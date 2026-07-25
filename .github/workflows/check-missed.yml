@@ -1,0 +1,19 @@
+name: Check missed reviews
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /internal/check-missed
+        run: |
+          curl -fsSL -X POST "$API_BASE_URL/internal/check-missed" \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            -w '\nHTTP %{http_code}\n'
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

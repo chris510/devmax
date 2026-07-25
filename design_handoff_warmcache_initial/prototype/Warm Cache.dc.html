@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #07080a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  a { color: #57b6c2; text-decoration: none; }
+  a:hover { color: #7fd0da; }
+  @keyframes wcPulse { 0% { transform: scale(1); opacity: .55 } 70% { transform: scale(1.45); opacity: 0 } 100% { transform: scale(1.45); opacity: 0 } }
+  @keyframes wcFade { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+  @keyframes wcSettle { 0% { opacity: 0; transform: translateY(10px) } 60% { opacity: 1; transform: translateY(-2px) } 100% { opacity: 1; transform: none } }
+  @keyframes wcDots { 0%, 20% { opacity: .25 } 50% { opacity: 1 } 100% { opacity: .25 } }
+  ::-webkit-scrollbar { width: 0 }
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 0; font-family: 'IBM Plex Sans', system-ui, sans-serif;">
+  <div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #0d0f11; color: #e8eaec; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(0,0,0,.6);">
+
+    <div style="height: 44px; flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 22px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #616870; letter-spacing: .04em;">
+      <span style="white-space: nowrap;">6:42</span>
+      <span style="white-space: nowrap;">{{ statusRight }}</span>
+    </div>
+
+    <sc-if value="{{ isToday }}" hint-placeholder-val="{{ true }}">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="padding: 14px 22px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1;">Today</div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #7c848b; letter-spacing: .03em;">FRI 24 JUL · {{ dueLine }}</div>
+            <sc-if value="{{ showBands }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; flex-wrap: wrap; column-gap: 7px; row-gap: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .03em;">
+                <sc-for list="{{ bands }}" as="b" hint-placeholder-count="3">
+                  <span role="button" onClick="{{ b.select }}" style="white-space: nowrap; cursor: pointer; color: {{ b.color }}; border-bottom: 1px solid {{ b.underline }}; padding-bottom: 1px;" style-hover="color: #cfd4d8">{{ b.text }}</span>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+          <div role="button" onClick="{{ openSettings }}" style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .12em; color: #8b9299; border: 1px solid #21262a; border-radius: 999px; padding: 7px 11px; cursor: pointer;" style-hover="border-color: #3a4248; color: #cfd4d8;">SETTINGS</div>
+        </div>
+
+        <div style="flex: 1; overflow-y: auto; padding: 0 14px 8px;">
+          <sc-for list="{{ rows }}" as="row" hint-placeholder-count="3">
+            <div role="button" onClick="{{ row.start }}" style="display: flex; gap: 14px; align-items: flex-start; padding: 15px 8px 16px; border-top: 1px solid #191d20; cursor: pointer;" style-hover="background: #111417">
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+                <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                  <span role="button" onClick="{{ row.openHistory }}" style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em; border-bottom: 1px dotted #2c3238; cursor: pointer;" style-hover="border-bottom-color: #57b6c2; color: #ffffff">{{ row.topic }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378; text-transform: uppercase;">{{ row.category }}</span>
+                </div>
+                <div style="font-size: 13.5px; line-height: 1.45; color: #949ba1; text-wrap: pretty;">{{ row.summary }}</div>
+                <div style="display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5e666c; letter-spacing: .04em;">
+                  <span style="white-space: nowrap;">{{ row.dueLabel }}</span>
+                  <sc-if value="{{ row.resumable }}" hint-placeholder-val="{{ false }}"><span style="white-space: nowrap; color: #57b6c2;">· resumable</span></sc-if>
+                  <sc-if value="{{ row.missedLabel }}" hint-placeholder-val="{{ false }}"><span style="white-space: nowrap;">· {{ row.missedLabel }}</span></sc-if>
+                </div>
+              </div>
+              <div style="flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 2px; width: 34px;">
+                <span style="font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ row.scoreColor }};">{{ row.scoreLabel }}</span>
+                <span style="width: 6px; height: 6px; border-radius: 999px; background: {{ row.scoreColor }};"></span>
+              </div>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="3">
+                <div style="display: flex; gap: 14px; align-items: flex-start; padding: 15px 8px 16px; border-top: 1px solid #191d20;">
+                  <div style="flex: 1; display: flex; flex-direction: column; gap: 9px; min-width: 0;">
+                    <div style="height: 12px; width: {{ k.w1 }}; border-radius: 3px; background: #1b1f22;"></div>
+                    <div style="height: 10px; width: {{ k.w2 }}; border-radius: 3px; background: #171a1d;"></div>
+                    <div style="height: 8px; width: 34%; border-radius: 3px; background: #14171a;"></div>
+                  </div>
+                  <div style="flex: none; width: 34px; display: flex; justify-content: center; padding-top: 2px;">
+                    <div style="width: 12px; height: 12px; border-radius: 3px; background: #1b1f22;"></div>
+                  </div>
+                </div>
+              </sc-for>
+              <div style="padding: 16px 8px 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #4e565b;">LOADING QUEUE</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isLoadError }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top: 1px solid #191d20; padding: 28px 8px 0; display: flex; flex-direction: column; gap: 18px; align-items: flex-start;">
+              <div style="display: flex; flex-direction: column; gap: 7px;">
+                <div style="font-size: 15.5px; color: #cfd4d8;">Couldn't reach the server.</div>
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6b7378; letter-spacing: .04em;">{{ loadErrorNote }}</div>
+              </div>
+              <div role="button" onClick="{{ retryLoad }}" style="font-size: 14px; color: #a8afb5; padding: 11px 18px; border: 1px solid #21262a; border-radius: 11px; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Retry</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 40px 8px 0; display: flex; flex-direction: column; gap: 26px; animation: wcFade .3s ease both;">
+              <div style="font-family: Newsreader, Georgia, serif; font-size: 22px; line-height: 1.4; color: #cfd4d8;">Nothing due until tomorrow, 7:10.</div>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #5e666c;">COMING UP</div>
+                <sc-for list="{{ upcoming }}" as="u" hint-placeholder-count="2">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 14px; color: #7c848b;">
+                    <span>{{ u.topic }}</span>
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5e666c;">{{ u.when }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isReady }}" hint-placeholder-val="{{ true }}">
+            <div>
+              <div style="border-top: 1px solid #191d20; margin-top: 4px;"></div>
+              <div style="padding: 16px 8px 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4e565b; letter-spacing: .06em;">TAP A TOPIC NAME FOR ITS HISTORY</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="flex: none; padding: 14px 22px 30px; display: flex; flex-direction: column; gap: 12px; background: #0d0f11;">
+          <div role="button" onClick="{{ openQuickAdd }}" style="align-self: flex-start; font-size: 13.5px; color: #8b9299; display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 0;" style-hover="color: #cfd4d8">
+            <span style="font-size: 16px; line-height: 1;">+</span><span>Ask about something else</span>
+          </div>
+          <sc-if value="{{ showStart }}" hint-placeholder-val="{{ true }}">
+            <div role="button" onClick="{{ startSession }}" style="background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">{{ startLabel }}</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isConv }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="flex: none; padding: 10px 22px 6px; display: flex; align-items: center; justify-content: space-between;">
+          <div role="button" onClick="{{ goToday }}" style="font-size: 19px; color: #7c848b; cursor: pointer; line-height: 1; padding: 4px 6px 6px 0;" style-hover="color: #e8eaec">✕</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .1em; color: #5e666c;">{{ progressLabel }}</div>
+        </div>
+
+        <div ref="{{ scrollRef }}" style="flex: 1; overflow-y: auto; padding: 12px 24px 20px;">
+          <sc-if value="{{ showResume }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-bottom: 26px; border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 14px 15px; display: flex; flex-direction: column; gap: 12px; animation: wcFade .3s ease both;">
+              <div style="font-size: 13.5px; color: #cfd4d8; line-height: 1.45;">You were mid-answer here 14 hours ago. Your partial answer was saved.</div>
+              <div style="display: flex; gap: 10px;">
+                <div role="button" onClick="{{ resumeAnswer }}" style="font-size: 13px; font-weight: 500; color: #06232a; background: #57b6c2; padding: 9px 14px; border-radius: 9px; cursor: pointer;" style-hover="background: #6ec6d1">Resume answer</div>
+                <div role="button" onClick="{{ discardAnswer }}" style="font-size: 13px; color: #8b9299; padding: 9px 12px; border: 1px solid #21262a; border-radius: 9px; cursor: pointer;" style-hover="color: #cfd4d8; border-color: #3a4248">Start over</div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-for list="{{ thread }}" as="t" hint-placeholder-count="1">
+            <div style="margin-bottom: 24px; animation: wcFade .35s ease both;">
+              <sc-if value="{{ t.isQ }}" hint-placeholder-val="{{ true }}">
+                <div style="font-family: Newsreader, Georgia, serif; font-size: {{ t.size }}; line-height: 1.32; letter-spacing: -.01em; color: #f2f4f5; text-wrap: pretty;">{{ t.text }}</div>
+              </sc-if>
+              <sc-if value="{{ t.isA }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-left: auto; max-width: 84%; background: #171b1e; border: 1px solid #1f2427; border-radius: 14px; padding: 13px 15px; font-size: 15px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">{{ t.text }}</div>
+              </sc-if>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ liveText }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-left: auto; max-width: 84%; font-size: 15px; line-height: 1.5; color: #a8afb5; text-wrap: pretty;">{{ liveText }}<span style="color: #57b6c2;">▍</span></div>
+          </sc-if>
+
+          <sc-if value="{{ isProcessing }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; align-items: center; gap: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .1em; color: #7c848b; margin-top: 6px;">
+              <span>SCORING</span>
+              <span style="display: inline-flex; gap: 3px;">
+                <span style="width: 3px; height: 3px; border-radius: 999px; background: #57b6c2; animation: wcDots 1s infinite;"></span>
+                <span style="width: 3px; height: 3px; border-radius: 999px; background: #57b6c2; animation: wcDots 1s infinite .18s;"></span>
+                <span style="width: 3px; height: 3px; border-radius: 999px; background: #57b6c2; animation: wcDots 1s infinite .36s;"></span>
+              </span>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isResult }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top: 10px; padding-top: 24px; border-top: 1px solid #191d20; display: flex; flex-direction: column; gap: 16px; animation: wcSettle .45s cubic-bezier(.2,.7,.3,1) both;">
+              <div style="display: flex; align-items: baseline; gap: 10px;">
+                <span style="font-size: 46px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; color: {{ resultColor }};">{{ resultScore }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5e666c;">/ 5 RECALL</span>
+              </div>
+              <div style="font-family: Newsreader, Georgia, serif; font-size: 18.5px; line-height: 1.5; color: #dfe3e5; text-wrap: pretty;">{{ resultFeedback }}</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6b7378; letter-spacing: .04em;">{{ resultSchedule }}</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="flex: none; padding: 8px 24px 30px; display: flex; flex-direction: column; gap: 14px;">
+          <sc-if value="{{ showResult }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              <div style="display: flex; gap: 10px;">
+                <div role="button" onClick="{{ nextCard }}" style="flex: 1; text-align: center; background: #57b6c2; color: #06232a; padding: 16px; border-radius: 13px; font-size: 15.5px; font-weight: 600; cursor: pointer;" style-hover="background: #6ec6d1">{{ nextLabel }}</div>
+                <sc-if value="{{ hasNext }}" hint-placeholder-val="{{ true }}">
+                  <div role="button" onClick="{{ goToday }}" style="text-align: center; padding: 16px 20px; border: 1px solid #21262a; border-radius: 13px; font-size: 15.5px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Done</div>
+                </sc-if>
+              </div>
+              <div role="button" onClick="{{ openHistoryCurrent }}" style="align-self: center; font-size: 13px; color: #7c848b; cursor: pointer; padding: 2px 4px; white-space: nowrap;" style-hover="color: #57b6c2">View history for this card</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ submitError }}" hint-placeholder-val="{{ false }}">
+            <div style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; animation: wcFade .25s ease both;">
+              <div style="font-size: 13px; color: #cfd4d8; line-height: 1.4;">Couldn't submit — your answer is saved.</div>
+              <div role="button" onClick="{{ retrySubmit }}" style="flex: none; font-size: 13px; font-weight: 500; color: #06232a; background: #57b6c2; padding: 8px 13px; border-radius: 9px; cursor: pointer;" style-hover="background: #6ec6d1">Try again</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showVoiceInput }}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 14px;">
+              <div style="position: relative; width: 84px; height: 84px; display: flex; align-items: center; justify-content: center;">
+                <sc-if value="{{ isRecording }}" hint-placeholder-val="{{ false }}">
+                  <span style="position: absolute; inset: 0; border-radius: 999px; border: 1px solid #57b6c2; animation: wcPulse 1.8s ease-out infinite;"></span>
+                </sc-if>
+                <div role="button" onClick="{{ toggleRecord }}" style="width: 76px; height: 76px; border-radius: 999px; border: 1px solid {{ micBorder }}; display: flex; align-items: center; justify-content: center; cursor: pointer; background: {{ micBg }};" style-hover="border-color: #7fd0da">
+                  <span style="width: {{ micDotSize }}; height: {{ micDotSize }}; border-radius: {{ micDotRadius }}; background: #57b6c2; display: block;"></span>
+                </div>
+              </div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .1em; color: #7c848b;">{{ micLabel }}</div>
+              <div role="button" onClick="{{ useText }}" style="font-size: 13px; color: #6b7378; cursor: pointer; border-bottom: 1px solid #23282c; padding-bottom: 2px;" style-hover="color: #cfd4d8; border-bottom-color: #4a5257">Type instead</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showTextInput }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              <textarea value="{{ draft }}" onChange="{{ onDraft }}" placeholder="Type your answer" rows="3" style="width: 100%; resize: none; background: #14171a; border: 1px solid #21262a; border-radius: 13px; padding: 13px 14px; color: #e8eaec; font-family: 'IBM Plex Sans', sans-serif; font-size: 15px; line-height: 1.5; outline: none;" style-focus="border-color: #57b6c2"></textarea>
+              <div style="display: flex; gap: 10px; align-items: center;">
+                <div role="button" onClick="{{ submitText }}" style="flex: 1; text-align: center; background: #57b6c2; color: #06232a; padding: 15px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer;" style-hover="background: #6ec6d1">Submit answer</div>
+                <div role="button" onClick="{{ useVoice }}" style="padding: 15px 16px; border: 1px solid #21262a; border-radius: 12px; font-size: 14px; color: #8b9299; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Voice</div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isHistory }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="flex: none; padding: 10px 22px 0;">
+          <div role="button" onClick="{{ goToday }}" style="font-size: 13px; color: #7c848b; cursor: pointer; display: inline-block; padding: 4px 0;" style-hover="color: #e8eaec">← Today</div>
+        </div>
+        <div style="flex: none; padding: 18px 22px 20px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15;">{{ histTopic }}</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378; text-transform: uppercase;">{{ histCategory }}</div>
+          <div style="font-family: Newsreader, Georgia, serif; font-size: 19px; line-height: 1.45; color: #dfe3e5; margin-top: 10px; text-wrap: pretty;">{{ histSummary }}</div>
+          <div style="display: flex; gap: 18px; margin-top: 12px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5e666c; letter-spacing: .04em;">
+            <span>{{ histMeta }}</span>
+          </div>
+        </div>
+
+        <div style="flex: 1; overflow-y: auto; padding: 0 22px 40px;">
+          <sc-if value="{{ histEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 18px 0 0; border-top: 1px solid #191d20; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-size: 15px; color: #949ba1;">No sessions yet.</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #5e666c;">FIRST REVIEW · TODAY, NEXT IN QUEUE</div>
+            </div>
+          </sc-if>
+
+          <sc-for list="{{ histSessions }}" as="s" hint-placeholder-count="3">
+            <div style="border-top: 1px solid #191d20;">
+              <div role="button" onClick="{{ s.toggle }}" style="display: flex; gap: 14px; align-items: flex-start; padding: 15px 0 16px; cursor: pointer;" style-hover="opacity: .82">
+                <span style="font-size: 15.5px; font-weight: 600; font-variant-numeric: tabular-nums; width: 16px; color: {{ s.color }};">{{ s.score }}</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+                  <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .06em; color: #6b7378;">{{ s.date }}</div>
+                  <div style="font-size: 14px; line-height: 1.45; color: #a8afb5; text-wrap: pretty;">{{ s.note }}</div>
+                </div>
+                <span style="font-size: 11px; color: #5e666c; padding-top: 3px;">{{ s.caret }}</span>
+              </div>
+              <sc-if value="{{ s.open }}" hint-placeholder-val="{{ false }}">
+                <div style="padding: 4px 0 22px 30px; display: flex; flex-direction: column; gap: 18px; animation: wcFade .25s ease both;">
+                  <sc-for list="{{ s.turns }}" as="t" hint-placeholder-count="2">
+                    <div style="display: flex; flex-direction: column; gap: 7px;">
+                      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: .12em; color: #545c61;">{{ t.label }}</div>
+                      <div style="font-family: {{ t.font }}; font-size: {{ t.size }}; line-height: 1.5; color: {{ t.color }}; text-wrap: pretty;">{{ t.text }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="position: absolute; inset: 0; background: rgba(4,5,6,.72); display: flex; flex-direction: column; justify-content: flex-end;">
+        <div role="button" onClick="{{ closeSheet }}" style="flex: 1;"></div>
+        <div style="background: #14171a; border-top: 1px solid #23282c; border-radius: 20px 20px 0 0; padding: 22px 22px 30px; display: flex; flex-direction: column; gap: 22px; animation: wcFade .25s ease both;">
+
+          <sc-if value="{{ isSettingsSheet }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 26px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-size: 17px; font-weight: 600;">Settings</div>
+                <div role="button" onClick="{{ closeSheet }}" style="font-size: 13px; color: #8b9299; cursor: pointer;" style-hover="color: #e8eaec">Close</div>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <div style="font-size: 14.5px;">Reviews per day</div>
+                  <div style="font-size: 12.5px; color: #7c848b;">{{ perDayNote }}</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 4px; border: 1px solid #23282c; border-radius: 10px; padding: 4px;">
+                  <div role="button" onClick="{{ decPerDay }}" style="width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; color: #a8afb5; cursor: pointer; border-radius: 7px; font-size: 16px;" style-hover="background: #1c2124; color: #fff">−</div>
+                  <div style="width: 26px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;">{{ perDay }}</div>
+                  <div role="button" onClick="{{ incPerDay }}" style="width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; color: #a8afb5; cursor: pointer; border-radius: 7px; font-size: 16px;" style-hover="background: #1c2124; color: #fff">+</div>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="font-size: 14.5px;">Notification windows</div>
+                <sc-for list="{{ windows }}" as="w" hint-placeholder-count="2">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <div role="button" onClick="{{ w.toggle }}" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                      <span style="width: 34px; height: 20px; border-radius: 999px; background: {{ w.trackBg }}; border: 1px solid {{ w.trackBorder }}; display: flex; align-items: center; padding: 2px; justify-content: {{ w.knobPos }};">
+                        <span style="width: 14px; height: 14px; border-radius: 999px; background: {{ w.knobBg }}; display: block;"></span>
+                      </span>
+                      <span style="font-size: 14px; color: {{ w.labelColor }};">{{ w.label }}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;">
+                      <span role="button" onClick="{{ w.cycleFrom }}" style="border: 1px solid #23282c; border-radius: 8px; padding: 6px 8px; cursor: pointer; color: {{ w.timeColor }};" style-hover="border-color: #57b6c2">{{ w.from }}</span>
+                      <span style="color: #545c61;">–</span>
+                      <span role="button" onClick="{{ w.cycleTo }}" style="border: 1px solid #23282c; border-radius: 8px; padding: 6px 8px; cursor: pointer; color: {{ w.timeColor }};" style-hover="border-color: #57b6c2">{{ w.to }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+                <div style="font-size: 12px; color: #6b7378; line-height: 1.5;">Tap a time to shift the window. Reviews are pushed inside these ranges only.</div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isAddSheet }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-family: Newsreader, Georgia, serif; font-size: 20px;">What do you want to be quizzed on?</div>
+                <div role="button" onClick="{{ closeSheet }}" style="font-size: 13px; color: #8b9299; cursor: pointer; flex: none; margin-left: 12px;" style-hover="color: #e8eaec">Close</div>
+              </div>
+              <input value="{{ newTopic }}" onChange="{{ onNewTopic }}" placeholder="e.g. Write-ahead logging" style="width: 100%; background: #0f1214; border: 1px solid #23282c; border-radius: 12px; padding: 14px; color: #e8eaec; font-family: 'IBM Plex Sans', sans-serif; font-size: 15.5px; outline: none;" style-focus="border-color: #57b6c2" />
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #6b7378;">SCHEDULE</div>
+                <div style="display: flex; gap: 8px;">
+                  <div role="button" onClick="{{ pickNow }}" style="flex: 1; text-align: center; padding: 12px; border-radius: 10px; font-size: 14px; border: 1px solid {{ nowBorder }}; color: {{ nowColor }}; background: {{ nowBg }}; cursor: pointer;">Now — top of queue</div>
+                  <div role="button" onClick="{{ pickLater }}" style="flex: 1; text-align: center; padding: 12px; border-radius: 10px; font-size: 14px; border: 1px solid {{ laterBorder }}; color: {{ laterColor }}; background: {{ laterBg }}; cursor: pointer;">Next review</div>
+                </div>
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #6b7378; letter-spacing: .04em;">DELIVERY · CONVERSATIONAL REVIEW</div>
+              </div>
+              <sc-if value="{{ addError }}" hint-placeholder-val="{{ false }}">
+                <div style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: #cfd4d8; line-height: 1.4; animation: wcFade .25s ease both;">Couldn't submit — the topic is still here. Try again.</div>
+              </sc-if>
+              <div role="button" onClick="{{ addCard }}" style="text-align: center; background: #57b6c2; color: #06232a; padding: 16px; border-radius: 13px; font-size: 15.5px; font-weight: 600; cursor: pointer; opacity: {{ addOpacity }};" style-hover="background: #6ec6d1">{{ addLabel }}</div>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844},&quot;loadState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;auto&quot;,&quot;loading&quot;,&quot;error&quot;],&quot;default&quot;:&quot;auto&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;failSubmit&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;failAdd&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;emptyQueue&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;textFirst&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;ttsEnabled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;}}">
+const LOW = "#c0705a", MID = "#c2a35a", HIGH = "#6fa77f", DIM = "#6b7378";
+const scoreColor = (s) => s == null ? DIM : s <= 1 ? LOW : s <= 3 ? MID : HIGH;
+const TIMES = ["06:30", "07:10", "07:45", "08:30", "12:15", "18:40", "21:00", "22:30"];
+
+const CARDS = [
+  {
+    id: "ch", topic: "Consistent hashing", category: "Core Concept",
+    summary: "solid on ring mechanics, shaky on virtual nodes",
+    lastScore: 2, dueLabel: "3 days overdue", missed: 0, resumable: false,
+    q: "You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't.",
+    answer: "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything.",
+    followUp: "One more — how do virtual nodes change the amount of data that moves?",
+    answer2: "Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes.",
+    score: 3,
+    feedback: "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.",
+    schedule: "NEXT REVIEW · 27 JUL · INTERVAL 3D",
+    sessions: [
+      { date: "21 JUL · 06:51", score: 2, note: "Explained the ring, stalled on virtual nodes.", turns: [
+        { role: "q", text: "What problem does consistent hashing solve that modulo hashing doesn't?" },
+        { role: "a", text: "With mod-N, if you add a server the modulus changes and almost every key maps somewhere new, so the whole cache is cold. Consistent hashing keeps most keys where they are." },
+        { role: "q", text: "One more — what are virtual nodes for?", follow: true },
+        { role: "a", text: "I think they… split a node into several ring positions? I'm not sure what that actually buys you." },
+        { role: "s", text: "2 — Right on the core motivation. Virtual nodes were guessed at, not explained." }
+      ] },
+      { date: "16 JUL · 21:32", score: 3, note: "Clear on lookups; didn't mention replication.", turns: [
+        { role: "q", text: "How does a client find which node owns a key?" },
+        { role: "a", text: "Hash the key, walk clockwise on the ring to the first node position you hit, that node owns it." },
+        { role: "s", text: "3 — Correct lookup path. No mention of how replicas are chosen from the successors." }
+      ] },
+      { date: "12 JUL · 07:04", score: 4, note: "First pass, mostly solid.", turns: [
+        { role: "q", text: "Describe consistent hashing in two sentences." },
+        { role: "a", text: "Nodes and keys are both hashed into the same circular space, and each key is owned by the next node clockwise. Adding or removing a node only affects the keys in the adjacent arc." },
+        { role: "s", text: "4 — Concise and accurate framing." }
+      ] }
+    ]
+  },
+  {
+    id: "raft", topic: "Raft leader election", category: "Distributed Systems",
+    summary: "can describe terms and voting; fuzzy on log-matching safety",
+    lastScore: 1, dueLabel: "1 day overdue", missed: 2, resumable: true,
+    partial: "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate, then it asks",
+    q: "A follower stops hearing heartbeats and starts an election. What stops it from becoming leader with an incomplete log?",
+    answer: "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate, then it asks everyone for votes. A voter refuses if the candidate's last log entry is older than its own, so a candidate missing committed entries can't win a majority.",
+    followUp: "One more — what does the new leader do about entries it has that the old leader never committed?",
+    answer2: "It just appends its own no-op entry for the new term and lets log matching overwrite the followers' conflicting tails.",
+    score: 3,
+    feedback: "The election-restriction argument was right, including comparing last-log terms. The follow-up conflated the no-op commit trick with conflict resolution — the leader never deletes its own entries, it forces followers to match.",
+    schedule: "NEXT REVIEW · 26 JUL · INTERVAL 2D",
+    sessions: [
+      { date: "23 JUL · 07:12", score: 1, note: "Mixed up terms and indexes.", turns: [
+        { role: "q", text: "What is a term in Raft, and what increments it?" },
+        { role: "a", text: "A term is like the index of the log entry, it goes up every time you write something." },
+        { role: "s", text: "1 — Terms are election epochs, not log positions. Worth re-reading before the next review." }
+      ] },
+      { date: "19 JUL · 21:48", score: 2, note: "Voting rules half-recalled.", turns: [
+        { role: "q", text: "Who can a follower vote for in a given term?" },
+        { role: "a", text: "One candidate per term, first come first served I think." },
+        { role: "q", text: "One more — is that the only condition?", follow: true },
+        { role: "a", text: "Probably also something about the log being up to date." },
+        { role: "s", text: "2 — One vote per term is right. The up-to-date-log condition was reached only when prompted." }
+      ] }
+    ]
+  },
+  {
+    id: "pg", topic: "Postgres index types", category: "Databases",
+    summary: "confident on B-tree vs GIN; hasn't explained index bloat",
+    lastScore: 3, dueLabel: "due today", missed: 0, resumable: false,
+    q: "You have a jsonb column and queries that filter on keys inside it. Which index, and what does it cost you?",
+    answer: "GIN, because it indexes each key and value inside the document rather than the whole column as one value. The cost is write amplification — every insert touches many posting lists — and the index gets big.",
+    followUp: "One more — what makes GIN writes slower than B-tree writes specifically?",
+    answer2: "One row can produce dozens of index entries instead of one, and the pending-list flush does batches of work at unpredictable times.",
+    score: 4,
+    feedback: "Right index, right tradeoff, and you named the pending list without prompting. Didn't mention fastupdate or how vacuum interacts with the posting trees.",
+    schedule: "NEXT REVIEW · 31 JUL · INTERVAL 7D",
+    sessions: [
+      { date: "17 JUL · 06:38", score: 3, note: "B-tree vs GIN clear; bloat unexplained.", turns: [
+        { role: "q", text: "When is a B-tree index the wrong choice?" },
+        { role: "a", text: "When you're not querying by an ordered scalar — full-text, array containment, jsonb keys. B-tree needs a single comparable value." },
+        { role: "s", text: "3 — Correct boundary. Follow-up on bloat went unanswered." }
+      ] }
+    ]
+  }
+];
+const UPCOMING = [
+  { topic: "TCP congestion control", when: "SAT 07:10" },
+  { topic: "Postgres index types", when: "SAT 21:00" },
+  { topic: "Bloom filters", when: "SUN 07:10" }
+];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      filter: null, load: "loading", submitError: false, retried: false, addError: false, addPending: false, addRetried: false,
+      screen: "today", cards: CARDS.slice(), queue: [], qIndex: 0,
+      stage: "idle", thread: [], liveText: "", inputMode: "voice", draft: "",
+      resume: false, result: null, histId: null, openSession: null,
+      sheet: null, perDay: 2, newTopic: "", newWhen: "now",
+      windows: [
+        { label: "Morning", on: true, from: "07:10", to: "08:30" },
+        { label: "Evening", on: true, from: "21:00", to: "22:30" }
+      ]
+    };
+    this.timers = [];
+  }
+  componentDidMount() { this.fetchDue(); }
+  fetchDue() {
+    const forced = this.props.loadState || "auto";
+    if (forced === "loading") { this.setState({ load: "loading" }); return; }
+    this.setState({ load: "loading" });
+    this.later(() => this.setState({ load: forced === "error" && !this.loadRetried ? "error" : "ready" }), 850);
+  }
+  componentDidUpdate(pp, ps) {
+    const s = this.state;
+    if (this.scrollEl && (ps.thread !== s.thread || ps.stage !== s.stage || ps.liveText !== s.liveText)) {
+      this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
+    }
+  }
+  componentWillUnmount() { this.timers.forEach(clearTimeout); if (this.rec) clearInterval(this.rec); }
+  later(fn, ms) { const t = setTimeout(fn, ms); this.timers.push(t); return t; }
+  card() { return this.state.cards.find(c => c.id === this.state.queue[this.state.qIndex]); }
+
+  dueCards() {
+    if (this.props.emptyQueue) return [];
+    return this.state.cards;
+  }
+  openConv(ids, resume) {
+    this.setState({
+      screen: "conv", queue: ids, qIndex: 0, stage: "idle", liveText: "", draft: "",
+      inputMode: this.props.textFirst ? "text" : "voice", result: null, submitError: false, retried: false,
+      resume: !!resume,
+      thread: [{ role: "q", text: this.state.cards.find(c => c.id === ids[0]).q }]
+    });
+  }
+  startRec() {
+    if (this.rec) { clearInterval(this.rec); this.rec = null; }
+    const c = this.card();
+    const follow = this.state.stage === "follow";
+    const target = follow ? c.answer2 : c.answer;
+    const base = (!follow && this.state.liveText && target.indexOf(this.state.liveText) === 0) ? this.state.liveText + " " : "";
+    const words = target.slice(base.length).split(" ");
+    let i = 0;
+    this.setState({ stage: follow ? "recFollow" : "rec", resume: false, submitError: false });
+    this.rec = setInterval(() => {
+      i++;
+      this.setState({ liveText: base + words.slice(0, i).join(" ") });
+      if (i >= words.length) { clearInterval(this.rec); this.rec = null; }
+    }, 85);
+  }
+  stopRec() {
+    if (this.rec) { clearInterval(this.rec); this.rec = null; }
+    this.commit(this.state.liveText || this.card().answer);
+  }
+  commit(text) {
+    if (this.rec) { clearInterval(this.rec); this.rec = null; }
+    const wasFollow = this.state.stage === "recFollow" || this.state.stage === "follow";
+    this.setState(s => ({
+      thread: s.thread.concat([{ role: "a", text }]), liveText: "", draft: "", stage: "proc"
+    }));
+    const c = this.card();
+    this.pending = { text: text, wasFollow: wasFollow };
+    this.later(() => {
+      if ((this.props.failSubmit || this.forceFail) && !this.state.retried) {
+        this.setState(s => ({
+          stage: wasFollow ? "follow" : "idle",
+          thread: s.thread.slice(0, -1),
+          liveText: s.inputMode === "voice" ? text : "",
+          draft: s.inputMode === "text" ? text : "",
+          submitError: true
+        }));
+        return;
+      }
+      const needsFollow = !wasFollow && c.score >= 2 && c.score <= 3;
+      if (needsFollow) {
+        this.setState(s => ({ stage: "follow", thread: s.thread.concat([{ role: "q", text: c.followUp, follow: true }]) }));
+      } else {
+        this.setState({ stage: "result", result: { score: c.score, feedback: c.feedback, schedule: c.schedule } });
+      }
+    }, 1500);
+  }
+  renderVals() {
+    const st = this.state, ready = st.load === "ready", due = ready ? this.dueCards() : [];
+    const bandOf = (s) => s == null ? "new" : s <= 1 ? "cold" : s <= 3 ? "shaky" : "solid";
+    const vis = st.filter ? due.filter(c => bandOf(c.lastScore) === st.filter) : due;
+    const V = {
+      isToday: st.screen === "today", isConv: st.screen === "conv", isHistory: st.screen === "history",
+      statusRight: st.screen === "conv" && this.props.ttsEnabled ? "READING ALOUD" : "WARM CACHE",
+      goToday: () => this.setState({ screen: "today", sheet: null, stage: "idle", liveText: "", result: null }),
+      openSettings: () => this.setState({ sheet: "settings" }),
+      openQuickAdd: () => this.setState({ sheet: "add", newTopic: "", newWhen: "now", addError: false, addPending: false, addRetried: false }),
+      closeSheet: () => this.setState({ sheet: null }),
+      sheetOpen: !!st.sheet, isSettingsSheet: st.sheet === "settings", isAddSheet: st.sheet === "add",
+      upcoming: UPCOMING,
+      isReady: ready,
+      showBands: ready && due.length > 0,
+      bands: (() => {
+        const band = bandOf;
+        const label = { shaky: "shaky", cold: "cold", solid: "solid", new: "unrated" };
+        const tint = { shaky: MID, cold: LOW, solid: HIGH, new: DIM };
+        const order = ["shaky", "cold", "solid", "new"];
+        return order.map(k => ({
+          k: k, n: due.filter(c => band(c.lastScore) === k).length
+        })).filter(b => b.n > 0).map((b, i, all) => ({
+          text: b.n + " " + label[b.k] + (i < all.length - 1 ? " ·" : ""),
+          color: st.filter === b.k ? tint[b.k] : "#7c848b",
+          underline: st.filter === b.k ? tint[b.k] : "transparent",
+          select: () => this.setState({ filter: st.filter === b.k ? null : b.k })
+        }));
+      })(),
+      isLoading: st.load === "loading",
+      isLoadError: st.load === "error",
+      loadErrorNote: "LAST SYNCED 06:12 · 3 CARDS CACHED",
+      skeleton: [{ w1: "58%", w2: "84%" }, { w1: "46%", w2: "72%" }, { w1: "63%", w2: "79%" }],
+      retryLoad: () => { this.loadRetried = true; this.fetchDue(); },
+      isEmpty: ready && due.length === 0,
+      dueLine: st.load === "loading" ? "CHECKING" : st.load === "error" ? "OFFLINE" : due.length === 0 ? "NOTHING DUE" : due.length + " CARDS DUE",
+      showStart: vis.length > 1,
+      startLabel: "Start — " + vis.length + " cards",
+      startSession: () => this.openConv(vis.map(c => c.id), false),
+      rows: vis.map(c => ({
+        topic: c.topic, category: c.category, summary: c.summary, dueLabel: c.dueLabel,
+        resumable: !!c.resumable, missedLabel: c.missed ? "missed " + c.missed + "×" : null,
+        scoreLabel: c.lastScore == null ? "—" : String(c.lastScore), scoreColor: scoreColor(c.lastScore),
+        start: () => this.openConv([c.id], c.resumable ? c.partial : false),
+        openHistory: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.setState({ screen: "history", histId: c.id, openSession: null }); }
+      }))
+    };
+
+    // conversation
+    const c = this.card();
+    const stage = st.stage;
+    V.scrollRef = (el) => { this.scrollEl = el; };
+    V.thread = st.thread.map((t, i) => ({
+      isQ: t.role === "q", isA: t.role === "a", text: t.text,
+      size: i === 0 ? "25px" : "21px"
+    }));
+    V.liveText = st.liveText || (st.resume && c ? c.partial : "");
+    V.isProcessing = stage === "proc";
+    V.isResult = stage === "result";
+    V.showResult = stage === "result";
+    V.isRecording = stage === "rec" || stage === "recFollow";
+    V.showResume = st.resume;
+    V.progressLabel = st.queue.length > 1 ? "CARD " + (st.qIndex + 1) + " OF " + st.queue.length : (c ? c.category.toUpperCase() : "");
+    V.showVoiceInput = st.screen === "conv" && stage !== "result" && stage !== "proc" && st.inputMode === "voice";
+    V.showTextInput = st.screen === "conv" && stage !== "result" && stage !== "proc" && st.inputMode === "text";
+    V.micBorder = V.isRecording ? "#57b6c2" : "#2c3238";
+    V.micBg = V.isRecording ? "rgba(87,182,194,.10)" : "transparent";
+    V.micDotSize = V.isRecording ? "20px" : "18px";
+    V.micDotRadius = V.isRecording ? "4px" : "999px";
+    V.micLabel = V.isRecording ? "LISTENING — TAP TO STOP" : st.resume ? "TAP TO KEEP GOING" : "TAP TO ANSWER";
+    V.toggleRecord = () => { if (V.isRecording) this.stopRec(); else this.startRec(); };
+    V.useText = () => this.setState({ inputMode: "text", draft: st.liveText || (st.resume && c ? c.partial : ""), resume: false, liveText: "" });
+    V.useVoice = () => this.setState({ inputMode: "voice", liveText: st.draft, draft: "" });
+    V.draft = st.draft;
+    V.onDraft = (e) => this.setState({ draft: e.target.value });
+    V.submitText = () => { if (st.draft.trim()) this.commit(st.draft.trim()); };
+    V.resumeAnswer = () => { this.setState({ liveText: c.partial, resume: false }, () => this.startRec()); };
+    V.discardAnswer = () => this.setState({ resume: false, liveText: "" });
+    V.resultScore = st.result ? st.result.score : "";
+    V.resultColor = scoreColor(st.result ? st.result.score : null);
+    V.resultFeedback = st.result ? st.result.feedback : "";
+    V.resultSchedule = st.result ? st.result.schedule : "";
+    V.hasNext = st.qIndex < st.queue.length - 1;
+    V.nextLabel = V.hasNext ? "Next card" : "Done";
+    V.nextCard = () => {
+      if (st.qIndex < st.queue.length - 1) {
+        const nid = st.queue[st.qIndex + 1];
+        this.setState({
+          qIndex: st.qIndex + 1, stage: "idle", liveText: "", draft: "", result: null, resume: false, submitError: false, retried: false,
+          thread: [{ role: "q", text: st.cards.find(x => x.id === nid).q }]
+        });
+      } else V.goToday();
+    };
+    V.submitError = st.submitError && st.screen === "conv";
+    V.retrySubmit = () => {
+      const p = this.pending || { text: st.liveText || st.draft };
+      this.setState({ retried: true, submitError: false }, () => this.commit(p.text));
+    };
+    V.openHistoryCurrent = () => this.setState({ screen: "history", histId: c.id, openSession: null });
+
+    // history
+    const h = st.cards.find(x => x.id === st.histId) || st.cards[0];
+    V.histTopic = h.topic; V.histCategory = h.category;
+    V.histSummary = h.summary ? h.summary.charAt(0).toUpperCase() + h.summary.slice(1) + "." : "";
+    V.histEmpty = h.sessions.length === 0;
+    V.histMeta = h.sessions.length === 0 ? "NEW CARD" :
+      h.sessions.length + " SESSIONS · AVG " + (h.sessions.reduce((a, s) => a + s.score, 0) / h.sessions.length).toFixed(1) + " · " + h.dueLabel.toUpperCase();
+    V.histSessions = h.sessions.map((s, i) => ({
+      date: s.date, score: s.score, note: s.note, color: scoreColor(s.score),
+      open: st.openSession === i, caret: st.openSession === i ? "▲" : "▼",
+      toggle: () => this.setState({ openSession: st.openSession === i ? null : i }),
+      turns: s.turns.map(t => ({
+        label: t.role === "q" ? (t.follow ? "FOLLOW-UP" : "QUESTION") : t.role === "a" ? "YOUR ANSWER" : "SCORE & FEEDBACK",
+        text: t.text,
+        font: t.role === "q" ? "Newsreader, Georgia, serif" : "'IBM Plex Sans', sans-serif",
+        size: t.role === "q" ? "17px" : "14.5px",
+        color: t.role === "a" ? "#a8afb5" : t.role === "s" ? scoreColor(parseInt(t.text, 10)) : "#dfe3e5"
+      }))
+    }));
+    if (V.histEmpty) V.histSessions = [];
+
+    // settings
+    V.perDay = st.perDay;
+    V.perDayNote = st.perDay === 1 ? "One push, morning window" : st.perDay + " pushes, spread across windows";
+    V.decPerDay = () => this.setState({ perDay: Math.max(1, st.perDay - 1) });
+    V.incPerDay = () => this.setState({ perDay: Math.min(6, st.perDay + 1) });
+    V.windows = st.windows.map((w, i) => {
+      const set = (patch) => this.setState({ windows: st.windows.map((x, j) => j === i ? Object.assign({}, x, patch) : x) });
+      const shift = (key) => { const idx = TIMES.indexOf(w[key]); set({ [key]: TIMES[(idx + 1) % TIMES.length] }); };
+      return {
+        label: w.label, from: w.from, to: w.to,
+        trackBg: w.on ? "rgba(87,182,194,.22)" : "transparent",
+        trackBorder: w.on ? "#57b6c2" : "#2c3238",
+        knobBg: w.on ? "#57b6c2" : "#4a5257",
+        knobPos: w.on ? "flex-end" : "flex-start",
+        labelColor: w.on ? "#e8eaec" : "#6b7378",
+        timeColor: w.on ? "#cfd4d8" : "#545c61",
+        toggle: () => set({ on: !w.on }),
+        cycleFrom: () => shift("from"), cycleTo: () => shift("to")
+      };
+    });
+
+    // quick add
+    V.newTopic = st.newTopic;
+    V.onNewTopic = (e) => this.setState({ newTopic: e.target.value });
+    V.pickNow = () => this.setState({ newWhen: "now" });
+    V.pickLater = () => this.setState({ newWhen: "later" });
+    const on = st.newWhen === "now";
+    V.nowBorder = on ? "#57b6c2" : "#23282c"; V.nowColor = on ? "#cfe9ed" : "#8b9299"; V.nowBg = on ? "rgba(87,182,194,.10)" : "transparent";
+    V.laterBorder = !on ? "#57b6c2" : "#23282c"; V.laterColor = !on ? "#cfe9ed" : "#8b9299"; V.laterBg = !on ? "rgba(87,182,194,.10)" : "transparent";
+    V.addError = st.addError;
+    V.addPending = st.addPending;
+    V.addLabel = st.addPending ? "Adding…" : st.addError ? "Try again" : "Add card";
+    V.addOpacity = st.addPending ? "0.55" : "1";
+    V.addCard = () => {
+      const name = st.newTopic.trim();
+      if (!name || st.addPending) return;
+      this.setState({ addPending: true, addError: false });
+      this.later(() => {
+        if ((this.props.failAdd || this.forceFail) && !this.state.addRetried) {
+          this.setState({ addPending: false, addError: true, addRetried: true });
+        } else this.commitCard(name);
+      }, 700);
+    };
+    return V;
+  }
+  commitCard(name) {
+      const card = {
+        id: "n" + Date.now(), topic: name, category: "Unsorted", summary: "no signal yet",
+        mode: "conversational",
+        lastScore: null, dueLabel: this.state.newWhen === "now" ? "added just now" : "queued for next review",
+        missed: 0, resumable: false, sessions: [],
+        q: "Let's start simple — explain " + name.toLowerCase() + " as if to a strong engineer who's never used it.",
+        answer: "", followUp: "One more — where does it break down at scale?", answer2: "",
+        score: 3, feedback: "First pass on this card — no baseline yet, so this score seeds the schedule.",
+        schedule: "NEXT REVIEW · 25 JUL · INTERVAL 1D"
+      };
+      this.setState(s => ({ cards: [card].concat(s.cards), sheet: null, newTopic: "", addPending: false, addError: false, addRetried: false }));
+  }
+}
+
+</script>
+</body>
+</html>

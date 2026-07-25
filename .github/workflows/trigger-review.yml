@@ -1,0 +1,22 @@
+name: Trigger review push
+
+on:
+  schedule:
+    - cron: '10 14 * * *'   # 07:10 PT
+    - cron: '0 4 * * *'     # 21:00 PT
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      # The endpoint validates the notification window itself, so a late trigger
+      # either still lands in-window or correctly no-ops.
+      - name: POST /internal/trigger-review
+        run: |
+          curl -fsSL -X POST "$API_BASE_URL/internal/trigger-review" \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            -w '\nHTTP %{http_code}\n'
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

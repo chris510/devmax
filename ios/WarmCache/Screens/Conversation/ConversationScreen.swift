@@ -1,0 +1,436 @@
+import SwiftUI
+
+/// One continuous thread; no screen change per turn.
+struct ConversationScreen: View {
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var flags: DebugFlags
+    @StateObject private var speech = SpeechService()
+    @StateObject private var speaker = SpeakerService()
+    @FocusState private var draftFocused: Bool
+
+    /// Answer bubbles and the live transcript cap at 84% — of the thread's content
+    /// width, not the screen's.
+    private static var answerMaxWidth: CGFloat {
+        (UIScreen.main.bounds.width - Metrics.conversationPadding * 2) * 0.84
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            StatusBar(rightText: speaker.isSpeaking ? "READING ALOUD" : "WARM CACHE")
+            chrome
+            thread
+            if state.stage != .result { inputArea } else { resultActions }
+        }
+        .background(Theme.bg)
+        .navigationBarHidden(true)
+        .onChange(of: state.thread.count) { _, _ in readLatestQuestion() }
+        .onChange(of: state.stage) { _, stage in
+            if stage == .idle || stage == .followUp { readLatestQuestion() }
+        }
+        .onDisappear { speech.stop(); speaker.stop() }
+    }
+
+    // MARK: - Chrome
+
+    private var chrome: some View {
+        HStack {
+            Button {
+                speech.stop()
+                speaker.stop()
+                state.finish()
+            } label: {
+                Text("✕")
+                    .font(.system(size: 19))
+                    .foregroundStyle(Theme.metaAlt)
+                    .frame(width: Metrics.minTapTarget, height: Metrics.minTapTarget, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            MetaText(text: state.conversationLabel, font: WCFont.mono(10.5), tracking: 1.05,
+                     color: Theme.metaDimAlt, uppercased: true)
+        }
+        .padding(.horizontal, Metrics.conversationPadding)
+    }
+
+    // MARK: - Thread
+
+    private var thread: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if state.resumeAvailable { resumeBanner }
+
+                    if state.stage == .loadingQuestion {
+                        questionSkeleton
+                    }
+
+                    ForEach(state.thread) { entry in
+                        entryView(entry)
+                            .frame(maxWidth: .infinity, alignment: alignment(for: entry))
+                            .wcFade()
+                    }
+
+                    // Live transcript: same position as the answer bubble, but no
+                    // bubble, with a trailing accent caret. The stored partial
+                    // renders the same way, beneath the question.
+                    if isRecording, !speech.transcript.isEmpty {
+                        liveTranscript(speech.transcript)
+                    } else if !state.draft.isEmpty, state.inputMode == .voice {
+                        liveTranscript(state.draft)
+                    } else if state.resumeAvailable, !state.storedPartial.isEmpty {
+                        liveTranscript(state.storedPartial)
+                    }
+
+                    if state.stage == .processing { scoringIndicator }
+                    if let result = state.result, state.stage == .result { scoreBlock(result) }
+
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.horizontal, Metrics.conversationPadding)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
+            }
+            // Auto-scrolled to the bottom on every new turn or stage change.
+            .onChange(of: state.thread.count) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: state.stage) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: speech.transcript) { _, _ in scrollToBottom(proxy) }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(Motion.fadeFast) { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
+
+    private func alignment(for entry: ThreadEntry) -> Alignment {
+        entry.role == .answer ? .trailing : .leading
+    }
+
+    @ViewBuilder
+    private func entryView(_ entry: ThreadEntry) -> some View {
+        switch entry.role {
+        case .question:
+            Text(entry.text)
+                .font(TypeRole.question)
+                .tracking(-0.25)
+                .lineSpacing(25 * 1.32 - 25 * 1.2)
+                .foregroundStyle(Theme.textStrong)
+                .fixedSize(horizontal: false, vertical: true)
+        case .followUpQuestion:
+            // Prefaced so it reads as a probe, not a new card.
+            Text(entry.text)
+                .font(TypeRole.followUp)
+                .tracking(-0.21)
+                .lineSpacing(21 * 1.32 - 21 * 1.2)
+                .foregroundStyle(Theme.textStrong)
+                .fixedSize(horizontal: false, vertical: true)
+        case .answer:
+            Text(entry.text)
+                .font(WCFont.sans(15))
+                .lineSpacing(15 * 1.5 - 15 * 1.2)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 13)
+                .background(Theme.bubble, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.bubbleRadius)
+                        .strokeBorder(Theme.bubbleBorder, lineWidth: 1)
+                )
+                .frame(maxWidth: Self.answerMaxWidth, alignment: .trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The question is generated on engagement, so it lands a beat after the
+    /// screen opens. Static skeleton lines in question geometry — the same
+    /// vocabulary as the Today loading state, rather than new motion.
+    private var questionSkeleton: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton1).frame(height: 18)
+            RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton2).frame(height: 18)
+                .padding(.trailing, 60)
+            RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton3).frame(height: 18)
+                .padding(.trailing, 150)
+        }
+    }
+
+    private func liveTranscript(_ text: String) -> some View {
+        // The caret is concatenated into the same Text so it trails the last word
+        // inline, rather than being pushed to the edge of the block.
+        (
+            Text(text)
+                // AA-compliant on #0d0f11 — deliberately not darkened to mark
+                // "in progress".
+                .foregroundColor(Theme.textMuted)
+                + Text("▍").foregroundColor(Theme.accent)
+        )
+        .font(WCFont.sans(15))
+        .lineSpacing(15 * 1.5 - 15 * 1.2)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: Self.answerMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var scoringIndicator: some View {
+        HStack(spacing: 8) {
+            MetaText(text: "SCORING", font: TypeRole.metaBody, tracking: 1.2, color: Theme.metaAlt)
+            ScoringDots()
+        }
+        .wcFade(Motion.fadeFast)
+    }
+
+    private var resumeBanner: some View {
+        Group {
+            InlineNotice {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("You were mid-answer here 14 hours ago. Your partial answer was saved.")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Button { state.resumeAnswer() } label: {
+                            Text("Resume answer")
+                                .font(TypeRole.secondaryAction)
+                                .foregroundStyle(Theme.accentInk)
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                        Button { state.startOver() } label: {
+                            Text("Start over")
+                                .font(TypeRole.secondaryAction)
+                                .foregroundStyle(Theme.textMuted)
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .overlay(RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Theme.border, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .wcFade()
+    }
+
+    // MARK: - Score block
+
+    private func scoreBlock(_ result: SessionResult) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Hairline().padding(.top, 10)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("\(result.score)")
+                    .font(TypeRole.bigScoreNumeral)
+                    .monospacedDigit()
+                    .foregroundStyle(ScoreStyle.color(for: result.score))
+                MetaText(text: "/ 5 RECALL", font: TypeRole.metaBody, tracking: 1.2, color: Theme.metaAlt)
+            }
+
+            Text(result.feedback)
+                .font(TypeRole.scoreFeedback)
+                .lineSpacing(18.5 * 1.5 - 18.5 * 1.2)
+                .foregroundStyle(Theme.textSerif)
+                .fixedSize(horizontal: false, vertical: true)
+
+            MetaText(text: result.scheduleLine, font: TypeRole.metaBody, tracking: 1.0, color: Theme.metaFaint)
+        }
+        .padding(.top, 14)
+        .wcSettle()
+    }
+
+    private var resultActions: some View {
+        VStack(spacing: 14) {
+            if state.hasMoreCards {
+                HStack(spacing: 12) {
+                    PrimaryButton(title: "Next card") { state.nextCard() }
+                    SecondaryButton(title: "Done", fillsWidth: false) { state.finish() }
+                }
+            } else {
+                PrimaryButton(title: "Done") { state.finish() }
+            }
+
+            Button {
+                if let card = state.currentCard {
+                    state.path.append(.history(card.id))
+                }
+            } label: {
+                Text("View history for this card")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.meta)
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: Metrics.minTapTarget)
+        }
+        .padding(.horizontal, Metrics.conversationPadding)
+        .padding(.top, 14)
+        .padding(.bottom, Metrics.bottomSafeArea)
+        .background(Theme.bg)
+    }
+
+    // MARK: - Input
+
+    private var isRecording: Bool {
+        state.stage == .recording || state.stage == .recordingFollowUp
+    }
+
+    private var canAnswer: Bool {
+        state.stage == .idle || state.stage == .followUp || isRecording
+    }
+
+    @ViewBuilder
+    private var inputArea: some View {
+        VStack(spacing: 14) {
+            if state.submitError { submitFailureStrip }
+
+            if state.inputMode == .voice {
+                voiceInput
+            } else {
+                textInput
+            }
+        }
+        .padding(.horizontal, Metrics.conversationPadding)
+        .padding(.top, 12)
+        .padding(.bottom, Metrics.bottomSafeArea)
+        .background(Theme.bg)
+    }
+
+    /// Directly above the control, same treatment as the resume banner.
+    private var submitFailureStrip: some View {
+        InlineNotice {
+            HStack(spacing: 12) {
+                Text("Couldn't submit — your answer is saved.")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer(minLength: 0)
+                Button { Task { await state.submit(state.draft) } } label: {
+                    Text("Try again")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .wcFade(Motion.fadeFast)
+    }
+
+    private var voiceInput: some View {
+        VStack(spacing: 12) {
+            Button(action: toggleRecording) {
+                ZStack {
+                    Circle()
+                        .fill(isRecording ? Theme.accentWash : Color.clear)
+                        .overlay(
+                            Circle().strokeBorder(
+                                isRecording ? Theme.accent : Theme.dottedUnderline, lineWidth: 1
+                            )
+                        )
+                        .frame(width: Metrics.micDiameter, height: Metrics.micDiameter)
+
+                    if isRecording { PulsingRing().frame(width: Metrics.micDiameter, height: Metrics.micDiameter) }
+
+                    // Recording turns the dot into a 20px stop glyph.
+                    RoundedRectangle(cornerRadius: isRecording ? 4 : 10)
+                        .fill(Theme.accent)
+                        .frame(width: isRecording ? 20 : 18, height: isRecording ? 20 : 18)
+                }
+                .frame(width: Metrics.micHitArea, height: Metrics.micHitArea)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canAnswer)
+            .opacity(canAnswer ? 1 : 0.4)
+
+            MetaText(text: micLabel, font: TypeRole.metaRow, tracking: 1.2, color: Theme.metaAlt)
+
+            Button {
+                // Swapping input mode carries the text across and never navigates away.
+                state.draft = speech.transcript.isEmpty ? state.draft : speech.transcript
+                speech.stop()
+                state.inputMode = .text
+                draftFocused = true
+            } label: {
+                Text("Type instead")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.meta)
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: Metrics.minTapTarget)
+        }
+    }
+
+    private var micLabel: String {
+        if isRecording { return "LISTENING — TAP TO STOP" }
+        // A stored partial counts: the mic continues that answer rather than
+        // starting a new one.
+        if !state.draft.isEmpty || state.resumeAvailable { return "TAP TO KEEP GOING" }
+        return "TAP TO ANSWER"
+    }
+
+    private func toggleRecording() {
+        speaker.stop()
+        if isRecording {
+            speech.stop()
+            let text = speech.transcript
+            state.draft = text
+            state.persistDraft(text)
+            Task { await state.submit(text) }
+        } else {
+            state.submitError = false
+            state.stage = state.stage == .followUp ? .recordingFollowUp : .recording
+            speech.start(
+                continuing: state.draft,
+                simulated: flags.simulateSpeech,
+                simulate: Self.simulatedAnswer(for: state.stage)
+            )
+        }
+    }
+
+    private var textInput: some View {
+        VStack(spacing: 12) {
+            TextEditor(text: $state.draft)
+                .font(WCFont.sans(15))
+                .foregroundStyle(Theme.textSecondary)
+                .scrollContentBackground(.hidden)
+                .focused($draftFocused)
+                .frame(height: 84)  // three rows
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inputRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                        .strokeBorder(draftFocused ? Theme.accent : Theme.borderStrong, lineWidth: 1)
+                )
+                .onChange(of: state.draft) { _, text in state.persistDraft(text) }
+
+            PrimaryButton(
+                title: "Submit answer",
+                enabled: canAnswer && !state.draft.trimmingCharacters(in: .whitespaces).isEmpty
+            ) {
+                state.submitError = false
+                Task { await state.submit(state.draft) }
+            }
+
+            SecondaryButton(title: "Voice") {
+                speech.restore(state.draft)
+                state.inputMode = .voice
+                draftFocused = false
+            }
+        }
+    }
+
+    // MARK: - TTS
+
+    private func readLatestQuestion() {
+        guard flags.ttsEnabled,
+              let last = state.thread.last(where: { $0.role != .answer })
+        else { return }
+        speaker.speak(last.text)
+    }
+
+    /// Fixture answers for the simulated-speech path, matching the prototype.
+    private static func simulatedAnswer(for stage: Stage) -> String {
+        stage == .recordingFollowUp
+            ? "Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes."
+            : "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
+    }
+}
