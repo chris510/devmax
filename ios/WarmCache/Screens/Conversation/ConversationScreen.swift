@@ -27,6 +27,16 @@ struct ConversationScreen: View {
         .onChange(of: state.stage) { _, stage in
             if stage == .idle || stage == .followUp { readLatestQuestion() }
         }
+        // The transcript used to reach state.draft only when recording stopped, so
+        // backgrounding mid-answer persisted a stale draft and lost everything
+        // spoken since the tap — the worst failure mode in the product. Mirror each
+        // partial through instead; the disk write is cheap and the network PATCH is
+        // debounced in persistDraft.
+        .onChange(of: speech.transcript) { _, text in
+            guard isRecording else { return }
+            state.draft = text
+            state.persistDraft(text)
+        }
         .onDisappear { speech.stop(); speaker.stop() }
     }
 

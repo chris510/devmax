@@ -1,0 +1,13 @@
+// Shared across configurations. Values here are safe to commit.
+//
+// Note the `$()` in URLs below and in Debug/Release: `//` starts a comment in an
+// xcconfig file, so `https://host` would truncate at the scheme. The empty
+// expansion breaks the token without changing the result.
+
+// Empty default so $(WC_API_KEY) always resolves even without Secrets.xcconfig.
+// A build with no key gets a clean 401 rather than a mystery.
+WC_API_KEY =
+
+// Overridden per configuration.
+WC_BASE_URL =
+WC_APS_ENVIRONMENT = development

@@ -33,11 +33,14 @@ final class DebugFlags: ObservableObject {
         }
         // Debug builds run on fixtures by default so the designs are reproducible
         // without a server; release builds always talk to the real API.
+        //
+        // Every flag that changes behaviour rather than presentation has to be
+        // pinned in release the same way. simulateSpeech in particular: it defaults
+        // to true because the simulator has no usable microphone, so an ungated
+        // release build on a real phone typed out a hardcoded fixture paragraph
+        // instead of recording the user.
         #if DEBUG
         useMockAPI = flag("WC_MOCK", default: true)
-        #else
-        useMockAPI = false
-        #endif
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         failSubmit = flag("WC_FAIL_SUBMIT")
         failAdd = flag("WC_FAIL_ADD")
@@ -46,6 +49,17 @@ final class DebugFlags: ObservableObject {
         ttsEnabled = flag("WC_TTS", default: true)
         simulateSpeech = flag("WC_SIM_SPEECH", default: true)
         route = env["WC_ROUTE"] ?? ""
+        #else
+        useMockAPI = false
+        loadState = .auto
+        failSubmit = false
+        failAdd = false
+        emptyQueue = false
+        textFirst = false
+        ttsEnabled = true
+        simulateSpeech = false
+        route = ""
+        #endif
     }
 }
 

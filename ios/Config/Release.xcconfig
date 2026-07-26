@@ -1,0 +1,10 @@
+#include "Base.xcconfig"
+#include? "Secrets.xcconfig"
+
+WC_BASE_URL = https:/$()/warm-cache-api.fly.dev
+
+// Must track APNS_USE_SANDBOX on the server: development <-> true,
+// production <-> false. A mismatch fails silently as BadDeviceToken.
+// Installing directly from Xcode uses a development profile, so this stays
+// `development` until you move to TestFlight.
+WC_APS_ENVIRONMENT = development

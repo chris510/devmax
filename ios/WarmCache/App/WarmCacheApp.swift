@@ -20,8 +20,10 @@ struct WarmCacheApp: App {
                     await state.applyDebugRoute()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    // Backgrounding mid-answer must not lose the transcript.
-                    if phase != .active { state.persistDraft(state.draft) }
+                    // Backgrounding mid-answer must not lose the transcript. Flush
+                    // rather than persist: the debounce in persistDraft is exactly
+                    // what we can't afford to wait out here.
+                    if phase != .active { state.flushDraft() }
                 }
         }
     }
@@ -74,8 +76,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         Task { @MainActor [state] in
-            try? await state?.api.registerDeviceToken(token)
+            do {
+                try await state?.api.registerDeviceToken(token)
+            } catch {
+                // Without this the push loop just never starts, with no clue why.
+                // The server side of the same symptom is trigger-review reporting
+                // reason=no_devices.
+                NSLog("warmcache: uploading the APNs token failed: \(error)")
+            }
         }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        // Usually a provisioning problem: no paid Apple Developer membership, or an
+        // App ID without the Push Notifications capability.
+        NSLog("warmcache: APNs registration failed: \(error.localizedDescription)")
     }
 
     func userNotificationCenter(

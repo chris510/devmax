@@ -36,6 +36,9 @@ final class AppState: ObservableObject {
 
     enum InputMode { case voice, text }
 
+    /// In-flight debounced draft upload; cancelled and replaced on each edit.
+    private var draftSync: Task<Void, Never>?
+
     let api: WarmCacheAPI
 
     init(api: WarmCacheAPI = APIConfig.client) {
@@ -177,11 +180,33 @@ final class AppState: ObservableObject {
         if let card = currentCard { DraftStore.clear(for: card.id) }
     }
 
+    /// Disk is the source of truth for instant rehydration, so it is written
+    /// synchronously on every call. The server copy is the durable backup and is
+    /// coalesced: this fires on every keystroke and on every speech-recognition
+    /// partial, and PATCH /sessions/{id}/draft is meant to be cheap and debounced,
+    /// not one request per character.
     func persistDraft(_ text: String) {
         guard let card = currentCard else { return }
         DraftStore.save(text, for: card.id)
         guard let sessionID else { return }
-        Task { try? await api.saveDraft(sessionID: sessionID, text: text) }
+
+        draftSync?.cancel()
+        draftSync = Task { [api] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            try? await api.saveDraft(sessionID: sessionID, text: text)
+        }
+    }
+
+    /// Push the current draft to the server now, cancelling any pending debounce.
+    /// Called when the app is backgrounded — the one moment the delay is not free.
+    func flushDraft() {
+        guard let card = currentCard else { return }
+        DraftStore.save(draft, for: card.id)
+        draftSync?.cancel()
+        guard let sessionID else { return }
+        let text = draft
+        Task { [api] in try? await api.saveDraft(sessionID: sessionID, text: text) }
     }
 
     func submit(_ text: String) async {

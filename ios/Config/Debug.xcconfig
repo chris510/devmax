@@ -1,0 +1,9 @@
+#include "Base.xcconfig"
+// Optional: a fresh clone with no Secrets.xcconfig still compiles.
+#include? "Secrets.xcconfig"
+
+// Debug builds run on MockAPI fixtures by default (WC_MOCK=1). This is where
+// WC_MOCK=0 points them — the local server on the ~/dev port.
+WC_BASE_URL = http:/$()/localhost:8083
+
+WC_APS_ENVIRONMENT = development

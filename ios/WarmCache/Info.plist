@@ -47,6 +47,23 @@
 	<string>Warm Cache listens while you answer a question out loud.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Your spoken answers are transcribed on this device so they can be scored.</string>
+	<!-- Injected from ios/Config/*.xcconfig. WCAPIKey comes from the gitignored
+	     Secrets.xcconfig; an empty value yields a clean 401 rather than a
+	     fallback that quietly authenticates with a secret published in the repo. -->
+	<key>WCBaseURL</key>
+	<string>$(WC_BASE_URL)</string>
+	<key>WCAPIKey</key>
+	<string>$(WC_API_KEY)</string>
+	<!-- Debug points at http://localhost:8083. NSAllowsLocalNetworking permits
+	     cleartext to loopback/.local/LAN only — production https stays fully
+	     protected, unlike NSAllowsArbitraryLoads. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Newsreader.ttf</string>
