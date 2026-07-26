@@ -2,14 +2,20 @@
 
 Two sources:
 
-* ``cards.json`` — the 111-card study plan (spec.md §Seeding). Not yet present in
-  the repo; pass ``--file`` once it lands.
-* ``--fixtures`` — the three cards from the design prototype, with their real
+* ``cards.json`` — the 111-card study plan (spec.md §Seeding). Six weeks, 84
+  conversational and 27 desk cards. This is what you seed a real database with.
+* ``--fixtures`` — the three cards from the design prototype, with their invented
   session history. Every screenshot in the design handoff depicts these, so this
-  is what makes the designs reproducible against a real server during dev.
+  is what makes the designs reproducible against a real server during dev. Never
+  load them into a real study queue; the guard in main() refuses by default.
 
     uv run python -m app.seed --fixtures
-    uv run python -m app.seed --file cards.json --weeks-through 2
+    uv run python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
+
+Due dates are staggered across each card's target week at the configured
+``reviews_per_day`` rate, so seeding the whole plan puts one session's worth in
+the queue on day one rather than all 111 cards. Record the ``--start-date`` you
+use: reusing it keeps later loads aligned to the same week boundaries.
 """
 
 import argparse
@@ -226,10 +232,13 @@ def _fixtures() -> list[dict]:
 
 
 async def load_fixtures() -> int:
-    today = date.today()
     now = datetime.now(UTC)
     added = 0
     async with session_factory() as db:
+        # The configured timezone, not the container's: every due comparison in the
+        # app is against the user's local calendar day (routers/deps.local_today),
+        # and a UTC server would seed these a day early after 17:00 PT.
+        today = now_in((await get_settings_row(db)).timezone).date()
         for spec in _fixtures():
             if (await db.exec(select(Card).where(Card.topic == spec["topic"]))).first():
                 continue
