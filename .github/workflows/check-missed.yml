@@ -2,7 +2,10 @@ name: Check missed reviews
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    # Offset off the hour so this never lands on the same minute as a trigger-review
+    # fire: check-missed clears last_pushed_at, which is the evidence trigger-review
+    # counts against reviews_per_day.
+    - cron: '35 */4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -11,9 +14,11 @@ jobs:
     steps:
       - name: POST /internal/check-missed
         run: |
-          curl -fsSL -X POST "$API_BASE_URL/internal/check-missed" \
-            -H "X-Cron-Secret: $CRON_SECRET" \
-            -w '\nHTTP %{http_code}\n'
+          body=$(curl -sS --fail-with-body \
+            --retry 3 --retry-connrefused --retry-delay 5 --max-time 60 \
+            -X POST "$API_BASE_URL/internal/check-missed" \
+            -H "X-Cron-Secret: $CRON_SECRET")
+          echo "$body"
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

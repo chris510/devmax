@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      # `.`, not `app tests` — the narrower command the docs used to give skipped
+      # alembic/ entirely, which is how three lint errors sat there unnoticed.
+      - name: Lint
+        run: uv run ruff check .
+
+      # Anthropic and APNs are mocked in the suite; no live API calls (spec.md §Testing).
+      - name: Test
+        run: uv run pytest -q

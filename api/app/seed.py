@@ -20,6 +20,7 @@ from pathlib import Path
 
 from sqlmodel import select
 
+from app.config import get_settings
 from app.db import session_factory
 from app.models import (
     DELIVERY_CONVERSATIONAL,
@@ -28,6 +29,7 @@ from app.models import (
     Card,
     Session,
 )
+from app.routers.deps import get_settings_row, now_in
 
 # Coding problems need a keyboard and an hour, not a two-minute voice session.
 DESK_CATEGORIES = {"Coding Warmup", "Coding Pattern", "Tier 2 Practical Build"}
@@ -37,12 +39,51 @@ def delivery_mode_for(category: str) -> str:
     return DELIVERY_DESK if category in DESK_CATEGORIES else DELIVERY_CONVERSATIONAL
 
 
-async def load_from_file(path: Path, weeks_through: int) -> int:
+DAYS_PER_WEEK = 7
+
+
+def _schedule(
+    entries: list[dict], start: date, per_day: int
+) -> dict[int, date]:
+    """Spread each week's cards across that week, one small batch per day.
+
+    ``--weeks-through`` alone cannot prevent a day-one flood: it controls *which*
+    cards load, not when they come due. Seeding every card with
+    ``next_review_at = today`` puts the entire cohort in the queue at once, which is
+    the opposite of what spec.md §Seeding is asking for.
+
+    Cards are grouped by (target_week, delivery_mode) and dealt out ``per_day`` at a
+    time — matching the push budget for conversational cards, one a day for desk
+    cards, which never enter the push loop at all. The day index is clamped so a
+    large week spills onto its own last day rather than into the following week.
+    Returns a map of entry index -> due date.
+    """
+    groups: dict[tuple[int | None, str], list[int]] = {}
+    for i, entry in enumerate(entries):
+        category = entry.get("category", "Unsorted")
+        mode = delivery_mode_for(category)
+        groups.setdefault((entry.get("target_week"), mode), []).append(i)
+
+    due: dict[int, date] = {}
+    for (week, mode), indices in groups.items():
+        # A card with no target_week behaves like POST /cards {"schedule": "now"}.
+        week_start = start if week is None else start + timedelta(days=DAYS_PER_WEEK * (week - 1))
+        rate = per_day if mode == DELIVERY_CONVERSATIONAL else 1
+        for position, index in enumerate(indices):
+            offset = min(position // max(rate, 1), DAYS_PER_WEEK - 1)
+            due[index] = week_start + timedelta(days=offset)
+    return due
+
+
+async def load_from_file(path: Path, weeks_through: int, start: date | None = None) -> int:
     entries = json.loads(path.read_text())
-    today = date.today()
     added = 0
     async with session_factory() as db:
-        for entry in entries:
+        settings = await get_settings_row(db)
+        begin = start or now_in(settings.timezone).date()
+        due_dates = _schedule(entries, begin, settings.reviews_per_day)
+
+        for index, entry in enumerate(entries):
             week = entry.get("target_week")
             if week is not None and week > weeks_through:
                 continue
@@ -58,7 +99,7 @@ async def load_from_file(path: Path, weeks_through: int) -> int:
                     source_company=entry.get("source_company"),
                     target_week=week,
                     delivery_mode=delivery_mode_for(category),
-                    next_review_at=today,
+                    next_review_at=due_dates[index],
                 )
             )
             added += 1
@@ -238,6 +279,10 @@ async def load_fixtures() -> int:
     return added
 
 
+def _looks_like_production(url: str) -> bool:
+    return "neon.tech" in url
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Warm Cache cards")
     parser.add_argument("--file", type=Path, help="cards.json from the study plan")
@@ -245,19 +290,40 @@ def main() -> None:
         "--weeks-through",
         type=int,
         default=2,
-        help="only load cards with target_week <= N (default 2, so day one isn't flooded)",
+        help="only load cards with target_week <= N (default 2; a safety valve, not "
+        "the throttle — due dates are staggered across each target week)",
+    )
+    parser.add_argument(
+        "--start-date",
+        type=date.fromisoformat,
+        help="YYYY-MM-DD that week 1 begins on (default: today in the configured "
+        "timezone). Reuse the same value on later loads so weeks stay aligned.",
     )
     parser.add_argument(
         "--fixtures",
         action="store_true",
         help="load the three design-prototype cards plus one desk card",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="allow --fixtures against a production database",
+    )
     args = parser.parse_args()
 
     if args.fixtures:
+        # The fixtures carry invented session history and a 14-hour-old draft, which
+        # would render a bogus resume banner on a real card. They exist to reproduce
+        # the design screenshots, not to seed a study queue.
+        if _looks_like_production(get_settings().database_url) and not args.force:
+            parser.error(
+                "--fixtures targets what looks like a production database. Use "
+                "--file cards.json instead, or pass --force if you really mean it."
+            )
         print(f"seeded {asyncio.run(load_fixtures())} fixture cards")
     elif args.file:
-        print(f"seeded {asyncio.run(load_from_file(args.file, args.weeks_through))} cards")
+        added = asyncio.run(load_from_file(args.file, args.weeks_through, args.start_date))
+        print(f"seeded {added} cards")
     else:
         parser.error("pass --fixtures or --file cards.json")
 

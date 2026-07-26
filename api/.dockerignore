@@ -1,0 +1,22 @@
+# Docker does not honour .gitignore, and the Dockerfile does `COPY . .`. Without
+# this file a developer's real .env — DATABASE_URL, API_KEY, CRON_SECRET,
+# ANTHROPIC_API_KEY, the APNs .p8 contents — is baked into an image layer, and the
+# host .venv is copied over the one the build just created.
+.env
+.env.*
+!.env.example
+.venv/
+*.p8
+
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.db
+*.sqlite3
+
+tests/
+README.md

@@ -246,7 +246,14 @@ async def score_answer(
         max_tokens=8000,
     )
 
-    score = int(data["score"])
+    # The JSON schema makes `score` required, so this should be unreachable — but an
+    # unguarded KeyError/ValueError here is a 500, and the client only knows how to
+    # retry a 503. Losing a spoken answer is the worst failure mode in the product.
+    try:
+        score = int(data["score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LLMError(f"scoring response had no usable score: {data!r}") from exc
+
     probe = str(data.get("follow_up_question", "")).strip()
 
     if not follow_up_used and FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH and probe:

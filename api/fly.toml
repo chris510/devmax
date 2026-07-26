@@ -4,6 +4,18 @@ primary_region = "sjc"
 [build]
   dockerfile = "Dockerfile"
 
+# Runs in a temporary machine before any app machine starts. Without it the schema
+# is never created and the settings row seeded by migration 0001 never exists, so
+# the first /internal/trigger-review fails on its very first query.
+[deploy]
+  release_command = "alembic upgrade head"
+
+[env]
+  # Must track the iOS entitlement's aps-environment. A mismatch fails silently as
+  # BadDeviceToken — flip both together, never one alone.
+  APNS_USE_SANDBOX = "true"
+  LOG_LEVEL = "INFO"
+
 [http_service]
   internal_port = 8080
   force_https = true

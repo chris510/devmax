@@ -72,12 +72,19 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
 
     top = due[0]
     tokens = [t.token for t in (await db.exec(select(DeviceToken))).all()]
-    await send_push(
+    delivered = await send_push(
         tokens=tokens,
         title=f"{len(due)} due",
         body=top.topic,
         card_id=top.id,
     )
+
+    # Reporting sent=True when nothing was delivered — no registered device, or APNs
+    # credentials not configured — would stamp last_pushed_at, and check-missed would
+    # then increment missed_count four hours later for a push the user never received.
+    # missed_count is the product's only compliance signal; don't corrupt it.
+    if not delivered:
+        return TriggerResult(sent=False, reason="no_devices", due_count=len(due))
 
     top.last_pushed_at = datetime.now(UTC)
     db.add(top)
