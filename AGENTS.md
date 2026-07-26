@@ -15,10 +15,13 @@ Sessions are **1–3 minutes, used half-awake or in line.** Every decision optim
 *speed into a session* and *honesty of signal* — never engagement mechanics. There are no
 streaks, no XP, no badges, and no celebration animations. Do not add them.
 
-**Status:** backend and iOS client both built and verified. The backend has 45 passing
-tests against a real ASGI app; the iOS client has been compared state-by-state against the
-design screenshots in a 390×844 simulator. Not yet deployed, and not yet run against a real
-Neon database or a live Anthropic key.
+**Status:** backend and iOS client both built; being prepared for a first deploy. The
+backend has 90 passing tests against a real ASGI app, green on both SQLite and Postgres, and
+the schema has been applied to a real Postgres 16. The iOS client has been compared
+state-by-state against the design screenshots in a 390×844 simulator, but the most recent
+round of fixes was written without a Swift toolchain and has not been compiled. Not yet
+deployed, and no live Anthropic or APNs call has been made. `docs/RUNBOOK.md` is the path
+from here to a push on a phone.
 
 ## The two source documents (both authoritative)
 
@@ -104,7 +107,7 @@ warmcache/
 
 ```sh
 # Backend
-cd api && uv sync && uv run pytest -q && uv run ruff check app tests
+cd api && uv sync && uv run pytest -q && uv run ruff check .   # `.`, not `app tests`
 uv run uvicorn app.main:app --reload --port 8083     # 8083 per the ~/dev port contract
 
 # iOS
@@ -141,13 +144,28 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **`cards.json` is missing.** `spec.md` §Seeding says the 111-card study plan is "already
-  generated," but it isn't in the repo. `app/seed.py` implements the documented contract;
-  until the file lands, `--fixtures` seeds the cards every screenshot depicts.
-- **Never run against real Postgres.** The migration's JSONB column and partial index have
-  only been exercised as SQLite variants in tests. Apply `alembic upgrade head` to a Neon
-  branch before trusting deployment.
-- **No live Anthropic or APNs call has been made.** Both are mocked everywhere.
+- **Not yet deployed.** Fly, Neon, Anthropic, and APNs accounts don't exist yet. Everything
+  needed is written down — see `docs/RUNBOOK.md`, which is the ordered path from a clean
+  repo to a push arriving on a phone.
+- **No live Anthropic or APNs call has been made.** Both are still mocked everywhere;
+  `services/llm.py` executing against the real API for the first time is a deliberate,
+  manual step in the runbook rather than something to discover when a push arrives.
+- **The iOS client has not been compiled since the last round of changes.** They were
+  written on Linux with no Swift toolchain. `WarmCacheTests/WireFormatTests.swift` decodes a
+  response captured from the running backend, which is the substitute for a compiler on
+  anything wire-format-shaped — but the Swift itself is unverified until you build it.
+- **`alembic revision --autogenerate` is disabled on purpose** (`target_metadata = None`).
+  `SQLModel.metadata` diverges from the handwritten migration — the four CHECK constraints,
+  every `server_default`, TEXT/SMALLINT vs VARCHAR/INTEGER — so autogenerate would emit a
+  revision dropping the constraints. Write revisions by hand and apply them to a real
+  Postgres before trusting them.
+
+The migration *has* now been applied to a real Postgres 16: the partial index, the JSONB
+column, the `::jsonb` settings seed, and all four CHECK constraints were verified, and the
+whole suite runs against Postgres via `TEST_DATABASE_URL` as well as SQLite. That is how the
+`timestamptz` bug in `models.py` was found — see `docs/DEVIATIONS.md` §6.
+
+Where the code and `spec.md` disagree, `docs/DEVIATIONS.md` records why.
 
 ## Out of scope — do not build
 

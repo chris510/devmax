@@ -36,12 +36,28 @@ uv run uvicorn app.main:app --reload --port 8083
 ```
 
 `--fixtures` seeds exactly the cards every screenshot depicts, so the designs are
-reproducible against a real server. Once `cards.json` (the 111-card study plan) lands, use
-`uv run python -m app.seed --file cards.json --weeks-through 2` instead.
+reproducible against a real server. For a real queue use the study plan instead — it
+staggers due dates so only one session's worth comes due per day:
 
 ```sh
-uv run pytest        # 45 tests; Anthropic and APNs are mocked, no live calls
-uv run ruff check app tests
+uv run python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
+```
+
+Never load `--fixtures` into a real database: they carry invented session history and a fake
+in-progress draft. The seeder refuses a Neon URL without `--force`.
+
+The three access-gating settings have no defaults — the app will not start without
+`DATABASE_URL`, `API_KEY`, and `CRON_SECRET`, and refuses known placeholder values.
+
+```sh
+uv run pytest        # 90 tests; Anthropic and APNs are mocked, no live calls
+uv run ruff check .  # `.`, not `app tests` — the narrower form skips alembic/
+
+# The same suite against real Postgres, which is the only way to exercise JSONB,
+# native UUID, timestamptz, and the CHECK constraints that live in the migration.
+createdb warmcache_test
+DATABASE_URL=postgresql+asyncpg://localhost/warmcache_test uv run alembic upgrade head
+TEST_DATABASE_URL=postgresql+asyncpg://localhost/warmcache_test uv run pytest
 ```
 
 The two shared secrets are independent: client endpoints need `X-API-Key`, `/internal/*`
@@ -51,12 +67,18 @@ needs `X-Cron-Secret`.
 
 ```sh
 cd ios
+cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig   # paste the server's API_KEY
 xcodegen generate
 open WarmCache.xcodeproj
 ```
 
 Debug builds run against fixtures (`MockAPI`) so every screen works with no server; release
 builds always use the real API. Point a debug build at a live server with `WC_MOCK=0`.
+
+The endpoint and API key come from `Config/*.xcconfig` — Debug at `localhost:8083`, Release
+at the Fly host — substituted into `Info.plist`. `Config/Secrets.xcconfig` is gitignored;
+without it the app builds and returns a clean 401 rather than falling back to a shared
+default. A device build also needs `DEVELOPMENT_TEAM` set in `project.yml`.
 
 ### Walking the designed states
 
@@ -75,6 +97,17 @@ xcrun simctl launch --setenv WC_ROUTE=score <device> com.christrinh.warmcache
 
 Forced failures succeed on the retry, as in the prototype, so each failure path walks end to
 end. Use a 390×844 simulator (iPhone 16e / 14 / 15) to match the design frame.
+
+All of these are Debug-only: in a Release build every flag is pinned, so none of them can
+change how the app behaves on a real phone.
+
+## Deploying
+
+`docs/RUNBOOK.md` is the ordered path from a clean repo to a push arriving on a phone —
+accounts, secrets, the first Fly deploy, seeding, the first real Claude call, the device
+build, and the triage steps for when a push doesn't show up.
+
+`docs/DEVIATIONS.md` records where the code intentionally differs from `spec.md`, and why.
 
 ## Notes
 
