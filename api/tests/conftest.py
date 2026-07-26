@@ -9,6 +9,7 @@ os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402
@@ -21,21 +22,42 @@ from app.models import Card, Settings  # noqa: E402
 API_HEADERS = {"X-API-Key": "test-api-key"}
 CRON_HEADERS = {"X-Cron-Secret": "test-cron-secret"}
 
+# The suite runs on in-memory SQLite by default — fast, hermetic, no services.
+# Point TEST_DATABASE_URL at an already-migrated Postgres database to run the
+# same suite against the real production schema instead, which is the only way
+# to exercise JSONB, native UUID, timestamptz, and the four CHECK constraints
+# that live in the migration but not in SQLModel.metadata:
+#
+#   createdb warmcache_test
+#   DATABASE_URL=postgresql+asyncpg://... uv run alembic upgrade head
+#   TEST_DATABASE_URL=postgresql+asyncpg://... uv run pytest
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+TEST_ON_POSTGRES = TEST_DATABASE_URL.startswith("postgresql")
+
 
 @pytest.fixture
 async def db() -> AsyncIterator[AsyncSession]:
-    """A fresh in-memory schema per test.
+    """A fresh schema per test.
 
-    StaticPool keeps every connection pointed at the same in-memory database —
-    without it each connection gets its own empty one.
+    On SQLite, StaticPool keeps every connection pointed at the same in-memory
+    database — without it each connection gets its own empty one. On Postgres
+    the schema is created by `alembic upgrade head` out of band, so each test
+    truncates instead of recreating.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    if TEST_ON_POSTGRES:
+        engine = create_async_engine(TEST_DATABASE_URL, poolclass=StaticPool)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("TRUNCATE cards, sessions, device_tokens, settings RESTART IDENTITY CASCADE")
+            )
+    else:
+        engine = create_async_engine(
+            TEST_DATABASE_URL,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
 
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:

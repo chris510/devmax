@@ -2,12 +2,20 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, Column, Index, text
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 # Postgres in production; the variant keeps the SQLite test schema compilable.
 WINDOWS_TYPE = JSONB().with_variant(JSON(), "sqlite")
+
+# Every timestamp column is `timestamptz` in migration 0001 and every value written
+# is tz-aware (`_now()` below). A bare `datetime` annotation would map to a naive
+# DateTime, and the asyncpg dialect casts bind parameters from the *model* type — so
+# it would emit `$n::TIMESTAMP WITHOUT TIME ZONE` and asyncpg would reject the aware
+# value with a DataError on every insert. SQLite silently drops tzinfo instead, which
+# is why this only ever surfaces against Postgres.
+TZ_DATETIME = DateTime(timezone=True)
 
 DELIVERY_CONVERSATIONAL = "conversational"
 DELIVERY_DESK = "desk"
@@ -58,10 +66,10 @@ class Card(SQLModel, table=True):
     mastery_summary: str = ""
     # Compliance signal only — never feeds SM-2.
     missed_count: int = 0
-    last_pushed_at: datetime | None = None
+    last_pushed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
 
-    created_at: datetime = Field(default_factory=_now)
-    updated_at: datetime = Field(default_factory=_now)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 class Session(SQLModel, table=True):
@@ -83,8 +91,8 @@ class Session(SQLModel, table=True):
     follow_up_used: bool = False
     status: str = STATUS_OPEN
 
-    started_at: datetime = Field(default_factory=_now)
-    ended_at: datetime | None = None
+    started_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    ended_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
 
 
 class DeviceToken(SQLModel, table=True):
@@ -92,7 +100,7 @@ class DeviceToken(SQLModel, table=True):
 
     token: str = Field(primary_key=True)
     kind: str = "apns"
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 class Settings(SQLModel, table=True):
