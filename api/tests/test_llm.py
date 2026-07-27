@@ -7,6 +7,8 @@ suite monkeypatches `score_answer` wholesale, so without this file the invariant
 has no coverage at all.
 """
 
+import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -137,3 +139,143 @@ async def test_an_unusable_score_raises_llm_error(
 
     with pytest.raises(llm.LLMError):
         await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
+
+
+# --- request construction ---------------------------------------------------
+# The tests above stub `_complete`, so nothing there covers what `_complete`
+# actually sends or how it retries. These stub one layer deeper, at `_client`.
+
+
+def make_response(payload=None, *, text: str | None = None):
+    """A stand-in for anthropic's Message, with just the fields _complete reads."""
+    body = text if text is not None else json.dumps(payload)
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=body)],
+        usage=SimpleNamespace(
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        ),
+    )
+
+
+class FakeClient:
+    """Records every request and replays a scripted list of outcomes."""
+
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls: list[dict] = []
+        self.messages = SimpleNamespace(create=self._create)
+
+    async def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture
+def fake_client(monkeypatch):
+    def install(*outcomes) -> FakeClient:
+        client = FakeClient(outcomes)
+        monkeypatch.setattr(llm, "_client", lambda: client)
+        return client
+
+    return install
+
+
+async def test_no_cache_control_is_sent(fake_client):
+    """Regression guard: the rubrics are below every model's cacheable minimum.
+
+    A `cache_control` marker here fails silently — no error, just a cache that
+    never fills. Keeping it out is deliberate; see the comment on SCORING_RUBRIC.
+    """
+    client = fake_client(make_response(scored(4)))
+    await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+
+    assert client.calls[0]["system"] == [{"type": "text", "text": llm.SCORING_RUBRIC}]
+    assert "cache_control" not in json.dumps(client.calls[0])
+
+
+async def test_effort_is_omitted_when_unset(fake_client, monkeypatch):
+    """Haiku 4.5 rejects `effort` outright, so it must be absent, not null."""
+    client = fake_client(make_response({"question": "What moves?"}))
+    monkeypatch.setattr(llm.get_settings(), "question_effort", None)
+
+    await llm.generate_question(
+        topic="Consistent hashing",
+        category="Systems",
+        pattern=None,
+        source_company=None,
+        mastery_summary="",
+        last_score=None,
+        recent_questions=[],
+    )
+
+    assert "effort" not in client.calls[0]["output_config"]
+
+
+async def test_effort_is_passed_through_when_set(fake_client, monkeypatch):
+    client = fake_client(make_response(scored(4)))
+    monkeypatch.setattr(llm.get_settings(), "scoring_effort", "low")
+
+    await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+
+    assert client.calls[0]["output_config"]["effort"] == "low"
+
+
+def test_client_is_cached_with_explicit_limits():
+    """A per-call client leaked an httpx connection pool per request."""
+    llm._client.cache_clear()
+    try:
+        first = llm._client()
+        assert llm._client() is first
+        assert first.max_retries == llm.SDK_MAX_RETRIES
+        assert first.timeout == llm.SDK_TIMEOUT_SECONDS
+    finally:
+        llm._client.cache_clear()
+
+
+async def test_unparseable_output_is_retried_once(fake_client):
+    client = fake_client(make_response(text="Here you go: {oops"), make_response(scored(4)))
+
+    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+
+    assert len(client.calls) == 2
+    assert result.score == 4
+
+
+async def test_unparseable_twice_raises(fake_client):
+    client = fake_client(make_response(text="nope"), make_response(text="still nope"))
+
+    with pytest.raises(llm.LLMError):
+        await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+
+    assert len(client.calls) == 2
+
+
+async def test_transport_failure_is_not_retried_here(fake_client):
+    """The SDK already retried (SDK_MAX_RETRIES); a second layer would stack."""
+    client = fake_client(RuntimeError("overloaded"))
+
+    with pytest.raises(llm.LLMError):
+        await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+
+    assert len(client.calls) == 1
+
+
+async def test_empty_question_is_rejected(fake_client):
+    fake_client(make_response({"question": "   "}))
+
+    with pytest.raises(llm.LLMError):
+        await llm.generate_question(
+            topic="Consistent hashing",
+            category="Systems",
+            pattern=None,
+            source_company=None,
+            mastery_summary="",
+            last_score=None,
+            recent_questions=[],
+        )

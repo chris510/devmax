@@ -122,7 +122,9 @@ class SettingsIn(SettingsOut):
 
 class TriggerResult(BaseModel):
     sent: bool
-    reason: str | None = None
+    # Constrained because this is what the cron consumer branches on — a typo'd
+    # reason should fail here, not read as an unrecognised-but-valid state.
+    reason: Literal["outside_window", "daily_limit", "nothing_due", "no_devices"] | None = None
     card_id: uuid.UUID | None = None
     due_count: int | None = None
 

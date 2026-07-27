@@ -29,7 +29,13 @@ class Settings(BaseSettings):
     # Sonnet 5 runs adaptive thinking by default; effort bounds it so a 1-3 minute
     # session doesn't stall on scoring. Haiku 4.5 rejects `effort` entirely, hence
     # None — set this if you swap the question model to a 4.6+ model.
-    scoring_effort: str | None = "medium"
+    #
+    # "low" beat "medium" on both axes in a live sweep (scripts/effort_sweep.py,
+    # 8 cases, 2026-07): 1460 vs 2353 output tokens, and 6/8 vs 3/8 exact score
+    # matches. Against a rubric this crisp, more thinking produced *less*
+    # consistent grading — medium's errors were scattered where low's were not.
+    # Re-run the sweep before changing this; it's the product's core signal.
+    scoring_effort: str | None = "low"
     question_effort: str | None = None
 
     apns_key_id: str = ""

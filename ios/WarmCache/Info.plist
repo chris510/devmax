@@ -57,6 +57,11 @@
 	<!-- Debug points at http://localhost:8083. NSAllowsLocalNetworking permits
 	     cleartext to loopback/.local/LAN only — production https stays fully
 	     protected, unlike NSAllowsArbitraryLoads. -->
+	<!-- iOS 14+ gates local-network access behind a user prompt, which cannot be
+	     shown without this string — the request fails silently instead. Needed for
+	     on-device testing against the Mac; verified against a physical iPhone. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Warm Cache connects to a development server running on your Mac when testing on device.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

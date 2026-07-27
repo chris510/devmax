@@ -102,3 +102,20 @@ def make_card(**overrides) -> Card:
         mastery_summary="",
     )
     return Card(**{**defaults, **overrides})
+
+
+@pytest.fixture
+def in_window(monkeypatch):
+    """Pins the clock to 07:30 local — inside the default morning window.
+
+    Every /internal/trigger-review test needs this; `_in_window` reads the wall
+    clock, so without it the suite passes or fails depending on the hour it runs.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.routers import internal
+
+    monkeypatch.setattr(
+        internal, "now_in", lambda tz: datetime(2026, 7, 24, 7, 30, tzinfo=ZoneInfo(tz))
+    )

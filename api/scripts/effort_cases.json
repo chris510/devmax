@@ -1,0 +1,58 @@
+[
+  {
+    "name": "consistent hashing — complete (5)",
+    "topic": "Consistent hashing",
+    "question": "You add a sixth node to a five-node ring. What moves, and what doesn't?",
+    "answer": "So each node owns the arc of the hash ring between it and its predecessor. When you add a sixth node it hashes to some point on the ring and takes over just the arc between itself and whoever came before it — so roughly one sixth of the keyspace moves, and only from that one successor node. Everyone else is untouched, which is the whole point versus mod-N hashing where basically every key remaps. The catch is that with only six real nodes the arcs are wildly uneven, you get hot spots, so in practice you use virtual nodes — each physical node hashes to a hundred or so points, so the load evens out and when a node dies its share spreads across everyone instead of dumping entirely on one neighbor.",
+    "expected_score": 5
+  },
+  {
+    "name": "consistent hashing — mechanism, no trade-offs (3)",
+    "topic": "Consistent hashing",
+    "question": "You add a sixth node to a five-node ring. What moves, and what doesn't?",
+    "answer": "Um, you hash the nodes onto a ring and each one owns the keys up to the next node going around. So adding a node means it takes some of the keys from its neighbor, and the rest of the ring stays the same. That's better than modulo hashing because you don't rehash everything.",
+    "expected_score": 3
+  },
+  {
+    "name": "consistent hashing — confidently wrong (1)",
+    "topic": "Consistent hashing",
+    "question": "You add a sixth node to a five-node ring. What moves, and what doesn't?",
+    "answer": "Right so consistent hashing, when you add the sixth node you rehash all the keys with the new node count and redistribute them evenly across all six, so each node ends up with a sixth of the data. That's what makes it consistent — everything's balanced after.",
+    "expected_score": 1
+  },
+  {
+    "name": "raft — mechanism + failure modes (4)",
+    "topic": "Raft leader election",
+    "question": "Two followers time out at the same moment. Walk me through what happens.",
+    "answer": "Both bump their term and become candidates, vote for themselves, and fan out RequestVote. Each other node votes at most once per term and only for a candidate whose log is at least as up to date as its own. So if the cluster splits evenly nobody gets a majority and the term just expires with no leader. Then they time out again — and because the election timeout is randomized, usually one fires meaningfully earlier the second time and wins cleanly. Without that randomization you can livelock, splitting the vote term after term.",
+    "expected_score": 4
+  },
+  {
+    "name": "raft — names it, mechanism wrong (1)",
+    "topic": "Raft leader election",
+    "question": "Two followers time out at the same moment. Walk me through what happens.",
+    "answer": "They'd both become candidates and then whichever one has the highest node ID wins the tiebreak and becomes leader, and the other one steps back down to follower.",
+    "expected_score": 1
+  },
+  {
+    "name": "postgres indexes — partial, major gap (2)",
+    "topic": "Postgres index types",
+    "question": "A query filters on a JSONB column and it's slow. What index do you reach for, and why not B-tree?",
+    "answer": "You'd want a GIN index for that. B-tree doesn't really work for JSONB because it's not, like, ordered in the way B-tree needs. GIN handles the containment queries.",
+    "expected_score": 2
+  },
+  {
+    "name": "postgres indexes — no recall (0)",
+    "topic": "Postgres index types",
+    "question": "A query filters on a JSONB column and it's slow. What index do you reach for, and why not B-tree?",
+    "answer": "Yeah I don't remember this one. Something about indexes being slower on JSON? I'd have to look it up honestly.",
+    "expected_score": 0
+  },
+  {
+    "name": "multi-source BFS — transcription noise (4)",
+    "topic": "Multi-source BFS",
+    "question": "Why seed the queue with every source at once instead of running BFS from each source separately?",
+    "answer": "Because if you run it separately from each source you're doing order V times E work, whereas if you push all the sources in at level zero the wavefront expands from all of them simultaneously and the first time you reach any cell that distance is already the minimum over all sources. So it's one pass, order V plus E. The thing to watch is you have to mark all the sources visited before you start popping, otherwise a source sitting adjacent to another source gets processed twice and your distances go wrong.",
+    "expected_score": 4
+  }
+]

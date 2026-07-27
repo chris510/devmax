@@ -12,9 +12,9 @@ configs:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    # Set to your Apple Developer Team ID. Required for a device build; a free
-    # personal team cannot carry the Push Notifications entitlement.
-    DEVELOPMENT_TEAM: ""
+    # One Percent Studios LLC. Required for a device build; a free personal
+    # team cannot carry the Push Notifications entitlement.
+    DEVELOPMENT_TEAM: "BSM3G2L4RK"
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
