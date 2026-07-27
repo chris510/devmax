@@ -27,6 +27,13 @@ def due_label(next_review_at: date, today: date) -> str:
     return f"{days} days overdue"
 
 
+def days_since_review(card: Card, today: date) -> int | None:
+    """None until the card has been answered once."""
+    if card.last_reviewed_at is None:
+        return None
+    return (today - card.last_reviewed_at.date()).days
+
+
 def classify_tier(card: Card, today: date) -> str:
     """Derived, never stored. Evaluation order matters — see spec.md §/cards/overview.
 

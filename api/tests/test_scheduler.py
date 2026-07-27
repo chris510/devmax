@@ -2,7 +2,16 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.services.scheduler import EASE_CAP, EASE_FLOOR, apply_sm2
+from app.services.scheduler import (
+    EASE_CAP,
+    EASE_FLOOR,
+    RATING_AGAIN,
+    RATING_GOOD,
+    RATING_QUALITY,
+    apply_sm2,
+    quality_for,
+    rating_for,
+)
 
 TODAY = date(2026, 7, 24)
 
@@ -94,3 +103,41 @@ def test_full_multi_review_sequence():
 
     # The lapse left a permanent mark on the ease factor.
     assert ease < 2.5
+
+
+# --- the mechanism gate -----------------------------------------------------
+# What the scheduler is handed is no longer the displayed score. `rating_for`
+# collapses a session to two buckets from mechanism accuracy alone.
+
+
+@pytest.mark.parametrize(
+    ("mechanism", "expected"),
+    [(0, RATING_AGAIN), (1, RATING_AGAIN), (2, RATING_AGAIN),
+     (3, RATING_GOOD), (4, RATING_GOOD), (5, RATING_GOOD)],
+)
+def test_rating_splits_at_the_mechanism_pass_mark(mechanism: int, expected: str):
+    assert rating_for(mechanism) == expected
+
+
+def test_every_passing_mechanism_produces_the_same_schedule():
+    """Two buckets, not six — depth beyond the mechanism must not move the card."""
+    outcomes = {apply_sm2(2.5, 6, 2, quality_for(m), TODAY) for m in (3, 4, 5)}
+    assert len(outcomes) == 1
+
+
+def test_every_failing_mechanism_produces_the_same_schedule():
+    outcomes = {apply_sm2(2.5, 15, 4, quality_for(m), TODAY) for m in (0, 1, 2)}
+    assert len(outcomes) == 1
+
+
+def test_a_pass_is_ease_neutral_and_a_lapse_costs_ease():
+    passed, _, _, _ = apply_sm2(2.5, 6, 2, quality_for(3), TODAY)
+    lapsed, _, _, _ = apply_sm2(2.5, 6, 2, quality_for(2), TODAY)
+    assert passed == pytest.approx(2.5)
+    assert lapsed < 2.5
+    assert lapsed >= EASE_FLOOR
+
+
+def test_the_gate_quality_values_stay_inside_sm2s_range():
+    for quality in RATING_QUALITY.values():
+        assert 0 <= quality <= 5

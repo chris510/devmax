@@ -25,9 +25,31 @@ SCORE_ARGS = dict(
 )
 
 
+# One axis triple per composite band. The model no longer returns a composite, so
+# a test that wants "a session that scores 4" has to say it in axis terms.
+AXES_FOR_COMPOSITE = {
+    0: (0, 0, 0),
+    1: (1, 0, 0),
+    2: (2, 0, 0),
+    3: (3, 0, 0),  # mechanism only
+    4: (4, 3, 0),  # + trade-offs, failure modes still thin
+    5: (5, 3, 3),  # all three
+}
+
+
 def scored(score: Any, probe: str | None = "probe?") -> dict[str, Any]:
-    """A well-formed scoring response. `probe=None` omits the follow-up entirely."""
-    payload: dict[str, Any] = {"score": score, "feedback": "f", "mastery_summary": "m"}
+    """A well-formed scoring response deriving to `score`.
+
+    `probe=None` omits the follow-up entirely.
+    """
+    mechanism, trade_offs, failure_modes = AXES_FOR_COMPOSITE[score]
+    payload: dict[str, Any] = {
+        "mechanism_accuracy": mechanism,
+        "trade_off_awareness": trade_offs,
+        "failure_mode_awareness": failure_modes,
+        "feedback": "f",
+        "mastery_summary": "m",
+    }
     if probe is not None:
         payload["follow_up_question"] = probe
     return payload
@@ -125,20 +147,75 @@ async def test_the_prior_follow_up_turns_are_sent_for_the_second_scoring(
     assert "They spread each node over many ring positions." in sent
 
 
-@pytest.mark.parametrize("payload", [{}, {"score": None}, {"score": "not a number"}])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {**scored(4), "mechanism_accuracy": None},
+        {**scored(4), "trade_off_awareness": "not a number"},
+        # The old blended shape: a model or config that ignored the new schema.
+        {"score": 4, "feedback": "f", "mastery_summary": "m"},
+    ],
+)
 async def test_an_unusable_score_raises_llm_error(
     monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
 ) -> None:
     """503, not 500.
 
-    The JSON schema makes `score` required so this should be unreachable, but the
-    client only knows how to retry a 503 — and on a 500 the user's spoken answer is
-    gone.
+    The JSON schema makes all three axes required so this should be unreachable,
+    but the client only knows how to retry a 503 — and on a 500 the user's spoken
+    answer is gone.
     """
     stub_completion(monkeypatch, payload)
 
     with pytest.raises(llm.LLMError):
         await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
+
+
+# --- the composite ----------------------------------------------------------
+# `derive_composite` replaces a number the model used to guess. These cases pin
+# the bands to the ones the old blended rubric described, so Card History and
+# `last_score` keep meaning what they meant.
+
+
+@pytest.mark.parametrize(
+    ("axes", "expected"),
+    [
+        ((0, 5, 5), 0),  # no recall — depth elsewhere cannot rescue it
+        ((1, 5, 5), 1),  # wrong mechanism, likewise
+        ((2, 5, 5), 2),  # partial mechanism, likewise
+        ((3, 0, 0), 3),  # mechanism only
+        ((5, 2, 2), 3),  # "3-5 correct" still lands at 3 without the other axes
+        ((3, 3, 0), 4),  # + trade-offs
+        ((3, 5, 2), 4),  # failure modes still thin
+        ((3, 0, 3), 5),  # failure modes present without trade-offs
+        ((5, 5, 5), 5),  # complete
+    ],
+)
+def test_derive_composite_reproduces_the_old_bands(axes: tuple[int, int, int], expected: int):
+    assert llm.derive_composite(*axes) == expected
+
+
+def test_a_low_mechanism_caps_the_composite_at_the_mechanism_score():
+    """The single load-bearing property: depth never masks a broken mechanism."""
+    for mechanism in (0, 1, 2):
+        composites = {
+            llm.derive_composite(mechanism, trade_offs, failure_modes)
+            for trade_offs in range(6)
+            for failure_modes in range(6)
+        }
+        assert composites == {mechanism}
+
+
+async def test_the_axes_are_carried_onto_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """They are persisted per session and rolled up on Coverage."""
+    stub_completion(monkeypatch, scored(4))
+
+    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+
+    assert (result.mechanism_accuracy, result.trade_off_awareness) == (4, 3)
+    assert result.failure_mode_awareness == 0
+    assert result.score == 4
 
 
 # --- request construction ---------------------------------------------------
