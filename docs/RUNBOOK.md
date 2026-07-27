@@ -3,9 +3,10 @@
 Everything needed to get from a clean repo to a push arriving on a phone, and to
 diagnose it when one doesn't.
 
+The backend runs on **Railway** — both the API and its Postgres, in one project.
 Steps that need your credentials are marked **(you)**. Nothing here has been run
-against real Fly, Neon, Anthropic, or APNs yet — the schema and the app have been
-verified against a local Postgres 16, but the first real deploy is still ahead.
+against real Railway or APNs yet; the schema and the app have been verified against
+a local Postgres 16, but the first real deploy is still ahead.
 
 ---
 
@@ -13,10 +14,10 @@ verified against a local Postgres 16, but the first real deploy is still ahead.
 
 | Account | Used for | Notes |
 |---|---|---|
-| Neon | Postgres | Free tier. Scales to zero. |
-| Fly.io | The API | Single `shared-cpu-1x` machine, `sjc`. |
+| Railway | The API *and* Postgres | Two services in one project. |
 | Anthropic | Question generation + scoring | Set a low monthly spend cap; expect cents at ~4 calls/day. |
 | Apple Developer | Push notifications | **Paid membership required.** A free personal team cannot carry the Push Notifications entitlement. Longest lead time — start here. |
+| GitHub | The two cron workflows | Already have it; two repo secrets to add. |
 
 ---
 
@@ -32,96 +33,123 @@ openssl rand -base64 32   # CRON_SECRET
 
 | Secret | Where it lives | Also held by |
 |---|---|---|
-| `DATABASE_URL` | Fly | — |
-| `API_KEY` | Fly | `ios/Config/Secrets.xcconfig`, inside the app binary |
-| `CRON_SECRET` | Fly | GitHub repo secret. **Never** in the app. |
-| `ANTHROPIC_API_KEY` | Fly | — |
-| `APNS_KEY_ID` | Fly | — |
-| `APNS_TEAM_ID` | Fly | — |
-| `APNS_BUNDLE_ID` | Fly | `com.christrinh.warmcache` |
-| `APNS_PRIVATE_KEY` | Fly | The `.p8` file, offline |
-| `API_BASE_URL` | GitHub repo secret | `https://warm-cache-api.fly.dev` |
+| `DATABASE_URL` | Railway service variable | Reference the Postgres service, don't paste — see §3 |
+| `API_KEY` | Railway | `ios/Config/Secrets.xcconfig`, inside the app binary |
+| `CRON_SECRET` | Railway | GitHub repo secret. **Never** in the app. |
+| `ANTHROPIC_API_KEY` | Railway | — |
+| `APNS_KEY_ID` | Railway | — |
+| `APNS_TEAM_ID` | Railway | — |
+| `APNS_BUNDLE_ID` | Railway | `com.christrinh.warmcache` |
+| `APNS_PRIVATE_KEY` | Railway | The `.p8` file, offline |
+| `API_BASE_URL` | GitHub repo secret | Your Railway public domain |
 
-`APNS_USE_SANDBOX` and `LOG_LEVEL` are in `fly.toml`'s `[env]`, not secrets.
+`APNS_USE_SANDBOX` and `LOG_LEVEL` are ordinary Railway variables, not secrets.
 
 ### Rotation
 
-- **`CRON_SECRET`** lives in two places. Update Fly, then the GitHub secret, within
-  the same minute, then `workflow_dispatch` the trigger workflow to confirm. A
-  missed cron in between is a harmless no-op, but don't rotate on a day you care.
+- **`CRON_SECRET`** lives in two places. Update Railway, then the GitHub secret,
+  within the same minute, then run the workflow manually to confirm. A missed cron
+  in between is a harmless no-op, but don't rotate on a day you care.
 - **`API_KEY`** is also inside an installed binary. Rotating it bricks the phone
   until you install a new build. Only rotate alongside a build and install; never
   remotely.
 
 ---
 
-## 2. Neon **(you)**
+## 2. Merging is what starts the crons
 
-1. Create a project and database.
-2. Copy the **direct** connection string — *not* the pooled `...-pooler...` host.
-   PgBouncer in transaction mode breaks asyncpg's prepared statements. (`db.py`
-   sets `statement_cache_size=0` so the pooled host is survivable rather than
-   silently broken, but the direct endpoint is the right choice for one user.)
-3. Rewrite the scheme `postgresql://` → `postgresql+asyncpg://`.
+Scheduled workflows only fire from the default branch, so the merge is what makes
+`trigger-review` and `check-missed` live. Until the backend is deployed and the two
+GitHub secrets exist they will fail — 8 red runs a day, with email.
 
-The trailing `?sslmode=require&channel_binding=require` can stay — those are
-libpq-only parameters that asyncpg rejects, and `db.py` strips them and negotiates
-TLS itself. It works either way.
+Either do §3 promptly, or disable both workflows in the repo's Actions tab and
+re-enable them at the end of §3. CI itself will pass on merge.
 
 ---
 
-## 3. First deploy **(you)**
+## 3. Railway **(you)**
 
-Order matters: the app fails closed on missing secrets, so they go in *before* the
-first deploy, and all in one call (each `fly secrets set` restarts the machine).
+### Create the project
 
-```sh
-cd api
-fly auth login
-fly launch --no-deploy --name warm-cache-api --region sjc   # keep the existing fly.toml
+1. New project → **Deploy from GitHub repo** → this repo.
+2. On the service: **Settings → Root Directory → `api`**. The repo is a monorepo
+   and `railway.json`, the `Dockerfile`, and `pyproject.toml` all live under `api/`.
+   Railway reads `api/railway.json` once the root directory is set.
+3. **New → Database → Add PostgreSQL** in the same project.
 
-fly secrets set -a warm-cache-api \
-  DATABASE_URL='postgresql+asyncpg://...' \
-  API_KEY='...' \
-  CRON_SECRET='...' \
-  ANTHROPIC_API_KEY='...'
+`api/railway.json` already pins the rest: build from the Dockerfile, `alembic
+upgrade head` as the `preDeployCommand`, and `/health` as the healthcheck.
 
-fly deploy
+### Wire the database
+
+On the API service, add a variable:
+
+```
+DATABASE_URL = ${{Postgres.DATABASE_URL}}
 ```
 
-`fly.toml`'s `[deploy] release_command` runs `alembic upgrade head` in a temporary
-machine before any app machine starts. **This is the migration's first contact with
-Neon.** It creates the schema *and* seeds the settings row that
-`/internal/trigger-review` reads on its very first query.
+That reference resolves to the **private** address
+(`postgres.railway.internal`), which is what you want: it stays on Railway's
+encrypted WireGuard mesh, costs no egress, and skips a public round trip.
 
-Then add the GitHub repo secrets `API_BASE_URL` and `CRON_SECRET`.
+Do **not** paste `DATABASE_PUBLIC_URL` here. It works, but it exits to the public
+internet and is fronted by a self-signed certificate.
+
+**One rewrite is required:** Railway hands you `postgresql://`, and this app uses
+the async driver. The value must start `postgresql+asyncpg://`. Either store it
+already rewritten, or set it from the reference and edit the scheme.
+
+### Set the remaining variables
+
+```
+API_KEY            = <openssl rand -base64 32>
+CRON_SECRET        = <a different openssl rand -base64 32>
+ANTHROPIC_API_KEY  = <your key>
+APNS_USE_SANDBOX   = true
+LOG_LEVEL          = INFO
+```
+
+APNs secrets come later, in §6 — the app boots fine without them and logs a warning.
+
+### Deploy, then expose it
+
+Deploy. The `preDeployCommand` runs `alembic upgrade head` against Postgres in a
+separate step **before** the new container takes traffic. That is the migration's
+first contact with a real database in this project; it creates the schema *and*
+seeds the settings row that `/internal/trigger-review` reads on its first query.
+
+Then **Settings → Networking → Generate Domain** to get the public hostname, and add
+the two GitHub repo secrets: `API_BASE_URL` (that domain, with `https://`) and
+`CRON_SECRET` (identical to Railway's).
 
 ### Verify
 
 ```sh
-B=https://warm-cache-api.fly.dev
-curl -sS $B/health                                    # {"status":"ok"}
-curl -sS -o /dev/null -w '%{http_code}\n' $B/cards/due            # 401
-curl -sS -H "X-API-Key: $API_KEY" $B/cards/due        # []
+B=https://<your-app>.up.railway.app
+curl -sS $B/health                                                  # {"status":"ok"}
+curl -sS -o /dev/null -w '%{http_code}\n' $B/cards/due               # 401
+curl -sS -H "X-API-Key: $API_KEY" $B/cards/due                       # []
 curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" $B/internal/trigger-review
 ```
 
-`/health` passing proves asyncpg, greenlet, TLS, and Neon wake-from-zero all work
-in one call. `fly logs` should show the `APNS_PRIVATE_KEY is unset` warning (expected
-at this stage) and no tracebacks.
+`/health` passing proves asyncpg, greenlet, the private-network address, and the
+schema all work in one call. Deploy logs should show the `APNS_PRIVATE_KEY is unset`
+warning (expected at this stage) and no tracebacks.
 
 ---
 
 ## 4. Seeding **(you)**
 
 ```sh
-fly ssh console -a warm-cache-api \
-  -C "python -m app.seed --file /app/cards.json --weeks-through 6 --start-date 2026-08-03"
+railway run --service <api-service> \
+  python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
 ```
 
 **Use `--file`, never `--fixtures`.** The fixtures carry invented session history
 and a fake 14-hour-old in-progress draft that would render a bogus resume banner on
-a real card. `seed.py` refuses a `neon.tech` URL without `--force`.
+a real card. `seed.py` refuses any non-local database without `--force`, and that
+check treats `postgres.railway.internal` as real — a private address is still
+production.
 
 **Record the `--start-date`.** Re-running with the same value is idempotent (dedupe
 is by topic); a different value misaligns the week boundaries.
@@ -139,7 +167,7 @@ FROM cards GROUP BY 1 ORDER BY 1 LIMIT 7;
 ## 5. First real Claude call **(you)**
 
 `app/services/llm.py` has never executed against the real API. Drive one session by
-hand with `fly logs` open, rather than discovering a problem when a push arrives.
+hand with the deploy logs open, rather than discovering a problem when a push arrives.
 
 ```sh
 CARD=$(curl -sS -H "X-API-Key: $API_KEY" $B/cards/due | jq -r '.[0].id')
@@ -156,15 +184,15 @@ curl -sS -X POST -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
   $B/sessions/$SID/answers                                  # -> status: complete
 ```
 
-`fly logs` should show `llm model=... ms=... in=... out=...`. Confirm SM-2 applied
-exactly once:
+Logs should show `llm model=... ms=... in=... out=...`. Confirm SM-2 applied exactly
+once:
 
 ```sql
 SELECT ease_factor, interval_days, repetitions, next_review_at FROM cards WHERE id='...';
 ```
 
-If the model IDs 404, they're config values: `fly secrets set SCORING_MODEL=...`.
-Load the `claude-api` skill before changing them.
+If the model IDs 404, they're config values: set `SCORING_MODEL` / `QUESTION_MODEL`
+as Railway variables. Load the `claude-api` skill before changing them.
 
 ---
 
@@ -175,7 +203,8 @@ cd ios
 cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig   # paste the server's API_KEY
 ```
 
-Set `DEVELOPMENT_TEAM` in `project.yml` to your Team ID, then:
+Set `WC_BASE_URL` in `Config/Release.xcconfig` to your Railway domain, and
+`DEVELOPMENT_TEAM` in `project.yml` to your Team ID, then:
 
 ```sh
 xcodegen generate
@@ -183,7 +212,7 @@ xcodebuild -project WarmCache.xcodeproj -scheme WarmCache \
   -destination 'platform=iOS Simulator,name=iPhone 16e' test
 ```
 
-Check against a live server before going to a device:
+Check against the live server before going to a device:
 
 ```sh
 xcrun simctl launch --setenv WC_MOCK=0 <device> com.christrinh.warmcache
@@ -200,11 +229,17 @@ not a fixture paragraph.
 
 ## 7. First push **(you, strictly in order)**
 
-```sh
-fly secrets set -a warm-cache-api \
-  APNS_KEY_ID='...' APNS_TEAM_ID='...' APNS_BUNDLE_ID='com.christrinh.warmcache'
-fly secrets set -a warm-cache-api APNS_PRIVATE_KEY="$(cat AuthKey_XXXXXXXX.p8)"
+Add on the Railway service:
+
 ```
+APNS_KEY_ID      = <key id>
+APNS_TEAM_ID     = <team id>
+APNS_BUNDLE_ID   = com.christrinh.warmcache
+APNS_PRIVATE_KEY = <the entire .p8 contents, including the BEGIN/END lines>
+```
+
+`APNS_PRIVATE_KEY` is multi-line. Railway's variable editor accepts that directly —
+paste the whole file, don't collapse the newlines.
 
 `APNS_USE_SANDBOX` must match the app's `aps-environment`: **development ↔ true**,
 production ↔ false. A mismatch fails silently as `BadDeviceToken`.
@@ -215,10 +250,10 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
    (check the device console for `warmcache: APNs registration failed`) or the build
    is still in mock mode.
 3. Confirm `GET /cards/due` is non-empty.
-4. Don't wait for the cron. Widen a window to cover now via `PUT /settings`,
-   `workflow_dispatch` the Trigger review workflow, expect
-   `{"sent": true, "card_id": ..., "due_count": N}` and a banner. **Restore the real
-   windows immediately** — see the constraint in §Scheduling below.
+4. Don't wait for the cron. Widen a window to cover now via `PUT /settings`, run the
+   Trigger review workflow manually, expect `{"sent": true, "card_id": ...,
+   "due_count": N}` and a banner. **Restore the real windows immediately** — see
+   §Scheduling.
 5. Tap the notification → it should deep-link into that card. Answer by voice.
 6. Confirm an unattended scheduled fire at 15:20 UTC.
 
@@ -226,8 +261,8 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
 
 ## Scheduling
 
-Two crons, in UTC, at `20 15` and `10 5`. These are *not* the obvious translations
-of the 07:10 and 21:00 window starts, and the difference matters.
+Two GitHub Actions crons, in UTC, at `20 15` and `10 5`. These are *not* the obvious
+translations of the 07:10 and 21:00 window starts, and the difference matters.
 
 GitHub cron doesn't observe DST but the windows are local and do. Both windows are
 wider than the one-hour shift (80 and 90 minutes), so a fixed UTC time exists that
@@ -240,6 +275,11 @@ lands inside them under either offset:
 contains the chosen time.** If you narrow a window in `PUT /settings`, the trigger
 workflow will start failing with `outside_window` — that failure is deliberate, and
 it means the schedule and the windows have drifted apart. Fix one or the other.
+
+The crons stay on GitHub Actions rather than moving to Railway cron. Railway cron is
+also UTC, so it would inherit the identical DST problem, and it needs a service that
+exits on completion — a second service just to make one HTTP call. GitHub Actions is
+already where the code lives and the workflow can assert on the response body.
 
 Scheduled workflows are disabled after 60 days of repository inactivity. GitHub
 emails first; click Enable in the Actions tab.
@@ -258,11 +298,25 @@ In order.
    - `no_devices` — nothing was delivered: no registered token, or APNs credentials
      missing. `last_pushed_at` is deliberately *not* stamped in this case, so
      `missed_count` stays honest.
-3. **`fly logs`** — `apns rejected token=...` means APNs took the request and
+3. **Deploy logs** — `apns rejected token=...` means APNs took the request and
    refused it. Almost always the sandbox/production mismatch.
 4. **`SELECT * FROM device_tokens`** — empty means the phone never registered.
 5. **The phone** — Focus mode, notification settings, or permission denied at first
    launch (there is no second prompt; delete and reinstall).
+
+## Triage: the app can't reach Postgres
+
+- **`sslmode` / `channel_binding` errors from asyncpg** — shouldn't happen; `db.py`
+  strips both. If you see one, something is passing the URL to a raw driver.
+- **`self-signed certificate in certificate chain`** — you're on
+  `DATABASE_PUBLIC_URL` without `?sslmode=require`. Railway's proxy uses a
+  self-signed cert, and with no sslmode the app defaults to full verification.
+  Either switch to the private `${{Postgres.DATABASE_URL}}` (preferred) or append
+  `?sslmode=require`, which means encrypt-without-verify, per libpq.
+- **DNS failure on `postgres.railway.internal`** — the private address only resolves
+  from inside Railway. Locally, use `DATABASE_PUBLIC_URL` with `?sslmode=require`.
+- **`InvalidPasswordError` / driver mismatch** — check the scheme is
+  `postgresql+asyncpg://`, not the `postgresql://` Railway gives you.
 
 ## Triage: a card is stuck
 

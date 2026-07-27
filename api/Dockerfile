@@ -18,4 +18,6 @@ RUN uv sync --frozen --no-dev
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Shell form so $PORT expands: Railway assigns the port at runtime and expects the
+# app to bind it. Falls back to 8080 for a plain `docker run`.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}

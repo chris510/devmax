@@ -323,8 +323,8 @@ def main() -> None:
         # the design screenshots, not to seed a study queue.
         #
         # Allowlist, not denylist: an unrecognised host is assumed to be real. A
-        # check for one vendor's domain would wave through Fly Postgres, Supabase,
-        # RDS, or a custom domain in front of the same Neon database.
+        # check for one vendor's domain would wave through Railway, Supabase, RDS,
+        # or a custom domain in front of the same database.
         if not is_local_database(get_settings().database_url) and not args.force:
             parser.error(
                 "--fixtures targets a non-local database. Use --file cards.json "

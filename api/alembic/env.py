@@ -39,8 +39,8 @@ def _run(connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    # Same URL normalisation the app uses: Neon's connection string carries
-    # libpq-only parameters that asyncpg rejects, and Fly's release_command runs
+    # Same URL normalisation the app uses: a hosted connection string carries
+    # libpq-only parameters that asyncpg rejects, and Railway's preDeployCommand runs
     # `alembic upgrade head` against exactly that string. Without this, the first
     # deploy fails here — before any app machine starts.
     url, kwargs = engine_kwargs(get_settings().database_url)

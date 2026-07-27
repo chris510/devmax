@@ -2,8 +2,10 @@
 
 Both are pure and both are load-bearing at deploy time: the first stops the app
 booting with the secrets published in this repo, the second is the difference
-between connecting to Neon and not.
+between connecting to the database and not.
 """
+
+import ssl
 
 import pytest
 from pydantic import ValidationError
@@ -30,7 +32,7 @@ def test_a_full_config_boots() -> None:
 def test_the_three_required_settings_have_no_default(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
-    """A default here means a deploy that forgets `fly secrets set` boots healthy."""
+    """A default here means a deploy that forgets to set them boots healthy."""
     # conftest exports all three so the app can import; drop the one under test.
     monkeypatch.delenv(missing.upper(), raising=False)
     with pytest.raises(ValidationError):
@@ -63,21 +65,25 @@ def test_the_two_secrets_must_differ() -> None:
         build(api_key="same", cron_secret="same")
 
 
-NEON = "postgresql+asyncpg://u:p@ep-x.aws.neon.tech/wc?sslmode=require&channel_binding=require"
+# Railway's private mesh address, which is what ${{Postgres.DATABASE_URL}} resolves to.
+RAILWAY_PRIVATE = "postgresql+asyncpg://postgres:p@postgres.railway.internal:5432/railway"
+# The public TCP proxy, fronted by a self-signed certificate.
+RAILWAY_PUBLIC = "postgresql+asyncpg://postgres:p@metro.proxy.rlwy.net:41234/railway?sslmode=require"
+HOSTED = "postgresql+asyncpg://u:p@db.example-cloud.com/wc?sslmode=require&channel_binding=require"
 
 
-def test_libpq_only_params_are_stripped_from_a_neon_url() -> None:
-    """asyncpg rejects sslmode/channel_binding, and Neon's console emits both."""
-    url, _ = engine_kwargs(NEON)
+def test_libpq_only_params_are_stripped() -> None:
+    """asyncpg rejects sslmode/channel_binding; hosted providers emit both."""
+    url, _ = engine_kwargs(HOSTED)
     assert "sslmode" not in url
     assert "channel_binding" not in url
 
 
-def test_neon_gets_tls_and_a_disabled_statement_cache() -> None:
-    url, kwargs = engine_kwargs(NEON)
+def test_a_hosted_database_gets_tls_and_a_disabled_statement_cache() -> None:
+    url, kwargs = engine_kwargs(HOSTED)
     assert kwargs["connect_args"]["ssl"] is not None
-    # PgBouncer in transaction mode on the pooled endpoint is incompatible with
-    # asyncpg's prepared statements.
+    # A PgBouncer-style pooler in transaction mode is incompatible with asyncpg's
+    # prepared statements.
     assert kwargs["connect_args"]["statement_cache_size"] == 0
     assert "prepared_statement_cache_size=0" in url
     assert kwargs["pool_recycle"] == 300
@@ -88,9 +94,13 @@ def test_neon_gets_tls_and_a_disabled_statement_cache() -> None:
     [
         "postgresql+asyncpg://postgres@127.0.0.1:5432/wc",
         "postgresql+asyncpg://postgres@localhost/wc",
+        # Railway's private networking is an encrypted WireGuard mesh, so app-level
+        # TLS buys nothing — and the image's certificate is self-signed, so demanding
+        # it would fail outright.
+        RAILWAY_PRIVATE,
     ],
 )
-def test_a_local_cluster_is_not_forced_onto_tls(url: str) -> None:
+def test_a_trusted_network_is_not_forced_onto_tls(url: str) -> None:
     _, kwargs = engine_kwargs(url)
     assert "ssl" not in kwargs["connect_args"]
 
@@ -98,6 +108,49 @@ def test_a_local_cluster_is_not_forced_onto_tls(url: str) -> None:
 def test_an_explicit_sslmode_wins_over_the_host_heuristic() -> None:
     _, kwargs = engine_kwargs("postgresql+asyncpg://postgres@127.0.0.1/wc?sslmode=require")
     assert "ssl" in kwargs["connect_args"]
+
+
+@pytest.mark.parametrize("sslmode", ["require", "prefer"])
+def test_require_encrypts_without_verifying(sslmode: str) -> None:
+    """libpq semantics: `require` means encrypt, not validate.
+
+    Only verify-ca/verify-full ask for validation. Treating `require` as verifying
+    is stricter than the URL asked for, and it fails against any provider using a
+    self-signed certificate — which is what Railway's TCP proxy does.
+    """
+    _, kwargs = engine_kwargs(f"postgresql+asyncpg://u:p@host.example.com/wc?sslmode={sslmode}")
+    context = kwargs["connect_args"]["ssl"]
+
+    assert context.verify_mode == ssl.CERT_NONE
+    assert context.check_hostname is False
+
+
+@pytest.mark.parametrize("sslmode", ["verify-ca", "verify-full"])
+def test_verify_modes_validate_the_certificate(sslmode: str) -> None:
+    _, kwargs = engine_kwargs(f"postgresql+asyncpg://u:p@host.example.com/wc?sslmode={sslmode}")
+
+    assert kwargs["connect_args"]["ssl"].verify_mode == ssl.CERT_REQUIRED
+
+
+def test_railways_public_proxy_connects_without_a_cert_error() -> None:
+    """The self-signed certificate is why this needs ?sslmode=require, not a bare URL."""
+    _, kwargs = engine_kwargs(RAILWAY_PUBLIC)
+
+    assert kwargs["connect_args"]["ssl"].verify_mode == ssl.CERT_NONE
+
+
+@pytest.mark.parametrize("sslmode", ["disable", "allow"])
+def test_ssl_can_be_turned_off_outright(sslmode: str) -> None:
+    _, kwargs = engine_kwargs(f"postgresql+asyncpg://u:p@host.example.com/wc?sslmode={sslmode}")
+
+    assert "ssl" not in kwargs["connect_args"]
+
+
+def test_an_unknown_remote_host_defaults_to_full_verification() -> None:
+    """No sslmode and not a trusted network — the safe default over the internet."""
+    _, kwargs = engine_kwargs("postgresql+asyncpg://u:p@db.example-cloud.com/wc")
+
+    assert kwargs["connect_args"]["ssl"].verify_mode == ssl.CERT_REQUIRED
 
 
 def test_sqlite_is_left_alone() -> None:

@@ -96,7 +96,7 @@ Found by running `alembic upgrade head` against real Postgres for the first time
 
 **Spec** (§Environment variables) lists the variables but not what happens when
 they're missing. The implementation defaulted `API_KEY` to `dev-api-key` and
-`CRON_SECRET` to `dev-cron-secret`, so a deploy that forgot `fly secrets set` would
+`CRON_SECRET` to `dev-cron-secret`, so a deploy that forgot to set them would
 boot healthy on a public hostname authenticated by two strings published in this
 repo.
 
@@ -104,7 +104,42 @@ repo.
 are refused, and the two secrets must differ — the spec calls for two *independent*
 secrets, and only one of them is meant to ship inside the app binary.
 
-## 8. `alembic` autogenerate is disabled
+## 8. Deployed to Railway, not Fly.io + Neon
+
+**Spec** (§Stack): "**Deployment:** Fly.io, single small instance" and "**Postgres** —
+Neon free tier".
+
+Both are now Railway: the API and its Postgres are two services in one project. The
+owner already pays for Railway for other apps and wants a single provider; that is a
+deployment preference the spec has no stake in, and nothing in the code is
+provider-specific. `fly.toml` is gone, `api/railway.json` replaces it, and Fly's
+`release_command` maps onto Railway's `preDeployCommand` with the same guarantee —
+migrations run to completion before the new container takes traffic.
+
+Two knock-on changes were required, both in `app/db.py`:
+
+- **`sslmode=require` now means encrypt-without-verify**, matching libpq, where only
+  `verify-ca` and `verify-full` request certificate validation. The previous code
+  mapped `require` to a fully verifying context, which is stricter than the URL asks
+  for and fails against any provider fronting Postgres with a self-signed
+  certificate — which is what Railway's TCP proxy uses. This is a correctness fix
+  that happens to be what unblocks Railway.
+- **`*.railway.internal` is treated as a trusted network** and gets no app-level TLS.
+  Railway puts every service in an environment on an encrypted WireGuard mesh, and
+  the Postgres image's certificate is self-signed, so demanding TLS there would fail
+  for no security gain.
+
+Note the deliberate asymmetry: `is_local_database`, which gates
+`seed.py --fixtures`, does **not** treat `railway.internal` as local. A private
+network address is still a production database. Merging the two predicates would let
+the fixtures — invented session history and a fake in-progress draft — into a real
+study queue.
+
+The GitHub Actions crons stay where they are. Railway cron is also UTC, so it would
+inherit the identical DST problem from §1, and it requires a service that exits on
+completion — a second service to make one HTTP call.
+
+## 9. `alembic` autogenerate is disabled
 
 `env.py` pointed `target_metadata` at `SQLModel.metadata`, which deliberately
 diverges from the handwritten migration: the four CHECK constraints, every

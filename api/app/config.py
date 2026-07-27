@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # No defaults on the three that gate access to the database and the API. A default
-    # here means a deploy that forgets `fly secrets set` boots healthy on a public
+    # here means a deploy that forgets to set them boots healthy on a public
     # hostname, authenticated by a string published in this repo.
     database_url: str
     api_key: str

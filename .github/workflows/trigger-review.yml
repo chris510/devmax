@@ -22,7 +22,7 @@ jobs:
     steps:
       # The endpoint validates the notification window itself, so a late trigger
       # either still lands in-window or correctly no-ops. Retries cover the double
-      # cold start of a stopped Fly machine plus a Neon instance scaled to zero.
+      # cold start of a sleeping container plus a database waking from idle.
       - name: POST /internal/trigger-review
         run: |
           body=$(curl -sS --fail-with-body \

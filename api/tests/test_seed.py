@@ -118,11 +118,14 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        "postgresql+asyncpg://u:p@ep-x.aws.neon.tech/wc",
-        # An allowlist has to hold for hosts nobody thought of, not just Neon:
-        # these would all take the fixtures under a "neon.tech" substring check.
+        # A private-network address is still a production database. This is the case
+        # that would be lost by reusing the TLS trusted-network predicate here, which
+        # deliberately does treat railway.internal as trusted.
+        "postgresql+asyncpg://postgres:p@postgres.railway.internal:5432/railway",
+        "postgresql+asyncpg://postgres:p@metro.proxy.rlwy.net:41234/railway",
+        # An allowlist has to hold for hosts nobody thought of, not just one vendor.
         "postgresql+asyncpg://u:p@db.example-cloud.com/wc",
-        "postgresql+asyncpg://u:p@warmcache.internal:5432/wc",
+        "postgresql+asyncpg://u:p@ep-x.aws.neon.tech/wc",
         "postgresql+asyncpg://u:p@10.0.0.7/wc",
     ],
 )

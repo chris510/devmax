@@ -9,43 +9,74 @@ from app.config import get_settings
 
 _settings = get_settings()
 
-# libpq query parameters that asyncpg does not understand. Neon's console hands you
-# a URL ending in `?sslmode=require&channel_binding=require`, and SQLAlchemy forwards
-# unknown query params straight into asyncpg.connect(), which rejects them outright.
-# Strip them and express the intent through connect_args instead.
+# libpq query parameters that asyncpg does not understand. A hosted provider will
+# hand you a URL ending in something like `?sslmode=require&channel_binding=require`,
+# and SQLAlchemy forwards unknown query params straight into asyncpg.connect(), which
+# rejects them outright. Strip them and express the intent through connect_args.
 _LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "options", "target_session_attrs"}
 
-# Everything else is treated as remote — an allowlist, so an unrecognised host fails
-# towards "this is production" rather than away from it.
+# Loopback only. An unrecognised host is assumed to be a real database, so this fails
+# towards "don't touch it" rather than away from it.
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", ""}
+
+# Networks where the transport is already encrypted, so app-level TLS adds nothing.
+# Railway puts every service in an environment on an encrypted WireGuard mesh and
+# addresses it as `<service>.railway.internal`.
+_TRUSTED_SUFFIXES = (".railway.internal",)
+
+
+def _host(url: str) -> str:
+    return (urlsplit(url).hostname or "").lower()
 
 
 def is_local_database(url: str) -> bool:
-    """Whether the URL points at a local dev cluster rather than a hosted one.
+    """Whether the URL points at a developer's own machine.
 
-    Used both to decide whether TLS is wanted and to keep `seed.py --fixtures`
-    away from a real database.
+    Deliberately narrower than `_on_trusted_network`: this is what keeps
+    `seed.py --fixtures` away from a real database, and a private-network address
+    like `postgres.railway.internal` is very much a real database.
     """
-    return (urlsplit(url).hostname or "").lower() in _LOCAL_HOSTS
+    return _host(url) in _LOCAL_HOSTS
 
 
-def _wants_tls(sslmode: str | None, url: str) -> bool:
-    """A hosted database requires TLS; a local dev cluster generally can't offer it.
+def _on_trusted_network(url: str) -> bool:
+    host = _host(url)
+    return host in _LOCAL_HOSTS or host.endswith(_TRUSTED_SUFFIXES)
 
-    An explicit `sslmode` in the URL always wins, so pasting Neon's own connection
-    string does the right thing even though the parameter itself has to be stripped.
+
+def _ssl_argument(sslmode: str | None, url: str) -> ssl.SSLContext | None:
+    """The asyncpg `ssl` value, following libpq's own sslmode semantics.
+
+    The distinction that matters: `require` means *encrypt*, it does not mean
+    *verify* — only `verify-ca` and `verify-full` ask for certificate validation.
+    Treating `require` as verifying is stricter than the URL asked for, and it
+    breaks any provider fronting Postgres with a self-signed certificate, which is
+    what Railway's TCP proxy does.
+
+    With no sslmode given, a trusted network gets plaintext and anything else gets
+    full verification — the safe default for a hosted database reached over the
+    public internet.
     """
-    if sslmode is not None:
-        return sslmode not in {"disable", "allow"}
-    return not is_local_database(url)
+    if sslmode in {"disable", "allow"}:
+        return None
+    if sslmode is None:
+        return None if _on_trusted_network(url) else ssl.create_default_context()
+
+    context = ssl.create_default_context()
+    if sslmode in {"verify-ca", "verify-full"}:
+        return context
+    # require / prefer: encrypted, unverified.
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 def engine_kwargs(url: str) -> tuple[str, dict]:
     """Normalise a database URL and derive the engine arguments that go with it.
 
     Shared by the app engine below and by alembic/env.py — migrations run against
-    the same Neon URL through Fly's release_command, so they need the same
-    treatment or `alembic upgrade head` fails where the app would have connected.
+    the same URL through Railway's preDeployCommand, so they need the same treatment
+    or `alembic upgrade head` fails where the app would have connected.
     """
     if "asyncpg" not in url:
         return url, {"connect_args": {}}
@@ -61,20 +92,22 @@ def engine_kwargs(url: str) -> tuple[str, dict]:
     url = urlunsplit(parts._replace(query=urlencode(kept)))
 
     connect_args: dict = {
-        # Neon scales to zero, so the first query after idle pays a cold start.
+        # A database that sleeps when idle makes the first query after a quiet spell
+        # pay a cold start.
         "timeout": 30,
         "command_timeout": 30,
-        # Neon's pooled (`-pooler`) host runs PgBouncer in transaction mode, which is
-        # incompatible with asyncpg's prepared-statement cache. Prefer the direct
-        # endpoint; this makes the pooled one survivable rather than silently broken.
+        # A PgBouncer-style pooler in transaction mode is incompatible with asyncpg's
+        # prepared-statement cache. Disabling it costs nothing at this traffic level
+        # and makes a pooled endpoint survivable rather than silently broken.
         "statement_cache_size": 0,
     }
-    if _wants_tls(sslmode, url):
-        connect_args["ssl"] = ssl.create_default_context()
+    context = _ssl_argument(sslmode, url)
+    if context is not None:
+        connect_args["ssl"] = context
 
     return url, {
         "connect_args": connect_args,
-        # Neon drops idle connections; recycle before it does.
+        # Idle connections get dropped by most hosted providers; recycle first.
         "pool_recycle": 300,
     }
 

@@ -16,7 +16,7 @@ Sessions are **1–3 minutes, used half-awake or in line.** Every decision optim
 streaks, no XP, no badges, and no celebration animations. Do not add them.
 
 **Status:** backend and iOS client both built; being prepared for a first deploy. The
-backend has 90 passing tests against a real ASGI app, green on both SQLite and Postgres, and
+backend has 107 passing tests against a real ASGI app, green on both SQLite and Postgres, and
 the schema has been applied to a real Postgres 16. The iOS client has been compared
 state-by-state against the design screenshots in a 390×844 simulator, but the most recent
 round of fixes was written without a Swift toolchain and has not been compiled. Not yet
@@ -90,7 +90,7 @@ warmcache/
 │   ├── README.md                    # Design handoff — authoritative for iOS
 │   ├── prototype/                   # HTML reference (read for exact values, don't lift)
 │   └── screenshots/                 # 18 states; the fidelity bar
-├── api/                             # Python 3.12 / FastAPI / SQLModel / Neon / Fly.io
+├── api/                             # Python 3.12 / FastAPI / SQLModel / Postgres / Railway
 │   ├── app/services/scheduler.py    # SM-2 — pure, the highest-value test surface
 │   ├── app/services/llm.py          # Question gen + scoring (Anthropic)
 │   ├── app/services/cards.py        # due_label, tier classification, turn assembly
@@ -144,7 +144,7 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **Not yet deployed.** Fly, Neon, Anthropic, and APNs accounts don't exist yet. Everything
+- **Not yet deployed.** Railway, Anthropic, and APNs accounts don't exist yet. Everything
   needed is written down — see `docs/RUNBOOK.md`, which is the ordered path from a clean
   repo to a push arriving on a phone.
 - **No live Anthropic or APNs call has been made.** Both are still mocked everywhere;

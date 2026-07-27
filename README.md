@@ -11,7 +11,7 @@ no auth UI, no gamification.
 ## Layout
 
 ```
-api/     FastAPI + SQLModel on Postgres (Neon), deployed to Fly.io — built to spec.md
+api/     FastAPI + SQLModel on Postgres, deployed to Railway — built to spec.md
 ios/     SwiftUI app — built to design_handoff_warmcache_initial/
 .github/ Cron workflows that drive the push loop
 ```
@@ -44,13 +44,13 @@ uv run python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-
 ```
 
 Never load `--fixtures` into a real database: they carry invented session history and a fake
-in-progress draft. The seeder refuses a Neon URL without `--force`.
+in-progress draft. The seeder refuses any non-local database without `--force`.
 
 The three access-gating settings have no defaults — the app will not start without
 `DATABASE_URL`, `API_KEY`, and `CRON_SECRET`, and refuses known placeholder values.
 
 ```sh
-uv run pytest        # 90 tests; Anthropic and APNs are mocked, no live calls
+uv run pytest        # 107 tests; Anthropic and APNs are mocked, no live calls
 uv run ruff check .  # `.`, not `app tests` — the narrower form skips alembic/
 
 # The same suite against real Postgres, which is the only way to exercise JSONB,
@@ -76,7 +76,7 @@ Debug builds run against fixtures (`MockAPI`) so every screen works with no serv
 builds always use the real API. Point a debug build at a live server with `WC_MOCK=0`.
 
 The endpoint and API key come from `Config/*.xcconfig` — Debug at `localhost:8083`, Release
-at the Fly host — substituted into `Info.plist`. `Config/Secrets.xcconfig` is gitignored;
+at the Railway host — substituted into `Info.plist`. `Config/Secrets.xcconfig` is gitignored;
 without it the app builds and returns a clean 401 rather than falling back to a shared
 default. A device build also needs `DEVELOPMENT_TEAM` set in `project.yml`.
 
@@ -104,7 +104,7 @@ change how the app behaves on a real phone.
 ## Deploying
 
 `docs/RUNBOOK.md` is the ordered path from a clean repo to a push arriving on a phone —
-accounts, secrets, the first Fly deploy, seeding, the first real Claude call, the device
+accounts, secrets, the first Railway deploy, seeding, the first real Claude call, the device
 build, and the triage steps for when a push doesn't show up.
 
 `docs/DEVIATIONS.md` records where the code intentionally differs from `spec.md`, and why.
