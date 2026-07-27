@@ -40,7 +40,7 @@ def local_today() -> date:
 # to exercise JSONB, native UUID, timestamptz, and the four CHECK constraints
 # that live in the migration but not in SQLModel.metadata:
 #
-#   createdb warmcache_test
+#   createdb devmax_test
 #   DATABASE_URL=postgresql+asyncpg://... uv run alembic upgrade head
 #   TEST_DATABASE_URL=postgresql+asyncpg://... uv run pytest
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")

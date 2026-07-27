@@ -1,8 +1,8 @@
-# Handoff: Warm Cache — conversational spaced-repetition study coach
+# Handoff: Devmax — conversational spaced-repetition study coach
 
 ## Overview
 
-Warm Cache is a private, single-user mobile app for technical-interview prep. It pushes a
+Devmax is a private, single-user mobile app for technical-interview prep. It pushes a
 question about a concept, the user answers by voice or text, the model asks one clarifying
 follow-up if the answer is shaky, then scores recall 0–5 and reschedules the card (SM-2).
 Sessions are 1–3 minutes, used half-awake or in line — every decision optimizes for
@@ -13,7 +13,7 @@ No tab bar, no onboarding, no auth UI, no gamification.
 
 ## About the design files
 
-`prototype/Warm Cache.dc.html` (plus its runtime `prototype/support.js`) is a **design
+`prototype/Devmax.dc.html` (plus its runtime `prototype/support.js`) is a **design
 reference built in HTML** — a working prototype of look, motion, and state transitions.
 It is **not production code to lift**. Recreate these screens in the target codebase's
 own environment (React Native / SwiftUI / React web — whatever the app actually is),
@@ -342,7 +342,7 @@ characters. Fonts are Google Fonts: **Newsreader** (400, 500, 400 italic) and
 
 ## Files
 
-- `prototype/Warm Cache.dc.html` — the prototype (all screens and states). Open in a browser.
+- `prototype/Devmax.dc.html` — the prototype (all screens and states). Open in a browser.
 - `prototype/support.js` — its runtime; required for the prototype to run, not part of the design.
 - `screenshots/` — every state referenced above:
   `today-default`, `today-loading`, `today-load-failure`, `today-empty`,

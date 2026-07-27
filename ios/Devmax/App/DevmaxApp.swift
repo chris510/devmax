@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 @main
-struct WarmCacheApp: App {
+struct DevmaxApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var state = AppState()
     @StateObject private var flags = DebugFlags.shared
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 // Without this the push loop just never starts, with no clue why.
                 // The server side of the same symptom is trigger-review reporting
                 // reason=no_devices.
-                NSLog("warmcache: uploading the APNs token failed: \(error)")
+                NSLog("devmax: uploading the APNs token failed: \(error)")
             }
         }
     }
@@ -93,7 +93,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) {
         // Usually a provisioning problem: no paid Apple Developer membership, or an
         // App ID without the Push Notifications capability.
-        NSLog("warmcache: APNs registration failed: \(error.localizedDescription)")
+        NSLog("devmax: APNs registration failed: \(error.localizedDescription)")
     }
 
     func userNotificationCenter(

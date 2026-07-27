@@ -21,7 +21,7 @@ enum APIError: Error {
 /// Two formatters because `ISO8601DateFormatter` can't make fractional seconds
 /// optional. Both are `static let`, so each is built once, not per decode.
 ///
-/// `WarmCacheTests/Fixtures/card_detail.json` is a response captured from the running
+/// `DevmaxTests/Fixtures/card_detail.json` is a response captured from the running
 /// app and pins this.
 enum WireDate {
     private static let fractional: ISO8601DateFormatter = {
@@ -54,7 +54,7 @@ enum WireDate {
     }
 }
 
-protocol WarmCacheAPI {
+protocol DevmaxAPI {
     func due() async throws -> [DueCard]
     func cards(sort: String, mode: String) async throws -> [CardSummary]
     func card(_ id: UUID) async throws -> CardDetail
@@ -67,12 +67,12 @@ protocol WarmCacheAPI {
     func registerDeviceToken(_ token: String) async throws
 }
 
-struct LiveAPI: WarmCacheAPI {
+struct LiveAPI: DevmaxAPI {
     var baseURL: URL
     var apiKey: String
     var session: URLSession = .shared
 
-    // Not private: WarmCacheTests decodes captured server responses through this
+    // Not private: DevmaxTests decodes captured server responses through this
     // exact decoder, which is the only wire-format check available without a server.
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -189,7 +189,7 @@ enum APIConfig {
         return value
     }
 
-    static var client: WarmCacheAPI {
+    static var client: DevmaxAPI {
         if DebugFlags.shared.useMockAPI { return MockAPI.shared }
         return LiveAPI(
             baseURL: info("WCBaseURL").flatMap(URL.init(string:)) ?? defaultBaseURL,

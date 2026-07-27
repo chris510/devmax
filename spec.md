@@ -1,12 +1,12 @@
-# Warm Cache — Backend Build Spec
+# Devmax — Backend Build Spec
 
-Handoff spec for scaffolding the Warm Cache backend. Build exactly what's
+Handoff spec for scaffolding the Devmax backend. Build exactly what's
 described here. Anything not specified is out of scope — see "Out of
 scope" at the bottom before adding anything.
 
 ## Context
 
-Warm Cache is a single-user conversational spaced-repetition study app for
+Devmax is a single-user conversational spaced-repetition study app for
 technical interview prep. A scheduled job pushes a notification; the user
 opens the iOS app, gets asked a question about a concept, answers by voice
 or text, gets one follow-up probe if the answer was partial, then gets
@@ -39,7 +39,7 @@ day, so Go's performance and footprint advantages don't apply.
 ## Project structure
 
 ```
-warm-cache-api/
+devmax-api/
   app/
     main.py              # FastAPI app, middleware, router registration
     config.py            # pydantic-settings, env vars

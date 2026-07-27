@@ -136,8 +136,8 @@ def test_the_fixtures_guard_treats_any_unrecognised_host_as_real(url: str) -> No
 @pytest.mark.parametrize(
     "url",
     [
-        "postgresql+asyncpg://postgres@127.0.0.1/warmcache",
-        "postgresql+asyncpg://postgres@localhost:55432/warmcache",
+        "postgresql+asyncpg://postgres@127.0.0.1/devmax",
+        "postgresql+asyncpg://postgres@localhost:55432/devmax",
         "sqlite+aiosqlite:///:memory:",
     ],
 )

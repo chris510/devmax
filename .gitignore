@@ -5,7 +5,7 @@ __pycache__/
 .env
 *.db
 ios/build/
-ios/WarmCache.xcodeproj/
+ios/Devmax.xcodeproj/
 DerivedData/
 # Holds WC_API_KEY, which must match the server's API_KEY.
 # See ios/Config/Secrets.example.xcconfig.
