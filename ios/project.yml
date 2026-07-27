@@ -1,4 +1,4 @@
-name: WarmCache
+name: Devmax
 options:
   bundleIdPrefix: com.christrinh
   deploymentTarget:
@@ -20,11 +20,11 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
 
 targets:
-  WarmCache:
+  Devmax:
     type: application
     platform: iOS
     sources:
-      - path: WarmCache
+      - path: Devmax
     # Per-configuration endpoint and API key, substituted into Info.plist and the
     # entitlements file. Config/Secrets.xcconfig is gitignored; the includes in
     # Debug/Release are optional so a fresh clone still builds.
@@ -33,46 +33,46 @@ targets:
       Release: Config/Release.xcconfig
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.christrinh.warmcache
-        INFOPLIST_FILE: WarmCache/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.christrinh.devmax
+        INFOPLIST_FILE: Devmax/Info.plist
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         TARGETED_DEVICE_FAMILY: "1"
         # Dark mode only — light mode is explicitly out of scope.
         SUPPORTS_MACCATALYST: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
-      path: WarmCache/WarmCache.entitlements
+      path: Devmax/Devmax.entitlements
       properties:
         # Driven by the xcconfig so it cannot drift from the server's
         # APNS_USE_SANDBOX: development <-> true, production <-> false.
         aps-environment: $(WC_APS_ENVIRONMENT)
 
-  WarmCacheTests:
+  DevmaxTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: WarmCacheTests
+      - path: DevmaxTests
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.christrinh.warmcache.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.christrinh.devmax.tests
     dependencies:
-      - target: WarmCache
+      - target: Devmax
 
 # XcodeGen writes no shared scheme unless one is declared, which makes
-# `xcodebuild -scheme WarmCache` after a clean `xcodegen generate` fragile.
+# `xcodebuild -scheme Devmax` after a clean `xcodegen generate` fragile.
 schemes:
-  WarmCache:
+  Devmax:
     build:
       targets:
-        WarmCache: all
-        WarmCacheTests: [test]
+        Devmax: all
+        DevmaxTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - WarmCacheTests
+        - DevmaxTests
     profile:
       config: Release
     analyze:

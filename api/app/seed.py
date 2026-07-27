@@ -114,7 +114,7 @@ async def load_from_file(path: Path, weeks_through: int, start: date | None = No
 
 
 def _fixtures() -> list[dict]:
-    """The prototype's three cards, verbatim from `Warm Cache.dc.html`."""
+    """The prototype's three cards, verbatim from `Devmax.dc.html`."""
     return [
         {
             "topic": "Consistent hashing",
@@ -290,7 +290,7 @@ async def load_fixtures() -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed Warm Cache cards")
+    parser = argparse.ArgumentParser(description="Seed Devmax cards")
     parser.add_argument("--file", type=Path, help="cards.json from the study plan")
     parser.add_argument(
         "--weeks-through",

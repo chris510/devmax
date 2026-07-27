@@ -1,7 +1,7 @@
-# Warm Cache — Project Context (Agent Guide)
+# Devmax — Project Context (Agent Guide)
 
 This file orients you to the whole project. Read it before touching anything; read
-`spec.md` before touching the backend and `design_handoff_warmcache_initial/README.md`
+`spec.md` before touching the backend and `design_handoff_devmax_initial/README.md`
 before touching the iOS client.
 
 ## What this is
@@ -28,11 +28,11 @@ push on a phone.
 | Document | Owns |
 |---|---|
 | `spec.md` | The backend: schema, endpoints, SM-2, LLM prompt rules, and an explicit out-of-scope list. It says "build exactly what's described here" — take that literally. |
-| `design_handoff_warmcache_initial/` | The iOS client: final tokens, type, copy, motion, and 18 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
+| `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 18 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
 
 **Where they disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
-`ios/WarmCache/Services/APIClient.swift` — so no view knows about the mismatch. If you find
+`ios/Devmax/Services/APIClient.swift` — so no view knows about the mismatch. If you find
 a new one, resolve it there, not in a screen.
 
 ## Load-bearing invariants
@@ -62,7 +62,7 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 ## Design fidelity rules
 
 Colors, type, spacing, radii, and **copy are final.** When something looks off, read the
-prototype source (`design_handoff_warmcache_initial/prototype/Warm Cache.dc.html`) for the
+prototype source (`design_handoff_devmax_initial/prototype/Devmax.dc.html`) for the
 exact value rather than eyeballing the PNG — that is how the real fidelity bugs were found.
 
 - **Motion is exactly four animations**: `wcFade`, `wcSettle`, `wcPulse`, and the 3-dot
@@ -84,9 +84,9 @@ exact value rather than eyeballing the PNG — that is how the real fidelity bug
 ## Repo map
 
 ```
-warmcache/
+devmax/
 ├── spec.md                          # Backend build spec — authoritative
-├── design_handoff_warmcache_initial/
+├── design_handoff_devmax_initial/
 │   ├── README.md                    # Design handoff — authoritative for iOS
 │   ├── prototype/                   # HTML reference (read for exact values, don't lift)
 │   └── screenshots/                 # 18 states; the fidelity bar
@@ -97,9 +97,9 @@ warmcache/
 │   ├── app/routers/                 # cards, sessions, devices, settings, internal
 │   └── app/seed.py                  # --fixtures (design cards) or --file cards.json
 ├── ios/                             # SwiftUI; `xcodegen generate` makes the gitignored project
-│   ├── WarmCache/Design/            # Theme, Typography, Motion, ScoreStyle — tokens live here
-│   ├── WarmCache/Services/          # APIClient, MockAPI, Speech, Speaker, DraftStore
-│   └── WarmCache/Screens/           # Today, Conversation, History
+│   ├── Devmax/Design/            # Theme, Typography, Motion, ScoreStyle — tokens live here
+│   ├── Devmax/Services/          # APIClient, MockAPI, Speech, Speaker, DraftStore
+│   └── Devmax/Screens/           # Today, Conversation, History
 └── .github/workflows/               # trigger-review + check-missed cron
 ```
 
@@ -112,7 +112,7 @@ uv run uvicorn app.main:app --reload --port 8083     # 8083 per the ~/dev port c
 
 # iOS
 cd ios && xcodegen generate
-xcodebuild -project WarmCache.xcodeproj -scheme WarmCache \
+xcodebuild -project Devmax.xcodeproj -scheme Devmax \
   -destination 'platform=iOS Simulator,name=iPhone 16e' build
 ```
 
@@ -126,7 +126,7 @@ command away:
 
 ```sh
 SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
-  xcrun simctl launch <device> com.christrinh.warmcache
+  xcrun simctl launch <device> com.christrinh.devmax
 ```
 
 `simctl` passes an environment variable to the app only when it's prefixed

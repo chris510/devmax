@@ -16,7 +16,7 @@ struct ConversationScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StatusBar(rightText: speaker.isSpeaking ? "READING ALOUD" : "WARM CACHE")
+            StatusBar(rightText: speaker.isSpeaking ? "READING ALOUD" : "DEVMAX")
             chrome
             thread
             if state.stage != .result { inputArea } else { resultActions }

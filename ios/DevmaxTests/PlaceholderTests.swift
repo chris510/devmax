@@ -1,5 +1,5 @@
 import XCTest
-@testable import WarmCache
+@testable import Devmax
 
 final class ScoreStyleTests: XCTestCase {
     func testBandsMatchTheDesignThresholds() {

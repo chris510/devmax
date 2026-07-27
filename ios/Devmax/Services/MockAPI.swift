@@ -58,7 +58,7 @@ final class DebugFlags: ObservableObject {
 }
 
 /// Fixture data matching the design handoff's screenshots exactly.
-actor MockAPI: WarmCacheAPI {
+actor MockAPI: DevmaxAPI {
     static let shared = MockAPI()
 
     private var submitAttempts = 0

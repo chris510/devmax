@@ -545,7 +545,7 @@ class Component extends DCLogic {
     const vis = st.filter ? due.filter(c => bandOf(c.lastScore) === st.filter) : due;
     const V = {
       isToday: st.screen === "today", isConv: st.screen === "conv", isHistory: st.screen === "history",
-      statusRight: st.screen === "conv" && this.props.ttsEnabled ? "READING ALOUD" : "WARM CACHE",
+      statusRight: st.screen === "conv" && this.props.ttsEnabled ? "READING ALOUD" : "DEVMAX",
       goToday: () => this.setState({ screen: "today", sheet: null, stage: "idle", liveText: "", result: null }),
       openSettings: () => this.setState({ sheet: "settings" }),
       openQuickAdd: () => this.setState({ sheet: "add", newTopic: "", newWhen: "now", addError: false, addPending: false, addRetried: false }),

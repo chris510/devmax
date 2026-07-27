@@ -39,9 +39,9 @@ final class AppState: ObservableObject {
     /// In-flight debounced draft upload; cancelled and replaced on each edit.
     private var draftSync: Task<Void, Never>?
 
-    let api: WarmCacheAPI
+    let api: DevmaxAPI
 
-    init(api: WarmCacheAPI = APIConfig.client) {
+    init(api: DevmaxAPI = APIConfig.client) {
         self.api = api
     }
 

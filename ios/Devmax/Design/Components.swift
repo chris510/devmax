@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// 44px tall, mono 11px, bottom-aligned. The right slot carries `WARM CACHE`
+/// 44px tall, mono 11px, bottom-aligned. The right slot carries `DEVMAX`
 /// normally and `READING ALOUD` while TTS is speaking.
 struct StatusBar: View {
-    var rightText: String = "WARM CACHE"
+    var rightText: String = "DEVMAX"
 
     var body: some View {
         HStack {

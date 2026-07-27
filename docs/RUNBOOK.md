@@ -1,4 +1,4 @@
-# Warm Cache — Deploy and Operations Runbook
+# Devmax — Deploy and Operations Runbook
 
 Everything needed to get from a clean repo to a push arriving on a phone, and to
 diagnose it when one doesn't.
@@ -39,7 +39,7 @@ openssl rand -base64 32   # CRON_SECRET
 | `ANTHROPIC_API_KEY` | Railway | — |
 | `APNS_KEY_ID` | Railway | — |
 | `APNS_TEAM_ID` | Railway | — |
-| `APNS_BUNDLE_ID` | Railway | `com.christrinh.warmcache` |
+| `APNS_BUNDLE_ID` | Railway | `com.christrinh.devmax` |
 | `APNS_PRIVATE_KEY` | Railway | The `.p8` file, offline |
 | `API_BASE_URL` | GitHub repo secret | Your Railway public domain |
 
@@ -208,14 +208,14 @@ Set `WC_BASE_URL` in `Config/Release.xcconfig` to your Railway domain, and
 
 ```sh
 xcodegen generate
-xcodebuild -project WarmCache.xcodeproj -scheme WarmCache \
+xcodebuild -project Devmax.xcodeproj -scheme Devmax \
   -destination 'platform=iOS Simulator,name=iPhone 16e' test
 ```
 
 Check against the live server before going to a device:
 
 ```sh
-xcrun simctl launch --setenv WC_MOCK=0 <device> com.christrinh.warmcache
+xcrun simctl launch --setenv WC_MOCK=0 <device> com.christrinh.devmax
 ```
 
 Today should load real cards, and **Card History must render non-blank** — that's
@@ -234,7 +234,7 @@ Add on the Railway service:
 ```
 APNS_KEY_ID      = <key id>
 APNS_TEAM_ID     = <team id>
-APNS_BUNDLE_ID   = com.christrinh.warmcache
+APNS_BUNDLE_ID   = com.christrinh.devmax
 APNS_PRIVATE_KEY = <the entire .p8 contents, including the BEGIN/END lines>
 ```
 
@@ -247,7 +247,7 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
 1. Launch the Release build, grant notification permission.
 2. **Confirm the token arrived before anything else:**
    `SELECT token, created_at FROM device_tokens;` — empty means registration failed
-   (check the device console for `warmcache: APNs registration failed`) or the build
+   (check the device console for `devmax: APNs registration failed`) or the build
    is still in mock mode.
 3. Confirm `GET /cards/due` is non-empty.
 4. Don't wait for the cron. Widen a window to cover now via `PUT /settings`, run the

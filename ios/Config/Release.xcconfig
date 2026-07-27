@@ -1,7 +1,9 @@
 #include "Base.xcconfig"
 #include? "Secrets.xcconfig"
 
-WC_BASE_URL = https:/$()/warm-cache-api.fly.dev
+// Placeholder. Replace with the Railway public domain once the project exists —
+// see docs/RUNBOOK.md §"Point the app at the deployed API".
+WC_BASE_URL = https:/$()/devmax-api-production.up.railway.app
 
 // Must track APNS_USE_SANDBOX on the server: development <-> true,
 // production <-> false. A mismatch fails silently as BadDeviceToken.

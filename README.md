@@ -1,4 +1,4 @@
-# Warm Cache
+# Devmax
 
 A private, single-user conversational spaced-repetition coach for technical-interview prep.
 A push arrives, you answer a question by voice or text, the model probes once if the answer
@@ -12,17 +12,17 @@ no auth UI, no gamification.
 
 ```
 api/     FastAPI + SQLModel on Postgres, deployed to Railway — built to spec.md
-ios/     SwiftUI app — built to design_handoff_warmcache_initial/
+ios/     SwiftUI app — built to design_handoff_devmax_initial/
 .github/ Cron workflows that drive the push loop
 ```
 
 Source documents, both authoritative:
 
 - `spec.md` — the backend build spec (schema, endpoints, SM-2, LLM rules, out-of-scope list).
-- `design_handoff_warmcache_initial/` — the iOS design handoff: final tokens, type, copy,
+- `design_handoff_devmax_initial/` — the iOS design handoff: final tokens, type, copy,
   motion, and 18 state screenshots, plus an HTML prototype used as a design reference.
 
-Where the two disagree, `spec.md` wins; the deltas are resolved once in `ios/WarmCache/Services/APIClient.swift`.
+Where the two disagree, `spec.md` wins; the deltas are resolved once in `ios/Devmax/Services/APIClient.swift`.
 
 ## Backend
 
@@ -55,9 +55,9 @@ uv run ruff check .  # `.`, not `app tests` — the narrower form skips alembic/
 
 # The same suite against real Postgres, which is the only way to exercise JSONB,
 # native UUID, timestamptz, and the CHECK constraints that live in the migration.
-createdb warmcache_test
-DATABASE_URL=postgresql+asyncpg://localhost/warmcache_test uv run alembic upgrade head
-TEST_DATABASE_URL=postgresql+asyncpg://localhost/warmcache_test uv run pytest
+createdb devmax_test
+DATABASE_URL=postgresql+asyncpg://localhost/devmax_test uv run alembic upgrade head
+TEST_DATABASE_URL=postgresql+asyncpg://localhost/devmax_test uv run pytest
 ```
 
 The two shared secrets are independent: client endpoints need `X-API-Key`, `/internal/*`
@@ -69,7 +69,7 @@ needs `X-Cron-Secret`.
 cd ios
 cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig   # paste the server's API_KEY
 xcodegen generate
-open WarmCache.xcodeproj
+open Devmax.xcodeproj
 ```
 
 Debug builds run against fixtures (`MockAPI`) so every screen works with no server; release
@@ -86,7 +86,7 @@ The prototype's Tweaks are launch environment variables, so any state — includ
 failure paths — can be reached in one command:
 
 ```sh
-xcrun simctl launch --setenv WC_ROUTE=score <device> com.christrinh.warmcache
+xcrun simctl launch --setenv WC_ROUTE=score <device> com.christrinh.devmax
 ```
 
 | Variable | Values |

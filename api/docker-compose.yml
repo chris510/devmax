@@ -1,6 +1,6 @@
 # Pinned so this never collides with sibling repos whose compose dir is also `api/`.
 # Port 5435 continues the ~/dev contract: wyd 5432, bit 5433, plate 5434.
-name: warmcache-api
+name: devmax-api
 
 services:
   postgres:
@@ -12,13 +12,13 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: warmcache
+      POSTGRES_DB: devmax
     ports:
       - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d warmcache"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d devmax"]
       interval: 5s
       timeout: 3s
       retries: 10

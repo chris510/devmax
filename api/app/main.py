@@ -13,7 +13,7 @@ from app.services.llm import LLMError
 _settings = get_settings()
 logging.basicConfig(level=_settings.log_level)
 
-app = FastAPI(title="Warm Cache API", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Devmax API", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(AuthMiddleware)
 
 # Not fatal: deploying before the Apple credentials exist is the recommended order.

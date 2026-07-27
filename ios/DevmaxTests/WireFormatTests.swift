@@ -1,5 +1,5 @@
 import XCTest
-@testable import WarmCache
+@testable import Devmax
 
 /// Decoding checks against a real server response.
 ///
