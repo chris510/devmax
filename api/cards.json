@@ -2,9 +2,6 @@
   { "topic": "Orders of magnitude: memory vs SSD vs network round trip", "category": "Core Concept", "target_week": 1 },
   { "topic": "TCP handshake cost and why connection reuse matters", "category": "Core Concept", "target_week": 1 },
   { "topic": "HTTP caching: ETags, Cache-Control, and revalidation", "category": "Core Concept", "target_week": 1 },
-  { "topic": "Processes, threads, and what a context switch actually costs", "category": "Core Concept", "target_week": 1 },
-  { "topic": "Big-O in practice: when constant factors dominate", "category": "Core Concept", "target_week": 1 },
-  { "topic": "Hash functions: uniformity, collisions, and load factor", "category": "Core Concept", "target_week": 1 },
   { "topic": "DNS resolution path and TTL propagation", "category": "Key Technology", "target_week": 1 },
   { "topic": "TLS handshake and session resumption", "category": "Key Technology", "target_week": 1 },
   { "topic": "Load balancers: L4 vs L7 and what each can route on", "category": "Key Technology", "target_week": 1 },
@@ -80,7 +77,6 @@
 
   { "topic": "Transformer attention: what scales with sequence length", "category": "Core Concept", "target_week": 5 },
   { "topic": "KV cache: memory footprint and reuse across requests", "category": "Core Concept", "target_week": 5 },
-  { "topic": "Tokenization and why token counts drive cost", "category": "Core Concept", "target_week": 5 },
   { "topic": "PagedAttention and GPU memory efficiency in vLLM", "category": "Key Technology", "target_week": 5 },
   { "topic": "GPU memory hierarchy and batching for throughput", "category": "Key Technology", "target_week": 5 },
   { "topic": "Continuous batching for LLM inference serving", "category": "System Design Pattern", "target_week": 5 },
@@ -114,5 +110,29 @@
   { "topic": "Single-source shortest path with Dijkstra", "category": "Coding Pattern", "pattern": "Dijkstra", "target_week": 6 },
   { "topic": "Grid traversal with state compression", "category": "Coding Pattern", "pattern": "Grid DP", "target_week": 6 },
   { "topic": "Serialize and deserialize a binary tree", "category": "Coding Warmup", "target_week": 6 },
-  { "topic": "Build a retry policy with exponential backoff and jitter", "category": "Tier 2 Practical Build", "target_week": 6 }
+  { "topic": "Build a retry policy with exponential backoff and jitter", "category": "Tier 2 Practical Build", "target_week": 6 },
+
+  { "topic": "The delivery framework: requirements, entities, API, high-level, deep dives", "category": "Delivery", "target_week": 1 },
+  { "topic": "Quantifying non-functional requirements and which ones change the design", "category": "Delivery", "target_week": 1 },
+
+  { "topic": "Geospatial indexing: geohash vs quadtree vs S2 cells", "category": "Core Concept", "target_week": 1 },
+  { "topic": "Real-time delivery: polling, long-poll, SSE, and WebSockets, and what each costs the server", "category": "Core Concept", "target_week": 1 },
+  { "topic": "API design: cursor vs offset pagination, versioning, and error semantics", "category": "Core Concept", "target_week": 1 },
+  { "topic": "Bloom filters and when a false positive is acceptable", "category": "Core Concept", "target_week": 2 },
+  { "topic": "Count-Min Sketch and HyperLogLog for heavy hitters and cardinality", "category": "Core Concept", "target_week": 2 },
+  { "topic": "Cache stampede, hot keys, and negative caching", "category": "Core Concept", "target_week": 2 },
+  { "topic": "Data modeling from access patterns: single-table design vs normalized schemas", "category": "Core Concept", "target_week": 2 },
+
+  { "topic": "DynamoDB: partition and sort keys, GSI vs LSI, and hot partitions", "category": "Key Technology", "target_week": 2 },
+  { "topic": "Redis as a data-structure store: sorted sets, streams, HyperLogLog, GEO", "category": "Key Technology", "target_week": 2 },
+  { "topic": "Flink: event time vs processing time, watermarks, and checkpointing", "category": "Key Technology", "target_week": 3 },
+  { "topic": "Vector indexes: HNSW vs IVF-PQ and the recall-latency-memory triangle", "category": "Key Technology", "target_week": 3 },
+
+  { "topic": "Distributed locks: TTLs, fencing tokens, and why Redlock is contested", "category": "System Design Pattern", "target_week": 2 },
+  { "topic": "Large blob upload: presigned URLs, chunked resumable uploads, CDN origin", "category": "System Design Pattern", "target_week": 2 },
+  { "topic": "Async job submission with status polling and webhook callback", "category": "System Design Pattern", "target_week": 3 },
+
+  { "topic": "Design a proximity search service for nearby places", "category": "System Design Problem", "target_week": 2 },
+  { "topic": "Design an ad click aggregator with exactly-once counting", "category": "System Design Problem", "target_week": 3 },
+  { "topic": "Design ticket reservation under scarcity", "category": "System Design Problem", "target_week": 3 }
 ]

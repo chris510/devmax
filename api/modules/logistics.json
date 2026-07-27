@@ -1,0 +1,5 @@
+[
+  { "topic": "Matching and dispatch under constraints: greedy vs batched assignment", "category": "Logistics", "target_week": 1 },
+  { "topic": "ETA estimation and the read path for a live map", "category": "Logistics", "target_week": 1 },
+  { "topic": "Hot partition mitigation: key salting and two-phase aggregation", "category": "Logistics", "target_week": 2 }
+]

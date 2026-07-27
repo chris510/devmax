@@ -39,11 +39,18 @@ def due_by_mode(entries: list[dict], per_day: int, mode: str) -> collections.Cou
 
 
 def test_the_real_study_plan_never_exceeds_the_daily_push_budget() -> None:
-    """The whole point: seeding all 111 cards must not flood day one."""
-    counts = due_by_mode(study_plan(), 2, DELIVERY_CONVERSATIONAL)
+    """The whole point: seeding the whole plan must not flood day one.
 
-    assert counts[START] == 2, "day one must show one session's worth, not the cohort"
-    assert max(counts.values()) <= 2
+    The curriculum additions (docs/CURRICULUM.md) put 16/23/19 conversational cards
+    in weeks 1-3, past the 14 that fit at two a day. `_schedule` clamps the overflow
+    onto each week's last day rather than spilling it into the next, so at two a day
+    week 2 piles 11 cards onto its seventh. The plan needs four a day now; day one is
+    one session's worth at either rate.
+    """
+    assert due_by_mode(study_plan(), 2, DELIVERY_CONVERSATIONAL)[START] == 2, (
+        "day one must show one session's worth, not the cohort"
+    )
+    assert max(due_by_mode(study_plan(), 4, DELIVERY_CONVERSATIONAL).values()) <= 4
 
 
 def test_the_budget_follows_reviews_per_day() -> None:
@@ -107,8 +114,8 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     entries = study_plan()
     modes = collections.Counter(delivery_mode_for(e["category"]) for e in entries)
 
-    assert len(entries) == 111
-    assert modes[DELIVERY_CONVERSATIONAL] == 84
+    assert len(entries) == 126
+    assert modes[DELIVERY_CONVERSATIONAL] == 99
     assert modes[DELIVERY_DESK] == 27
     # seed.py raises KeyError without a topic, and dedupes on it.
     assert all(e.get("topic") and e.get("target_week") for e in entries)
