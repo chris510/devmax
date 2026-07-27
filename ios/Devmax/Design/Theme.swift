@@ -43,6 +43,8 @@ enum Theme {
     static let accentLine = Color(hex: 0x26343A)      // resume / inline-error border
     static let accentSurface = Color(hex: 0x10171A)   // resume / inline-error fill
     static let accentSelectedText = Color(hex: 0xCFE9ED)
+    /// The second line of a selected category chip on Review Sprint Setup.
+    static let accentChipNote = Color(hex: 0x8FC7CF)
 
     // Score colors are never the only signal — the numeral is always present.
     static let scoreLow = Color(hex: 0xC0705A)   // 0-1

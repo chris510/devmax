@@ -78,6 +78,40 @@ struct SecondaryButton: View {
     }
 }
 
+/// Bordered − / value / +. Settings' "reviews per day" and Review Sprint's
+/// "session size" are the same control at the same geometry in the design, so
+/// they are the same component here.
+struct StepperControl: View {
+    let value: Int
+    let decrement: () -> Void
+    let increment: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            step("−", action: decrement)
+            Text("\(value)")
+                .font(WCFont.sans(15, weight: 600))
+                .monospacedDigit()
+                .foregroundStyle(Theme.text)
+                .frame(width: 26)
+            step("+", action: increment)
+        }
+        .padding(4)
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.borderStrong, lineWidth: 1))
+    }
+
+    private func step(_ glyph: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(glyph)
+                .font(WCFont.sans(16))
+                .foregroundStyle(Theme.textMuted)
+                .frame(width: 32, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// The resume banner and the inline submit-failure strip share this treatment —
 /// bordered accent-surface, 12px radius. No red, no icon, no toast.
 struct InlineNotice<Content: View>: View {

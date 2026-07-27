@@ -18,6 +18,7 @@ struct ConversationScreen: View {
         VStack(spacing: 0) {
             StatusBar(rightText: speaker.isSpeaking ? "READING ALOUD" : "DEVMAX")
             chrome
+            progressRail
             thread
             if state.stage != .result { inputArea } else { resultActions }
         }
@@ -58,6 +59,94 @@ struct ConversationScreen: View {
                      color: Theme.metaDimAlt, uppercased: true)
         }
         .padding(.horizontal, Metrics.conversationPadding)
+    }
+
+    // MARK: - Progress rail
+
+    /// A second row beneath the chrome whenever a session has more than one card
+    /// — any multi-card session, not just a Review Sprint. The ✕ row is left
+    /// untouched: the rail is glanceable secondary information, not navigation,
+    /// and the dots are not tappable in this pass.
+    @ViewBuilder
+    private var progressRail: some View {
+        if !state.rail.isEmpty {
+            Group {
+                if flags.railStyle == .chips { chipRail } else { dotRail }
+            }
+            .padding(.top, 2)
+            .padding(.bottom, 10)
+            .padding(.horizontal, Metrics.conversationPadding)
+        }
+    }
+
+    /// The shipped option. The current topic's name carries the literal
+    /// information in the chrome slot, so the rail itself stays abstract.
+    private var dotRail: some View {
+        HStack(spacing: 8) {
+            ForEach(state.rail) { stop in
+                Circle()
+                    .fill(railFill(stop))
+                    .overlay(Circle().strokeBorder(railBorder(stop), lineWidth: 1))
+                    .frame(width: stop.isCurrent ? 9 : 7, height: stop.isCurrent ? 9 : 7)
+                    .animation(Motion.fade, value: stop.coveredScore)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// The prototyped alternative — more informative, visibly busier at 6–10
+    /// items. Kept behind `WC_RAIL_STYLE` for side-by-side comparison only.
+    private var chipRail: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(state.rail) { stop in
+                        Text(Self.chipLabel(stop.topic).uppercased())
+                            .font(WCFont.mono(9.5))
+                            .tracking(0.95)
+                            .foregroundStyle(chipColor(stop))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: Metrics.chipRadius)
+                                    .fill(stop.isCurrent ? Theme.accentWash : .clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Metrics.chipRadius)
+                                    .strokeBorder(railBorder(stop), lineWidth: 1)
+                            )
+                            .fixedSize()
+                            .id(stop.id)
+                    }
+                }
+            }
+            .onChange(of: state.cursor) { _, _ in
+                guard let current = state.rail.first(where: \.isCurrent) else { return }
+                withAnimation(Motion.fadeFast) { proxy.scrollTo(current.id, anchor: .center) }
+            }
+        }
+    }
+
+    private static func chipLabel(_ topic: String) -> String {
+        topic.count > 16 ? String(topic.prefix(15)) + "…" : topic
+    }
+
+    private func railFill(_ stop: AppState.RailStop) -> Color {
+        if stop.isCurrent { return Theme.accent }
+        if let score = stop.coveredScore { return ScoreStyle.color(for: score) }
+        return .clear
+    }
+
+    private func railBorder(_ stop: AppState.RailStop) -> Color {
+        if stop.isCurrent { return Theme.accent }
+        if let score = stop.coveredScore { return ScoreStyle.color(for: score) }
+        return Theme.border
+    }
+
+    private func chipColor(_ stop: AppState.RailStop) -> Color {
+        if stop.isCurrent { return Theme.accentSelectedText }
+        if let score = stop.coveredScore { return ScoreStyle.color(for: score) }
+        return Theme.metaDim
     }
 
     // MARK: - Thread
@@ -250,11 +339,13 @@ struct ConversationScreen: View {
         VStack(spacing: 14) {
             if state.hasMoreCards {
                 HStack(spacing: 12) {
-                    PrimaryButton(title: "Next card") { state.nextCard() }
+                    PrimaryButton(title: state.sessionEndLabel) { state.nextCard() }
                     SecondaryButton(title: "Done", fillsWidth: false) { state.finish() }
                 }
             } else {
-                PrimaryButton(title: "Done") { state.finish() }
+                // `See recap` on the last card of a multi-card run; `Done` alone
+                // ends a single-card session.
+                PrimaryButton(title: state.sessionEndLabel) { state.nextCard() }
             }
 
             Button {

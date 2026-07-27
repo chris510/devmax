@@ -5,8 +5,17 @@ import SwiftUI
 @MainActor
 final class AppState: ObservableObject {
     enum LoadState: Equatable { case loading, ready, error }
-    enum Screen: Hashable { case today, conversation(UUID), history(UUID) }
+    enum Screen: Hashable {
+        case today, conversation(UUID), history(UUID)
+        case sprintSetup, coverage, recap
+    }
     enum Sheet: String, Identifiable { case settings, add; var id: String { rawValue } }
+
+    /// The expanded tier on Coverage. One at a time, across the whole screen.
+    struct OpenTier: Equatable {
+        let category: String
+        let tier: ScoreStyle.Tier
+    }
 
     // Today
     @Published var load: LoadState = .loading
@@ -33,8 +42,26 @@ final class AppState: ObservableObject {
     @Published var sessionCards: [DueCard] = []
     @Published var cursor = 0
     @Published var sessionID: UUID?
+    /// A Review Sprint run — suppresses SM-2 server-side and swaps the schedule line.
+    @Published var practice = false
+    /// This session's scored cards, in walk order. Drives the rail and the recap.
+    @Published var run: [RunEntry] = []
+
+    // Review Sprint / Coverage
+    @Published var library: [CardSummary] = []
+    @Published var libraryLoad: LoadState = .loading
+    /// Empty means the whole library, not "nothing".
+    @Published var setupCats: Set<String> = []
+    @Published var setupSize = 6
+    /// Bumped by Shuffle; the only input that re-rolls the suggested set.
+    @Published var seed = 1
+    @Published var covOpen: OpenTier?
+    @Published var recapOpen: UUID?
 
     enum InputMode { case voice, text }
+
+    static let minSessionSize = 4
+    static let maxSessionSize = 10
 
     /// In-flight debounced draft upload; cancelled and replaced on each edit.
     private var draftSync: Task<Void, Never>?
@@ -118,23 +145,214 @@ final class AppState: ObservableObject {
         Task { _ = try? await api.updateSettings(new) }
     }
 
+    // MARK: - Review Sprint
+
+    func loadLibrary() async {
+        if DebugFlags.shared.loadState == .loading {
+            libraryLoad = .loading
+            return  // hold the skeleton so it can be compared to the screenshot
+        }
+        libraryLoad = .loading
+        do {
+            library = try await api.cards(sort: "next_review", mode: "conversational")
+            libraryLoad = .ready
+        } catch {
+            libraryLoad = .error
+        }
+    }
+
+    func enterSprintSetup() {
+        covOpen = nil
+        path.append(.sprintSetup)
+        Task { await loadLibrary() }
+    }
+
+    /// Every category present in the library, alphabetical. Derived from the data
+    /// rather than hardcoded, so a new category appears without a code change.
+    var categories: [String] {
+        Array(Set(library.map(\.category))).sorted()
+    }
+
+    /// The cards a sprint would draw from: the whole library, or just the
+    /// selected categories. An empty selection means everything.
+    var sprintPool: [CardSummary] {
+        setupCats.isEmpty ? library : library.filter { setupCats.contains($0.category) }
+    }
+
+    /// The suggested set, ranked weakest-first then least-recently-reviewed,
+    /// shuffled within the top `size + 4`, then re-sorted back into rank order so
+    /// the walk always opens on the weakest card.
+    ///
+    /// Unrated cards sort as weakest — an untested card is the strongest reason
+    /// to run a sprint at all.
+    var sprintSet: [CardSummary] {
+        let ranked = sprintPool.sorted { a, b in
+            let (wa, wb) = (a.lastScore ?? -1, b.lastScore ?? -1)
+            if wa != wb { return wa < wb }
+            return (a.daysSinceReview ?? 0) > (b.daysSinceReview ?? 0)
+        }
+        let top = Array(ranked.prefix(setupSize + 4))
+
+        // Seeded so the same seed always yields the same set — Shuffle is the only
+        // thing that changes it, not a re-render.
+        var lcg = seed &* 9301 &+ 49297
+        var pool = top
+        var shuffled: [CardSummary] = []
+        while !pool.isEmpty {
+            lcg = (lcg &* 9301 &+ 49297) % 233_280
+            let index = Int(Double(lcg) / 233_280 * Double(pool.count))
+            shuffled.append(pool.remove(at: min(max(index, 0), pool.count - 1)))
+        }
+
+        // `uniquingKeysWith` rather than `uniqueKeysWithValues`: a duplicated id
+        // from the server would otherwise trap inside a view body.
+        let order = Dictionary(
+            ranked.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        return shuffled.prefix(setupSize).sorted { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
+    }
+
+    var setupStatus: String {
+        switch libraryLoad {
+        case .loading: return "CHECKING"
+        case .error: return "OFFLINE"
+        case .ready:
+            guard !setupCats.isEmpty else {
+                return "\(library.count) CARDS IN LIBRARY"
+            }
+            let n = sprintPool.count
+            return "\(n) CARD\(n == 1 ? "" : "S") IN FILTER"
+        }
+    }
+
+    /// Fewer than a session's minimum in the filtered pool.
+    var setupEmpty: Bool { libraryLoad == .ready && sprintPool.count < Self.minSessionSize }
+    var setupReady: Bool { libraryLoad == .ready && sprintPool.count >= Self.minSessionSize }
+
+    /// The category chip's second line: its most urgent count, in priority order.
+    func chipNote(for category: String) -> String {
+        let cards = library.filter { $0.category == category }
+        func count(_ tier: ScoreStyle.Tier) -> Int {
+            cards.filter { ScoreStyle.Tier.of($0.lastScore) == tier }.count
+        }
+        let weak = count(.cold) + count(.shaky)
+        if weak > 0 { return "\(weak) shaky" }
+        if count(.untested) > 0 { return "\(count(.untested)) untested" }
+        if count(.developing) > 0 { return "\(count(.developing)) developing" }
+        return "\(count(.solid)) solid"
+    }
+
+    func toggleCategory(_ name: String) {
+        if setupCats.contains(name) { setupCats.remove(name) } else { setupCats.insert(name) }
+    }
+
+    func startSprint() {
+        let cards = sprintSet.map(\.asQueueCard)
+        guard !cards.isEmpty else { return }
+        beginSession(cards: cards, practice: true, replacingPath: true)
+    }
+
+    // MARK: - Coverage
+
+    /// One section per category, worst-first by an exact comparator: weak
+    /// (cold + shaky) descending, then untested descending, then alphabetical.
+    /// Deterministic for any data set — no sort control, no per-render judgment.
+    var coverageSections: [(category: String, cards: [CardSummary])] {
+        categories
+            .map { name in (category: name, cards: library.filter { $0.category == name }) }
+            .sorted { a, b in
+                let (wa, wb) = (Self.tally(a.cards, [.cold, .shaky]), Self.tally(b.cards, [.cold, .shaky]))
+                if wa != wb { return wa > wb }
+                let (ua, ub) = (Self.tally(a.cards, [.untested]), Self.tally(b.cards, [.untested]))
+                if ua != ub { return ua > ub }
+                return a.category < b.category
+            }
+    }
+
+    private static func tally(_ cards: [CardSummary], _ tiers: [ScoreStyle.Tier]) -> Int {
+        cards.filter { tiers.contains(ScoreStyle.Tier.of($0.lastScore)) }.count
+    }
+
+    var coverageStatus: String {
+        switch libraryLoad {
+        case .loading: return "CHECKING"
+        case .error: return "OFFLINE"
+        case .ready: return "\(library.count) CARDS · \(categories.count) CATEGORIES"
+        }
+    }
+
+    /// `MECHANISM 4.1 · TRADE-OFFS 2.8 · FAILURE MODES 3.2`.
+    ///
+    /// Scoring runs on three axes internally; this is the only place that
+    /// decomposition surfaces, because "which axis is systemically weak" is the
+    /// question Coverage exists to answer. Empty until something has been scored.
+    var axisRollup: [String] {
+        guard libraryLoad == .ready else { return [] }
+        let axes: [(String, (CardSummary) -> Int?)] = [
+            ("MECHANISM", \.lastMechanismAccuracy),
+            ("TRADE-OFFS", \.lastTradeOffAwareness),
+            ("FAILURE MODES", \.lastFailureModeAwareness),
+        ]
+        let means: [String] = axes.compactMap { name, axis in
+            let values = library.compactMap(axis)
+            guard !values.isEmpty else { return nil }
+            let mean = Double(values.reduce(0, +)) / Double(values.count)
+            return name + " " + String(format: "%.1f", mean)
+        }
+        return means.count == axes.count ? means : []
+    }
+
     // MARK: - Conversation
 
-    /// Entering from a single row, or from Start with the whole filtered queue.
-    func beginSession(cards: [DueCard], startingAt index: Int = 0) {
+    /// Entering from a single row, from Start with the whole filtered queue, or
+    /// from a Review Sprint's suggested set.
+    func beginSession(
+        cards: [DueCard], startingAt index: Int = 0, practice: Bool = false,
+        replacingPath: Bool = false
+    ) {
         sessionCards = cards
         cursor = index
+        self.practice = practice
+        run = []
+        recapOpen = nil
         guard let card = cards[safe: index] else { return }
-        path.append(.conversation(card.id))
+        // A sprint replaces Setup rather than stacking on it, so ✕ lands on Today.
+        if replacingPath { path = [.conversation(card.id)] } else { path.append(.conversation(card.id)) }
         Task { await openCard(card) }
     }
 
     var currentCard: DueCard? { sessionCards[safe: cursor] }
 
-    /// `CARD 1 OF 3` in a multi-card session, otherwise the card's category.
+    /// The current card's topic in a multi-card session, otherwise its category.
+    ///
+    /// This replaced `CARD 2 OF 3`: the rail below already carries position, so
+    /// the chrome slot can carry the literal information instead of repeating it.
     var conversationLabel: String {
         guard sessionCards.count > 1 else { return currentCard?.category ?? "" }
-        return "CARD \(cursor + 1) OF \(sessionCards.count)"
+        return currentCard?.topic ?? ""
+    }
+
+    /// One stop per card in the session. Shown whenever a session has more than
+    /// one card — not only in a Review Sprint.
+    struct RailStop: Identifiable, Equatable {
+        let id: UUID
+        let topic: String
+        let isCurrent: Bool
+        /// Set once the card has been walked past *and* scored.
+        let coveredScore: Int?
+    }
+
+    var rail: [RailStop] {
+        guard sessionCards.count > 1 else { return [] }
+        return sessionCards.enumerated().map { index, card in
+            let scored = run.first { $0.id == card.id }
+            return RailStop(
+                id: card.id,
+                topic: card.topic,
+                isCurrent: index == cursor,
+                coveredScore: index < cursor ? scored?.score : nil
+            )
+        }
     }
 
     func openCard(_ card: DueCard) async {
@@ -148,7 +366,7 @@ final class AppState: ObservableObject {
         inputMode = DebugFlags.shared.textFirst ? .text : .voice
 
         do {
-            let start = try await api.startSession(cardID: card.id)
+            let start = try await api.startSession(cardID: card.id, practice: practice)
             sessionID = start.sessionId
             thread = [ThreadEntry(role: .question, text: start.question)]
 
@@ -252,12 +470,22 @@ final class AppState: ObservableObject {
             case .followUp(let question):
                 thread.append(ThreadEntry(role: .followUpQuestion, text: question))
                 stage = .followUp
-            case .complete(let score, let feedback, let nextReviewAt, let intervalDays):
+            case .complete(let score, let feedback, let nextReviewAt, let intervalDays, let wasPractice):
                 result = SessionResult(
                     score: score,
                     feedback: feedback,
-                    scheduleLine: Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays)
+                    scheduleLine: wasPractice
+                        ? Self.practiceScheduleLine
+                        : Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays)
                 )
+                if let card = currentCard {
+                    run.append(
+                        RunEntry(
+                            id: card.id, topic: card.topic, category: card.category,
+                            score: score, feedback: feedback
+                        )
+                    )
+                }
                 stage = .result
             }
         } catch {
@@ -271,9 +499,22 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// The session-end button. `Next card` on every card but the last; on the last
+    /// card of a multi-card run it reads `See recap`, and a single-card session
+    /// keeps `Done`. The transition is always a tap, never an automatic swap.
+    var sessionEndLabel: String {
+        if hasMoreCards { return "Next card" }
+        return sessionCards.count > 1 ? "See recap" : "Done"
+    }
+
     func nextCard() {
         guard cursor + 1 < sessionCards.count else {
-            finish()
+            if sessionCards.count > 1 {
+                recapOpen = nil
+                path = [.recap]
+            } else {
+                finish()
+            }
             return
         }
         cursor += 1
@@ -283,6 +524,17 @@ final class AppState: ObservableObject {
     }
 
     var hasMoreCards: Bool { cursor + 1 < sessionCards.count }
+
+    /// The recap's aggregate, rounded for its colour band but shown to one decimal.
+    var runAverage: Double? {
+        guard !run.isEmpty else { return nil }
+        return Double(run.map(\.score).reduce(0, +)) / Double(run.count)
+    }
+
+    func runAnother() {
+        path = [.sprintSetup]
+        Task { await loadLibrary() }
+    }
 
     func finish() {
         path = []
@@ -310,6 +562,40 @@ final class AppState: ObservableObject {
         case "resume":
             // The Raft card is the one with a stored partial answer.
             if let card = queue.first(where: { $0.resumable }) { beginSession(cards: [card]) }
+        case "setup", "sprint-setup":
+            enterSprintSetup()
+        case "coverage":
+            enterSprintSetup()
+            await waitForLibrary()
+            path.append(.coverage)
+        case "coverage-expanded":
+            enterSprintSetup()
+            await waitForLibrary()
+            path.append(.coverage)
+            if let section = coverageSections.first,
+               let tier = ScoreStyle.Tier.allCases.first(where: { tier in
+                   section.cards.contains { ScoreStyle.Tier.of($0.lastScore) == tier }
+               }) {
+                covOpen = OpenTier(category: section.category, tier: tier)
+            }
+        case "recap", "recap-expanded":
+            enterSprintSetup()
+            await waitForLibrary()
+            startSprint()
+            await waitForQuestion()
+            // Walk the whole set so the recap has a full run behind it. Each card
+            // may take a follow-up turn before it completes, so answer until the
+            // score lands rather than a fixed number of times.
+            while true {
+                for _ in 0..<3 where stage != .result {
+                    await submit("A fixture answer, scored by the mock.")
+                }
+                guard hasMoreCards else { break }
+                nextCard()
+                await waitForQuestion()
+            }
+            nextCard()  // the last card's `See recap`
+            if route == "recap-expanded" { recapOpen = run.first?.id }
         default:
             // Everything else is a Conversation stage.
             guard let card = queue.first else { return }
@@ -322,6 +608,12 @@ final class AppState: ObservableObject {
 
     private func waitForQuestion() async {
         for _ in 0..<40 where stage == .loadingQuestion {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    private func waitForLibrary() async {
+        for _ in 0..<40 where libraryLoad == .loading {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
@@ -353,6 +645,10 @@ final class AppState: ObservableObject {
             return
         }
     }
+
+    /// A sprint scores the card and writes it to history, but the schedule it
+    /// would otherwise quote is untouched — so the line says that instead.
+    static let practiceScheduleLine = "PRACTICE MODE · SCHEDULE UNCHANGED"
 
     /// `NEXT REVIEW · 27 JUL · INTERVAL 3D`
     static func scheduleLine(nextReviewAt: String, intervalDays: Int) -> String {

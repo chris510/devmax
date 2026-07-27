@@ -16,7 +16,7 @@ Sessions are **1–3 minutes, used half-awake or in line.** Every decision optim
 streaks, no XP, no badges, and no celebration animations. Do not add them.
 
 **Status:** backend and iOS client both built; being prepared for a first deploy. The
-backend has 107 passing tests against a real ASGI app, green on both SQLite and Postgres.
+backend has 147 passing tests against a real ASGI app, green on both SQLite and Postgres.
 The whole stack has since been exercised locally end to end: schema applied to a real
 Postgres 17, live Anthropic calls through both prompts, the iOS client compiled and run
 against the real API on simulator and on a physical device, and a real APNs push
@@ -28,7 +28,7 @@ push on a phone.
 | Document | Owns |
 |---|---|
 | `spec.md` | The backend: schema, endpoints, SM-2, LLM prompt rules, and an explicit out-of-scope list. It says "build exactly what's described here" — take that literally. |
-| `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 18 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
+| `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 29 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
 
 **Where they disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
@@ -42,8 +42,23 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **`missed_count` never touches `ease_factor`.** Missing a review is a *compliance* signal,
   not a *retention* signal. Conflating them means a busy week at work trashes the ease factor
   on topics the user knows cold, and the scheduler then over-drills the wrong things.
-- **Score 2 fails SM-2; score 3 passes.** Both trigger a follow-up in the app. These are two
-  independent thresholds — do not collapse them into one constant.
+- **Scoring returns three axes; the 0–5 composite is derived in code.** The model returns
+  `mechanism_accuracy`, `trade_off_awareness`, and `failure_mode_awareness`;
+  `llm.derive_composite` turns them into the number the app displays. Never ask the model for
+  the composite — that was a source of scores that disagreed with the model's own reasoning.
+- **Only `mechanism_accuracy` reaches the scheduler, in two buckets.** Not volunteering the
+  failure modes is a depth gap; getting the mechanism wrong is a retention failure, and only
+  the second should move the interval. The composite is a display concern — if you find it
+  feeding SM-2 again, that's the regression.
+- **Composite 2 fails SM-2; composite 3 passes.** Both trigger a follow-up in the app. These
+  are two independent thresholds — do not collapse them into one constant.
+- **A card's question is generated once and then reused.** `cards.canonical_question` is the
+  same retrieval every review; regenerating per session puts every review in the
+  weak-transfer regime. The follow-up probe still varies every time — that variation is
+  wanted, and is not the same thing.
+- **A practice session scores and writes history but never moves the schedule.** `ease_factor`,
+  `interval_days`, `repetitions`, and `next_review_at` are the four fields a Review Sprint
+  must leave alone. Mastery signal is written normally.
 - **Maximum one follow-up per session, enforced server-side.** The model always writes a
   probe and returns a provisional score; `submit_answer` decides whether to use it based on
   `follow_up_used`. This is structural, not prompt-dependent — keep it that way.
@@ -76,10 +91,16 @@ exact value rather than eyeballing the PNG — that is how the real fidelity bug
 - **Score color is never the only signal** — the numeral is always present; the dot is
   decorative reinforcement.
 - **Dark mode only.** Light mode is in scope for the product but not designed yet.
-- Today's mastery bands (`cold/shaky/solid/unrated`) are **not** the backend's
-  `/cards/overview` tiers (`untested/shaky/developing/solid/cold`). Different vocabularies
-  answering different questions — do not merge them. `overview` has no screen in this design
-  and is intentionally unconsumed.
+- **Three tier vocabularies, none of them interchangeable.** Today's mastery bands
+  (`cold/shaky/solid/unrated`) answer "how is today's queue distributed". Coverage's tiers
+  (`cold/shaky/developing/solid/untested`, from the last score alone) answer "where does the
+  library need cards", and split the middle so a 3 reads differently from a 2. The backend's
+  `/cards/overview` tiers share Coverage's *names* but not its definitions — they fold in
+  ease factor and lapse timing. Do not merge them; `overview` still has no screen and is
+  intentionally unconsumed.
+- **The three scoring axes surface in exactly one place**: Coverage's rollup line. Everywhere
+  else a session is a single 0–5 numeral. Adding an axis breakdown to the score block or Card
+  History is a change to what the product claims to measure, not a display tweak.
 
 ## Repo map
 
@@ -89,7 +110,7 @@ devmax/
 ├── design_handoff_devmax_initial/
 │   ├── README.md                    # Design handoff — authoritative for iOS
 │   ├── prototype/                   # HTML reference (read for exact values, don't lift)
-│   └── screenshots/                 # 18 states; the fidelity bar
+│   └── screenshots/                 # 29 states; the fidelity bar
 ├── api/                             # Python 3.12 / FastAPI / SQLModel / Postgres / Railway
 │   ├── app/services/scheduler.py    # SM-2 — pure, the highest-value test surface
 │   ├── app/services/llm.py          # Question gen + scoring (Anthropic)
@@ -99,7 +120,7 @@ devmax/
 ├── ios/                             # SwiftUI; `xcodegen generate` makes the gitignored project
 │   ├── Devmax/Design/            # Theme, Typography, Motion, ScoreStyle — tokens live here
 │   ├── Devmax/Services/          # APIClient, MockAPI, Speech, Speaker, DraftStore
-│   └── Devmax/Screens/           # Today, Conversation, History
+│   └── Devmax/Screens/           # Today, Conversation, History, Sprint (setup/coverage/recap)
 └── .github/workflows/               # trigger-review + check-missed cron
 ```
 
@@ -134,8 +155,10 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 `simctl` reads it as the device argument and fails with `Invalid device`.
 
 `WC_ROUTE`: `question` `recording` `text` `followup` `score` `resume` `submit-failure`
-`history` `history-empty` `settings` `add` `filter`. Also `WC_LOAD` (`auto|loading|error`)
-and boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
+`history` `history-empty` `settings` `add` `filter` `setup` `coverage` `coverage-expanded`
+`recap` `recap-expanded`. Also `WC_LOAD` (`auto|loading|error`),
+`WC_RAIL_STYLE` (`dots|chips` — dots ships; chips exists only for the side-by-side) and
+boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
 `WC_SIM_SPEECH`. Forced failures succeed on the retry, so each path walks end to end.
 
 `WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
@@ -178,11 +201,23 @@ change faster than this file does — do not write Anthropic calls from memory.
   revision dropping the constraints. Write revisions by hand and apply them to a real
   Postgres before trusting them.
 
-The migration *has* now been applied to a real Postgres: the partial index, the JSONB
-column, the `::jsonb` settings seed, and all four CHECK constraints were verified, and the
-whole suite runs against Postgres via `TEST_DATABASE_URL` as well as SQLite. `api/docker-compose.yml`
-brings that Postgres up locally on port 5435. That is how the `timestamptz` bug in
-`models.py` was found — see `docs/DEVIATIONS.md` §6.
+- **Review Sprint, Coverage and Session Recap have not been compiled or screenshotted.**
+  They were written against the prototype and the handoff on a machine with no Xcode, so
+  they carry no build and no fidelity check. Before trusting them: `xcodegen generate`,
+  build, then walk `WC_ROUTE=setup`, `coverage`, `coverage-expanded`, `recap`,
+  `recap-expanded` and compare each against its PNG. The Coverage section order and the
+  axis rollup were checked against `coverage.png` by hand — the comparator reproduces the
+  screenshot's nine-section order exactly, and the `MockAPI` fixtures produce its
+  `MECHANISM 2.7 · TRADE-OFFS 1.4 · FAILURE MODES 2.3` — but that is arithmetic, not a
+  rendered screen.
+
+Both migrations *have* been applied to a real Postgres: the partial index, the JSONB
+column, the `::jsonb` settings seed, and all ten CHECK constraints were verified, along
+with 0002's downgrade/re-upgrade round trip and its no-backfill claim (a pre-decomposition
+row keeps its blended `score` and leaves every axis null). The whole suite runs against
+Postgres via `TEST_DATABASE_URL` as well as SQLite. `api/docker-compose.yml` brings that
+Postgres up locally on port 5435. That is how the `timestamptz` bug in `models.py` was
+found — see `docs/DEVIATIONS.md` §6.
 
 Where the code and `spec.md` disagree, `docs/DEVIATIONS.md` records why.
 

@@ -135,6 +135,23 @@ struct TodayScreen: View {
             }
             .buttonStyle(.plain)
 
+            // Always visible, including when the queue is empty or the fetch
+            // failed — a sprint draws from the whole library, not from what's due.
+            // Deliberately lower weight than Start, which stays the dominant
+            // daily action.
+            Button { state.enterSprintSetup() } label: {
+                Text("Review sprint")
+                    .font(WCFont.sans(15))
+                    .foregroundStyle(Theme.textMuted)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+
             // Start appears only when more than one card is due.
             if state.visibleQueue.count > 1 {
                 PrimaryButton(title: "Start — \(state.visibleQueue.count) cards") {

@@ -20,11 +20,11 @@
   @keyframes wcFade { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
   @keyframes wcSettle { 0% { opacity: 0; transform: translateY(10px) } 60% { opacity: 1; transform: translateY(-2px) } 100% { opacity: 1; transform: none } }
   @keyframes wcDots { 0%, 20% { opacity: .25 } 50% { opacity: 1 } 100% { opacity: .25 } }
-  ::-webkit-scrollbar { width: 0 }
+  ::-webkit-scrollbar { width: 0; height: 0 }
 </style>
 </helmet>
 <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 0; font-family: 'IBM Plex Sans', system-ui, sans-serif;">
-  <div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #0d0f11; color: #e8eaec; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(0,0,0,.6);">
+  <div id="wcframe" style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #0d0f11; color: #e8eaec; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(0,0,0,.6);">
 
     <div style="height: 44px; flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 22px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #616870; letter-spacing: .04em;">
       <span style="white-space: nowrap;">6:42</span>
@@ -125,9 +125,231 @@
           <div role="button" onClick="{{ openQuickAdd }}" style="align-self: flex-start; font-size: 13.5px; color: #8b9299; display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 0;" style-hover="color: #cfd4d8">
             <span style="font-size: 16px; line-height: 1;">+</span><span>Ask about something else</span>
           </div>
+          <div role="button" onClick="{{ openSprint }}" style="text-align: center; padding: 14px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Review sprint</div>
           <sc-if value="{{ showStart }}" hint-placeholder-val="{{ true }}">
             <div role="button" onClick="{{ startSession }}" style="background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">{{ startLabel }}</div>
           </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSetup }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="flex: none; padding: 10px 22px 0;">
+          <div role="button" onClick="{{ goToday }}" style="font-size: 13px; color: #7c848b; cursor: pointer; display: inline-block; padding: 4px 0;" style-hover="color: #e8eaec">← Today</div>
+        </div>
+        <div style="flex: none; padding: 14px 22px 16px; display: flex; flex-direction: column; gap: 6px;">
+          <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1;">Review sprint</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #7c848b; letter-spacing: .03em;">{{ setupStatus }}</div>
+        </div>
+
+        <div style="flex: 1; overflow-y: auto; padding: 0 22px 8px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 18px;">
+            <sc-for list="{{ cats }}" as="c" hint-placeholder-count="9">
+              <div role="button" onClick="{{ c.toggle }}" style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 6px 10px 7px; border-radius: 9px; cursor: pointer; border: 1px solid {{ c.border }}; background: {{ c.bg }}; color: {{ c.color }}; display: flex; flex-direction: column; gap: 2px;" style-hover="border-color: #3a4248">
+                <span style="white-space: nowrap;">{{ c.label }}</span>
+                <span style="font-size: 9.5px; letter-spacing: .08em; color: {{ c.noteColor }}; white-space: nowrap;">{{ c.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; border-top: 1px solid #191d20;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-size: 14.5px;">Session size</div>
+              <div style="font-size: 12.5px; color: #7c848b;">{{ sizeNote }}</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 4px; border: 1px solid #23282c; border-radius: 10px; padding: 4px;">
+              <div role="button" onClick="{{ decSize }}" style="width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; color: #a8afb5; cursor: pointer; border-radius: 7px; font-size: 16px;" style-hover="background: #1c2124; color: #fff">−</div>
+              <div style="width: 26px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;">{{ setupSize }}</div>
+              <div role="button" onClick="{{ incSize }}" style="width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; color: #a8afb5; cursor: pointer; border-radius: 7px; font-size: 16px;" style-hover="background: #1c2124; color: #fff">+</div>
+            </div>
+          </div>
+
+          <sc-if value="{{ setupReady }}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0 4px; border-top: 1px solid #191d20;">
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #5e666c;">{{ setLabel }}</div>
+              <div role="button" onClick="{{ shuffleSet }}" style="font-size: 13px; color: #8b9299; cursor: pointer; padding: 2px 0;" style-hover="color: #cfd4d8">Shuffle</div>
+            </div>
+          </sc-if>
+
+          <sc-for list="{{ preview }}" as="row" hint-placeholder-count="6">
+            <div style="display: flex; gap: 14px; align-items: flex-start; padding: 15px 0 16px; border-top: 1px solid #191d20;">
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+                <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                  <span style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em;">{{ row.topic }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378; text-transform: uppercase;">{{ row.category }}</span>
+                </div>
+                <div style="font-size: 13.5px; line-height: 1.45; color: #949ba1; text-wrap: pretty;">{{ row.summary }}</div>
+              </div>
+              <div style="flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 2px; width: 34px;">
+                <span style="font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ row.scoreColor }};">{{ row.scoreLabel }}</span>
+                <span style="width: 6px; height: 6px; border-radius: 999px; background: {{ row.scoreColor }};"></span>
+              </div>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ setupReady }}" hint-placeholder-val="{{ true }}">
+            <div style="border-top: 1px solid #191d20; padding: 14px 0 4px;">
+              <div role="button" onClick="{{ openCoverage }}" style="display: inline-block; font-size: 13px; color: #8b9299; cursor: pointer; padding: 2px 0;" style-hover="color: #57b6c2">View full coverage →</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ setupLoading }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="3">
+                <div style="display: flex; gap: 14px; align-items: flex-start; padding: 15px 0 16px; border-top: 1px solid #191d20;">
+                  <div style="flex: 1; display: flex; flex-direction: column; gap: 9px; min-width: 0;">
+                    <div style="height: 12px; width: {{ k.w1 }}; border-radius: 3px; background: #1b1f22;"></div>
+                    <div style="height: 10px; width: {{ k.w2 }}; border-radius: 3px; background: #171a1d;"></div>
+                    <div style="height: 8px; width: 34%; border-radius: 3px; background: #14171a;"></div>
+                  </div>
+                  <div style="flex: none; width: 34px; display: flex; justify-content: center; padding-top: 2px;">
+                    <div style="width: 12px; height: 12px; border-radius: 3px; background: #1b1f22;"></div>
+                  </div>
+                </div>
+              </sc-for>
+              <div style="padding: 16px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #4e565b;">LOADING CARDS</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ setupError }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top: 1px solid #191d20; padding: 28px 0 0; display: flex; flex-direction: column; gap: 18px; align-items: flex-start;">
+              <div style="display: flex; flex-direction: column; gap: 7px;">
+                <div style="font-size: 15.5px; color: #cfd4d8;">Couldn't reach the server.</div>
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6b7378; letter-spacing: .04em;">{{ loadErrorNote }}</div>
+              </div>
+              <div role="button" onClick="{{ retrySetup }}" style="font-size: 14px; color: #a8afb5; padding: 11px 18px; border: 1px solid #21262a; border-radius: 11px; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Retry</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ setupEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top: 1px solid #191d20; padding: 30px 0 0; animation: wcFade .3s ease both;">
+              <div style="font-family: Newsreader, Georgia, serif; font-size: 20px; line-height: 1.4; color: #cfd4d8; text-wrap: pretty;">Not enough cards in these categories yet.</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 12px; background: #0d0f11;">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .06em; color: #4e565b;">PRACTICE MODE · WON'T CHANGE YOUR REVIEW SCHEDULE</div>
+          <sc-if value="{{ setupReady }}" hint-placeholder-val="{{ true }}">
+            <div role="button" onClick="{{ startSprint }}" style="background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">{{ sprintStartLabel }}</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isCoverage }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="flex: none; padding: 10px 22px 0;">
+          <div role="button" onClick="{{ backToSetup }}" style="font-size: 13px; color: #7c848b; cursor: pointer; display: inline-block; padding: 4px 0;" style-hover="color: #e8eaec">← Review sprint</div>
+        </div>
+        <div style="flex: none; padding: 14px 22px 14px; display: flex; flex-direction: column; gap: 6px;">
+          <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1;">Coverage</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #7c848b; letter-spacing: .03em;">{{ covStatus }}</div>
+          <sc-if value="{{ showCovAxes }}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; flex-wrap: wrap; column-gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6b7378; letter-spacing: .04em; padding-top: 1px;">
+              <sc-for list="{{ covAxisParts }}" as="a" hint-placeholder-count="3">
+                <span style="white-space: nowrap;">{{ a.text }}</span>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="flex: 1; overflow-y: auto; padding: 0 22px 30px;">
+          <sc-for list="{{ covSections }}" as="s" hint-placeholder-count="9">
+            <div style="border-top: 1px solid #191d20; padding: 14px 0 15px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                <span style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em;">{{ s.name }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378;">{{ s.count }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; column-gap: 7px; row-gap: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .03em;">
+                <sc-for list="{{ s.tiers }}" as="t" hint-placeholder-count="3">
+                  <span role="button" onClick="{{ t.toggle }}" style="white-space: nowrap; cursor: pointer; color: {{ t.color }}; border-bottom: 1px solid {{ t.underline }}; padding-bottom: 1px;" style-hover="color: #cfd4d8">{{ t.text }}</span>
+                </sc-for>
+              </div>
+              <sc-if value="{{ s.open }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; flex-direction: column; gap: 9px; padding-top: 6px; animation: wcFade .25s ease both;">
+                  <sc-for list="{{ s.cards }}" as="cc" hint-placeholder-count="2">
+                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                      <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+                        <span style="font-size: 14px; color: #cfd4d8;">{{ cc.topic }}</span>
+                        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: .08em; color: #4e565b;">{{ cc.note }}</span>
+                      </div>
+                      <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ cc.color }};">{{ cc.score }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ setupLoading }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="3">
+                <div style="border-top: 1px solid #191d20; padding: 15px 0 16px; display: flex; flex-direction: column; gap: 9px;">
+                  <div style="height: 12px; width: {{ k.w1 }}; border-radius: 3px; background: #1b1f22;"></div>
+                  <div style="height: 10px; width: {{ k.w2 }}; border-radius: 3px; background: #171a1d;"></div>
+                </div>
+              </sc-for>
+              <div style="padding: 16px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #4e565b;">LOADING CARDS</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ setupError }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top: 1px solid #191d20; padding: 28px 0 0; display: flex; flex-direction: column; gap: 18px; align-items: flex-start;">
+              <div style="display: flex; flex-direction: column; gap: 7px;">
+                <div style="font-size: 15.5px; color: #cfd4d8;">Couldn't reach the server.</div>
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6b7378; letter-spacing: .04em;">{{ loadErrorNote }}</div>
+              </div>
+              <div role="button" onClick="{{ retrySetup }}" style="font-size: 14px; color: #a8afb5; padding: 11px 18px; border: 1px solid #21262a; border-radius: 11px; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Retry</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ covReady }}" hint-placeholder-val="{{ true }}">
+            <div style="border-top: 1px solid #191d20; padding: 16px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .06em; color: #4e565b;">TAP A TIER TO LIST ITS CARDS · READ ONLY</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isRecap }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="flex: none; padding: 20px 22px 16px; display: flex; flex-direction: column; gap: 18px;">
+          <div style="font-family: Newsreader, Georgia, serif; font-size: 24px; letter-spacing: -.01em; line-height: 1.15; color: #f2f4f5;">Session recap</div>
+          <div style="display: flex; align-items: flex-end; gap: 10px;">
+            <span style="font-size: 46px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; color: {{ recapColor }};">{{ recapAvg }}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5e666c; padding-bottom: 2px;">/ 5 AVERAGE</span>
+          </div>
+        </div>
+
+        <div style="flex: 1; overflow-y: auto; padding: 0 22px 20px;">
+          <sc-for list="{{ recapRows }}" as="r" hint-placeholder-count="6">
+            <div style="border-top: 1px solid #191d20;">
+              <div role="button" onClick="{{ r.toggle }}" style="display: flex; gap: 14px; align-items: flex-start; padding: 15px 0 16px; cursor: pointer;" style-hover="opacity: .82">
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+                  <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                    <span style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em;">{{ r.topic }}</span>
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378; text-transform: uppercase;">{{ r.category }}</span>
+                  </div>
+                </div>
+                <div style="flex: none; display: flex; align-items: baseline; gap: 10px; padding-top: 2px;">
+                  <span style="font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ r.color }};">{{ r.score }}</span>
+                  <span style="font-size: 11px; color: #5e666c;">{{ r.caret }}</span>
+                </div>
+              </div>
+              <sc-if value="{{ r.open }}" hint-placeholder-val="{{ false }}">
+                <div style="padding: 0 0 20px; animation: wcFade .25s ease both;">
+                  <div style="font-family: Newsreader, Georgia, serif; font-size: 17px; line-height: 1.5; color: #dfe3e5; text-wrap: pretty;">{{ r.feedback }}</div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 12px; background: #0d0f11;">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .06em; color: #4e565b;">PRACTICE MODE · SCORES SAVED TO HISTORY, SCHEDULE UNCHANGED</div>
+          <div role="button" onClick="{{ goToday }}" style="background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">Done</div>
+          <div role="button" onClick="{{ runAnother }}" style="align-self: center; font-size: 13px; color: #7c848b; cursor: pointer; padding: 2px 4px;" style-hover="color: #57b6c2">Run another</div>
         </div>
       </div>
     </sc-if>
@@ -138,6 +360,22 @@
           <div role="button" onClick="{{ goToday }}" style="font-size: 19px; color: #7c848b; cursor: pointer; line-height: 1; padding: 4px 6px 6px 0;" style-hover="color: #e8eaec">✕</div>
           <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .1em; color: #5e666c;">{{ progressLabel }}</div>
         </div>
+
+        <sc-if value="{{ showDotRail }}" hint-placeholder-val="{{ false }}">
+          <div style="flex: none; padding: 2px 24px 10px; display: flex; align-items: center; gap: 8px;">
+            <sc-for list="{{ rail }}" as="d" hint-placeholder-count="6">
+              <span style="width: {{ d.size }}; height: {{ d.size }}; border-radius: 999px; background: {{ d.bg }}; border: 1px solid {{ d.border }}; flex: none; animation: wcFade .3s ease both;"></span>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ showChipRail }}" hint-placeholder-val="{{ false }}">
+          <div ref="{{ chipRailRef }}" style="flex: none; padding: 2px 24px 10px; display: flex; align-items: center; gap: 6px; overflow-x: auto; white-space: nowrap;">
+            <sc-for list="{{ rail }}" as="d" hint-placeholder-count="6">
+              <span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; border-radius: 8px; border: 1px solid {{ d.border }}; background: {{ d.chipBg }}; color: {{ d.chipColor }}; animation: wcFade .3s ease both;">{{ d.label }}</span>
+            </sc-for>
+          </div>
+        </sc-if>
 
         <div ref="{{ scrollRef }}" style="flex: 1; overflow-y: auto; padding: 12px 24px 20px;">
           <sc-if value="{{ showResume }}" hint-placeholder-val="{{ false }}">
@@ -204,7 +442,7 @@
           <sc-if value="{{ submitError }}" hint-placeholder-val="{{ false }}">
             <div style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; animation: wcFade .25s ease both;">
               <div style="font-size: 13px; color: #cfd4d8; line-height: 1.4;">Couldn't submit — your answer is saved.</div>
-              <div role="button" onClick="{{ retrySubmit }}" style="flex: none; font-size: 13px; font-weight: 500; color: #06232a; background: #57b6c2; padding: 8px 13px; border-radius: 9px; cursor: pointer;" style-hover="background: #6ec6d1">Try again</div>
+              <div role="button" onClick="{{ retrySubmit }}" style="flex: none; white-space: nowrap; font-size: 13px; font-weight: 500; color: #06232a; background: #57b6c2; padding: 8px 13px; border-radius: 9px; cursor: pointer;" style-hover="background: #6ec6d1">Try again</div>
             </div>
           </sc-if>
 
@@ -358,9 +596,14 @@
 </div>
 
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844},&quot;loadState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;auto&quot;,&quot;loading&quot;,&quot;error&quot;],&quot;default&quot;:&quot;auto&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;failSubmit&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;failAdd&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;emptyQueue&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;textFirst&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;ttsEnabled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844},&quot;loadState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;auto&quot;,&quot;loading&quot;,&quot;error&quot;],&quot;default&quot;:&quot;auto&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;failSubmit&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;failAdd&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Network states&quot;},&quot;emptyQueue&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;textFirst&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;ttsEnabled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;railStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dots&quot;,&quot;chips&quot;],&quot;default&quot;:&quot;dots&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Review sprint&quot;}}">
 const LOW = "#c0705a", MID = "#c2a35a", HIGH = "#6fa77f", DIM = "#6b7378";
 const scoreColor = (s) => s == null ? DIM : s <= 1 ? LOW : s <= 3 ? MID : HIGH;
+// three internal scoring axes; illustrative per-card decomposition of the stored blended score
+const AXES = ["MECHANISM", "TRADE-OFFS", "FAILURE MODES"];
+const AXIS_BIAS = [0.55, -0.85, 0.05];
+const axisHash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0xffff; return h; };
+const axisScore = (c, i) => Math.max(0, Math.min(5, c.lastScore + AXIS_BIAS[i] + ((axisHash(c.id + i) % 7) - 3) * 0.12));
 const TIMES = ["06:30", "07:10", "07:45", "08:30", "12:15", "18:40", "21:00", "22:30"];
 
 const CARDS = [
@@ -442,6 +685,79 @@ const CARDS = [
     ]
   }
 ];
+const mk = (id, topic, category, summary, lastScore, ago, q, answer, followUp, answer2, score, feedback) => ({
+  id, topic, category, summary, lastScore, ago, dueLabel: "not due", missed: 0, resumable: false,
+  q, answer, followUp, answer2, score, feedback, schedule: "NEXT REVIEW · NOT SCHEDULED", sessions: []
+});
+
+const EXTRA = [
+  mk("tcp", "TCP congestion control", "Networking", "explains slow start; cubic vs reno unclear", 2, 9,
+    "A connection sees a single packet loss mid-transfer. What does the sender do to its window, and why that much?",
+    "It halves the congestion window and moves into congestion avoidance, growing linearly after that. The halving is the multiplicative-decrease half of AIMD — it backs off fast enough that competing flows converge on a fair share.",
+    "One more — how does CUBIC change that recovery shape?",
+    "CUBIC grows on a cubic curve anchored at the window size where loss happened, so it climbs back quickly, flattens near that point, then probes past it.",
+    3, "AIMD reasoning was right, including why the decrease is multiplicative. The CUBIC answer described the curve but not why it helps on high-bandwidth-delay links, and fast recovery versus timeout never got separated."),
+  mk("bloom", "Bloom filters", "Core Concept", "solid on false positives; sizing math shaky", 3, 12,
+    "When would you put a Bloom filter in front of a store, and what does it cost you when it's wrong?",
+    "When most lookups miss and a real lookup is expensive — SSTable reads, remote fetches. A false positive just costs you the lookup you would have done anyway; there are no false negatives, so correctness holds.",
+    "One more — how do you size one for a target false-positive rate?",
+    "Bits per element drives it — around ten bits per element gets you roughly one percent, and the optimal hash count is proportional to bits per element.",
+    3, "Right use case and the correct asymmetry between false positives and false negatives. The sizing answer landed on the ballpark number but not the relationship it comes from, and deletion / counting variants weren't mentioned."),
+  mk("mvcc", "MVCC in Postgres", "Databases", "knows snapshots; vacuum reasoning thin", 1, 15,
+    "Two transactions read and write the same row concurrently under read-committed. Walk me through what each one actually sees.",
+    "Each statement takes a snapshot, so a reader sees the last row version committed before the statement began. The writer creates a new tuple version and marks the old one dead; the reader keeps the old version until it commits.",
+    "One more — what has to happen before that dead version's space is reusable?",
+    "Vacuum has to run and confirm no live snapshot can still see it, then the space goes back to the page's free space map.",
+    2, "The snapshot-per-statement rule was correct and clearly stated. The vacuum answer skipped the horizon that actually blocks cleanup — a long-running transaction pinning old versions — which is the part that explains bloat in production."),
+  mk("lock", "Optimistic vs pessimistic locking", "Concurrency", "good on retry loops; no contention math", 4, 6,
+    "You're picking between optimistic and pessimistic locking for a hot counter row. Which one, and at what point does it flip?",
+    "Optimistic wins while conflicts are rare — no lock held across the round trip, and losers just retry. On a hot row conflicts are common, so retries pile up and throughput collapses; a short pessimistic lock or a queue in front is better past that point.",
+    "One more — how would you find that crossover point before shipping?",
+    "Measure retry rate under load — once a meaningful share of writes retries more than once, you're past it.",
+    4, "Correctly framed the tradeoff as conflict rate rather than a general preference, and the retry-rate signal is the right instrument. Didn't mention sharding the counter, which usually beats both options here."),
+  mk("cacheinv", "Cache invalidation strategies", "Caching", "write-through clear; TTL tradeoffs vague", 2, 21,
+    "Your read cache is serving stale rows after writes. What are your options and what does each one actually guarantee?",
+    "Write-through or write-behind keeps the cache in step at write time, invalidate-on-write is simpler but has a race between the delete and the next read repopulating from a stale replica, and TTL bounds staleness without promising freshness.",
+    "One more — how do you close the invalidate-on-write race?",
+    "Delete after the write commits and again after a short delay, or version the key so a stale fill can't win.",
+    3, "Named the three families and the invalidate race accurately. Versioned keys were mentioned but not developed, and there was no mention of read-your-writes for the user who made the change."),
+  mk("idem", "Idempotency keys", "API Design", "can define; storage lifetime unexplained", 3, 4,
+    "A client retries a payment request after a timeout. What does your API need so the customer isn't charged twice?",
+    "The client sends an idempotency key with the request; the server records the key with the result of the first attempt and returns that stored result for any repeat, rather than executing again.",
+    "One more — what happens if the retry arrives while the first request is still in flight?",
+    "The key row is inserted before the work starts, so the second request sees it in progress and waits or returns a conflict.",
+    4, "The reserve-key-then-execute ordering is the important part and you got there without prompting. Key retention and what happens when the same key arrives with a different payload were both left open."),
+  mk("paging", "Virtual memory and page faults", "Operating Systems", "no signal yet", null, 30,
+    "A process touches a page that isn't resident. Walk me through everything that happens before the instruction retries.",
+    "The MMU misses in the page table, traps to the kernel, the kernel finds the mapping, allocates a frame, reads the page in if it's file- or swap-backed, updates the page table entry, and returns so the instruction restarts.",
+    "One more — what's different for a minor fault?",
+    "No disk read — the page is already in memory, in the page cache or shared with another process, so it's just a mapping update.",
+    4, "Complete walk-through in the right order, and the minor-fault distinction was clean. Didn't touch TLB invalidation after the mapping changes, which is where multi-core behaviour gets interesting."),
+  mk("backpressure", "Backpressure and load shedding", "Reliability", "names the patterns; no queue-depth reasoning", 1, 18,
+    "A downstream service slows to a third of its usual rate. What should your service do, and what will it do if you build nothing?",
+    "If you build nothing, requests queue until memory or timeouts give out and latency goes vertical for everyone. With backpressure you bound the queue and reject or slow admission once it fills, so a subset fails fast instead of everything degrading.",
+    "One more — how do you choose what to shed?",
+    "Shed by priority — drop retries and background traffic before user-facing reads.",
+    2, "The failure mode without backpressure was described correctly. Queue depth as a latency signal, and bounding it from a target latency rather than picking a number, never came up — that's the mechanism that makes this concrete."),
+  mk("tls", "TLS handshake", "Networking", "session resumption unclear", 2, 11,
+    "Walk me through what a TLS 1.3 handshake costs a first-time client, and what a returning one avoids.",
+    "First time it's one round trip — the client sends its key share with hello, the server responds with its share, certificate and finished, and both derive the traffic keys. A returning client can use a pre-shared key from the last session and send data in the first flight.",
+    "One more — what's the risk with that early data?",
+    "It can be replayed, so it should only carry idempotent requests.",
+    3, "One-RTT flow and the resumption path were both correct, and naming the replay risk unprompted is the right instinct. Certificate verification and what actually gets authenticated were skipped."),
+  mk("cap", "CAP in practice", "Distributed Systems", "quotes the theorem; weak on partition behaviour", 3, 8,
+    "Forget the acronym — a network partition splits your cluster right now. What decision does your system actually have to make?",
+    "Whether the side that can't reach a quorum still answers. Serving reads and writes there means diverging state you have to reconcile later; refusing means that side is unavailable until the partition heals.",
+    "One more — where does latency fit into that, outside a partition?",
+    "Even with no partition you're trading consistency against latency, since a strongly consistent read has to talk to a quorum.",
+    4, "Framed it as a runtime decision rather than a slogan, and the PACELC extension came out naturally. Didn't say how divergence would actually be reconciled — last-write-wins versus merge — which is where the real cost sits.")
+];
+
+const CATEGORIES = ["Core Concept", "Distributed Systems", "Databases", "Networking", "Concurrency", "Caching", "Operating Systems", "API Design", "Reliability"];
+const TIERS = ["cold", "shaky", "developing", "solid", "untested"];
+const TIER_COLOR = { cold: LOW, shaky: MID, developing: MID, solid: HIGH, untested: DIM };
+const tierOf = (s) => s == null ? "untested" : s <= 1 ? "cold" : s === 2 ? "shaky" : s === 3 ? "developing" : "solid";
+
 const UPCOMING = [
   { topic: "TCP congestion control", when: "SAT 07:10" },
   { topic: "Postgres index types", when: "SAT 21:00" },
@@ -457,6 +773,7 @@ class Component extends DCLogic {
       stage: "idle", thread: [], liveText: "", inputMode: "voice", draft: "",
       resume: false, result: null, histId: null, openSession: null,
       sheet: null, perDay: 2, newTopic: "", newWhen: "now",
+      setupCats: [], setupSize: 6, seed: 1, setupLoad: "loading", practice: false, run: [], recapOpen: null, covOpen: null,
       windows: [
         { label: "Morning", on: true, from: "07:10", to: "08:30" },
         { label: "Evening", on: true, from: "21:00", to: "22:30" }
@@ -476,21 +793,40 @@ class Component extends DCLogic {
     if (this.scrollEl && (ps.thread !== s.thread || ps.stage !== s.stage || ps.liveText !== s.liveText)) {
       this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
     }
+    if (this.chipRail) {
+      const ch = this.chipRail.children[s.qIndex];
+      if (ch) this.chipRail.scrollLeft = Math.max(0, ch.offsetLeft - (this.chipRail.clientWidth - ch.offsetWidth) / 2);
+    }
   }
   componentWillUnmount() { this.timers.forEach(clearTimeout); if (this.rec) clearInterval(this.rec); }
   later(fn, ms) { const t = setTimeout(fn, ms); this.timers.push(t); return t; }
-  card() { return this.state.cards.find(c => c.id === this.state.queue[this.state.qIndex]); }
+  find(id) { return this.state.cards.find(c => c.id === id) || EXTRA.find(c => c.id === id); }
+  card() { return this.find(this.state.queue[this.state.qIndex]); }
+  library() { return this.state.cards.concat(EXTRA); }
+  sprintSet() {
+    const st = this.state;
+    const pool = st.setupCats.length ? this.library().filter(c => st.setupCats.indexOf(c.category) >= 0) : this.library();
+    const weak = (c) => c.lastScore == null ? -1 : c.lastScore;
+    const rank = pool.slice().sort((a, b) => weak(a) - weak(b) || (b.ago || 0) - (a.ago || 0));
+    const top = rank.slice(0, Math.min(rank.length, st.setupSize + 4));
+    let s0 = st.seed * 9301 + 49297;
+    const rnd = () => { s0 = (s0 * 9301 + 49297) % 233280; return s0 / 233280; };
+    const sh = top.slice();
+    for (let i = sh.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = sh[i]; sh[i] = sh[j]; sh[j] = t; }
+    return { pool: pool, set: sh.slice(0, st.setupSize).sort((a, b) => rank.indexOf(a) - rank.indexOf(b)) };
+  }
 
   dueCards() {
     if (this.props.emptyQueue) return [];
     return this.state.cards;
   }
-  openConv(ids, resume) {
+  openConv(ids, resume, practice) {
     this.setState({
       screen: "conv", queue: ids, qIndex: 0, stage: "idle", liveText: "", draft: "",
+      practice: !!practice, run: [], recapOpen: null,
       inputMode: this.props.textFirst ? "text" : "voice", result: null, submitError: false, retried: false,
       resume: !!resume,
-      thread: [{ role: "q", text: this.state.cards.find(c => c.id === ids[0]).q }]
+      thread: [{ role: "q", text: this.find(ids[0]).q }]
     });
   }
   startRec() {
@@ -535,9 +871,19 @@ class Component extends DCLogic {
       if (needsFollow) {
         this.setState(s => ({ stage: "follow", thread: s.thread.concat([{ role: "q", text: c.followUp, follow: true }]) }));
       } else {
-        this.setState({ stage: "result", result: { score: c.score, feedback: c.feedback, schedule: c.schedule } });
+        this.setState(s => ({
+          stage: "result",
+          result: { score: c.score, feedback: c.feedback, schedule: s.practice ? "PRACTICE MODE · SCHEDULE UNCHANGED" : c.schedule },
+          run: s.run.filter(r => r.id !== c.id).concat([{ id: c.id, topic: c.topic, category: c.category, score: c.score, feedback: c.feedback }])
+        }));
       }
     }, 1500);
+  }
+  enterSetup() {
+    const forced = this.props.loadState || "auto";
+    this.setState({ screen: "setup", setupLoad: "loading", practice: false, run: [], recapOpen: null });
+    if (forced === "loading") return;
+    this.later(() => this.setState({ setupLoad: forced === "error" && !this.setupRetried ? "error" : "ready" }), 700);
   }
   renderVals() {
     const st = this.state, ready = st.load === "ready", due = ready ? this.dueCards() : [];
@@ -546,7 +892,9 @@ class Component extends DCLogic {
     const V = {
       isToday: st.screen === "today", isConv: st.screen === "conv", isHistory: st.screen === "history",
       statusRight: st.screen === "conv" && this.props.ttsEnabled ? "READING ALOUD" : "DEVMAX",
-      goToday: () => this.setState({ screen: "today", sheet: null, stage: "idle", liveText: "", result: null }),
+      goToday: () => this.setState({ screen: "today", sheet: null, stage: "idle", liveText: "", result: null, practice: false }),
+      isSetup: st.screen === "setup", isRecap: st.screen === "recap",
+      openSprint: () => { this.enterSetup(); },
       openSettings: () => this.setState({ sheet: "settings" }),
       openQuickAdd: () => this.setState({ sheet: "add", newTopic: "", newWhen: "now", addError: false, addPending: false, addRetried: false }),
       closeSheet: () => this.setState({ sheet: null }),
@@ -622,14 +970,16 @@ class Component extends DCLogic {
     V.resultFeedback = st.result ? st.result.feedback : "";
     V.resultSchedule = st.result ? st.result.schedule : "";
     V.hasNext = st.qIndex < st.queue.length - 1;
-    V.nextLabel = V.hasNext ? "Next card" : "Done";
+    V.nextLabel = V.hasNext ? "Next card" : st.queue.length > 1 ? "See recap" : "Done";
     V.nextCard = () => {
       if (st.qIndex < st.queue.length - 1) {
         const nid = st.queue[st.qIndex + 1];
         this.setState({
           qIndex: st.qIndex + 1, stage: "idle", liveText: "", draft: "", result: null, resume: false, submitError: false, retried: false,
-          thread: [{ role: "q", text: st.cards.find(x => x.id === nid).q }]
+          thread: [{ role: "q", text: this.find(nid).q }]
         });
+      } else if (st.queue.length > 1) {
+        this.setState({ screen: "recap", recapOpen: null, stage: "idle", result: null });
       } else V.goToday();
     };
     V.submitError = st.submitError && st.screen === "conv";
@@ -639,8 +989,129 @@ class Component extends DCLogic {
     };
     V.openHistoryCurrent = () => this.setState({ screen: "history", histId: c.id, openSession: null });
 
+    // progress rail
+    const railCards = st.queue.map(id => this.find(id));
+    const railOn = st.screen === "conv" && st.queue.length > 1;
+    const chips = this.props.railStyle === "chips";
+    V.showDotRail = railOn && !chips;
+    V.showChipRail = railOn && chips;
+    V.rail = railCards.map((rc, i) => {
+      const done = st.run.find(r => r.id === rc.id);
+      const covered = i < st.qIndex && done;
+      const tint = covered ? scoreColor(done.score) : "#57b6c2";
+      const label = rc.topic.length > 16 ? rc.topic.slice(0, 15) + "…" : rc.topic;
+      return {
+        label: label,
+        size: i === st.qIndex ? "9px" : "7px",
+        bg: i === st.qIndex ? "#57b6c2" : covered ? tint : "transparent",
+        border: i === st.qIndex ? "#57b6c2" : covered ? tint : "#21262a",
+        chipBg: i === st.qIndex ? "rgba(87,182,194,.10)" : "transparent",
+        chipColor: i === st.qIndex ? "#cfe9ed" : covered ? tint : "#6b7378"
+      };
+    });
+    V.chipRailRef = (el) => {
+      this.chipRail = el;
+      if (el) requestAnimationFrame(() => {
+        const ch = el.children[st.qIndex];
+        if (ch) el.scrollLeft = Math.max(0, ch.offsetLeft - (el.clientWidth - ch.offsetWidth) / 2);
+      });
+    };
+    if (railOn) V.progressLabel = (c ? c.topic.toUpperCase() : "");
+
+    // review sprint setup
+    const sprintPick = this.sprintSet();
+    const setReady = st.setupLoad === "ready";
+    V.setupLoading = st.setupLoad === "loading";
+    V.setupError = st.setupLoad === "error";
+    V.setupEmpty = setReady && sprintPick.pool.length < 4;
+    V.setupReady = setReady && sprintPick.pool.length >= 4;
+    V.setupStatus = st.setupLoad === "loading" ? "CHECKING" : st.setupLoad === "error" ? "OFFLINE" :
+      st.setupCats.length ? sprintPick.pool.length + (sprintPick.pool.length === 1 ? " CARD IN FILTER" : " CARDS IN FILTER") : this.library().length + " CARDS IN LIBRARY";
+    V.setupSize = st.setupSize;
+    V.sizeNote = "Weakest and least recently reviewed first";
+    V.setLabel = "WALK ORDER";
+    V.decSize = () => this.setState({ setupSize: Math.max(4, st.setupSize - 1) });
+    V.incSize = () => this.setState({ setupSize: Math.min(10, st.setupSize + 1) });
+    V.shuffleSet = () => this.setState({ seed: st.seed + 1 });
+    V.retrySetup = () => { this.setupRetried = true; this.enterSetup(); };
+    const lib = this.library();
+    const byCat = (name) => lib.filter(c => c.category === name);
+    const tierCounts = (cards) => TIERS.reduce((a, t) => { a[t] = cards.filter(c => tierOf(c.lastScore) === t).length; return a; }, {});
+    V.cats = CATEGORIES.map(name => {
+      const on = st.setupCats.indexOf(name) >= 0;
+      const n = tierCounts(byCat(name));
+      const weak = n.cold + n.shaky;
+      const note = weak ? weak + " shaky" : n.untested ? n.untested + " untested" : n.developing ? n.developing + " developing" : n.solid + " solid";
+      return {
+        label: name, note: note,
+        border: on ? "#57b6c2" : "#23282c", bg: on ? "rgba(87,182,194,.10)" : "transparent",
+        color: on ? "#cfe9ed" : "#8b9299", noteColor: on ? "#8fc7cf" : "#4e565b",
+        toggle: () => this.setState({ setupCats: on ? st.setupCats.filter(x => x !== name) : st.setupCats.concat([name]) })
+      };
+    });
+
+    // coverage
+    V.isCoverage = st.screen === "coverage";
+    V.openCoverage = () => this.setState({ screen: "coverage", covOpen: null });
+    V.backToSetup = () => this.setState({ screen: "setup" });
+    V.covReady = setReady;
+    V.covStatus = st.setupLoad === "loading" ? "CHECKING" : st.setupLoad === "error" ? "OFFLINE" :
+      lib.length + " CARDS · " + CATEGORIES.length + " CATEGORIES";
+    // axis rollup: three-axis scoring averaged across every scored card, one mono line, no bars
+    const scoredLib = lib.filter(c => c.lastScore != null);
+    V.covAxisParts = setReady && scoredLib.length
+      ? AXES.map((a, i) => ({
+          text: a + " " + (scoredLib.reduce((t, c) => t + axisScore(c, i), 0) / scoredLib.length).toFixed(1) + (i < AXES.length - 1 ? " ·" : "")
+        }))
+      : [];
+    V.showCovAxes = setReady && scoredLib.length > 0;
+    // sort comparator, pinned: weak (shaky+cold) desc, then untested desc, then alphabetical
+    V.covSections = setReady ? CATEGORIES.map(name => {
+      const cards = byCat(name);
+      const n = tierCounts(cards);
+      return { name: name, cards: cards, n: n, weak: n.cold + n.shaky, untested: n.untested };
+    }).sort((a, b) => (b.weak - a.weak) || (b.untested - a.untested) || a.name.localeCompare(b.name)).map(sec => {
+      const openTier = st.covOpen && st.covOpen.cat === sec.name ? st.covOpen.tier : null;
+      const shown = openTier ? sec.cards.filter(c => tierOf(c.lastScore) === openTier) : [];
+      return {
+        name: sec.name,
+        count: sec.cards.length + (sec.cards.length === 1 ? " CARD" : " CARDS"),
+        open: !!openTier,
+        tiers: TIERS.filter(t => sec.n[t] > 0).map((t, i, all) => ({
+          text: sec.n[t] + " " + t + (i < all.length - 1 ? " ·" : ""),
+          color: openTier === t ? TIER_COLOR[t] : "#7c848b",
+          underline: openTier === t ? TIER_COLOR[t] : "transparent",
+          toggle: () => this.setState({ covOpen: openTier === t ? null : { cat: sec.name, tier: t } })
+        })),
+        cards: shown.map(c => ({
+          topic: c.topic,
+          note: c.ago ? c.ago + "D SINCE REVIEW" : c.dueLabel.toUpperCase(),
+          score: c.lastScore == null ? "—" : String(c.lastScore),
+          color: scoreColor(c.lastScore)
+        }))
+      };
+    }) : [];
+    V.preview = V.setupReady ? sprintPick.set.map(pc => ({
+      topic: pc.topic, category: pc.category, summary: pc.summary,
+      scoreLabel: pc.lastScore == null ? "—" : String(pc.lastScore), scoreColor: scoreColor(pc.lastScore)
+    })) : [];
+    V.sprintStartLabel = "Start — " + sprintPick.set.length + " cards";
+    V.startSprint = () => this.openConv(sprintPick.set.map(x => x.id), false, true);
+
+    // recap
+    const run = st.run;
+    const avg = run.length ? run.reduce((a, r) => a + r.score, 0) / run.length : 0;
+    V.recapAvg = run.length ? avg.toFixed(1) : "—";
+    V.recapColor = run.length ? scoreColor(Math.round(avg)) : DIM;
+    V.recapRows = run.map((r, i) => ({
+      topic: r.topic, category: r.category, score: r.score, color: scoreColor(r.score), feedback: r.feedback,
+      open: st.recapOpen === i, caret: st.recapOpen === i ? "▲" : "▼",
+      toggle: () => this.setState({ recapOpen: st.recapOpen === i ? null : i })
+    }));
+    V.runAnother = () => this.enterSetup();
+
     // history
-    const h = st.cards.find(x => x.id === st.histId) || st.cards[0];
+    const h = this.find(st.histId) || st.cards[0] || EXTRA[0];
     V.histTopic = h.topic; V.histCategory = h.category;
     V.histSummary = h.summary ? h.summary.charAt(0).toUpperCase() + h.summary.slice(1) + "." : "";
     V.histEmpty = h.sessions.length === 0;

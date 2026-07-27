@@ -27,17 +27,10 @@ struct SettingsSheet: View {
                     .foregroundStyle(Theme.metaAlt)
             }
             Spacer()
-            HStack(spacing: 0) {
-                stepButton("−") { draft.reviewsPerDay = max(1, draft.reviewsPerDay - 1) }
-                Text("\(draft.reviewsPerDay)")
-                    .font(TypeRole.body)
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.text)
-                    .frame(width: 34)
-                stepButton("+") { draft.reviewsPerDay = min(6, draft.reviewsPerDay + 1) }
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.borderStrong, lineWidth: 1)
+            StepperControl(
+                value: draft.reviewsPerDay,
+                decrement: { draft.reviewsPerDay = max(1, draft.reviewsPerDay - 1) },
+                increment: { draft.reviewsPerDay = min(6, draft.reviewsPerDay + 1) }
             )
         }
     }
@@ -46,16 +39,6 @@ struct SettingsSheet: View {
         let enabled = draft.windows.filter(\.on).count
         let pushes = draft.reviewsPerDay == 1 ? "1 push" : "\(draft.reviewsPerDay) pushes"
         return enabled > 1 ? "\(pushes), spread across windows" : "\(pushes), in one window"
-    }
-
-    private func stepButton(_ glyph: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(glyph)
-                .font(TypeRole.body)
-                .foregroundStyle(Theme.textMuted)
-                .frame(width: 38, height: 38)
-        }
-        .buttonStyle(.plain)
     }
 
     private var windows: some View {
