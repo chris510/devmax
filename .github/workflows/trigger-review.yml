@@ -2,8 +2,18 @@ name: Trigger review push
 
 on:
   schedule:
-    - cron: '10 14 * * *'   # 07:10 PT
-    - cron: '0 4 * * *'     # 21:00 PT
+    # GitHub cron is UTC and does not observe DST, but the notification windows are
+    # local (America/Los_Angeles) and do. The spec's original 14:10/04:00 UTC render
+    # as 07:10/21:00 PDT — correct in summer — but 06:10/20:00 PST, which falls
+    # outside every window, so both daily pushes silently no-op from November to
+    # March while this workflow still exits 0.
+    #
+    # Both windows are wider than the 60-minute DST shift (80 and 90 minutes), so a
+    # fixed UTC time exists that lands inside them under either offset:
+    #   morning 07:10-08:30 local => T-7 and T-8 both in range => 15:10-15:30 UTC
+    #   evening 21:00-22:30 local => T-7 and T-8 both in range => 05:00-05:30 UTC
+    - cron: '20 15 * * *'   # 08:20 PDT / 07:20 PST
+    - cron: '10 5 * * *'    # 22:10 PDT / 21:10 PST
   workflow_dispatch:
 
 jobs:
@@ -11,12 +21,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # The endpoint validates the notification window itself, so a late trigger
-      # either still lands in-window or correctly no-ops.
+      # either still lands in-window or correctly no-ops. Retries cover the double
+      # cold start of a sleeping container plus a database waking from idle.
       - name: POST /internal/trigger-review
         run: |
-          curl -fsSL -X POST "$API_BASE_URL/internal/trigger-review" \
-            -H "X-Cron-Secret: $CRON_SECRET" \
-            -w '\nHTTP %{http_code}\n'
+          body=$(curl -sS --fail-with-body \
+            --retry 3 --retry-connrefused --retry-delay 5 --max-time 60 \
+            -X POST "$API_BASE_URL/internal/trigger-review" \
+            -H "X-Cron-Secret: $CRON_SECRET")
+          echo "$body"
+
+          reason=$(printf '%s' "$body" | jq -r '.reason // empty')
+          case "$reason" in
+            outside_window)
+              # Unreachable with the schedule above, so if it happens the schedule and
+              # the configured windows have drifted apart. Failing loudly here is the
+              # whole point: this is the failure mode that stayed green for months.
+              echo "::error::Fired outside every notification window. The cron schedule \
+          and the windows in PUT /settings no longer agree — see the comment above the \
+          schedule in this file."
+              exit 1
+              ;;
+            no_devices)
+              echo "::warning::Nothing delivered — no registered device token, or the \
+          APNs credentials are not configured on the app."
+              ;;
+          esac
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

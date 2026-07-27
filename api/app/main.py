@@ -16,6 +16,15 @@ logging.basicConfig(level=_settings.log_level)
 app = FastAPI(title="Warm Cache API", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(AuthMiddleware)
 
+# Not fatal: deploying before the Apple credentials exist is the recommended order.
+# But send_push() returns 0 silently in that state, so without this the only symptom
+# is pushes that never arrive.
+if not _settings.apns_private_key:
+    logging.getLogger(__name__).warning(
+        "APNS_PRIVATE_KEY is unset — /internal/trigger-review will report "
+        "sent=false reason=no_devices and no push will be delivered."
+    )
+
 app.include_router(cards.router)
 app.include_router(sessions.router)
 app.include_router(devices.router)

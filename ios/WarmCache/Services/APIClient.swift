@@ -9,6 +9,51 @@ enum APIError: Error {
     case status(Int)
 }
 
+/// Timestamps as the backend actually sends them.
+///
+/// `JSONDecoder.DateDecodingStrategy.iso8601` uses `.withInternetDateTime` alone,
+/// which rejects fractional seconds — and the backend emits them. `started_at` is a
+/// Postgres `timestamptz` that pydantic serializes as `2026-07-26T23:02:09.722946Z`,
+/// so every `GET /cards/{id}` threw. `CardHistoryScreen` swallows that with `try?`,
+/// which is why all three Card History states rendered blank against a real server
+/// while working fine on `MockAPI`.
+///
+/// Two formatters because `ISO8601DateFormatter` can't make fractional seconds
+/// optional. Both are `static let`, so each is built once, not per decode.
+///
+/// `WarmCacheTests/Fixtures/card_detail.json` is a response captured from the running
+/// app and pins this.
+enum WireDate {
+    private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func parse(_ text: String) -> Date? {
+        fractional.date(from: text) ?? plain.date(from: text)
+    }
+
+    static func decode(_ decoder: Decoder) throws -> Date {
+        let text = try decoder.singleValueContainer().decode(String.self)
+        guard let date = parse(text) else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "unparseable timestamp: \(text)"
+                )
+            )
+        }
+        return date
+    }
+}
+
 protocol WarmCacheAPI {
     func due() async throws -> [DueCard]
     func cards(sort: String, mode: String) async throws -> [CardSummary]
@@ -27,10 +72,12 @@ struct LiveAPI: WarmCacheAPI {
     var apiKey: String
     var session: URLSession = .shared
 
-    private static let decoder: JSONDecoder = {
+    // Not private: WarmCacheTests decodes captured server responses through this
+    // exact decoder, which is the only wire-format check available without a server.
+    static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom(WireDate.decode)
         return d
     }()
 
@@ -122,14 +169,31 @@ struct LiveAPI: WarmCacheAPI {
     }
 }
 
-/// Where the app points. Local dev uses port 8083 per the ~/dev port contract.
+/// Where the app points.
+///
+/// Both values come from the per-configuration xcconfigs in `ios/Config` via
+/// Info.plist substitution: Debug points at localhost:8083 (the ~/dev port
+/// contract), Release at the Fly deployment. `WC_API_KEY` lives in the gitignored
+/// `Config/Secrets.xcconfig` — see `Config/Secrets.example.xcconfig`.
+///
+/// There is deliberately no fallback API key. A default here can only mask a
+/// misconfigured build, and the value it used to fall back to is published in this
+/// repo. Missing config produces a clean 401 instead of a mystery.
 enum APIConfig {
+    static let defaultBaseURL = URL(string: "http://localhost:8083")!
+
+    static func info(_ key: String) -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+              !value.trimmingCharacters(in: .whitespaces).isEmpty
+        else { return nil }
+        return value
+    }
+
     static var client: WarmCacheAPI {
         if DebugFlags.shared.useMockAPI { return MockAPI.shared }
         return LiveAPI(
-            baseURL: URL(string: Bundle.main.object(forInfoDictionaryKey: "WCBaseURL") as? String
-                ?? "http://localhost:8083")!,
-            apiKey: Bundle.main.object(forInfoDictionaryKey: "WCAPIKey") as? String ?? "dev-api-key"
+            baseURL: info("WCBaseURL").flatMap(URL.init(string:)) ?? defaultBaseURL,
+            apiKey: info("WCAPIKey") ?? ""
         )
     }
 }

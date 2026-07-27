@@ -6,7 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import get_settings
 
-# Health is the only unauthenticated route (Fly.io health checks hit it).
+# Health is the only unauthenticated route (the platform health check hits it).
 PUBLIC_PATHS = {"/health"}
 DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 

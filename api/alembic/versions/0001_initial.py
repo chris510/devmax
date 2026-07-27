@@ -6,8 +6,9 @@ Create Date: 2026-07-24
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0001"
 down_revision: str | None = None
@@ -43,7 +44,9 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "delivery_mode IN ('conversational', 'desk')", name="ck_cards_delivery_mode"
         ),
-        sa.CheckConstraint("last_score IS NULL OR last_score BETWEEN 0 AND 5", name="ck_cards_score"),
+        sa.CheckConstraint(
+            "last_score IS NULL OR last_score BETWEEN 0 AND 5", name="ck_cards_score"
+        ),
     )
     op.create_index("ix_cards_next_review_at", "cards", ["next_review_at"])
     # The hot query — due conversational cards. Desk cards never enter the push loop.

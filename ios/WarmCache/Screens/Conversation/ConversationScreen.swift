@@ -27,6 +27,14 @@ struct ConversationScreen: View {
         .onChange(of: state.stage) { _, stage in
             if stage == .idle || stage == .followUp { readLatestQuestion() }
         }
+        // The transcript used to reach the draft only when recording stopped, so
+        // backgrounding mid-answer persisted a stale draft and lost everything
+        // spoken since the tap — the worst failure mode in the product. Mirror each
+        // partial through; updateDraft debounces the writes.
+        .onChange(of: speech.transcript) { _, text in
+            guard isRecording else { return }
+            state.updateDraft(text)
+        }
         .onDisappear { speech.stop(); speaker.stop() }
     }
 
@@ -344,7 +352,7 @@ struct ConversationScreen: View {
 
             Button {
                 // Swapping input mode carries the text across and never navigates away.
-                state.draft = speech.transcript.isEmpty ? state.draft : speech.transcript
+                state.updateDraft(speech.transcript.isEmpty ? state.draft : speech.transcript)
                 speech.stop()
                 state.inputMode = .text
                 draftFocused = true
@@ -371,8 +379,9 @@ struct ConversationScreen: View {
         if isRecording {
             speech.stop()
             let text = speech.transcript
-            state.draft = text
-            state.persistDraft(text)
+            state.updateDraft(text)
+            // Submitting is the other moment a pending debounce can't be waited out.
+            state.flushDraft()
             Task { await state.submit(text) }
         } else {
             state.submitError = false
@@ -400,7 +409,9 @@ struct ConversationScreen: View {
                     RoundedRectangle(cornerRadius: Metrics.inputRadius)
                         .strokeBorder(draftFocused ? Theme.accent : Theme.borderStrong, lineWidth: 1)
                 )
-                .onChange(of: state.draft) { _, text in state.persistDraft(text) }
+                // The TextEditor binds $state.draft directly, so this only needs to
+                // schedule the write that updateDraft would otherwise have done.
+                .onChange(of: state.draft) { _, text in state.updateDraft(text) }
 
             PrimaryButton(
                 title: "Submit answer",

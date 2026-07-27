@@ -2,25 +2,33 @@
 
 Two sources:
 
-* ``cards.json`` — the 111-card study plan (spec.md §Seeding). Not yet present in
-  the repo; pass ``--file`` once it lands.
-* ``--fixtures`` — the three cards from the design prototype, with their real
+* ``cards.json`` — the 111-card study plan (spec.md §Seeding). Six weeks, 84
+  conversational and 27 desk cards. This is what you seed a real database with.
+* ``--fixtures`` — the three cards from the design prototype, with their invented
   session history. Every screenshot in the design handoff depicts these, so this
-  is what makes the designs reproducible against a real server during dev.
+  is what makes the designs reproducible against a real server during dev. Never
+  load them into a real study queue; the guard in main() refuses by default.
 
     uv run python -m app.seed --fixtures
-    uv run python -m app.seed --file cards.json --weeks-through 2
+    uv run python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
+
+Due dates are staggered across each card's target week at the configured
+``reviews_per_day`` rate, so seeding the whole plan puts one session's worth in
+the queue on day one rather than all 111 cards. Record the ``--start-date`` you
+use: reusing it keeps later loads aligned to the same week boundaries.
 """
 
 import argparse
 import asyncio
 import json
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from sqlmodel import select
 
-from app.db import session_factory
+from app.config import get_settings
+from app.db import is_local_database, session_factory
 from app.models import (
     DELIVERY_CONVERSATIONAL,
     DELIVERY_DESK,
@@ -28,6 +36,7 @@ from app.models import (
     Card,
     Session,
 )
+from app.routers.deps import get_settings_row, local_today, now_in
 
 # Coding problems need a keyboard and an hour, not a two-minute voice session.
 DESK_CATEGORIES = {"Coding Warmup", "Coding Pattern", "Tier 2 Practical Build"}
@@ -37,15 +46,53 @@ def delivery_mode_for(category: str) -> str:
     return DELIVERY_DESK if category in DESK_CATEGORIES else DELIVERY_CONVERSATIONAL
 
 
-async def load_from_file(path: Path, weeks_through: int) -> int:
-    entries = json.loads(path.read_text())
-    today = date.today()
+DAYS_PER_WEEK = 7
+
+
+def _schedule(entries: list[dict], start: date, per_day: int) -> list[date]:
+    """Spread each week's cards across that week, one small batch per day.
+
+    ``--weeks-through`` alone cannot prevent a day-one flood: it controls *which*
+    cards load, not when they come due. Seeding every card with
+    ``next_review_at = today`` puts the entire cohort in the queue at once, which is
+    the opposite of what spec.md §Seeding is asking for.
+
+    Cards are grouped by (target_week, delivery_mode) and dealt out ``per_day`` at a
+    time — matching the push budget for conversational cards, one a day for desk
+    cards, which never enter the push loop at all. The day index is clamped so a
+    large week spills onto its own last day rather than into the following week.
+    Returns one due date per entry, in the order given.
+    """
+    groups: dict[tuple[int | None, str], list[int]] = defaultdict(list)
+    for i, entry in enumerate(entries):
+        mode = delivery_mode_for(entry.get("category", "Unsorted"))
+        groups[(entry.get("target_week"), mode)].append(i)
+
+    due: list[date] = [start] * len(entries)
+    for (week, mode), indices in groups.items():
+        # A card with no target_week behaves like POST /cards {"schedule": "now"}.
+        week_start = start if week is None else start + timedelta(days=DAYS_PER_WEEK * (week - 1))
+        rate = max(per_day, 1) if mode == DELIVERY_CONVERSATIONAL else 1
+        for position, index in enumerate(indices):
+            offset = min(position // rate, DAYS_PER_WEEK - 1)
+            due[index] = week_start + timedelta(days=offset)
+    return due
+
+
+def _within(entry: dict, weeks_through: int) -> bool:
+    week = entry.get("target_week")
+    return week is None or week <= weeks_through
+
+
+async def load_from_file(path: Path, weeks_through: int, start: date | None = None) -> int:
+    entries = [e for e in json.loads(path.read_text()) if _within(e, weeks_through)]
     added = 0
     async with session_factory() as db:
-        for entry in entries:
-            week = entry.get("target_week")
-            if week is not None and week > weeks_through:
-                continue
+        settings = await get_settings_row(db)
+        begin = start or now_in(settings.timezone).date()
+
+        due_dates = _schedule(entries, begin, settings.reviews_per_day)
+        for entry, due in zip(entries, due_dates, strict=True):
             existing = (await db.exec(select(Card).where(Card.topic == entry["topic"]))).first()
             if existing is not None:
                 continue
@@ -56,9 +103,9 @@ async def load_from_file(path: Path, weeks_through: int) -> int:
                     category=category,
                     pattern=entry.get("pattern"),
                     source_company=entry.get("source_company"),
-                    target_week=week,
+                    target_week=entry.get("target_week"),
                     delivery_mode=delivery_mode_for(category),
-                    next_review_at=today,
+                    next_review_at=due,
                 )
             )
             added += 1
@@ -185,10 +232,12 @@ def _fixtures() -> list[dict]:
 
 
 async def load_fixtures() -> int:
-    today = date.today()
     now = datetime.now(UTC)
     added = 0
     async with session_factory() as db:
+        # The configured timezone, not the container's: a UTC server would seed
+        # these a day early after 17:00 PT.
+        today = await local_today(db)
         for spec in _fixtures():
             if (await db.exec(select(Card).where(Card.topic == spec["topic"]))).first():
                 continue
@@ -238,6 +287,8 @@ async def load_fixtures() -> int:
     return added
 
 
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Warm Cache cards")
     parser.add_argument("--file", type=Path, help="cards.json from the study plan")
@@ -245,19 +296,44 @@ def main() -> None:
         "--weeks-through",
         type=int,
         default=2,
-        help="only load cards with target_week <= N (default 2, so day one isn't flooded)",
+        help="only load cards with target_week <= N (default 2; a safety valve, not "
+        "the throttle — due dates are staggered across each target week)",
+    )
+    parser.add_argument(
+        "--start-date",
+        type=date.fromisoformat,
+        help="YYYY-MM-DD that week 1 begins on (default: today in the configured "
+        "timezone). Reuse the same value on later loads so weeks stay aligned.",
     )
     parser.add_argument(
         "--fixtures",
         action="store_true",
         help="load the three design-prototype cards plus one desk card",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="allow --fixtures against a production database",
+    )
     args = parser.parse_args()
 
     if args.fixtures:
+        # The fixtures carry invented session history and a 14-hour-old draft, which
+        # would render a bogus resume banner on a real card. They exist to reproduce
+        # the design screenshots, not to seed a study queue.
+        #
+        # Allowlist, not denylist: an unrecognised host is assumed to be real. A
+        # check for one vendor's domain would wave through Railway, Supabase, RDS,
+        # or a custom domain in front of the same database.
+        if not is_local_database(get_settings().database_url) and not args.force:
+            parser.error(
+                "--fixtures targets a non-local database. Use --file cards.json "
+                "instead, or pass --force if you really mean it."
+            )
         print(f"seeded {asyncio.run(load_fixtures())} fixture cards")
     elif args.file:
-        print(f"seeded {asyncio.run(load_from_file(args.file, args.weeks_through))} cards")
+        added = asyncio.run(load_from_file(args.file, args.weeks_through, args.start_date))
+        print(f"seeded {added} cards")
     else:
         parser.error("pass --fixtures or --file cards.json")
 

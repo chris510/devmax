@@ -1,6 +1,13 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Values that ship in this repo, in .env.example, or in the docs. They are public,
+# so a deploy that reaches production still carrying one is not authenticated at all.
+PLACEHOLDER_SECRETS = frozenset(
+    {"dev-api-key", "dev-cron-secret", "change-me", "change-me-too", ""}
+)
 
 
 class Settings(BaseSettings):
@@ -8,9 +15,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://localhost/warmcache"
-    api_key: str = "dev-api-key"
-    cron_secret: str = "dev-cron-secret"
+    # No defaults on the three that gate access to the database and the API. A default
+    # here means a deploy that forgets to set them boots healthy on a public
+    # hostname, authenticated by a string published in this repo.
+    database_url: str
+    api_key: str
+    cron_secret: str
 
     anthropic_api_key: str = ""
     # Per-function model config so either can be swapped during calibration.
@@ -29,6 +39,20 @@ class Settings(BaseSettings):
     apns_use_sandbox: bool = True
 
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secrets(self) -> "Settings":
+        for name in ("api_key", "cron_secret"):
+            if getattr(self, name) in PLACEHOLDER_SECRETS:
+                raise ValueError(
+                    f"{name.upper()} is unset or still a placeholder. Generate one with "
+                    "`openssl rand -base64 32`."
+                )
+        # spec.md §Auth: two *independent* shared secrets. Collapsing them into one
+        # means the cron secret ships inside the iOS binary along with the API key.
+        if self.api_key == self.cron_secret:
+            raise ValueError("API_KEY and CRON_SECRET must be different values.")
+        return self
 
 
 @lru_cache
