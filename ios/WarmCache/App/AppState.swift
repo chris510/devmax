@@ -180,33 +180,58 @@ final class AppState: ObservableObject {
         if let card = currentCard { DraftStore.clear(for: card.id) }
     }
 
-    /// Disk is the source of truth for instant rehydration, so it is written
-    /// synchronously on every call. The server copy is the durable backup and is
-    /// coalesced: this fires on every keystroke and on every speech-recognition
-    /// partial, and PATCH /sessions/{id}/draft is meant to be cheap and debounced,
-    /// not one request per character.
-    func persistDraft(_ text: String) {
-        guard let card = currentCard else { return }
-        DraftStore.save(text, for: card.id)
-        guard let sessionID else { return }
+    /// The single way the in-progress answer changes.
+    ///
+    /// Typing and speech both route through here, so "a word the user produced
+    /// reaches storage" is one guarantee in one place rather than a convention each
+    /// call site has to remember — losing a spoken answer is the worst failure mode
+    /// in the product, and the previous shape let a caller assign `draft` and skip
+    /// persistence.
+    func updateDraft(_ text: String) {
+        draft = text
+        scheduleDraftSync()
+    }
 
+    /// Write the current draft everywhere, immediately. Called when the app is
+    /// backgrounded and when recording stops — the moments a delay isn't free.
+    func flushDraft() {
+        syncDraft(debounced: false)
+    }
+
+    private func scheduleDraftSync() {
+        syncDraft(debounced: true)
+    }
+
+    /// Disk is the source of truth for instant rehydration; the server copy is the
+    /// durable backup. Both are debounced because this is called on every keystroke
+    /// *and* every speech-recognition partial — several times a second while
+    /// speaking. `DraftStore.save` is a read-modify-rewrite of the whole file plus an
+    /// atomic rename, so running it per partial competes with the live caret and
+    /// auto-scroll for the same main-thread frame budget. `flushDraft` on
+    /// backgrounding and on recording-stop is what makes the guarantee exact.
+    private func syncDraft(debounced: Bool) {
         draftSync?.cancel()
-        draftSync = Task { [api] in
-            try? await Task.sleep(for: .seconds(3))
+        guard let card = currentCard else { return }
+        let text = draft
+
+        guard debounced else {
+            DraftStore.save(text, for: card.id)
+            if let sessionID {
+                Task { [api] in try? await api.saveDraft(sessionID: sessionID, text: text) }
+            }
+            return
+        }
+
+        draftSync = Task { [api, sessionID] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            DraftStore.save(text, for: card.id)
+
+            guard let sessionID else { return }
+            try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             try? await api.saveDraft(sessionID: sessionID, text: text)
         }
-    }
-
-    /// Push the current draft to the server now, cancelling any pending debounce.
-    /// Called when the app is backgrounded — the one moment the delay is not free.
-    func flushDraft() {
-        guard let card = currentCard else { return }
-        DraftStore.save(draft, for: card.id)
-        draftSync?.cancel()
-        guard let sessionID else { return }
-        let text = draft
-        Task { [api] in try? await api.saveDraft(sessionID: sessionID, text: text) }
     }
 
     func submit(_ text: String) async {

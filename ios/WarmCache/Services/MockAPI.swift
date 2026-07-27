@@ -25,41 +25,35 @@ final class DebugFlags: ObservableObject {
     /// navigation. Set via `simctl launch --setenv WC_ROUTE=…`.
     let route: String
 
+    #if DEBUG
+    private static let isDebug = true
+    #else
+    private static let isDebug = false
+    #endif
+
     private init() {
-        let env = ProcessInfo.processInfo.environment
+        // Release reads an empty environment, so every flag falls through to its
+        // own default and there is no second list of values to keep in sync.
+        let env = Self.isDebug ? ProcessInfo.processInfo.environment : [:]
         func flag(_ key: String, default fallback: Bool = false) -> Bool {
             guard let raw = env[key] else { return fallback }
             return raw == "1" || raw.lowercased() == "true"
         }
-        // Debug builds run on fixtures by default so the designs are reproducible
-        // without a server; release builds always talk to the real API.
-        //
-        // Every flag that changes behaviour rather than presentation has to be
-        // pinned in release the same way. simulateSpeech in particular: it defaults
-        // to true because the simulator has no usable microphone, so an ungated
-        // release build on a real phone typed out a hardcoded fixture paragraph
-        // instead of recording the user.
-        #if DEBUG
-        useMockAPI = flag("WC_MOCK", default: true)
+
+        // The two whose default is `true` need the extra gate: a release build must
+        // never fall back to fixtures or to fake speech. simulateSpeech especially —
+        // it defaults to true because the simulator has no usable microphone, so
+        // ungated it typed out a hardcoded paragraph instead of recording the user.
+        useMockAPI = Self.isDebug && flag("WC_MOCK", default: true)
+        simulateSpeech = Self.isDebug && flag("WC_SIM_SPEECH", default: true)
+
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         failSubmit = flag("WC_FAIL_SUBMIT")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
         textFirst = flag("WC_TEXT_FIRST")
         ttsEnabled = flag("WC_TTS", default: true)
-        simulateSpeech = flag("WC_SIM_SPEECH", default: true)
         route = env["WC_ROUTE"] ?? ""
-        #else
-        useMockAPI = false
-        loadState = .auto
-        failSubmit = false
-        failAdd = false
-        emptyQueue = false
-        textFirst = false
-        ttsEnabled = true
-        simulateSpeech = false
-        route = ""
-        #endif
     }
 }
 
@@ -251,7 +245,9 @@ actor MockAPI: WarmCacheAPI {
 
     func registerDeviceToken(_ token: String) async throws {}
 
+    /// Same parser the live client uses, so a fixture timestamp that the real
+    /// decoder would reject can't silently work here.
     private static func date(_ iso: String) -> Date {
-        ISO8601DateFormatter().date(from: iso) ?? Date()
+        WireDate.parse(iso) ?? Date()
     }
 }

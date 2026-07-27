@@ -21,13 +21,14 @@ use: reusing it keeps later loads aligned to the same week boundaries.
 import argparse
 import asyncio
 import json
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from sqlmodel import select
 
 from app.config import get_settings
-from app.db import session_factory
+from app.db import is_local_database, session_factory
 from app.models import (
     DELIVERY_CONVERSATIONAL,
     DELIVERY_DESK,
@@ -35,7 +36,7 @@ from app.models import (
     Card,
     Session,
 )
-from app.routers.deps import get_settings_row, now_in
+from app.routers.deps import get_settings_row, local_today, now_in
 
 # Coding problems need a keyboard and an hour, not a two-minute voice session.
 DESK_CATEGORIES = {"Coding Warmup", "Coding Pattern", "Tier 2 Practical Build"}
@@ -48,9 +49,7 @@ def delivery_mode_for(category: str) -> str:
 DAYS_PER_WEEK = 7
 
 
-def _schedule(
-    entries: list[dict], start: date, per_day: int
-) -> dict[int, date]:
+def _schedule(entries: list[dict], start: date, per_day: int) -> list[date]:
     """Spread each week's cards across that week, one small batch per day.
 
     ``--weeks-through`` alone cannot prevent a day-one flood: it controls *which*
@@ -62,37 +61,38 @@ def _schedule(
     time — matching the push budget for conversational cards, one a day for desk
     cards, which never enter the push loop at all. The day index is clamped so a
     large week spills onto its own last day rather than into the following week.
-    Returns a map of entry index -> due date.
+    Returns one due date per entry, in the order given.
     """
-    groups: dict[tuple[int | None, str], list[int]] = {}
+    groups: dict[tuple[int | None, str], list[int]] = defaultdict(list)
     for i, entry in enumerate(entries):
-        category = entry.get("category", "Unsorted")
-        mode = delivery_mode_for(category)
-        groups.setdefault((entry.get("target_week"), mode), []).append(i)
+        mode = delivery_mode_for(entry.get("category", "Unsorted"))
+        groups[(entry.get("target_week"), mode)].append(i)
 
-    due: dict[int, date] = {}
+    due: list[date] = [start] * len(entries)
     for (week, mode), indices in groups.items():
         # A card with no target_week behaves like POST /cards {"schedule": "now"}.
         week_start = start if week is None else start + timedelta(days=DAYS_PER_WEEK * (week - 1))
-        rate = per_day if mode == DELIVERY_CONVERSATIONAL else 1
+        rate = max(per_day, 1) if mode == DELIVERY_CONVERSATIONAL else 1
         for position, index in enumerate(indices):
-            offset = min(position // max(rate, 1), DAYS_PER_WEEK - 1)
+            offset = min(position // rate, DAYS_PER_WEEK - 1)
             due[index] = week_start + timedelta(days=offset)
     return due
 
 
+def _within(entry: dict, weeks_through: int) -> bool:
+    week = entry.get("target_week")
+    return week is None or week <= weeks_through
+
+
 async def load_from_file(path: Path, weeks_through: int, start: date | None = None) -> int:
-    entries = json.loads(path.read_text())
+    entries = [e for e in json.loads(path.read_text()) if _within(e, weeks_through)]
     added = 0
     async with session_factory() as db:
         settings = await get_settings_row(db)
         begin = start or now_in(settings.timezone).date()
-        due_dates = _schedule(entries, begin, settings.reviews_per_day)
 
-        for index, entry in enumerate(entries):
-            week = entry.get("target_week")
-            if week is not None and week > weeks_through:
-                continue
+        due_dates = _schedule(entries, begin, settings.reviews_per_day)
+        for entry, due in zip(entries, due_dates, strict=True):
             existing = (await db.exec(select(Card).where(Card.topic == entry["topic"]))).first()
             if existing is not None:
                 continue
@@ -103,9 +103,9 @@ async def load_from_file(path: Path, weeks_through: int, start: date | None = No
                     category=category,
                     pattern=entry.get("pattern"),
                     source_company=entry.get("source_company"),
-                    target_week=week,
+                    target_week=entry.get("target_week"),
                     delivery_mode=delivery_mode_for(category),
-                    next_review_at=due_dates[index],
+                    next_review_at=due,
                 )
             )
             added += 1
@@ -235,10 +235,9 @@ async def load_fixtures() -> int:
     now = datetime.now(UTC)
     added = 0
     async with session_factory() as db:
-        # The configured timezone, not the container's: every due comparison in the
-        # app is against the user's local calendar day (routers/deps.local_today),
-        # and a UTC server would seed these a day early after 17:00 PT.
-        today = now_in((await get_settings_row(db)).timezone).date()
+        # The configured timezone, not the container's: a UTC server would seed
+        # these a day early after 17:00 PT.
+        today = await local_today(db)
         for spec in _fixtures():
             if (await db.exec(select(Card).where(Card.topic == spec["topic"]))).first():
                 continue
@@ -288,8 +287,6 @@ async def load_fixtures() -> int:
     return added
 
 
-def _looks_like_production(url: str) -> bool:
-    return "neon.tech" in url
 
 
 def main() -> None:
@@ -324,10 +321,14 @@ def main() -> None:
         # The fixtures carry invented session history and a 14-hour-old draft, which
         # would render a bogus resume banner on a real card. They exist to reproduce
         # the design screenshots, not to seed a study queue.
-        if _looks_like_production(get_settings().database_url) and not args.force:
+        #
+        # Allowlist, not denylist: an unrecognised host is assumed to be real. A
+        # check for one vendor's domain would wave through Fly Postgres, Supabase,
+        # RDS, or a custom domain in front of the same Neon database.
+        if not is_local_database(get_settings().database_url) and not args.force:
             parser.error(
-                "--fixtures targets what looks like a production database. Use "
-                "--file cards.json instead, or pass --force if you really mean it."
+                "--fixtures targets a non-local database. Use --file cards.json "
+                "instead, or pass --force if you really mean it."
             )
         print(f"seeded {asyncio.run(load_fixtures())} fixture cards")
     elif args.file:

@@ -23,6 +23,14 @@ SCORE_ARGS = dict(
 )
 
 
+def scored(score: Any, probe: str | None = "probe?") -> dict[str, Any]:
+    """A well-formed scoring response. `probe=None` omits the follow-up entirely."""
+    payload: dict[str, Any] = {"score": score, "feedback": "f", "mastery_summary": "m"}
+    if probe is not None:
+        payload["follow_up_question"] = probe
+    return payload
+
+
 def stub_completion(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> list[dict]:
     """Replace the Anthropic round trip; record the kwargs it was called with."""
     calls: list[dict] = []
@@ -46,10 +54,7 @@ def stub_completion(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) ->
 async def test_only_shaky_scores_probe(
     monkeypatch: pytest.MonkeyPatch, score: int, expected: str
 ) -> None:
-    stub_completion(
-        monkeypatch,
-        {"score": score, "feedback": "f", "mastery_summary": "m", "follow_up_question": "probe?"},
-    )
+    stub_completion(monkeypatch, scored(score))
 
     result = await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
 
@@ -65,10 +70,7 @@ async def test_a_used_follow_up_always_completes(
     This is enforced here in code rather than by asking the model nicely — the
     model still writes a probe, and it is discarded.
     """
-    stub_completion(
-        monkeypatch,
-        {"score": score, "feedback": "f", "mastery_summary": "m", "follow_up_question": "probe?"},
-    )
+    stub_completion(monkeypatch, scored(score))
 
     result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
 
@@ -80,10 +82,7 @@ async def test_a_used_follow_up_always_completes(
 async def test_a_shaky_score_without_a_probe_completes(
     monkeypatch: pytest.MonkeyPatch, probe: str
 ) -> None:
-    stub_completion(
-        monkeypatch,
-        {"score": 2, "feedback": "f", "mastery_summary": "m", "follow_up_question": probe},
-    )
+    stub_completion(monkeypatch, scored(2, probe))
 
     result = await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
 
@@ -94,10 +93,7 @@ async def test_a_shaky_score_without_a_probe_completes(
 async def test_follow_up_result_carries_the_probe_and_no_score(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stub_completion(
-        monkeypatch,
-        {"score": 2, "feedback": "f", "mastery_summary": "m", "follow_up_question": " One more — "},
-    )
+    stub_completion(monkeypatch, scored(2, " One more — "))
 
     result = await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
 
@@ -111,9 +107,7 @@ async def test_follow_up_result_carries_the_probe_and_no_score(
 async def test_the_prior_follow_up_turns_are_sent_for_the_second_scoring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = stub_completion(
-        monkeypatch, {"score": 4, "feedback": "f", "mastery_summary": "m"}
-    )
+    calls = stub_completion(monkeypatch, scored(4, probe=None))
 
     await llm.score_answer(
         **{

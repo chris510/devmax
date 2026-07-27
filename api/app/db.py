@@ -15,44 +15,51 @@ _settings = get_settings()
 # Strip them and express the intent through connect_args instead.
 _LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "options", "target_session_attrs"}
 
-
-def _split_libpq_params(url: str) -> tuple[str, dict[str, str]]:
-    """Return the URL with libpq-only params removed, plus the params that were removed."""
-    parts = urlsplit(url)
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
-    kept = [(k, v) for k, v in pairs if k not in _LIBPQ_ONLY_PARAMS]
-    removed = {k: v for k, v in pairs if k in _LIBPQ_ONLY_PARAMS}
-    return urlunsplit(parts._replace(query=urlencode(kept))), removed
-
-
+# Everything else is treated as remote — an allowlist, so an unrecognised host fails
+# towards "this is production" rather than away from it.
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", ""}
 
 
-def _wants_tls(sslmode: str | None, host: str | None) -> bool:
-    """Neon requires TLS; a local dev cluster generally can't offer it.
+def is_local_database(url: str) -> bool:
+    """Whether the URL points at a local dev cluster rather than a hosted one.
+
+    Used both to decide whether TLS is wanted and to keep `seed.py --fixtures`
+    away from a real database.
+    """
+    return (urlsplit(url).hostname or "").lower() in _LOCAL_HOSTS
+
+
+def _wants_tls(sslmode: str | None, url: str) -> bool:
+    """A hosted database requires TLS; a local dev cluster generally can't offer it.
 
     An explicit `sslmode` in the URL always wins, so pasting Neon's own connection
     string does the right thing even though the parameter itself has to be stripped.
     """
     if sslmode is not None:
         return sslmode not in {"disable", "allow"}
-    return (host or "").lower() not in _LOCAL_HOSTS
+    return not is_local_database(url)
 
 
-def _with_query(url: str, **params: str) -> str:
-    parts = urlsplit(url)
-    pairs = parse_qsl(parts.query, keep_blank_values=True) + list(params.items())
-    return urlunsplit(parts._replace(query=urlencode(pairs)))
+def engine_kwargs(url: str) -> tuple[str, dict]:
+    """Normalise a database URL and derive the engine arguments that go with it.
 
-
-def _engine_kwargs(url: str) -> tuple[str, dict]:
+    Shared by the app engine below and by alembic/env.py — migrations run against
+    the same Neon URL through Fly's release_command, so they need the same
+    treatment or `alembic upgrade head` fails where the app would have connected.
+    """
     if "asyncpg" not in url:
         return url, {"connect_args": {}}
 
-    url, removed = _split_libpq_params(url)
+    parts = urlsplit(url)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    sslmode = next((v for k, v in pairs if k == "sslmode"), None)
+
+    kept = [(k, v) for k, v in pairs if k not in _LIBPQ_ONLY_PARAMS]
     # SQLAlchemy's own prepared-statement cache — a separate knob from asyncpg's
     # statement_cache_size below, and one the dialect only reads off the URL.
-    url = _with_query(url, prepared_statement_cache_size="0")
+    kept.append(("prepared_statement_cache_size", "0"))
+    url = urlunsplit(parts._replace(query=urlencode(kept)))
+
     connect_args: dict = {
         # Neon scales to zero, so the first query after idle pays a cold start.
         "timeout": 30,
@@ -62,8 +69,9 @@ def _engine_kwargs(url: str) -> tuple[str, dict]:
         # endpoint; this makes the pooled one survivable rather than silently broken.
         "statement_cache_size": 0,
     }
-    if _wants_tls(removed.get("sslmode"), urlsplit(url).hostname):
+    if _wants_tls(sslmode, url):
         connect_args["ssl"] = ssl.create_default_context()
+
     return url, {
         "connect_args": connect_args,
         # Neon drops idle connections; recycle before it does.
@@ -71,7 +79,7 @@ def _engine_kwargs(url: str) -> tuple[str, dict]:
     }
 
 
-_url, _kwargs = _engine_kwargs(_settings.database_url)
+_url, _kwargs = engine_kwargs(_settings.database_url)
 
 engine = create_async_engine(_url, echo=False, pool_pre_ping=True, **_kwargs)
 

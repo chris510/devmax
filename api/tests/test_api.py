@@ -1,12 +1,12 @@
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
 from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, Session
 from app.services import llm
 from app.services.llm import LLMError, ScoreResult
-from tests.conftest import API_HEADERS, CRON_HEADERS, make_card
+from tests.conftest import API_HEADERS, CRON_HEADERS, local_today, make_card
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ async def test_internal_endpoint_accepts_cron_secret(client):
 
 
 async def test_due_excludes_desk_cards(client, db):
-    today = date.today()
+    today = local_today()
     db.add(make_card(topic="Consistent hashing", next_review_at=today))
     db.add(make_card(topic="Multi-source BFS", delivery_mode="desk", next_review_at=today))
     await db.commit()
@@ -66,7 +66,7 @@ async def test_due_excludes_desk_cards(client, db):
 
 
 async def test_due_orders_most_overdue_first(client, db):
-    today = date.today()
+    today = local_today()
     db.add(make_card(topic="Due today", next_review_at=today))
     db.add(make_card(topic="Three days over", next_review_at=today - timedelta(days=3)))
     await db.commit()
@@ -78,7 +78,7 @@ async def test_due_orders_most_overdue_first(client, db):
 
 
 async def test_resumable_reflects_stored_draft(client, db):
-    card = make_card(next_review_at=date.today())
+    card = make_card(next_review_at=local_today())
     db.add(card)
     await db.commit()
 
@@ -164,7 +164,7 @@ async def test_completing_a_session_applies_sm2_and_updates_the_card(client, db,
     assert card.repetitions == 2
     assert card.last_score == 4
     assert card.mastery_summary == "solid"
-    assert card.next_review_at == date.today() + timedelta(days=6)
+    assert card.next_review_at == local_today() + timedelta(days=6)
 
 
 async def test_answering_a_complete_session_returns_409(client, db, stub_llm):
@@ -251,7 +251,7 @@ async def test_trigger_review_no_ops_outside_the_window(client, db, monkeypatch)
         "now_in",
         lambda tz: datetime(2026, 7, 24, 3, 0, tzinfo=ZoneInfo(tz)),
     )
-    db.add(make_card(next_review_at=date.today()))
+    db.add(make_card(next_review_at=local_today()))
     await db.commit()
 
     body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
@@ -267,7 +267,7 @@ async def test_trigger_review_no_ops_when_nothing_due(client, db, monkeypatch):
     monkeypatch.setattr(
         internal, "now_in", lambda tz: datetime(2026, 7, 24, 7, 30, tzinfo=ZoneInfo(tz))
     )
-    db.add(make_card(next_review_at=date.today() + timedelta(days=5)))
+    db.add(make_card(next_review_at=local_today() + timedelta(days=5)))
     await db.commit()
 
     body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
@@ -299,7 +299,7 @@ async def test_trigger_review_never_calls_claude(client, db, monkeypatch):
 
     monkeypatch.setattr(internal, "send_push", _push)
 
-    card = make_card(next_review_at=date.today() - timedelta(days=3))
+    card = make_card(next_review_at=local_today() - timedelta(days=3))
     db.add(card)
     await db.commit()
 

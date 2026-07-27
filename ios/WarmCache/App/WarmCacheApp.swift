@@ -20,9 +20,9 @@ struct WarmCacheApp: App {
                     await state.applyDebugRoute()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    // Backgrounding mid-answer must not lose the transcript. Flush
-                    // rather than persist: the debounce in persistDraft is exactly
-                    // what we can't afford to wait out here.
+                    // Backgrounding mid-answer must not lose the transcript, and the
+                    // debounce updateDraft applies is exactly what can't be waited
+                    // out here — so flush rather than schedule.
                     if phase != .active { state.flushDraft() }
                 }
         }

@@ -9,7 +9,7 @@ enum APIError: Error {
     case status(Int)
 }
 
-/// Decode a timestamp the backend actually sends.
+/// Timestamps as the backend actually sends them.
 ///
 /// `JSONDecoder.DateDecodingStrategy.iso8601` uses `.withInternetDateTime` alone,
 /// which rejects fractional seconds — and the backend emits them. `started_at` is a
@@ -18,29 +18,40 @@ enum APIError: Error {
 /// which is why all three Card History states rendered blank against a real server
 /// while working fine on `MockAPI`.
 ///
+/// Two formatters because `ISO8601DateFormatter` can't make fractional seconds
+/// optional. Both are `static let`, so each is built once, not per decode.
+///
 /// `WarmCacheTests/Fixtures/card_detail.json` is a response captured from the running
 /// app and pins this.
-func wireDate(from decoder: Decoder) throws -> Date {
-    let text = try decoder.singleValueContainer().decode(String.self)
-    if let date = ISO8601.fractional.date(from: text) { return date }
-    if let date = ISO8601.plain.date(from: text) { return date }
-    throw DecodingError.dataCorrupted(
-        .init(codingPath: decoder.codingPath, debugDescription: "unparseable timestamp: \(text)")
-    )
-}
-
-enum ISO8601 {
-    static let fractional: ISO8601DateFormatter = {
+enum WireDate {
+    private static let fractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    static let plain: ISO8601DateFormatter = {
+    private static let plain: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+
+    static func parse(_ text: String) -> Date? {
+        fractional.date(from: text) ?? plain.date(from: text)
+    }
+
+    static func decode(_ decoder: Decoder) throws -> Date {
+        let text = try decoder.singleValueContainer().decode(String.self)
+        guard let date = parse(text) else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "unparseable timestamp: \(text)"
+                )
+            )
+        }
+        return date
+    }
 }
 
 protocol WarmCacheAPI {
@@ -66,7 +77,7 @@ struct LiveAPI: WarmCacheAPI {
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
-        d.dateDecodingStrategy = .custom { try wireDate(from: $0) }
+        d.dateDecodingStrategy = .custom(WireDate.decode)
         return d
     }()
 
@@ -169,7 +180,7 @@ struct LiveAPI: WarmCacheAPI {
 /// misconfigured build, and the value it used to fall back to is published in this
 /// repo. Missing config produces a clean 401 instead of a mystery.
 enum APIConfig {
-    static let defaultBaseURL = "http://localhost:8083"
+    static let defaultBaseURL = URL(string: "http://localhost:8083")!
 
     static func info(_ key: String) -> String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
@@ -180,9 +191,8 @@ enum APIConfig {
 
     static var client: WarmCacheAPI {
         if DebugFlags.shared.useMockAPI { return MockAPI.shared }
-        let base = info("WCBaseURL") ?? defaultBaseURL
         return LiveAPI(
-            baseURL: URL(string: base) ?? URL(string: defaultBaseURL)!,
+            baseURL: info("WCBaseURL").flatMap(URL.init(string:)) ?? defaultBaseURL,
             apiKey: info("WCAPIKey") ?? ""
         )
     }

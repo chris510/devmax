@@ -18,9 +18,21 @@ from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
 from app.db import get_session  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Card, Settings  # noqa: E402
+from app.routers.deps import now_in  # noqa: E402
 
 API_HEADERS = {"X-API-Key": "test-api-key"}
 CRON_HEADERS = {"X-Cron-Secret": "test-cron-secret"}
+
+
+def local_today() -> date:
+    """The calendar day the app compares due dates against.
+
+    Every due comparison goes through `routers/deps.local_today`, which reads the
+    settings timezone — not the runner's. Using `date.today()` in a test makes it
+    pass or fail depending on the time of day: on a UTC machine the two disagree
+    from 00:00 to 07:00 UTC, which is most of a Pacific afternoon.
+    """
+    return now_in(Settings().timezone).date()
 
 # The suite runs on in-memory SQLite by default — fast, hermetic, no services.
 # Point TEST_DATABASE_URL at an already-migrated Postgres database to run the

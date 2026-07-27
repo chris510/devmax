@@ -2,10 +2,12 @@ import asyncio
 from logging.config import fileConfig
 
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from alembic import context
 from app import models  # noqa: F401  — registers tables on SQLModel.metadata
 from app.config import get_settings
+from app.db import engine_kwargs
 
 config = context.config
 if config.config_file_name is not None:
@@ -37,7 +39,13 @@ def _run(connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(get_settings().database_url)
+    # Same URL normalisation the app uses: Neon's connection string carries
+    # libpq-only parameters that asyncpg rejects, and Fly's release_command runs
+    # `alembic upgrade head` against exactly that string. Without this, the first
+    # deploy fails here — before any app machine starts.
+    url, kwargs = engine_kwargs(get_settings().database_url)
+    # One connection, no pool: this process exits as soon as the migration lands.
+    engine = create_async_engine(url, poolclass=NullPool, **kwargs)
     async with engine.connect() as connection:
         await connection.run_sync(_run)
     await engine.dispose()
