@@ -158,3 +158,30 @@ unreachable, so this is inert today. Fixing it properly needs a `push_log` table
 
 **Trigger condition: if the cron moves to hourly, or `reviews_per_day` rises above
 the number of daily fires, add `push_log` first.**
+
+---
+
+## Deviation from the design handoff, not `spec.md`
+
+`design_handoff_devmax_initial/README.md` §Assets says: *"None. No images, no
+icons, no SVG."* That is true of every screen — the codebase still has zero
+`Image( )` calls, and the `✕ ← + ▼ ▍` glyphs are text characters. But an iOS app
+needs an icon, and the handoff never specified one, so it came from a later icon
+kit that now lives in `assets/app_icon/` (the "Cache stack" mark: three offset
+rounded bars, bottom bar in the accent `#57b6c2`, so icon and UI stay in sync).
+
+Three things about how it's wired:
+
+- **Only the dark master is shipped.** `AppIcon.appiconset` carries a single
+  1024 in the default slot. iOS derives the dark and tinted home-screen variants
+  itself, which flat art with high foreground/background contrast handles well.
+  The kit's light pair and monochrome SVG are committed as delivered but unused.
+- **The catalog PNG is RGB, not RGBA.** Every PNG in the kit carries an alpha
+  channel (uniformly opaque, but present), and App Store Connect rejects a
+  marketing icon that has one. The copy under `AppIcon.appiconset` is re-encoded
+  to colortype 2 and is otherwise pixel-identical to the kit master. **Re-export
+  from `assets/app_icon/svg/` and you must strip alpha again.**
+- **Nothing was pre-rounded.** iOS applies the squircle mask; the
+  `devmax-icon-rounded-*.png` files in the kit are for platforms that don't.
+
+The launch screen is still a bare `#0D0F11` with no image, per the handoff.

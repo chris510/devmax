@@ -90,6 +90,7 @@ devmax/
 │   ├── README.md                    # Design handoff — authoritative for iOS
 │   ├── prototype/                   # HTML reference (read for exact values, don't lift)
 │   └── screenshots/                 # 18 states; the fidelity bar
+├── assets/app_icon/                 # Icon kit — `svg/` is the re-export source of truth
 ├── api/                             # Python 3.12 / FastAPI / SQLModel / Postgres / Railway
 │   ├── app/services/scheduler.py    # SM-2 — pure, the highest-value test surface
 │   ├── app/services/llm.py          # Question gen + scoring (Anthropic)
