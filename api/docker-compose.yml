@@ -1,0 +1,27 @@
+# Pinned so this never collides with sibling repos whose compose dir is also `api/`.
+# Port 5435 continues the ~/dev contract: wyd 5432, bit 5433, plate 5434.
+name: warmcache-api
+
+services:
+  postgres:
+    # Neon runs Postgres 17. Matching it here is the point of this file — the
+    # migration's JSONB column and partial index have only ever been exercised
+    # as SQLite variants in tests, so this is where they first meet real
+    # Postgres. Do not downgrade to match a sibling repo.
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: warmcache
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d warmcache"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:

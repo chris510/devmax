@@ -4,6 +4,7 @@ from datetime import timedelta
 import pytest
 
 from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, Session
+from app.routers import internal
 from app.services import llm
 from app.services.llm import LLMError, ScoreResult
 from tests.conftest import API_HEADERS, CRON_HEADERS, local_today, make_card
@@ -258,15 +259,7 @@ async def test_trigger_review_no_ops_outside_the_window(client, db, monkeypatch)
     assert body == {"sent": False, "reason": "outside_window", "card_id": None, "due_count": None}
 
 
-async def test_trigger_review_no_ops_when_nothing_due(client, db, monkeypatch):
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from app.routers import internal
-
-    monkeypatch.setattr(
-        internal, "now_in", lambda tz: datetime(2026, 7, 24, 7, 30, tzinfo=ZoneInfo(tz))
-    )
+async def test_trigger_review_no_ops_when_nothing_due(client, db, in_window):
     db.add(make_card(next_review_at=local_today() + timedelta(days=5)))
     await db.commit()
 
@@ -274,16 +267,8 @@ async def test_trigger_review_no_ops_when_nothing_due(client, db, monkeypatch):
     assert body["reason"] == "nothing_due"
 
 
-async def test_trigger_review_never_calls_claude(client, db, monkeypatch):
+async def test_trigger_review_never_calls_claude(client, db, in_window, monkeypatch):
     """Generating a question for a push that may never be opened wastes tokens."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from app.routers import internal
-
-    monkeypatch.setattr(
-        internal, "now_in", lambda tz: datetime(2026, 7, 24, 7, 30, tzinfo=ZoneInfo(tz))
-    )
 
     async def _fail(**_kwargs):
         raise AssertionError("trigger-review must not call the LLM")
@@ -308,6 +293,34 @@ async def test_trigger_review_never_calls_claude(client, db, monkeypatch):
     assert body["due_count"] == 1
     assert sent[0]["title"] == "1 due"
     assert sent[0]["body"] == "Consistent hashing"
+
+
+async def test_undelivered_push_does_not_mark_the_card_as_pushed(
+    client, db, in_window, monkeypatch
+):
+    """A failed delivery must not later be counted against the user.
+
+    last_pushed_at is what check-missed reads to decide a review was ignored.
+    Setting it when APNs reached nobody would inflate missed_count with our own
+    delivery failures — and missed_count is a signal about the user.
+    """
+
+    async def _push_reaching_nobody(**_kwargs):
+        return 0
+
+    monkeypatch.setattr(internal, "send_push", _push_reaching_nobody)
+
+    card = make_card(next_review_at=local_today() - timedelta(days=3))
+    db.add(card)
+    await db.commit()
+
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+    assert body["sent"] is False
+    assert body["reason"] == "no_devices"
+    assert body["due_count"] == 1
+
+    await db.refresh(card)
+    assert card.last_pushed_at is None
 
 
 async def test_check_missed_increments_count_without_touching_ease_factor(client, db):

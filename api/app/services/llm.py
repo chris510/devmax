@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -19,8 +20,20 @@ log = logging.getLogger(__name__)
 FOLLOW_UP_LOW = 2
 FOLLOW_UP_HIGH = 3
 
-# Byte-identical across every call, so it's the cache breakpoint. Everything
-# card-specific goes in the user turn, after this block.
+# Retries match the SDK's own default, pinned so a future SDK change can't
+# quietly alter how long a session can stall. The timeout is the real
+# departure: 600s is the default and is absurd for a session the user is
+# sitting through — a hung scoring call has to fail while they still have the
+# phone in their hand.
+SDK_MAX_RETRIES = 2
+SDK_TIMEOUT_SECONDS = 45.0
+
+# Byte-identical across every call — but *not* a prompt-cache breakpoint. The
+# minimum cacheable prefix is 1024 tokens on Sonnet 5 and 4096 on Haiku 4.5;
+# this rubric is ~450 and QUESTION_RUBRIC ~180, so a `cache_control` marker here
+# would silently no-op (no error, just cache_read=0 forever). Padding to reach
+# the floor would cost more input tokens per call than caching could return at
+# this volume. The cache_* fields in the log line below prove it stays at zero.
 SCORING_RUBRIC = """\
 You are grading a spaced-repetition recall session for a senior backend engineer \
 preparing for interviews at Anthropic, OpenAI, and Google.
@@ -108,8 +121,19 @@ class ScoreResult:
     mastery_summary: str = ""
 
 
+@lru_cache
 def _client() -> AsyncAnthropic:
-    return AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+    """One client per process — each construction opens its own connection pool.
+
+    Cached rather than per-call: the previous version leaked an httpx pool on
+    every request. Mirrors the ``get_settings`` caching in app.config, and is
+    safe for the same reason — the API key is fixed for the process lifetime.
+    """
+    return AsyncAnthropic(
+        api_key=get_settings().anthropic_api_key,
+        max_retries=SDK_MAX_RETRIES,
+        timeout=SDK_TIMEOUT_SECONDS,
+    )
 
 
 async def _complete(
@@ -127,13 +151,14 @@ async def _complete(
     below should never fail — the retry is a backstop for a model or config that
     doesn't support structured outputs. First call with a new schema pays a
     one-time compilation cost; it's cached for 24h after that.
+
+    Transport failures are *not* retried here; the SDK already did that (see
+    SDK_MAX_RETRIES) and anything reaching the ``except`` below has exhausted it.
     """
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": [
-            {"type": "text", "text": rubric, "cache_control": {"type": "ephemeral"}},
-        ],
+        "system": [{"type": "text", "text": rubric}],
         "messages": [{"role": "user", "content": user_content}],
         "output_config": {"format": {"type": "json_schema", "schema": schema}},
     }
@@ -149,7 +174,7 @@ async def _complete(
         started = time.monotonic()
         try:
             response = await client.messages.create(**kwargs)
-        except Exception as exc:  # network, rate limit, overload
+        except Exception as exc:
             raise LLMError(f"{model} call failed: {exc}") from exc
 
         elapsed_ms = int((time.monotonic() - started) * 1000)

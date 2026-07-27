@@ -16,12 +16,12 @@ Sessions are **1–3 minutes, used half-awake or in line.** Every decision optim
 streaks, no XP, no badges, and no celebration animations. Do not add them.
 
 **Status:** backend and iOS client both built; being prepared for a first deploy. The
-backend has 107 passing tests against a real ASGI app, green on both SQLite and Postgres, and
-the schema has been applied to a real Postgres 16. The iOS client has been compared
-state-by-state against the design screenshots in a 390×844 simulator, but the most recent
-round of fixes was written without a Swift toolchain and has not been compiled. Not yet
-deployed, and no live Anthropic or APNs call has been made. `docs/RUNBOOK.md` is the path
-from here to a push on a phone.
+backend has 107 passing tests against a real ASGI app, green on both SQLite and Postgres.
+The whole stack has since been exercised locally end to end: schema applied to a real
+Postgres 17, live Anthropic calls through both prompts, the iOS client compiled and run
+against the real API on simulator and on a physical device, and a real APNs push
+delivered to that device. Not yet deployed. `docs/RUNBOOK.md` is the path from here to a
+push on a phone.
 
 ## The two source documents (both authoritative)
 
@@ -125,14 +125,24 @@ Tweaks are launch environment variables, so any state — including failure path
 command away:
 
 ```sh
-xcrun simctl launch --setenv WC_ROUTE=submit-failure --setenv WC_FAIL_SUBMIT=1 \
-  <device> com.christrinh.warmcache
+SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
+  xcrun simctl launch <device> com.christrinh.warmcache
 ```
+
+`simctl` passes an environment variable to the app only when it's prefixed
+`SIMCTL_CHILD_`; the `--setenv` flag it once accepted is gone, and today's
+`simctl` reads it as the device argument and fails with `Invalid device`.
 
 `WC_ROUTE`: `question` `recording` `text` `followup` `score` `resume` `submit-failure`
 `history` `history-empty` `settings` `add` `filter`. Also `WC_LOAD` (`auto|loading|error`)
 and boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
 `WC_SIM_SPEECH`. Forced failures succeed on the retry, so each path walks end to end.
+
+`WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
+`WC_BASE_URL` overrides where it points, which is how a device build reaches the Mac
+(`http://<mac-lan-ip>:8083`, set in the Xcode scheme) without a personal address
+landing in committed source. The server must be on `--host 0.0.0.0` for that;
+bound to localhost it is unreachable from the phone.
 
 **Screenshot the state and compare it to its PNG in `screenshots/` before calling a UI change
 done.** That is the acceptance test.
@@ -144,26 +154,35 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **Not yet deployed.** Railway, Anthropic, and APNs accounts don't exist yet. Everything
-  needed is written down — see `docs/RUNBOOK.md`, which is the ordered path from a clean
-  repo to a push arriving on a phone.
-- **No live Anthropic or APNs call has been made.** Both are still mocked everywhere;
-  `services/llm.py` executing against the real API for the first time is a deliberate,
-  manual step in the runbook rather than something to discover when a push arrives.
-- **The iOS client has not been compiled since the last round of changes.** They were
-  written on Linux with no Swift toolchain. `WarmCacheTests/WireFormatTests.swift` decodes a
-  response captured from the running backend, which is the substitute for a compiler on
-  anything wire-format-shaped — but the Swift itself is unverified until you build it.
+- **`cards.json` is missing.** `spec.md` §Seeding says the 111-card study plan is "already
+  generated," but it isn't in the repo. `app/seed.py` implements the documented contract;
+  until the file lands, `--fixtures` seeds only the four cards the screenshots depict — three
+  of them conversational, so the push rotation exhausts in days.
+- **Not yet deployed.** No Railway project exists yet. `docs/RUNBOOK.md` is the ordered path
+  from a clean repo to a push arriving on a phone.
+- **Anthropic and APNs have both been exercised for real, locally.** `services/llm.py` runs
+  against the live API (see `scripts/effort_sweep.py`, which is also how `scoring_effort`
+  was chosen), and a real APNs push has reached a physical iPhone from a local server using
+  a team-scoped key configured for Sandbox & Production. Its ID and the `.p8` live in
+  `api/.env`, never in the repo; the `.p8` cannot be re-downloaded, so if it is lost, revoke
+  and reissue (Apple allows 2 keys per team).
+- **APNs production is still untested.** A TestFlight build gets a *production* token, so
+  `APNS_USE_SANDBOX` must flip to `false` and `WC_APS_ENVIRONMENT` to `production` together
+  — a mismatch fails silently as `BadDeviceToken`.
+- **The pooler is untested.** The schema is verified against real Postgres, but a hosted
+  Postgres fronted by pgbouncer is a known friction point for asyncpg and prepared
+  statements. Smoke-test one real connection before trusting a deploy.
 - **`alembic revision --autogenerate` is disabled on purpose** (`target_metadata = None`).
   `SQLModel.metadata` diverges from the handwritten migration — the four CHECK constraints,
   every `server_default`, TEXT/SMALLINT vs VARCHAR/INTEGER — so autogenerate would emit a
   revision dropping the constraints. Write revisions by hand and apply them to a real
   Postgres before trusting them.
 
-The migration *has* now been applied to a real Postgres 16: the partial index, the JSONB
+The migration *has* now been applied to a real Postgres: the partial index, the JSONB
 column, the `::jsonb` settings seed, and all four CHECK constraints were verified, and the
-whole suite runs against Postgres via `TEST_DATABASE_URL` as well as SQLite. That is how the
-`timestamptz` bug in `models.py` was found — see `docs/DEVIATIONS.md` §6.
+whole suite runs against Postgres via `TEST_DATABASE_URL` as well as SQLite. `api/docker-compose.yml`
+brings that Postgres up locally on port 5435. That is how the `timestamptz` bug in
+`models.py` was found — see `docs/DEVIATIONS.md` §6.
 
 Where the code and `spec.md` disagree, `docs/DEVIATIONS.md` records why.
 
