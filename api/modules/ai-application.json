@@ -1,0 +1,6 @@
+[
+  { "topic": "Permission-filtered retrieval: ACLs in a vector or search index", "category": "AI Application", "target_week": 1 },
+  { "topic": "Document ingestion: chunking strategy, OCR failures, and re-index on update", "category": "AI Application", "target_week": 1 },
+  { "topic": "Hybrid search: combining BM25 and dense retrieval with reranking", "category": "AI Application", "target_week": 2 },
+  { "topic": "Elasticsearch write path: segments, refresh interval, and near-real-time search", "category": "AI Application", "target_week": 2 }
+]

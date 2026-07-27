@@ -68,7 +68,7 @@ Return only the structured fields. No preamble, no code fences, no commentary.\
 
 QUESTION_RUBRIC = """\
 You are running a spaced-repetition recall session for a senior backend engineer \
-preparing for interviews at Anthropic, OpenAI, and Google.
+preparing for system design interviews across product and infrastructure companies.
 
 Generate ONE question about the given topic that forces the engineer to reconstruct \
 the mechanism from memory rather than recite a definition. Prefer concrete scenarios \

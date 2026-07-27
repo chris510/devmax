@@ -1,0 +1,5 @@
+[
+  { "topic": "Time-series databases: rollups, retention, and label cardinality blowup", "category": "Infra", "target_week": 1 },
+  { "topic": "API gateway vs load balancer vs service mesh: what each layer owns", "category": "Infra", "target_week": 1 },
+  { "topic": "Durable workflow orchestration vs choreographed sagas", "category": "Infra", "target_week": 2 }
+]

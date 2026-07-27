@@ -2,8 +2,11 @@
 
 Two sources:
 
-* ``cards.json`` — the 111-card study plan (spec.md §Seeding). Six weeks, 84
-  conversational and 27 desk cards. This is what you seed a real database with.
+* ``cards.json`` — the 126-card study plan (spec.md §Seeding, docs/CURRICULUM.md).
+  Six weeks, 99 conversational and 27 desk cards. This is what you seed a real
+  database with.
+* ``modules/*.json`` — company-shaped card sets in the same schema, seeded on
+  demand when a loop is scheduled rather than as part of the daily rotation.
 * ``--fixtures`` — the three cards from the design prototype, with their invented
   session history. Every screenshot in the design handoff depicts these, so this
   is what makes the designs reproducible against a real server during dev. Never
@@ -14,7 +17,7 @@ Two sources:
 
 Due dates are staggered across each card's target week at the configured
 ``reviews_per_day`` rate, so seeding the whole plan puts one session's worth in
-the queue on day one rather than all 111 cards. Record the ``--start-date`` you
+the queue on day one rather than the whole cohort. Record the ``--start-date`` you
 use: reusing it keeps later loads aligned to the same week boundaries.
 """
 

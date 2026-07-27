@@ -1,0 +1,5 @@
+[
+  { "topic": "Message storage at scale: partitioning by channel and time bucketing", "category": "Realtime Social", "target_week": 1 },
+  { "topic": "Presence at scale: heartbeats, gossip, and eventual accuracy", "category": "Realtime Social", "target_week": 1 },
+  { "topic": "Connection state: sticky routing, reconnect, and missed-message backfill", "category": "Realtime Social", "target_week": 2 }
+]
