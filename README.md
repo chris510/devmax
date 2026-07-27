@@ -49,6 +49,19 @@ in-progress draft. The seeder refuses any non-local database without `--force`.
 The three access-gating settings have no defaults — the app will not start without
 `DATABASE_URL`, `API_KEY`, and `CRON_SECRET`, and refuses known placeholder values.
 
+Two things worth knowing before you run it locally:
+
+- **Running the app needs real Postgres**, not SQLite. Migration 0001 creates a JSONB
+  column, so `alembic upgrade head` fails on SQLite with a `CompileError`. (The *test*
+  suite runs on SQLite happily — it builds tables from `SQLModel.metadata` and never
+  touches the migration.)
+- **Only the two LLM endpoints need `ANTHROPIC_API_KEY`.** Everything else — the due
+  queue, card history, settings, adding cards, both `/internal/*` crons — runs with no
+  Anthropic or APNs credentials at all. Starting a session without a key returns a
+  clean `503 {"detail":"scoring_unavailable"}`, and an unconfigured APNs makes
+  `trigger-review` report `{"sent": false, "reason": "no_devices"}` without stamping
+  `last_pushed_at`.
+
 ```sh
 uv run pytest        # 107 tests; Anthropic and APNs are mocked, no live calls
 uv run ruff check .  # `.`, not `app tests` — the narrower form skips alembic/

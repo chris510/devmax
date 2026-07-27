@@ -250,10 +250,21 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
    (check the device console for `warmcache: APNs registration failed`) or the build
    is still in mock mode.
 3. Confirm `GET /cards/due` is non-empty.
-4. Don't wait for the cron. Widen a window to cover now via `PUT /settings`, run the
-   Trigger review workflow manually, expect `{"sent": true, "card_id": ...,
-   "due_count": N}` and a banner. **Restore the real windows immediately** — see
-   §Scheduling.
+4. Don't wait for the cron. Widen a window to cover now, run the Trigger review
+   workflow manually, expect `{"sent": true, "card_id": ..., "due_count": N}` and a
+   banner. `PUT /settings` replaces the whole object and each window needs all four
+   keys — `label`, `on`, `from`, `to`:
+
+   ```sh
+   curl -sS -X PUT -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+     -d '{"reviews_per_day":2,"timezone":"America/Los_Angeles","windows":[
+          {"label":"Morning","on":true,"from":"00:00","to":"23:59"},
+          {"label":"Evening","on":false,"from":"21:00","to":"22:30"}]}' \
+     $B/settings
+   ```
+
+   **Restore the real windows immediately** (`07:10–08:30` and `21:00–22:30`, both
+   `on`) — a window left wide open breaks the DST reasoning in §Scheduling.
 5. Tap the notification → it should deep-link into that card. Answer by voice.
 6. Confirm an unattended scheduled fire at 15:20 UTC.
 
