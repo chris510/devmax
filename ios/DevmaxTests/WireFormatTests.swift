@@ -143,7 +143,7 @@ final class WireFormatTests: XCTestCase {
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
 
-        guard case .complete(let score, _, _, let interval, let practice) = outcome else {
+        guard case .complete(let score, _, _, let interval, let practice, _, _) = outcome else {
             return XCTFail("expected a completed outcome, got \(outcome)")
         }
         XCTAssertEqual(score, 4)
@@ -162,10 +162,36 @@ final class WireFormatTests: XCTestCase {
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
 
-        guard case .complete(_, _, _, _, let practice) = outcome else {
+        guard case .complete(_, _, _, _, let practice, let reattempt, let prompt) = outcome else {
             return XCTFail("expected a completed outcome, got \(outcome)")
         }
         XCTAssertFalse(practice)
+        // Same reasoning for the coached re-attempt: a server that predates it
+        // omits the field, and the affordance must stay hidden rather than offer a
+        // turn the server would reject.
+        XCTAssertFalse(reattempt)
+        XCTAssertNil(prompt)
+    }
+
+    func testACompletedAnswerCarriesTheReattemptOffer() throws {
+        // Server-computed from `mechanism_accuracy <= 2`. The client never receives
+        // the axis itself — the score block shows one numeral, the composite.
+        let json = Data(#"""
+        {"status":"complete","score":1,"feedback":"The mechanism is arc ownership.",
+         "next_review_at":"2026-07-29","interval_days":1,"practice":false,
+         "reattempt_offered":true,"reattempt_prompt":"In your words — What moves?"}
+        """#.utf8)
+
+        let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
+
+        guard case .complete(let score, _, _, _, _, let reattempt, let prompt) = outcome else {
+            return XCTFail("expected a completed outcome, got \(outcome)")
+        }
+        XCTAssertEqual(score, 1)
+        XCTAssertTrue(reattempt)
+        // The server composes the prompt: on a resumed follow-up session the client
+        // cannot reconstruct it, because its only `.question` entry is the probe.
+        XCTAssertEqual(prompt, "In your words — What moves?")
     }
 
     // MARK: - Coverage's tier vocabulary

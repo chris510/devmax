@@ -15,13 +15,55 @@ from app.models import (
     Session,
 )
 from app.routers.deps import local_today
-from app.schemas import AnswerIn, CompleteOut, DraftUpdate, FollowUpOut, SessionStart
+from app.schemas import (
+    AnswerIn,
+    CompleteOut,
+    DraftUpdate,
+    FollowUpOut,
+    ReattemptOut,
+    SessionStart,
+)
 from app.services import llm
 from app.services.scheduler import apply_sm2, quality_for
 
 router = APIRouter(tags=["sessions"])
 
 RECENT_QUESTION_LIMIT = 3
+
+# The mechanism band where the rubric states the correct answer outright, and so the
+# only band where there is anything to re-attempt. Same threshold the scheduler fails
+# on (`scheduler.MECHANISM_PASS`), but they are independent decisions — one is "was
+# this a retention failure", the other is "is coaching available". Do not collapse.
+REATTEMPT_MAX_MECHANISM = 2
+
+# Turn 3 re-asks the card's own question rather than generating a new one: the
+# re-attempt is the same retrieval, now informed. Composed server-side and sent to
+# the client, so what is displayed is what the answer is graded against.
+REATTEMPT_PREFACE = "In your words — "
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize a timestamp read back from the database before comparing it.
+
+    Every timestamp is written tz-aware, but SQLite silently drops `tzinfo` on read
+    while Postgres keeps it — the same divergence `models.TZ_DATETIME` documents. A
+    bare `<` between the two raises TypeError, so comparisons normalize first.
+    """
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _reattempt_eligible(session: Session) -> bool:
+    """Whether a completed session may still be coached.
+
+    One predicate, two callers: `submit_answer` decides whether to offer the link
+    and `submit_reattempt` decides whether to honour it. Written once so an offer
+    the endpoint would 409 is unrepresentable — DEVIATIONS §15 shows this band does
+    move, and it must move in both places at once.
+    """
+    return (
+        session.mechanism_accuracy is not None
+        and session.mechanism_accuracy <= REATTEMPT_MAX_MECHANISM
+    )
 
 
 async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
@@ -209,10 +251,90 @@ async def submit_answer(
     # saved, SM-2 not applied — would leave the card permanently stuck.
     await db.commit()
 
+    eligible = _reattempt_eligible(session)
     return CompleteOut(
         score=result.score or 0,
         feedback=result.feedback,
         next_review_at=next_review,
         interval_days=interval,
         practice=session.practice,
+        reattempt_offered=eligible,
+        reattempt_prompt=REATTEMPT_PREFACE + session.question_asked if eligible else None,
     )
+
+
+@router.post("/sessions/{session_id}/reattempt", response_model=ReattemptOut)
+async def submit_reattempt(
+    session_id: uuid.UUID, body: AnswerIn, db: AsyncSession = Depends(get_session)
+) -> ReattemptOut:
+    """Turn 3: a coached re-attempt, after the correction has already been given.
+
+    This endpoint must never touch `ease_factor`, `interval_days`, `repetitions`, or
+    `next_review_at`, and never touch `session.score` or the three axis columns. It
+    runs *after* the session is complete and SM-2 is already applied — a turn that
+    happens once the model has stated the correct mechanism measures coached
+    performance, and feeding that to the scheduler would inflate the interval by the
+    ease factor on exactly the cards just gotten wrong.
+
+    See docs/multi-turn-coaching-design.md §4. Nothing here is load-bearing on the
+    LLM behaving: the write set below is the guarantee.
+    """
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    # A re-attempt only exists after a scored, completed session. Any other status
+    # means turn 2 never landed, so there is no correction to re-attempt.
+    if session.status != STATUS_COMPLETE:
+        raise HTTPException(status_code=409, detail="session is not complete")
+    if session.reattempt_used:
+        raise HTTPException(status_code=409, detail="re-attempt already used")
+    if not _reattempt_eligible(session):
+        raise HTTPException(status_code=409, detail="session is not eligible for a re-attempt")
+    # An empty body would spend the one re-attempt on nothing: the model scores it 0
+    # and rewrites the card's mastery summary on that basis. The client already
+    # guards this; the endpoint must too, because the write is irreversible.
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="re-attempt text is empty")
+
+    card = await db.get(Card, session.card_id)
+    if card is None:  # pragma: no cover — FK guarantees this
+        raise HTTPException(status_code=404, detail="card not found")
+
+    # The offer expires when the card is reviewed again. Turn 3 rewrites
+    # `mastery_summary`, which is live context for the *next* `score_answer` — so a
+    # re-attempt against a stale session would let an old, already-superseded
+    # session's coaching overwrite a newer review's assessment, and that is the one
+    # indirect route by which turn 3 could reach a future scheduling decision.
+    if card.last_reviewed_at is not None and session.ended_at is not None:
+        if _as_utc(card.last_reviewed_at) > _as_utc(session.ended_at):
+            raise HTTPException(status_code=409, detail="card has been reviewed since")
+
+    # Scored before anything is written, matching `submit_answer` — a failed call
+    # leaves the row untouched and the client can retry. Unlike `submit_answer`,
+    # nothing is at risk either way: the score is already banked and the schedule
+    # already applied.
+    result = await llm.score_reattempt(
+        topic=card.topic,
+        question_asked=session.question_asked,
+        feedback_given=session.feedback,
+        reattempt_answer=body.text,
+        # `_reattempt_eligible` guarantees this is set and <= 2.
+        unaided_mechanism=session.mechanism_accuracy or 0,
+    )
+
+    session.reattempt_answer = body.text
+    session.reattempt_mechanism_accuracy = result.mechanism_accuracy
+    session.reattempt_used = True
+    session.draft_text = ""
+
+    # The entire card-side write. `last_score` and the three `last_*` axes stay put:
+    # they describe the unaided attempt, which is what Coverage and the tiers mean.
+    if result.mastery_summary:
+        card.mastery_summary = result.mastery_summary
+        card.updated_at = datetime.now(UTC)
+        db.add(card)
+
+    db.add(session)
+    await db.commit()
+
+    return ReattemptOut(mastery_summary=card.mastery_summary)

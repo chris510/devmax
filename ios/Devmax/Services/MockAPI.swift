@@ -15,6 +15,9 @@ final class DebugFlags: ObservableObject {
     @Published var useMockAPI: Bool
     @Published var loadState: LoadState
     @Published var failSubmit: Bool
+    /// Forces a failing mechanism score, which is what makes the coached
+    /// re-attempt reachable — the affordance only appears below the band.
+    @Published var failedMechanism: Bool
     @Published var failAdd: Bool
     @Published var emptyQueue: Bool
     @Published var textFirst: Bool
@@ -54,6 +57,7 @@ final class DebugFlags: ObservableObject {
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         railStyle = RailStyle(rawValue: env["WC_RAIL_STYLE"] ?? "") ?? .dots
         failSubmit = flag("WC_FAIL_SUBMIT")
+        failedMechanism = flag("WC_FAILED_MECHANISM")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
         textFirst = flag("WC_TEXT_FIRST")
@@ -304,15 +308,33 @@ actor MockAPI: DevmaxAPI {
         // Sprint runs vary so the recap has something to show; a daily review
         // keeps the fixture the Conversation screenshots were taken against.
         let scores = [3, 4, 2, 2, 3, 3]
-        let score = sessionIsPractice ? scores[completions % scores.count] : 3
+        var score = sessionIsPractice ? scores[completions % scores.count] : 3
+        if await MainActor.run(body: { DebugFlags.shared.failedMechanism }) { score = 1 }
         completions += 1
         return .complete(
             score: score,
-            feedback: "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.",
+            feedback: score <= 2
+                ? "The ring isn't ordered by node identity — each node owns the arc of hash space ending at its own position, so adding one only moves the slice that arc takes over."
+                : "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.",
             nextReviewAt: "2026-07-27",
             intervalDays: 3,
-            practice: sessionIsPractice
+            practice: sessionIsPractice,
+            // The server derives this from `mechanism_accuracy <= 2`. A composite of
+            // 2 or less means exactly that (`derive_composite` caps at the mechanism
+            // when it fails), so the mock can key off the score it already has.
+            reattemptOffered: score <= 2,
+            reattemptPrompt: score <= 2
+                ? "In your words — You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't."
+                : nil
         )
+    }
+
+    func submitReattempt(sessionID: UUID, text: String) async throws {
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        submitAttempts += 1
+        if await MainActor.run(body: { DebugFlags.shared.failSubmit }), submitAttempts % 2 == 1 {
+            throw APIError.scoringUnavailable
+        }
     }
 
     func settings() async throws -> AppSettings { storedSettings }

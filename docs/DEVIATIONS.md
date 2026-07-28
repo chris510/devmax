@@ -264,6 +264,55 @@ range, so both edges of the band are pinned.
 
 ---
 
+## 16. A session may carry a third turn: the coached re-attempt
+
+`spec.md` §LLM integration says "maximum one follow-up per session". A session can
+now hold one more turn after that — but not another follow-up, and not another
+score.
+
+This is §15's argument carried one step further. §15 widened the probe band down to
+1 because *"corrective feedback alone is recognition, not recall"* — a targeted
+second question is the only retrieval the session offers, and a wrong mechanism from
+someone who engaged is exactly where it changes what gets encoded. That reasoning
+does not stop at the probe. When `mechanism_accuracy <= 2`, `SCORING_RUBRIC`
+requires feedback to state the correct mechanism outright, and then the session
+ends. The user reads the right answer and closes the app, having never once produced
+it themselves. The re-attempt is that missing turn.
+
+**The scoring signal freezes at turn 2, and that is the whole design.** Turn 3
+happens after the correction has been given, so it measures coached performance, not
+retention. `POST /sessions/{id}/reattempt` runs against an already-`complete`
+session with SM-2 already applied, and writes exactly three `reattempt_*` columns plus
+`card.mastery_summary`. It cannot reach `quality_for`, cannot change `score` or the
+three axes, and cannot touch `last_score` or the `last_*` axes — those describe the
+unaided attempt, which is what Coverage and the tiers mean by a card's state.
+
+**It is opt-in, and that is what protects the session budget.** The session completes
+where it completed before; turn 3 is a tap on a secondary link under the score block,
+so a half-awake user's session is exactly the length it was. The cap is three turns,
+enforced by `reattempt_used` the same structural way `follow_up_used` enforces the
+probe cap.
+
+**The schema is deliberately hostile to a fourth turn.** Three scalar columns rather
+than a `session_turns` table: a turns table would model turn 3 as "another
+follow-up", which is precisely the flattening this rejects. Growing the cap should
+require a migration and a decision, not a row.
+
+**The grader is told the unaided score, and must say the turn was coached.** Turn 3
+omits the turn-1/2 answers on purpose — grading against the failed attempt invites
+scoring the delta — but the *score* is passed, because without it the model cannot
+know it is grading a coached turn and writes summaries that read as unaided mastery.
+Since `mastery_summary` is live context for the next `score_answer`, an over-generous
+summary here is the one path by which turn 3 could reach a future scheduling
+decision. The offer also expires once the card is reviewed again, so a stale session
+cannot overwrite a newer review's summary.
+
+`docs/multi-turn-coaching-design.md` is the full design record, including the
+rejected alternative (a separate coaching mode) and why.
+`tests/test_api.py::test_reattempt_never_touches_sm2_or_the_score` pins the write set.
+
+---
+
 ## Known limitation, not a deviation
 
 `/internal/trigger-review` enforces `reviews_per_day` by counting *cards stamped

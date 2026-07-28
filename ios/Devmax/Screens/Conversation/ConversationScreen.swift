@@ -27,7 +27,7 @@ struct ConversationScreen: View {
         .navigationBarHidden(true)
         .onChange(of: state.thread.count) { _, _ in readLatestQuestion() }
         .onChange(of: state.stage) { _, stage in
-            if stage == .idle || stage == .followUp { readLatestQuestion() }
+            if stage.acceptsAnswer && !stage.isRecording { readLatestQuestion() }
         }
         // The transcript used to reach the draft only when recording stopped, so
         // backgrounding mid-answer persisted a stale draft and lost everything
@@ -205,8 +205,10 @@ struct ConversationScreen: View {
                 .lineSpacing(25 * 1.32 - 25 * 1.2)
                 .foregroundStyle(Theme.textStrong)
                 .fixedSize(horizontal: false, vertical: true)
-        case .followUpQuestion:
-            // Prefaced so it reads as a probe, not a new card.
+        case .followUpQuestion, .reattemptQuestion:
+            // Both are prefaced so they read as probes rather than new cards, and
+            // both use the same serif 21 — the preface carries the distinction,
+            // not a new type role.
             Text(entry.text)
                 .font(TypeRole.followUp)
                 .tracking(-0.21)
@@ -341,6 +343,20 @@ struct ConversationScreen: View {
                 PrimaryButton(title: state.sessionEndLabel) { state.nextCard() }
             }
 
+            // Turn 3, offered only when the mechanism was wrong — the one band where
+            // the feedback above states the correct answer outright. A sibling of
+            // the history link, not a new component: same type role, same color,
+            // same tap target. The score block itself is unchanged.
+            if state.result?.reattemptOffered == true {
+                Button { state.beginReattempt() } label: {
+                    Text("Say it back in your own words")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.meta)
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: Metrics.minTapTarget)
+            }
+
             Button {
                 if let card = state.currentCard {
                     state.path.append(.history(card.id))
@@ -361,13 +377,8 @@ struct ConversationScreen: View {
 
     // MARK: - Input
 
-    private var isRecording: Bool {
-        state.stage == .recording || state.stage == .recordingFollowUp
-    }
-
-    private var canAnswer: Bool {
-        state.stage == .idle || state.stage == .followUp || isRecording
-    }
+    private var isRecording: Bool { state.stage.isRecording }
+    private var canAnswer: Bool { state.stage.acceptsAnswer }
 
     @ViewBuilder
     private var inputArea: some View {
@@ -469,7 +480,7 @@ struct ConversationScreen: View {
             Task { await state.submit(text) }
         } else {
             state.submitError = false
-            state.stage = state.stage == .followUp ? .recordingFollowUp : .recording
+            state.stage = state.stage.recordingTwin
             speech.start(
                 continuing: state.draft,
                 simulated: flags.simulateSpeech,
@@ -526,9 +537,18 @@ struct ConversationScreen: View {
     }
 
     /// Fixture answers for the simulated-speech path, matching the prototype.
+    ///
+    /// The re-attempt case is not decoration: replaying turn 1 here would dictate a
+    /// verbatim repeat of the answer the model just corrected, which is precisely
+    /// the parroting `REATTEMPT_RUBRIC` scores as a 1.
     private static func simulatedAnswer(for stage: Stage) -> String {
-        stage == .recordingFollowUp
-            ? "Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes."
-            : "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
+        switch stage {
+        case .recordingFollowUp:
+            return "Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes."
+        case .recordingReattempt:
+            return "Right — so it's the arc, not the node name. Each node owns the stretch of hash space that ends at its own position, so a new node only takes over the part of its neighbour's stretch that now falls behind it."
+        default:
+            return "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
+        }
     }
 }

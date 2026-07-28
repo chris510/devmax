@@ -16,7 +16,7 @@ Sessions are **1–3 minutes, used half-awake or in line.** Every decision optim
 streaks, no XP, no badges, and no celebration animations. Do not add them.
 
 **Status:** backend and iOS client both built; being prepared for a first deploy. The
-backend has 147 passing tests against a real ASGI app, green on both SQLite and Postgres.
+backend has 172 passing tests against a real ASGI app, green on both SQLite and Postgres.
 The whole stack has since been exercised locally end to end: schema applied to a real
 Postgres 17, live Anthropic calls through both prompts, the iOS client compiled and run
 against the real API on simulator and on a physical device, and a real APNs push
@@ -59,9 +59,19 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **A practice session scores and writes history but never moves the schedule.** `ease_factor`,
   `interval_days`, `repetitions`, and `next_review_at` are the four fields a Review Sprint
   must leave alone. Mastery signal is written normally.
-- **Maximum one follow-up per session, enforced server-side.** The model always writes a
-  probe and returns a provisional score; `submit_answer` decides whether to use it based on
-  `follow_up_used`. This is structural, not prompt-dependent — keep it that way.
+- **Maximum one *scored* follow-up per session, enforced server-side.** The model always
+  writes a probe and returns a provisional score; `submit_answer` decides whether to use it
+  based on `follow_up_used`. This is structural, not prompt-dependent — keep it that way.
+  At most one further *coached re-attempt* may follow, and it never reaches SM-2 or the
+  displayed score — see the next invariant.
+- **No turn that happens after the model has stated the correct mechanism may reach the
+  scheduler.** Turn 3 (`POST /sessions/{id}/reattempt`) is offered only when
+  `mechanism_accuracy <= 2`, is user-initiated, and runs *after* the session is already
+  `complete` and SM-2 already applied. It writes exactly three `reattempt_*` columns plus
+  `card.mastery_summary` — never `score`, never the three axis columns, never the four SM-2
+  fields. A post-correction turn measures coached performance, not retention; feeding one to
+  `quality_for` would inflate the interval by the ease factor on precisely the cards just
+  gotten wrong. `docs/multi-turn-coaching-design.md` is the design record.
 - **`delivery_mode: 'desk'` cards never reach `/cards/due` and never trigger a push.** Coding
   problems need a keyboard and an hour, not a two-minute voice session.
 - **The complete-answer path is a single transaction.** A partial write — answer saved, SM-2
@@ -157,13 +167,17 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 `simctl` reads it as the device argument and fails with `Invalid device`.
 
 `WC_ROUTE`: `question` `recording` `processing` `text` `followup` `score` `resume`
-`submit-failure` `history` `history-empty` `settings` `add` `filter` `setup` (alias
+`submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
+`filter` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded`. An unrecognised
 value falls through to the conversation question state rather than erroring, so check the
 spelling. Also `WC_LOAD` (`auto|loading|error`),
 `WC_RAIL_STYLE` (`dots|chips` — dots ships; chips exists only for the side-by-side) and
 boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
-`WC_SIM_SPEECH`. Forced failures succeed on the retry, so each path walks end to end.
+`WC_SIM_SPEECH` `WC_FAILED_MECHANISM`. Forced failures succeed on the retry, so each path
+walks end to end. `WC_FAILED_MECHANISM` forces a failing mechanism score, which is what
+makes the coached re-attempt reachable; the two `reattempt` routes set it themselves, so
+it only needs passing to see a failed mechanism on some *other* route.
 
 `WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
 `WC_BASE_URL` overrides where it points, which is how a device build reaches the Mac
