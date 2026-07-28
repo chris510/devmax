@@ -363,7 +363,14 @@ final class AppState: ObservableObject {
         do {
             let start = try await api.startSession(cardID: card.id, practice: practice)
             sessionID = start.sessionId
-            thread = [ThreadEntry(role: .question, text: start.question)]
+            // A session resumed mid-probe comes back with the *probe* as `question`,
+            // so it has to be tagged as one — otherwise it renders at the opening
+            // question's 25px instead of the follow-up's 21px serif.
+            thread = [
+                ThreadEntry(
+                    role: start.isFollowUp ? .followUpQuestion : .question, text: start.question
+                )
+            ]
 
             // Disk wins over the server's copy — it's the more recent of the two
             // when the app was backgrounded mid-answer.
