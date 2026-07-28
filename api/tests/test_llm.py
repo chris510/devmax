@@ -357,3 +357,26 @@ async def test_empty_question_is_rejected(fake_client):
             last_score=None,
             recent_questions=[],
         )
+
+
+# --- mastery summary hygiene -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("shaky on virtual nodes", "shaky on virtual nodes"),
+        ("  padded  ", "padded"),
+        # Straight and curly quotes, and the CJK bracket seen in live output.
+        ("'shaky.'", "shaky."),
+        ('"solid on rings"', "solid on rings"),
+        ("shaky.」", "shaky."),
+        ("“solid, shaky on vnodes”", "solid, shaky on vnodes"),
+        # A sentence-final stop is the summary's own text, not packaging.
+        ("solid on ring mechanics.", "solid on ring mechanics."),
+        ("", ""),
+    ],
+)
+def test_clean_summary_strips_wrappers_but_keeps_the_sentence(raw, expected):
+    """The summary renders verbatim in the UI and is fed to the next scoring call."""
+    assert llm.clean_summary(raw) == expected

@@ -5,8 +5,10 @@ diagnose it when one doesn't.
 
 The backend runs on **Railway** — both the API and its Postgres, in one project.
 Steps that need your credentials are marked **(you)**. Nothing here has been run
-against real Railway or APNs yet; the schema and the app have been verified against
-a local Postgres 16, but the first real deploy is still ahead.
+against real Railway yet. APNs *has* been exercised for real — a push has reached a
+physical iPhone from a local server — and the schema and app are verified against a
+local Postgres 17, including through a PgBouncer running in `transaction` mode (see
+§3). The first real deploy is still ahead.
 
 ---
 
@@ -98,6 +100,45 @@ internet and is fronted by a self-signed certificate.
 **One rewrite is required:** Railway hands you `postgresql://`, and this app uses
 the async driver. The value must start `postgresql+asyncpg://`. Either store it
 already rewritten, or set it from the reference and edit the scheme.
+
+### If the endpoint is pooled
+
+Railway's direct Postgres URL is not pooled, so this usually does not apply — but
+check before assuming, and check again if you ever move to a pooled provider
+(Supabase, Neon, or PgBouncer in front of anything).
+
+`db.engine_kwargs` already sets `statement_cache_size=0` and
+`prepared_statement_cache_size=0`, which is the correct and sufficient fix. This
+has been verified locally against PgBouncer 1.25 in `transaction` mode: the full
+suite passes, and so does the live app under concurrent load.
+
+The failure it prevents is loud and specific, so you will know it if you see it:
+
+```
+asyncpg.exceptions.DuplicatePreparedStatementError:
+prepared statement "__asyncpg_stmt_1__" already exists
+HINT: ... pgbouncer with pool_mode set to "transaction" ...
+```
+
+If that appears in the logs, `DATABASE_URL` is reaching a transaction-mode pooler
+*and* one of those two settings is not taking effect — check that the URL still
+goes through `engine_kwargs` rather than being handed to `create_async_engine`
+directly.
+
+To reproduce the whole thing locally before trusting a hosted pooler:
+
+```sh
+docker run -d --name pgb --network devmax-api_default -p 6432:5432 \
+  -e DB_HOST=postgres -e DB_PORT=5432 -e DB_USER=postgres -e DB_PASSWORD=postgres \
+  -e POOL_MODE=transaction -e AUTH_TYPE=scram-sha-256 \
+  -e MAX_PREPARED_STATEMENTS=0 \
+  edoburu/pgbouncer:latest
+```
+
+`MAX_PREPARED_STATEMENTS=0` is the important flag — PgBouncer ≥1.21 defaults it to
+200 and rewrites prepared statements itself, which hides the bug completely. Point
+`DATABASE_URL` at port 6432 and exercise the app, not just the test suite: the
+suite builds its own engine in `conftest` and never calls `engine_kwargs`.
 
 ### Set the remaining variables
 
