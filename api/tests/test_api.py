@@ -2,8 +2,9 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from sqlmodel import select
 
-from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, Session
+from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, DeviceToken, Session
 from app.routers import internal
 from app.services import llm
 from app.services.llm import LLMError, ScoreResult
@@ -577,3 +578,182 @@ async def test_check_missed_increments_count_without_touching_ease_factor(client
     await db.refresh(card)
     assert card.missed_count == 1
     assert card.ease_factor == 2.5
+
+
+# --- overview ---------------------------------------------------------------
+
+
+async def test_overview_counts_every_tier_and_splits_shaky_from_cold(client, db):
+    """`counts` covers the whole library; the two lists carry only what needs work.
+
+    `cold` is the lapse case — solid, then left far past its interval — and it
+    must not also appear under `shaky`. These are the /cards/overview tiers,
+    which fold in ease factor and lapse timing; they share names with Coverage's
+    tiers but not their definitions.
+    """
+    today = local_today()
+    db.add(make_card(topic="Untested", repetitions=0))
+    db.add(make_card(topic="Shaky", repetitions=2, last_score=2))
+    db.add(make_card(topic="Developing", repetitions=2, last_score=3))
+    db.add(make_card(topic="Solid", repetitions=4, ease_factor=2.6, last_score=5))
+    db.add(
+        make_card(
+            topic="Lapsed",
+            repetitions=4,
+            ease_factor=2.6,
+            last_score=5,
+            interval_days=10,
+            next_review_at=today - timedelta(days=30),
+        )
+    )
+    await db.commit()
+
+    body = (await client.get("/cards/overview", headers=API_HEADERS)).json()
+
+    assert body["counts"] == {
+        "untested": 1,
+        "shaky": 1,
+        "developing": 1,
+        "solid": 1,
+        "cold": 1,
+    }
+    assert [c["topic"] for c in body["shaky"]] == ["Shaky"]
+    assert [c["topic"] for c in body["cold"]] == ["Lapsed"]
+    assert body["cold"][0]["days_overdue"] == 30
+    # last_score is a shaky-list concern; the cold list answers "how long ago".
+    assert body["shaky"][0]["last_score"] == 2
+    assert body["cold"][0]["last_score"] is None
+
+
+async def test_overview_mode_filters_desk_cards(client, db):
+    db.add(make_card(topic="Consistent hashing"))
+    db.add(make_card(topic="Multi-source BFS", delivery_mode="desk"))
+    await db.commit()
+
+    conversational = (
+        await client.get("/cards/overview?mode=conversational", headers=API_HEADERS)
+    ).json()
+    desk = (await client.get("/cards/overview?mode=desk", headers=API_HEADERS)).json()
+    every = (await client.get("/cards/overview", headers=API_HEADERS)).json()
+
+    assert sum(conversational["counts"].values()) == 1
+    assert sum(desk["counts"].values()) == 1
+    assert sum(every["counts"].values()) == 2
+
+
+# --- settings ---------------------------------------------------------------
+
+
+async def test_settings_round_trip(client):
+    """PUT returns the stored row, and GET agrees with it.
+
+    The window's `from` is a Python keyword aliased to `from_` in the schema —
+    this pins the wire format, which is the part a client can actually see.
+    """
+    payload = {
+        "reviews_per_day": 3,
+        "timezone": "America/New_York",
+        "windows": [
+            {"label": "Morning", "on": True, "from": "06:30", "to": "09:00"},
+            {"label": "Evening", "on": False, "from": "20:00", "to": "22:00"},
+        ],
+    }
+
+    put = await client.put("/settings", headers=API_HEADERS, json=payload)
+    assert put.status_code == 200
+    assert put.json() == payload
+    assert (await client.get("/settings", headers=API_HEADERS)).json() == payload
+
+
+async def test_settings_rejects_out_of_range_reviews_per_day(client):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["reviews_per_day"] = 7
+
+    assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
+
+
+async def test_settings_defaults_are_served_before_any_write(client):
+    body = (await client.get("/settings", headers=API_HEADERS)).json()
+
+    assert body["reviews_per_day"] == 2
+    assert body["timezone"] == "America/Los_Angeles"
+    assert [w["label"] for w in body["windows"]] == ["Morning", "Evening"]
+
+
+# --- device tokens ----------------------------------------------------------
+
+
+async def test_device_token_registration_is_idempotent(client, db):
+    for _ in range(3):
+        resp = await client.post(
+            "/device-tokens", headers=API_HEADERS, json={"token": "abc123", "kind": "apns"}
+        )
+        assert resp.status_code == 204
+
+    tokens = (await db.exec(select(DeviceToken))).all()
+    assert len(tokens) == 1
+    assert tokens[0].kind == "apns"
+
+
+async def test_device_token_reregistration_updates_kind(client, db):
+    """The same device moving sandbox -> production must not keep the stale kind.
+
+    A TestFlight build re-registers the token it already had; if `kind` stayed
+    put, the row would describe the previous build.
+    """
+    await client.post(
+        "/device-tokens", headers=API_HEADERS, json={"token": "abc123", "kind": "apns-sandbox"}
+    )
+    created = (await db.exec(select(DeviceToken))).one().created_at
+
+    await client.post(
+        "/device-tokens", headers=API_HEADERS, json={"token": "abc123", "kind": "apns"}
+    )
+
+    row = (await db.exec(select(DeviceToken))).one()
+    assert row.kind == "apns"
+    assert row.created_at == created  # first-seen, not last-seen
+
+
+# --- quick add --------------------------------------------------------------
+
+
+async def test_create_card_schedule_now_is_due_today(client):
+    body = (await client.post("/cards", headers=API_HEADERS, json={"topic": "  Raft  "})).json()
+
+    assert body["topic"] == "Raft"  # whitespace stripped
+    assert body["category"] == "Unsorted"
+    assert body["delivery_mode"] == "conversational"
+    assert body["due_label"] == "due today"
+    assert body["days_since_review"] is None
+    assert body["repetitions"] == 0
+
+
+async def test_create_card_schedule_next_is_due_tomorrow(client):
+    resp = await client.post(
+        "/cards", headers=API_HEADERS, json={"topic": "Raft", "schedule": "next"}
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["due_label"] == "due tomorrow"
+
+
+async def test_create_card_rejects_empty_topic(client):
+    resp = await client.post("/cards", headers=API_HEADERS, json={"topic": ""})
+    assert resp.status_code == 422
+
+
+# --- health -----------------------------------------------------------------
+
+
+async def test_health_needs_no_api_key_and_checks_the_database(client):
+    """The Railway healthcheck hits this unauthenticated, so it must stay open.
+
+    It runs a real `SELECT 1` against its own session factory rather than the
+    request-scoped dependency — that is the point, since a healthcheck that
+    can't reach Postgres should not report ok.
+    """
+    resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}

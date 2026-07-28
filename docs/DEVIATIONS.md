@@ -231,6 +231,39 @@ in favour of not misleading.
 
 ---
 
+## 15. The follow-up probe band starts at 1, not 2
+
+`spec.md` §LLM integration says "if the score would be **2 or 3** and
+`follow_up_used` is false, return `status: follow_up`". `FOLLOW_UP_LOW` is 1.
+
+The original band treats the probe as a *disambiguator*: a 2 or a 3 is an answer
+that might be better than it read, so ask once more before committing a score. A
+1 was considered settled — the mechanism was wrong, there is nothing to
+disambiguate.
+
+That is right about the scoring and wrong about the learning. A second, narrower
+question is also the only retrieval attempt the session offers, and a wrong
+mechanism from someone who engaged with the question is exactly the case where a
+targeted probe changes what gets encoded. Corrective feedback alone is
+recognition, not recall.
+
+**0 stays excluded, and the boundary is the point.** A 0 is no recall at all.
+Probing it asks a half-awake user to guess a second time before being told the
+answer, which spends the session's scarcest resource — the ~5s scoring round trip
+and the user's patience — on the case least likely to produce anything. A 0 still
+resets the card to a one-day interval, so it comes back tomorrow regardless.
+
+Nothing downstream changes. The probe still cannot fire twice (`follow_up_used`
+is checked first), SM-2 still gates on `mechanism_accuracy` alone, and the
+composite is still derived in code. This widens *when* the model's already-written
+probe gets used — the model writes one on every call either way, so there is no
+extra token cost on answers that don't probe.
+
+`tests/test_llm.py::test_only_shaky_scores_probe` parametrises the whole 0–5
+range, so both edges of the band are pinned.
+
+---
+
 ## Known limitation, not a deviation
 
 `/internal/trigger-review` enforces `reviews_per_day` by counting *cards stamped
@@ -266,6 +299,9 @@ the two wiring decisions live here.
   foregrounds and both `devmax-icon-rounded-*.png` — carry real transparency, and
   flattening those destroys them.
 
-Nothing verifies either rule. An RGBA marketing icon builds, installs, and runs
-fine, and fails only at App Store upload — so a CI check on the catalog PNG's
-colortype would be worth more than this paragraph.
+Both rules are now enforced in CI. `scripts/check_icon_alpha.py` reads the PNG
+IHDR colortype directly — no dependency, no decode — and asserts the catalog copy
+is opaque and that the six real-transparency files still carry alpha. It runs as
+the `icons` job in `.github/workflows/ci.yml`. It does *not* check the 14
+full-bleed kit squares, which ship RGBA as delivered; stripping their dead alpha
+matters only for what gets copied into the catalog.

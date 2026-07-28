@@ -28,3 +28,13 @@ jobs:
       # Anthropic and APNs are mocked in the suite; no live API calls (spec.md §Testing).
       - name: Test
         run: uv run pytest -q
+
+  # An RGBA marketing icon builds, installs, and runs fine — it fails only at
+  # App Store upload, long after the re-export that caused it. Stdlib only, so
+  # no setup step. See docs/DEVIATIONS.md §Icon.
+  icons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check app-icon alpha rules
+        run: python3 scripts/check_icon_alpha.py

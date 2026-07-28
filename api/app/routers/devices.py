@@ -15,5 +15,11 @@ async def upsert_device_token(
     existing = await db.get(DeviceToken, body.token)
     if existing is None:
         db.add(DeviceToken(token=body.token, kind=body.kind))
-        await db.commit()
+    else:
+        # The client re-registers on every launch, so this is the common path.
+        # `created_at` is deliberately left alone — it records when the token was
+        # first seen, and the sandbox/production split is carried by `kind`,
+        # which must follow the build that just registered.
+        existing.kind = body.kind
+    await db.commit()
     return Response(status_code=204)

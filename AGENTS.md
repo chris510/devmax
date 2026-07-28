@@ -156,9 +156,11 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 `SIMCTL_CHILD_`; the `--setenv` flag it once accepted is gone, and today's
 `simctl` reads it as the device argument and fails with `Invalid device`.
 
-`WC_ROUTE`: `question` `recording` `text` `followup` `score` `resume` `submit-failure`
-`history` `history-empty` `settings` `add` `filter` `setup` `coverage` `coverage-expanded`
-`recap` `recap-expanded`. Also `WC_LOAD` (`auto|loading|error`),
+`WC_ROUTE`: `question` `recording` `processing` `text` `followup` `score` `resume`
+`submit-failure` `history` `history-empty` `settings` `add` `filter` `setup` (alias
+`sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded`. An unrecognised
+value falls through to the conversation question state rather than erroring, so check the
+spelling. Also `WC_LOAD` (`auto|loading|error`),
 `WC_RAIL_STYLE` (`dots|chips` — dots ships; chips exists only for the side-by-side) and
 boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
 `WC_SIM_SPEECH`. Forced failures succeed on the retry, so each path walks end to end.
@@ -179,10 +181,12 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **`cards.json` is missing.** `spec.md` §Seeding says the 111-card study plan is "already
-  generated," but it isn't in the repo. `app/seed.py` implements the documented contract;
-  until the file lands, `--fixtures` seeds only the four cards the screenshots depict — three
-  of them conversational, so the push rotation exhausts in days.
+- **`cards.json` was written here, not delivered.** `spec.md` §Seeding says the 111-card
+  study plan is "already generated," but it never was; `api/cards.json` is a 126-card plan
+  authored against `app/seed.py`'s documented contract (`docs/CURRICULUM.md` records the
+  111 → 126 expansion). Seed from it with `--file`. `--fixtures` is for the design states
+  only — it seeds the four cards the screenshots depict, with invented history and a fake
+  in-progress draft, and refuses a non-local database without `--force`.
 - **Not yet deployed.** No Railway project exists yet. `docs/RUNBOOK.md` is the ordered path
   from a clean repo to a push arriving on a phone.
 - **Anthropic and APNs have both been exercised for real, locally.** `services/llm.py` runs
@@ -203,15 +207,25 @@ change faster than this file does — do not write Anthropic calls from memory.
   revision dropping the constraints. Write revisions by hand and apply them to a real
   Postgres before trusting them.
 
-- **Review Sprint, Coverage and Session Recap have not been compiled or screenshotted.**
-  They were written against the prototype and the handoff on a machine with no Xcode, so
-  they carry no build and no fidelity check. Before trusting them: `xcodegen generate`,
-  build, then walk `WC_ROUTE=setup`, `coverage`, `coverage-expanded`, `recap`,
-  `recap-expanded` and compare each against its PNG. The Coverage section order and the
-  axis rollup were checked against `coverage.png` by hand — the comparator reproduces the
-  screenshot's nine-section order exactly, and the `MockAPI` fixtures produce its
-  `MECHANISM 2.7 · TRADE-OFFS 1.4 · FAILURE MODES 2.3` — but that is arithmetic, not a
-  rendered screen.
+- **Review Sprint, Coverage and Session Recap are now compiled and screenshot-checked.**
+  All five states (`setup`, `coverage`, `coverage-expanded`, `recap`, `recap-expanded`)
+  build and were compared against their PNGs on an iPhone 16e. Coverage matched on the
+  first render, nine-section order and `MECHANISM 2.7 · TRADE-OFFS 1.4 · FAILURE MODES 2.3`
+  included. Four things did not, and are fixed: the category chips sorted alphabetically
+  instead of in curriculum order, their count line rendered lowercase where the prototype
+  uppercases the whole chip in CSS, `SprintPreviewRow` used an `HStack` that compressed the
+  topic instead of `RecapRow`'s `FlowLayout`, and `waitForQuestion` returned early on a
+  stale `.result` stage so the recap walk recorded one card instead of six.
+
+  **A stale `DerivedData` directory will silently install an old binary.**
+  `find … -name Devmax.app | head -1` is not deterministic when two exist, and the old one
+  ran with the sprint routes falling through to Conversation — which reads exactly like an
+  app bug. Confirm what you installed before believing a screenshot:
+  `xcrun simctl get_app_container <dev> com.christrinh.devmax` and check its mtime.
+
+  Give the async routes room. `coverage` waits on the library, and `recap` walks a whole
+  six-card sprint through mock latency — that one needs ~40s before the screen settles, so
+  a short `sleep` screenshots a half-finished walk.
 
 Both migrations *have* been applied to a real Postgres: the partial index, the JSONB
 column, the `::jsonb` settings seed, and all ten CHECK constraints were verified, along
