@@ -43,6 +43,40 @@ enum ScoreStyle {
             }
         }
     }
+
+    /// Coverage's five tiers — a *third* vocabulary, and deliberately so.
+    ///
+    /// `Band` above answers "how is today's queue distributed" in four coarse
+    /// buckets; this answers "where does the library need more cards" and splits
+    /// the middle so `developing` (a 3) reads differently from `shaky` (a 2). It
+    /// shares its names with the backend's `/cards/overview` tiers but not their
+    /// definitions — those fold in ease factor and lapse timing, these come from
+    /// the last score alone. Do not merge the three.
+    enum Tier: String, CaseIterable, Identifiable {
+        /// Declaration order is display order.
+        case cold, shaky, developing, solid, untested
+
+        var id: String { rawValue }
+
+        static func of(_ score: Int?) -> Tier {
+            guard let score else { return .untested }
+            switch score {
+            case ...1: return .cold
+            case 2: return .shaky
+            case 3: return .developing
+            default: return .solid
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .cold: return Theme.scoreLow
+            case .shaky, .developing: return Theme.scoreMid
+            case .solid: return Theme.scoreHigh
+            case .untested: return Theme.scoreNone
+            }
+        }
+    }
 }
 
 /// The row score column: numeral above, 6px dot below, both in the score color.

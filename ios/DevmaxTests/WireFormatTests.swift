@@ -88,4 +88,97 @@ final class WireFormatTests: XCTestCase {
         XCTAssertFalse(card.nextReviewAt.isEmpty)
         XCTAssertGreaterThanOrEqual(card.missedCount, 0)
     }
+
+    // MARK: - The library shape Review Sprint and Coverage read
+
+    private static let libraryRow = Data(#"""
+    [{"id":"00000000-0000-0000-0000-0000000000c1","topic":"Consistent hashing",
+      "category":"Core Concept","delivery_mode":"conversational",
+      "mastery_summary":"solid on ring mechanics","last_score":3,
+      "last_mechanism_accuracy":4,"last_trade_off_awareness":1,
+      "last_failure_mode_awareness":2,"ease_factor":2.36,"interval_days":3,
+      "repetitions":3,"next_review_at":"2026-07-27","due_label":"3 days overdue",
+      "days_since_review":9,"missed_count":0}]
+    """#.utf8)
+
+    func testTheLibraryRowDecodesWithItsAxisScores() throws {
+        let cards = try LiveAPI.decoder.decode([CardSummary].self, from: Self.libraryRow)
+        let card = try XCTUnwrap(cards.first)
+
+        XCTAssertEqual(card.lastMechanismAccuracy, 4)
+        XCTAssertEqual(card.lastTradeOffAwareness, 1)
+        XCTAssertEqual(card.lastFailureModeAwareness, 2)
+        // Both computed server-side — the client never re-derives them.
+        XCTAssertEqual(card.dueLabel, "3 days overdue")
+        XCTAssertEqual(card.daysSinceReview, 9)
+    }
+
+    func testAnUnscoredLibraryRowLeavesEveryAxisNil() throws {
+        let json = Data(#"""
+        [{"id":"00000000-0000-0000-0000-0000000000c9","topic":"Virtual memory",
+          "category":"Operating Systems","delivery_mode":"conversational",
+          "mastery_summary":"","last_score":null,"last_mechanism_accuracy":null,
+          "last_trade_off_awareness":null,"last_failure_mode_awareness":null,
+          "ease_factor":2.5,"interval_days":1,"repetitions":0,
+          "next_review_at":"2026-08-01","due_label":"due in 5 days",
+          "days_since_review":null,"missed_count":0}]
+        """#.utf8)
+
+        let card = try XCTUnwrap(try LiveAPI.decoder.decode([CardSummary].self, from: json).first)
+
+        XCTAssertNil(card.lastScore)
+        XCTAssertNil(card.lastMechanismAccuracy)
+        XCTAssertNil(card.daysSinceReview)
+        // Coverage groups it as `untested`, not as a zero.
+        XCTAssertEqual(ScoreStyle.Tier.of(card.lastScore), .untested)
+    }
+
+    // MARK: - The answer outcome
+
+    func testACompletedAnswerCarriesThePracticeFlag() throws {
+        let json = Data(#"""
+        {"status":"complete","score":4,"feedback":"Solid.",
+         "next_review_at":"2026-07-30","interval_days":6,"practice":true}
+        """#.utf8)
+
+        let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
+
+        guard case .complete(let score, _, _, let interval, let practice) = outcome else {
+            return XCTFail("expected a completed outcome, got \(outcome)")
+        }
+        XCTAssertEqual(score, 4)
+        XCTAssertEqual(interval, 6)
+        XCTAssertTrue(practice)
+    }
+
+    func testAnOutcomeWithoutThePracticeFlagReadsAsADailyReview() throws {
+        // A server that predates practice mode omits the field entirely; the
+        // schedule line must still be the real one rather than crashing or
+        // claiming the schedule was untouched.
+        let json = Data(#"""
+        {"status":"complete","score":3,"feedback":"Partial.",
+         "next_review_at":"2026-07-28","interval_days":1}
+        """#.utf8)
+
+        let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
+
+        guard case .complete(_, _, _, _, let practice) = outcome else {
+            return XCTFail("expected a completed outcome, got \(outcome)")
+        }
+        XCTAssertFalse(practice)
+    }
+
+    // MARK: - Coverage's tier vocabulary
+
+    func testTheCoverageTiersSplitTheMiddleOfTheScoreRange() {
+        // Deliberately finer than Today's four bands: a 3 is `developing`, not
+        // the same bucket as a 2.
+        XCTAssertEqual(ScoreStyle.Tier.of(nil), .untested)
+        XCTAssertEqual(ScoreStyle.Tier.of(0), .cold)
+        XCTAssertEqual(ScoreStyle.Tier.of(1), .cold)
+        XCTAssertEqual(ScoreStyle.Tier.of(2), .shaky)
+        XCTAssertEqual(ScoreStyle.Tier.of(3), .developing)
+        XCTAssertEqual(ScoreStyle.Tier.of(4), .solid)
+        XCTAssertEqual(ScoreStyle.Tier.of(5), .solid)
+    }
 }

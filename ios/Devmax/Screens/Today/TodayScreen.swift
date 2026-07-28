@@ -70,30 +70,20 @@ struct TodayScreen: View {
         .buttonStyle(.plain)
     }
 
-    /// A single mono line of bands. Not a dashboard — no percentages, no bars,
-    /// no second line. Tapping one filters the list; tapping it again clears.
+    /// Tapping a band filters the list; tapping it again clears.
     private var masteryBands: some View {
-        FlowLayout(horizontalSpacing: 7, verticalSpacing: 3) {
-            ForEach(Array(state.bands.enumerated()), id: \.element.band) { index, entry in
-                let active = state.filter == entry.band
-                let isLast = index == state.bands.count - 1
-                Button {
-                    withAnimation(Motion.fadeFast) {
-                        state.filter = active ? nil : entry.band
-                    }
-                } label: {
-                    VStack(spacing: 1) {
-                        Text("\(entry.count) \(entry.band.rawValue)\(isLast ? "" : " ·")")
-                            .font(WCFont.mono(11))
-                            .tracking(0.33)
-                            .foregroundStyle(active ? entry.band.color : Theme.metaAlt)
-                        Rectangle()
-                            .fill(active ? entry.band.color : .clear)
-                            .frame(height: 1)
-                    }
-                    .fixedSize()
-                }
-                .buttonStyle(.plain)
+        CountSegments(
+            segments: state.bands.map { entry in
+                CountSegments.Segment(
+                    id: entry.band.rawValue,
+                    text: "\(entry.count) \(entry.band.rawValue)",
+                    color: entry.band.color,
+                    isActive: state.filter == entry.band
+                )
+            }
+        ) { segment in
+            withAnimation(Motion.fadeFast) {
+                state.filter = segment.isActive ? nil : ScoreStyle.Band(rawValue: segment.id)
             }
         }
     }
@@ -132,6 +122,23 @@ struct TodayScreen: View {
                 }
                 .foregroundStyle(Theme.meta)
                 .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+
+            // Always visible, including when the queue is empty or the fetch
+            // failed — a sprint draws from the whole library, not from what's due.
+            // Deliberately lower weight than Start, which stays the dominant
+            // daily action.
+            Button { state.enterSprintSetup() } label: {
+                Text("Review sprint")
+                    .font(WCFont.sans(15))
+                    .foregroundStyle(Theme.textMuted)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    )
             }
             .buttonStyle(.plain)
 
@@ -211,7 +218,22 @@ struct TodayRow: View {
 
 /// Three static skeleton rows matching row geometry. No shimmer — static blocks
 /// only, per the handoff.
+///
+/// Shared by Today, Review Sprint Setup and Coverage: the prototype drives all
+/// three from one `skeleton` list, and they differ only in the label, the
+/// horizontal inset, and whether the row carries a score column. Keeping one
+/// copy is what stops row geometry drifting between screens, since the drift
+/// would only ever show up in a screenshot comparison.
 struct LoadingList: View {
+    var label: String = "LOADING QUEUE"
+    var inset: CGFloat = Metrics.rowInset
+    var showsScoreColumn = true
+    /// Today separates rows with a leading `Hairline`; the Sprint screens use a
+    /// top overlay so the rule sits flush with their section rules.
+    var separator: Separator = .leading
+
+    enum Separator { case leading, overlay }
+
     private let widths: [[CGFloat]] = [[0.58, 0.84, 0.34], [0.46, 0.72, 0.34], [0.63, 0.79, 0.34]]
     private let heights: [CGFloat] = [12, 10, 8]
     private let fills = [Theme.skeleton1, Theme.skeleton2, Theme.skeleton3]
@@ -219,33 +241,36 @@ struct LoadingList: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(0..<3, id: \.self) { row in
-                Hairline()
+                if separator == .leading { Hairline() }
                 HStack(alignment: .top, spacing: Metrics.scoreColumnGap) {
                     GeometryReader { geo in
                         VStack(alignment: .leading, spacing: 9) {
-                            ForEach(0..<3, id: \.self) { i in
+                            ForEach(0..<(showsScoreColumn ? 3 : 2), id: \.self) { i in
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(fills[i])
                                     .frame(width: geo.size.width * widths[row][i], height: heights[i])
                             }
                         }
                     }
-                    .frame(height: 48)
+                    .frame(height: showsScoreColumn ? 48 : 31)
 
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Theme.skeleton1)
-                        .frame(width: 12, height: 12)
-                        .frame(width: Metrics.scoreColumnWidth, alignment: .center)
-                        .padding(.top, 2)
+                    if showsScoreColumn {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Theme.skeleton1)
+                            .frame(width: 12, height: 12)
+                            .frame(width: Metrics.scoreColumnWidth, alignment: .center)
+                            .padding(.top, 2)
+                    }
                 }
                 .padding(.top, Metrics.rowTopPadding)
                 .padding(.bottom, Metrics.rowBottomPadding)
-                .padding(.horizontal, Metrics.rowInset)
+                .padding(.horizontal, inset)
+                .overlay(alignment: .top) { if separator == .overlay { Hairline() } }
             }
 
-            MetaText(text: "LOADING QUEUE", font: WCFont.mono(10), tracking: 1.2, color: Theme.metaFaint)
+            MetaText(text: label, font: WCFont.mono(10), tracking: 1.2, color: Theme.metaFaint)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Metrics.rowInset)
+                .padding(.horizontal, inset)
                 .padding(.top, 16)
         }
     }
@@ -288,10 +313,10 @@ struct EmptyQueue: View {
                 .lineSpacing(22 * 1.4 - 22 * 1.2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !state.upcoming.isEmpty {
+            if !state.library.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     MetaText(text: "COMING UP", font: WCFont.mono(10), tracking: 1.2, color: Theme.metaDimAlt)
-                    ForEach(state.upcoming.prefix(3)) { card in
+                    ForEach(state.library.prefix(3)) { card in
                         HStack(spacing: 12) {
                             Text(card.topic)
                                 .font(WCFont.sans(14))

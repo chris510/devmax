@@ -59,7 +59,9 @@ protocol DevmaxAPI {
     func cards(sort: String, mode: String) async throws -> [CardSummary]
     func card(_ id: UUID) async throws -> CardDetail
     func createCard(topic: String, schedule: String) async throws -> CardSummary
-    func startSession(cardID: UUID) async throws -> SessionStart
+    /// `practice` marks a Review Sprint run: scored and written to the card's
+    /// history exactly like a normal session, with SM-2 left untouched.
+    func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart
     func saveDraft(sessionID: UUID, text: String) async throws
     func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome
     func settings() async throws -> AppSettings
@@ -138,8 +140,11 @@ struct LiveAPI: DevmaxAPI {
         return try Self.decoder.decode(CardSummary.self, from: await request("POST", "cards", body: body))
     }
 
-    func startSession(cardID: UUID) async throws -> SessionStart {
-        let data = try await request("POST", "cards/\(cardID)/sessions")
+    func startSession(cardID: UUID, practice: Bool = false) async throws -> SessionStart {
+        let data = try await request(
+            "POST", "cards/\(cardID)/sessions",
+            query: practice ? [URLQueryItem(name: "practice", value: "true")] : []
+        )
         return try Self.decoder.decode(SessionStart.self, from: data)
     }
 

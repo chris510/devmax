@@ -1,8 +1,18 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.services.cards import COLD, DEVELOPING, SHAKY, SOLID, UNTESTED, classify_tier, due_label
+from app.services.cards import (
+    COLD,
+    DEVELOPING,
+    SHAKY,
+    SOLID,
+    UNTESTED,
+    classify_tier,
+    days_since_review,
+    due_label,
+)
 from tests.conftest import make_card
 
 TODAY = date(2026, 7, 24)
@@ -71,3 +81,35 @@ def test_lapsed_but_not_solid_is_not_cold():
         next_review_at=TODAY - timedelta(days=30),
     )
     assert classify_tier(card, TODAY) == DEVELOPING
+
+
+# --- days since review ------------------------------------------------------
+# `last_reviewed_at` is stored in UTC; `today` is the user's local calendar day.
+# West of UTC those two disagree for the whole evening, which is exactly when a
+# session gets answered.
+
+LA = ZoneInfo("America/Los_Angeles")
+
+
+def test_days_since_review_is_none_until_the_card_has_been_answered():
+    assert days_since_review(make_card(), TODAY, LA) is None
+
+
+def test_an_evening_review_is_zero_days_ago_not_minus_one():
+    """The regression: 24 Jul 19:00 in Los Angeles is already 25 Jul in UTC.
+
+    Taking `.date()` off the stored UTC timestamp and subtracting it from the
+    local day returned -1, and Coverage rendered `-1D SINCE REVIEW` for a card
+    reviewed minutes earlier. Only reproducible for part of the day, so it has
+    to be pinned rather than left to whenever CI happens to run.
+    """
+    reviewed = datetime(2026, 7, 24, 19, 30, tzinfo=LA)
+    assert reviewed.astimezone(UTC).date() == date(2026, 7, 25)  # the trap
+
+    card = make_card(last_reviewed_at=reviewed.astimezone(UTC))
+    assert days_since_review(card, TODAY, LA) == 0
+
+
+def test_days_since_review_counts_whole_local_days():
+    card = make_card(last_reviewed_at=datetime(2026, 7, 15, 8, 0, tzinfo=LA).astimezone(UTC))
+    assert days_since_review(card, TODAY, LA) == 9

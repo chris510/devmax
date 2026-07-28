@@ -23,11 +23,31 @@ struct CardSummary: Codable, Identifiable, Equatable {
     let deliveryMode: String
     let masterySummary: String
     let lastScore: Int?
+    /// The three axes behind `lastScore`. Coverage's rollup line is the only
+    /// consumer — nothing else in the app decomposes a score.
+    let lastMechanismAccuracy: Int?
+    let lastTradeOffAwareness: Int?
+    let lastFailureModeAwareness: Int?
     let easeFactor: Double
     let intervalDays: Int
     let repetitions: Int
     let nextReviewAt: String
+    /// Both computed server-side, like `DueCard.dueLabel`.
+    let dueLabel: String
+    let daysSinceReview: Int?
     let missedCount: Int
+
+    /// Review Sprint walks library cards through the same Conversation screen the
+    /// daily queue uses, so the set is adapted rather than the screen generalised.
+    /// `resumable` is not a library fact — only a live session with a saved draft
+    /// makes a card resumable — so it is supplied by whoever builds the queue.
+    func asQueueCard(resumable: Bool = false) -> DueCard {
+        DueCard(
+            id: id, topic: topic, category: category, masterySummary: masterySummary,
+            lastScore: lastScore, dueLabel: dueLabel, resumable: resumable,
+            missedCount: missedCount
+        )
+    }
 }
 
 struct Turn: Codable, Equatable, Identifiable {
@@ -72,12 +92,14 @@ struct SessionStart: Codable, Equatable {
 /// server owns the follow-up decision, the client only reacts to it.
 enum AnswerOutcome: Equatable {
     case followUp(question: String)
-    case complete(score: Int, feedback: String, nextReviewAt: String, intervalDays: Int)
+    case complete(
+        score: Int, feedback: String, nextReviewAt: String, intervalDays: Int, practice: Bool
+    )
 }
 
 extension AnswerOutcome: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case status, question, score, feedback, nextReviewAt, intervalDays
+        case status, question, score, feedback, nextReviewAt, intervalDays, practice
     }
 
     init(from decoder: Decoder) throws {
@@ -90,7 +112,9 @@ extension AnswerOutcome: Decodable {
                 score: try c.decode(Int.self, forKey: .score),
                 feedback: try c.decode(String.self, forKey: .feedback),
                 nextReviewAt: try c.decode(String.self, forKey: .nextReviewAt),
-                intervalDays: try c.decode(Int.self, forKey: .intervalDays)
+                intervalDays: try c.decode(Int.self, forKey: .intervalDays),
+                // Absent on a server that predates practice mode; a daily review.
+                practice: try c.decodeIfPresent(Bool.self, forKey: .practice) ?? false
             )
         }
     }
@@ -148,6 +172,18 @@ enum Stage: Equatable {
 struct SessionResult: Equatable {
     let score: Int
     let feedback: String
-    /// e.g. `NEXT REVIEW · 27 JUL · INTERVAL 3D`
+    /// `NEXT REVIEW · 27 JUL · INTERVAL 3D`, or the practice-mode line in a sprint.
     let scheduleLine: String
+}
+
+/// One scored card in a multi-card run. Drives the progress rail's covered dots
+/// and every row of Session Recap.
+struct RunEntry: Identifiable, Equatable {
+    let id: UUID
+    let topic: String
+    let category: String
+    let score: Int
+    let feedback: String
+    /// As the server reported it for this card, not as the client requested it.
+    let practice: Bool
 }

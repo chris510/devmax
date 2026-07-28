@@ -8,8 +8,19 @@ follow-up if the answer is shaky, then scores recall 0–5 and reschedules the c
 Sessions are 1–3 minutes, used half-awake or in line — every decision optimizes for
 *speed into a session* and *honesty of signal*, never engagement mechanics.
 
-Three screens: **Today** (queue), **Conversation** (the core loop), **Card History**.
-No tab bar, no onboarding, no auth UI, no gamification.
+Three core screens: **Today** (queue), **Conversation** (the core loop), **Card History**,
+plus a **Review Sprint** mode built on top of them — **Review Sprint Setup** (build a topic
+set) and **Session Recap** (what a multi-card run produced). No tab bar, no onboarding, no
+auth UI, no gamification.
+
+The mode was originally scoped as "Mock Interview" and renamed: questions inside a session
+are not linked to each other (no interviewer persona, no cross-topic follow-up), so
+"interview" claimed more continuity than the feature delivers. Mechanism unchanged, copy only.
+
+Review Sprint sessions run in **practice mode**: each answer is scored and written to that
+card's history exactly like a normal session, but SM-2 scheduling fields (interval, next
+review date) are left untouched. This is stated on screen in both new screens' footnotes and
+in the session-end schedule line.
 
 ## About the design files
 
@@ -160,6 +171,12 @@ list states this: `TAP A TOPIC NAME FOR ITS HISTORY` (hidden while loading/faile
 **Quick-add affordance:** low-weight `+ Ask about something else`, 13.5px `#8b9299`, always
 visible — including in the empty and error states.
 
+**Review sprint button:** bordered secondary button (1px `#21262a`, 12px radius, 14px
+padding, 15px `#a8afb5`), sitting between the quick-add link and `Start`. Always visible,
+including when the queue is empty or the fetch failed — it draws from the whole card library,
+not from what's due. Deliberately lower weight than `Start`, which stays the dominant daily
+action. Opens Review Sprint Setup.
+
 ### States
 
 - **Loading** (`screenshots/today-loading.png`): three static skeleton rows matching row
@@ -211,8 +228,36 @@ Settings are reachable **only** from Today — not a destination.
 
 **Purpose:** one continuous thread; no screen change per turn.
 
-**Chrome:** a `✕` (19px, `#7c848b`) top-left returns to Today; mono right-aligned label shows
-`CARD 1 OF 3` in a multi-card session, otherwise the card's category. The status bar right
+**Chrome:** a `✕` (19px, `#7c848b`) top-left returns to Today; the mono right-aligned label
+shows the **current card's topic**, uppercase, in a multi-card session (`MVCC IN POSTGRES`),
+otherwise the card's category.
+
+**Topic progress rail** (`screenshots/conversation-rail-dots.png`): whenever a session has
+more than one card, a second row sits directly beneath the chrome (2px top / 10px bottom
+padding, 24px horizontal, 8px gap) — the `✕` row is untouched, the rail is glanceable
+secondary information, not navigation. This replaces the old `CARD 2 OF 3` label and applies
+to any multi-card session, not just Review Sprint.
+
+- **Dot stepper (shipped option).** One dot per card: not yet reached = 7px hollow ring,
+  1px `#21262a`; current = 9px filled `accent`; covered = 7px filled in that card's score
+  colour (`score-low`/`mid`/`high`). The current topic's name carries the literal
+  information in the chrome slot, so the rail itself can stay abstract.
+- **Label chips (alternative, prototyped)** (`screenshots/conversation-rail-chips.png`):
+  a horizontally scrollable single-line strip, mono 9.5px uppercase chips, 5/8px padding,
+  8px radius, truncated to 15 characters + `…`; same three-state colour treatment, current
+  chip `accent` border + accent wash and auto-scrolled to centre. More informative, visibly
+  busier at 6–10 items. Toggle between the two with the `railStyle` tweak.
+
+**Decision:** ship the **dot stepper**. Both are built, so the chip variant stays behind
+`railStyle` for side-by-side comparison, but `dots` is the default and the one to build —
+it reads at a glance and matches the app's one-quiet-line preference. Drop the chip path if
+it hasn't won the argument by build time.
+
+Rail state changes (hollow → accent → score colour) use `wcFade`. Dots/chips are **not
+tappable** in this pass. Because Review Sprint reuses this screen unchanged, its interruption
+and failure states — resume-partial-answer banner, text-input fallback, submit failure with
+the transcript preserved — apply in a sprint run exactly as in a daily session; none of them
+are special-cased on practice mode (verified in the prototype). The status bar right
 slot reads `READING ALOUD` while TTS is on. No other card metadata on this screen.
 
 **Thread** (scroll container, 24px horizontal padding, auto-scrolled to bottom on every new
@@ -277,11 +322,166 @@ No toast, no full-screen error, no data loss. Retrying re-posts the same payload
 
 ---
 
+## Screen 4 — Review Sprint Setup (`screenshots/sprint-setup-default.png`)
+
+**Purpose:** build the topic set before starting, closer to "tap Start" than "fill in a form".
+The suggested set is already built when the screen opens; everything on it is optional
+refinement.
+
+**Header:** `← Today` back link (13px, same as Card History), title `Review sprint`
+30px/600 −.02em, and a mono status line beneath it — `13 CARDS IN LIBRARY`,
+`N CARDS IN FILTER` when categories are selected, `CHECKING` while loading, `OFFLINE` on
+failure.
+
+**Controls, in order:**
+1. **Category filter** — one chip per category (9 total), mono 10px uppercase, 6/10/7px
+   padding, 9px radius, multi-select. Selected = `accent` border + `accent-wash` fill +
+   `#cfe9ed` label, matching the Quick Add schedule segments. No selection = full library.
+   Each chip carries a **tier-count annotation** on a second line, mono 9.5px `meta-faint`
+   (`#8fc7cf` when the chip is selected) — the category's most urgent count, in priority
+   order: `N shaky` (cold + shaky), else `N untested`, else `N developing`, else
+   `N solid`. Same category-grouped tier data that powers Coverage, so weak-area targeting
+   is visible where it gets acted on.
+2. **Session size** — the Settings "reviews per day" stepper component verbatim
+   (bordered − / value / +), range 4–10, default 6. Sub-line: "Weakest and least recently
+   reviewed first".
+3. **Shuffle** — 13px `#8b9299` text action, right-aligned opposite the mono `WALK ORDER`
+   label. Regenerates the set from the current filter and size; instant, no loading state.
+
+**Suggested set:** the pool is ranked weakest-score-first, then least-recently-reviewed;
+unrated cards sort as weakest. The top `size + 4` are shuffled and `size` are taken, then
+re-sorted back into rank order so the walk always opens on the weakest card.
+
+**Topic preview list:** Today's row anatomy minus the meta line — topic 16.5px/500, mono
+category tag, mastery summary 13.5px `#949ba1`, score column (numeral + dot). Rows are
+**not tappable** here; this is a preview, not a queue. Removing or reordering a single card
+is out of scope for this pass and is the first thing worth adding if auto-suggestion turns
+out to need correction often.
+
+**Link to Coverage:** a low-weight 13px `meta` text action beneath the preview list,
+`View full coverage →`, opening Screen 6. The only entry point to Coverage in this pass —
+this is the moment someone is already thinking in category gaps.
+
+**Trust footnote**, mono 10.5px `#4e565b`, directly above the button:
+`PRACTICE MODE · WON'T CHANGE YOUR REVIEW SCHEDULE`
+
+**Primary button:** `Start — N cards`, accent fill, identical to Today's Start.
+
+### States
+
+- **Loading** (`screenshots/sprint-setup-loading.png`): Today's skeleton rows (3), same bar
+  geometry, mono `LOADING CARDS` beneath. No shimmer. Controls stay visible and live.
+- **Empty** (`screenshots/sprint-setup-empty.png`): when the filtered pool holds fewer than 4
+  cards (the session-size minimum) — serif 20px "Not enough cards in these categories yet."
+  The chips stay live so the selection can be widened immediately; no separate clear button,
+  and the Start button is withheld.
+- **Load failure** (`screenshots/sprint-setup-load-failure.png`): Today's `LoadFailure`
+  pattern verbatim — "Couldn't reach the server." + mono `LAST SYNCED 06:12 · 3 CARDS CACHED`
+  + secondary **Retry**. No red, no icon. Status line reads `OFFLINE`.
+
+---
+
+## Screen 5 — Session Recap (`screenshots/session-recap.png`)
+
+**Purpose:** replaces the silent "last card finishes → back to Today". Shown once, after the
+final card of any multi-card session is scored. **The transition is a manual tap, not an
+automatic screen swap:** on every card except the last the session-end button reads
+**Next card**; on the last card of a run that same button reads **See recap** (a single-card
+session keeps **Done**).
+
+- **Title:** serif 24px `#f2f4f5` "Session recap", in Card History's title position.
+- **Aggregate score block:** the single-card score block treatment — 46px/600 tabular numeral
+  in the colour of the rounded average's band, mono 13px `/ 5 AVERAGE` beside it. No new
+  number presentation, no chart.
+- **Per-topic results:** Setup's row anatomy with this run's scores — topic, mono category,
+  score numeral, ▼ caret. Tapping expands inline to that card's feedback in serif 17px,
+  reusing Card History's accordion behaviour exactly, one row open at a time
+  (`screenshots/session-recap-expanded.png`).
+- **Trust footnote:** `PRACTICE MODE · SCORES SAVED TO HISTORY, SCHEDULE UNCHANGED`
+- **Actions:** primary **Done** (accent, returns to Today); centred 13px **Run another**
+  below it, which returns to Setup with the filter and session size preserved.
+- **Copy:** feedback keeps the scoring rubric's tone — specific, never congratulatory. No
+  celebration, no streaks, no share, no confetti.
+
+During a Review Sprint the session-end schedule line reads
+`PRACTICE MODE · SCHEDULE UNCHANGED` in place of `NEXT REVIEW · … · INTERVAL …`.
+
+---
+
+## Screen 6 — Coverage (`screenshots/coverage.png`)
+
+**Purpose:** a standing, category-grouped view of mastery across the whole library — for
+deciding where the study guide needs more cards, fewer cards, or rebalancing. Not a daily
+habit screen. Reached only from `View full coverage →` on Review Sprint Setup; add a second
+entry point later only if people ask for it.
+
+**Read-only.** It surfaces the gap, it doesn't fix it. Card authoring stays in Quick Add
+(one at a time) or the seed data (bulk) — no card-authoring UI here.
+
+**Header:** `← Review sprint` back link (13px), title `Coverage` 30px/600, mono status line
+`13 CARDS · 9 CATEGORIES` (`CHECKING` / `OFFLINE` in the other states).
+
+**Axis rollup:** one mono line directly beneath the status line — `MECHANISM 4.1 ·
+TRADE-OFFS 2.8 · FAILURE MODES 3.2` — mono 10.5px `meta-dim`, letter-spacing .06em, each
+value the mean of that axis across every scored card in the library. Scoring runs on three
+axes internally; this is the only place that decomposition surfaces, because "which axis is
+systemically weak" is the question Coverage exists to answer. No bars, no colour, no
+tappability. Hidden when no card has been scored. In the prototype the per-card axis values
+are derived illustratively from each card's stored score — real data comes from the backend's
+three-axis fields.
+
+**Tiers:** five, derived from each card's last score — `untested` (none), `cold` (0–1),
+`shaky` (2), `developing` (3), `solid` (4–5). Colours reuse the score bands:
+cold `score-low`, shaky/developing `score-mid`, solid `score-high`, untested `score-none`.
+No new metric — this is the same per-card tier data as Today's mastery line, re-sliced by
+category.
+
+**Section per category**, separated by `hairline`, 14/15px padding:
+- Category name 16.5px/500 with the card count mono 10px `meta-dim` right-aligned
+  (`2 CARDS` / `1 CARD`).
+- One mono 11px tier line in Today's mastery-band idiom — `1 shaky · 1 developing`,
+  zero-count tiers omitted, each segment tappable. The open segment switches from
+  `#7c848b` to its tier colour with a 1px underline, exactly like the Today band filter.
+- Tapping expands that tier's cards beneath: topic 14px `text-secondary`, mono 9.5px
+  `meta-faint` aside (`9D SINCE REVIEW`, or the due label for cards in the queue), and the
+  last score right-aligned in its score colour. One tier open at a time
+  (`screenshots/coverage-expanded.png`).
+- **Sections sort worst-first, by an exact comparator** (no sort control, no per-render
+  judgment): primary key `shaky + cold` count descending; tie-break on `untested` count
+  descending; final tie-break alphabetical by category name. Deterministic for any data set.
+- Footnote under the list, mono 10px `meta-faint`: `TAP A TIER TO LIST ITS CARDS · READ ONLY`
+
+**Deliberately not shown:** any week-by-week pace indicator. A seeded `target_week` describes
+the original seed order, not real progress after SM-2 has moved each card's cadence, so
+showing it as pace would state something false with a lot of visual confidence. A card's
+planned week is acceptable only as a `meta-faint` aside inside an expanded tier list.
+
+### States
+
+- **Loading:** the same static skeleton + mono `LOADING CARDS` as Setup.
+- **Load failure:** Today's `LoadFailure` pattern verbatim.
+- **No empty state** — every category has at least one card by construction.
+
+---
+
+### Out of scope for Review Sprint and Coverage (this pass)
+
+Manual reordering or removal inside a generated set · saved/named recurring sets ·
+cross-topic conversational continuity (scoring stays card-by-card) · streaks, badges or any
+celebratory end-of-session treatment · tap-to-preview on the progress rail · in-app card
+creation or editing from Coverage · a week-by-week pace view of any kind.
+
+---
+
 ## Navigation
 
 Today is home. Card History is reached from a Today row's topic name, or from
 "View history for this card" on the session-end state. Conversation is entered from a row
-tap or Start, and exited with `✕` / Done. No tab bar. No modal stack deeper than one sheet.
+tap, Start, or Review Sprint Setup's Start, and exited with `✕` / Done. Review Sprint Setup
+is reached only from Today and exits via `← Today` or by starting a session; Coverage is
+reached only from Setup and returns there; Session Recap
+appears after the last card of any multi-card session and exits to Today or back to Setup.
+No tab bar. No modal stack deeper than one sheet.
 
 ---
 
@@ -305,6 +505,15 @@ Client state the prototype exercises (name them however the codebase prefers):
 | `sheet` | `null` \| `settings` \| `add` | |
 | `addPending`, `addError` | bool | quick-add in-flight / failed |
 | `perDay`, `windows[]` | int, `[{label,on,from,to}]` | settings |
+| `screen` (added values) | `setup` \| `recap` | the two Review Sprint screens |
+| `setupLoad` | `loading` → `ready` \| `error` | Setup's library fetch; `Retry` re-runs it |
+| `setupCats` | `string[]` | selected category filters; empty = whole library |
+| `setupSize` | int 4–10 | session size, default 6 |
+| `seed` | int | bumped by Shuffle; regenerates the suggested set |
+| `practice` | bool | practice mode (sprint run) — suppresses SM-2 writes, swaps the schedule line |
+| `covOpen` | `null` \| `{cat, tier}` | expanded tier on Coverage |
+| `run` | `[{id, topic, category, score, feedback}]` | this session's results; drives rail colours and the recap |
+| `recapOpen` | `null` \| index | expanded recap row |
 
 ### Transitions
 
@@ -350,11 +559,18 @@ characters. Fonts are Google Fonts: **Newsreader** (400, 500, 400 italic) and
   `conversation-question`, `conversation-recording`, `conversation-followup`,
   `conversation-score`, `conversation-text-input`, `conversation-resume`,
   `conversation-submit-failure`, `card-history`, `card-history-expanded`,
-  `card-history-empty`, `today-mastery-filter`.
+  `card-history-empty`, `today-mastery-filter`,
+  `sprint-setup-default`, `sprint-setup-loading`, `sprint-setup-empty`,
+  `sprint-setup-load-failure`, `conversation-rail-dots`, `conversation-rail-chips`
+  (detail crop), `session-recap`, `session-recap-expanded`, `sprint-setup-coverage-link`
+  (detail crop), `coverage`, `coverage-expanded`.
 
 ### Exercising the states in the prototype
 
 The prototype exposes toggles (Tweaks): `loadState` (`auto` / `loading` / `error`),
-`failSubmit`, `failAdd`, `emptyQueue`, `textFirst`, `ttsEnabled`. Forced failures succeed on
+`failSubmit`, `failAdd`, `emptyQueue`, `textFirst`, `ttsEnabled`, and `railStyle`
+(`dots` / `chips`) for the two progress-rail options. `loadState` also drives Review Sprint
+Setup's loading and failure states. The library holds 13 cards across the 9 categories — the
+three due cards plus ten that exist only for Review Sprint. Forced failures succeed on
 the retry so each failure path can be walked end to end. Transcripts type themselves out to
 stand in for streaming STT.

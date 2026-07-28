@@ -38,23 +38,33 @@ SCORING_RUBRIC = """\
 You are grading a spaced-repetition recall session for a senior backend engineer \
 preparing for interviews at Anthropic, OpenAI, and Google.
 
-Score the answer 0-5 on three axes only: mechanism accuracy, trade-off awareness, \
-and failure-mode awareness. Do not score fluency, length, confidence, or enthusiasm.
+Score the answer on three axes, 0-5 each, independently:
 
-  0 - no recall, or fundamentally wrong mechanism
-  1 - names the topic but the mechanism described is incorrect
-  2 - partial mechanism, major gaps or a confidently wrong detail
-  3 - correct core mechanism, missing trade-offs or failure modes
-  4 - correct mechanism plus trade-offs, minor gaps
-  5 - complete: mechanism, trade-offs, and failure modes, unprompted
+  mechanism_accuracy — is the underlying mechanism correct?
+    0 no recall attempted or fundamentally wrong
+    1 names the topic but the mechanism described is incorrect
+    2 partial mechanism, major gaps or a confidently wrong detail
+    3-5 core mechanism correct, distinguish by completeness
+
+  trade_off_awareness — did they name the relevant trade-offs unprompted?
+  failure_mode_awareness — did they name how/when this breaks, unprompted?
+
+Do not score fluency, length, confidence, or enthusiasm.
 
 Answers arrive as voice transcripts. They will be conversational and disfluent and \
 may contain speech-to-text errors. Score the substance. Never penalize verbal filler \
 ("um", "like", "so yeah"), false starts, or obvious transcription artifacts — if a \
 word is clearly a mis-transcription of the right technical term, treat it as correct.
 
-`feedback` is one or two sentences, specific to what was actually said and what was \
-missed. Not generic encouragement. Never congratulatory.
+`feedback` is one to three sentences, and its content depends on mechanism_accuracy:
+  - If mechanism_accuracy <= 2: state the correct mechanism directly, in plain terms —
+    don't just note that it was wrong or incomplete. This is the single most important
+    thing feedback does; a low mechanism score with vague feedback is a bug, not a
+    valid response.
+  - If mechanism_accuracy >= 3: skip re-explaining the mechanism. Instead, supply
+    whichever of trade_off_awareness or failure_mode_awareness scored lower — state
+    the actual trade-off or failure mode, don't just note it was missing.
+  Never generic encouragement. Never congratulatory.
 
 `follow_up_question` is a probe at the single most important gap in this answer, \
 phrased as one short question and prefaced with "One more — ". Always write one, \
@@ -87,17 +97,51 @@ QUESTION_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+AXES = ("mechanism_accuracy", "trade_off_awareness", "failure_mode_awareness")
+
 SCORE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "score": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "mechanism_accuracy": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "trade_off_awareness": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "failure_mode_awareness": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
         "feedback": {"type": "string"},
         "follow_up_question": {"type": "string"},
         "mastery_summary": {"type": "string"},
     },
-    "required": ["score", "feedback", "follow_up_question", "mastery_summary"],
+    "required": [
+        "mechanism_accuracy",
+        "trade_off_awareness",
+        "failure_mode_awareness",
+        "feedback",
+        "follow_up_question",
+        "mastery_summary",
+    ],
     "additionalProperties": False,
 }
+
+
+def derive_composite(mechanism: int, trade_offs: int, failure_modes: int) -> int:
+    """The 0-5 number the app displays, computed rather than guessed.
+
+    A direct restatement of the bands the old blended rubric asked the model to
+    apply in its head (0/1 mechanism wrong, 3 mechanism only, 4 + trade-offs,
+    5 complete), so nothing downstream sees a meaning change. Deriving it also
+    removes a real source of inconsistency: the model used to return a blended
+    score that could disagree with its own stated reasoning.
+
+    Display only. Scheduling gates on ``mechanism_accuracy`` — see
+    ``scheduler.rating_for``.
+    """
+    # A failing mechanism caps the composite at itself: no recall, a wrong
+    # mechanism, or a partial one cannot be rescued by depth elsewhere.
+    if mechanism <= 2:
+        return mechanism
+    if trade_offs <= 2 and failure_modes <= 2:
+        return 3  # correct mechanism, nothing else
+    if failure_modes <= 2:
+        return 4  # mechanism + trade-offs, failure modes still thin
+    return 5  # all three present
 
 
 class LLMError(RuntimeError):
@@ -116,9 +160,27 @@ class ScoreResult:
 
     status: str  # "follow_up" | "complete"
     score: int | None = None
+    mechanism_accuracy: int | None = None
+    trade_off_awareness: int | None = None
+    failure_mode_awareness: int | None = None
     feedback: str = ""
     follow_up_question: str | None = None
     mastery_summary: str = ""
+
+    def __post_init__(self) -> None:
+        """A completed result always carries all three axes.
+
+        Enforced here so `submit_answer` can read `mechanism_accuracy` without a
+        fallback. The fallback it replaces was a path where the composite reached
+        SM-2 — the exact conflation this decomposition exists to remove, and one
+        no test could have caught, because a `ScoreResult` built without axes is
+        only reachable by constructing one by hand.
+        """
+        if self.status != "complete":
+            return
+        missing = [axis for axis in AXES if getattr(self, axis) is None]
+        if missing:
+            raise ValueError(f"a complete ScoreResult is missing {', '.join(missing)}")
 
 
 @lru_cache
@@ -271,14 +333,16 @@ async def score_answer(
         max_tokens=8000,
     )
 
-    # The JSON schema makes `score` required, so this should be unreachable — but an
-    # unguarded KeyError/ValueError here is a 500, and the client only knows how to
-    # retry a 503. Losing a spoken answer is the worst failure mode in the product.
+    # The JSON schema makes all three axes required, so this should be unreachable —
+    # but an unguarded KeyError/ValueError here is a 500, and the client only knows
+    # how to retry a 503. Losing a spoken answer is the worst failure mode in the
+    # product.
     try:
-        score = int(data["score"])
+        mechanism, trade_offs, failure_modes = (int(data[axis]) for axis in AXES)
     except (KeyError, TypeError, ValueError) as exc:
-        raise LLMError(f"scoring response had no usable score: {data!r}") from exc
+        raise LLMError(f"scoring response had no usable axis scores: {data!r}") from exc
 
+    score = derive_composite(mechanism, trade_offs, failure_modes)
     probe = str(data.get("follow_up_question", "")).strip()
 
     if not follow_up_used and FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH and probe:
@@ -287,6 +351,9 @@ async def score_answer(
     return ScoreResult(
         status="complete",
         score=score,
+        mechanism_accuracy=mechanism,
+        trade_off_awareness=trade_offs,
+        failure_mode_awareness=failure_modes,
         feedback=str(data.get("feedback", "")).strip(),
         mastery_summary=str(data.get("mastery_summary", "")).strip(),
     )

@@ -43,6 +43,12 @@ struct RootView: View {
                         ConversationScreen()
                     case .history(let id):
                         CardHistoryScreen(cardID: id)
+                    case .sprintSetup:
+                        SprintSetupScreen()
+                    case .coverage:
+                        CoverageScreen()
+                    case .recap:
+                        SessionRecapScreen()
                     }
                 }
         }
