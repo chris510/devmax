@@ -186,15 +186,6 @@ async def submit_answer(
         card.mastery_summary = result.mastery_summary
     card.updated_at = now
 
-    # Gated on mechanism accuracy alone, from the FINAL session after any follow-up.
-    # A session scored before the decomposition shipped has no axis; falling back to
-    # the composite is exact rather than approximate, because `derive_composite`
-    # returns <= 2 for exactly the mechanism scores that fail. Defaulting to 0
-    # instead would reset a card's interval on a shape mismatch.
-    mechanism = result.mechanism_accuracy
-    if mechanism is None:
-        mechanism = result.score or 0
-
     next_review, interval = card.next_review_at, card.interval_days
     if not session.practice:
         today = await local_today(db)
@@ -202,7 +193,9 @@ async def submit_answer(
             card.ease_factor,
             card.interval_days,
             card.repetitions,
-            quality_for(mechanism),
+            # Gated on mechanism accuracy alone, from the FINAL session after any
+            # follow-up. `ScoreResult` guarantees it is set on a complete result.
+            quality_for(result.mechanism_accuracy or 0),
             today,
         )
         card.ease_factor = ease

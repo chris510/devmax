@@ -87,23 +87,14 @@ actor MockAPI: DevmaxAPI {
             throw APIError.status(500)
         }
         if await MainActor.run(body: { DebugFlags.shared.emptyQueue }) { return [] }
-        return extraCards + [
-            DueCard(
-                id: Self.chID, topic: "Consistent hashing", category: "Core Concept",
-                masterySummary: "solid on ring mechanics, shaky on virtual nodes",
-                lastScore: 2, dueLabel: "3 days overdue", resumable: false, missedCount: 0
-            ),
-            DueCard(
-                id: Self.raftID, topic: "Raft leader election", category: "Distributed Systems",
-                masterySummary: "can describe terms and voting; fuzzy on log-matching safety",
-                lastScore: 1, dueLabel: "1 day overdue", resumable: true, missedCount: 2
-            ),
-            DueCard(
-                id: Self.pgID, topic: "Postgres index types", category: "Databases",
-                masterySummary: "confident on B-tree vs GIN; hasn't explained index bloat",
-                lastScore: 3, dueLabel: "due today", resumable: false, missedCount: 0
-            ),
-        ]
+        // The queue is the first three library cards, adapted — one fixture list,
+        // not two. These fixtures *are* the screenshot acceptance test, so a
+        // mastery string edited in one place and not the other would make Today
+        // and Coverage disagree about the same card with nothing to catch it.
+        // The Raft card is the one carrying a stored partial answer.
+        return extraCards + Self.library.prefix(3).map {
+            $0.asQueueCard(resumable: $0.id == Self.raftID)
+        }
     }
 
     /// The whole library: the three due cards plus ten that exist only for Review

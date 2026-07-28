@@ -18,7 +18,11 @@ struct CoverageScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch state.libraryLoad {
-                    case .loading: CoverageSkeleton()
+                    case .loading:
+                        LoadingList(
+                            label: "LOADING CARDS", inset: 0,
+                            showsScoreColumn: false, separator: .overlay
+                        )
                     case .error: LoadFailure { Task { await state.loadLibrary() } }
                     case .ready: sections
                     }
@@ -101,7 +105,7 @@ private struct CoverageSection: View {
     /// Tiers present here, in fixed order, zero-count tiers omitted.
     private var tiers: [(tier: ScoreStyle.Tier, count: Int)] {
         ScoreStyle.Tier.allCases.compactMap { tier in
-            let count = cards.filter { ScoreStyle.Tier.of($0.lastScore) == tier }.count
+            let count = AppState.tally(cards, [tier])
             return count > 0 ? (tier, count) : nil
         }
     }
@@ -139,31 +143,24 @@ private struct CoverageSection: View {
         .overlay(alignment: .top) { Hairline() }
     }
 
-    /// Today's mastery-band idiom, re-sliced by category. The open segment
-    /// switches from `#7c848b` to its tier colour with a 1px underline.
+    /// Today's mastery-band line, re-sliced by category — the same control, one
+    /// tier open at a time across the whole screen.
     private var tierLine: some View {
-        FlowLayout(horizontalSpacing: 7, verticalSpacing: 3) {
-            ForEach(Array(tiers.enumerated()), id: \.element.tier) { index, entry in
-                let open = openTier == entry.tier
-                Button {
-                    withAnimation(Motion.fadeFast) {
-                        state.covOpen = open
-                            ? nil
-                            : AppState.OpenTier(category: category, tier: entry.tier)
-                    }
-                } label: {
-                    VStack(spacing: 1) {
-                        Text("\(entry.count) \(entry.tier.rawValue)\(index < tiers.count - 1 ? " ·" : "")")
-                            .font(WCFont.mono(11))
-                            .tracking(0.33)
-                            .foregroundStyle(open ? entry.tier.color : Theme.metaAlt)
-                        Rectangle()
-                            .fill(open ? entry.tier.color : .clear)
-                            .frame(height: 1)
-                    }
-                    .fixedSize()
-                }
-                .buttonStyle(.plain)
+        CountSegments(
+            segments: tiers.map { entry in
+                CountSegments.Segment(
+                    id: entry.tier.rawValue,
+                    text: "\(entry.count) \(entry.tier.rawValue)",
+                    color: entry.tier.color,
+                    isActive: openTier == entry.tier
+                )
+            }
+        ) { segment in
+            guard let tier = ScoreStyle.Tier(rawValue: segment.id) else { return }
+            withAnimation(Motion.fadeFast) {
+                state.covOpen = segment.isActive
+                    ? nil
+                    : AppState.OpenTier(category: category, tier: tier)
             }
         }
     }
@@ -193,30 +190,3 @@ private struct CoverageSection: View {
     }
 }
 
-/// The same static skeleton as Review Sprint Setup, without the score column.
-struct CoverageSkeleton: View {
-    private let widths: [[CGFloat]] = [[0.58, 0.84], [0.46, 0.72], [0.63, 0.79]]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<3, id: \.self) { row in
-                GeometryReader { geo in
-                    VStack(alignment: .leading, spacing: 9) {
-                        RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton1)
-                            .frame(width: geo.size.width * widths[row][0], height: 12)
-                        RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton2)
-                            .frame(width: geo.size.width * widths[row][1], height: 10)
-                    }
-                }
-                .frame(height: 31)
-                .padding(.top, 15)
-                .padding(.bottom, 16)
-                .overlay(alignment: .top) { Hairline() }
-            }
-
-            MetaText(text: "LOADING CARDS", font: WCFont.mono(10),
-                     tracking: 1.2, color: Theme.metaFaint)
-                .padding(.top, 16)
-        }
-    }
-}

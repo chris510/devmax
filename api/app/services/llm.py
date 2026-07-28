@@ -133,10 +133,10 @@ def derive_composite(mechanism: int, trade_offs: int, failure_modes: int) -> int
     Display only. Scheduling gates on ``mechanism_accuracy`` — see
     ``scheduler.rating_for``.
     """
-    if mechanism <= 1:
-        return mechanism  # 0 or 1 — no recall / wrong mechanism, nothing else matters
-    if mechanism == 2:
-        return 2
+    # A failing mechanism caps the composite at itself: no recall, a wrong
+    # mechanism, or a partial one cannot be rescued by depth elsewhere.
+    if mechanism <= 2:
+        return mechanism
     if trade_offs <= 2 and failure_modes <= 2:
         return 3  # correct mechanism, nothing else
     if failure_modes <= 2:
@@ -166,6 +166,21 @@ class ScoreResult:
     feedback: str = ""
     follow_up_question: str | None = None
     mastery_summary: str = ""
+
+    def __post_init__(self) -> None:
+        """A completed result always carries all three axes.
+
+        Enforced here so `submit_answer` can read `mechanism_accuracy` without a
+        fallback. The fallback it replaces was a path where the composite reached
+        SM-2 — the exact conflation this decomposition exists to remove, and one
+        no test could have caught, because a `ScoreResult` built without axes is
+        only reachable by constructing one by hand.
+        """
+        if self.status != "complete":
+            return
+        missing = [axis for axis in AXES if getattr(self, axis) is None]
+        if missing:
+            raise ValueError(f"a complete ScoreResult is missing {', '.join(missing)}")
 
 
 @lru_cache

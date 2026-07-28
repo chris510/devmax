@@ -41,10 +41,10 @@ struct SprintSetupScreen: View {
                     sessionSize
 
                     switch state.libraryLoad {
-                    case .loading: SprintSkeleton()
+                    case .loading: LoadingList(label: "LOADING CARDS", inset: 0, separator: .overlay)
                     case .error: LoadFailure { Task { await state.loadLibrary() } }
                     case .ready:
-                        if state.setupEmpty { emptyPool } else { suggestedSet }
+                        if state.setupReady { suggestedSet } else { emptyPool }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -226,47 +226,9 @@ private struct SprintPreviewRow: View {
 
             ScoreColumn(score: card.lastScore)
         }
-        .padding(.top, 15)
-        .padding(.bottom, 16)
+        .padding(.top, Metrics.rowTopPadding)
+        .padding(.bottom, Metrics.rowBottomPadding)
         .overlay(alignment: .top) { Hairline() }
-    }
-}
-
-/// Today's skeleton geometry, three rows, no shimmer.
-struct SprintSkeleton: View {
-    private let widths: [[CGFloat]] = [[0.58, 0.84], [0.46, 0.72], [0.63, 0.79]]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<3, id: \.self) { row in
-                HStack(alignment: .top, spacing: Metrics.scoreColumnGap) {
-                    GeometryReader { geo in
-                        VStack(alignment: .leading, spacing: 9) {
-                            RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton1)
-                                .frame(width: geo.size.width * widths[row][0], height: 12)
-                            RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton2)
-                                .frame(width: geo.size.width * widths[row][1], height: 10)
-                            RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton3)
-                                .frame(width: geo.size.width * 0.34, height: 8)
-                        }
-                    }
-                    .frame(height: 48)
-
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Theme.skeleton1)
-                        .frame(width: 12, height: 12)
-                        .frame(width: Metrics.scoreColumnWidth, alignment: .center)
-                        .padding(.top, 2)
-                }
-                .padding(.top, 15)
-                .padding(.bottom, 16)
-                .overlay(alignment: .top) { Hairline() }
-            }
-
-            MetaText(text: "LOADING CARDS", font: WCFont.mono(10),
-                     tracking: 1.2, color: Theme.metaFaint)
-                .padding(.top, 16)
-        }
     }
 }
 

@@ -81,7 +81,7 @@ struct SessionRecapScreen: View {
             // "SCHEDULE UNCHANGED" is simply false, on the one screen whose job
             // is to be trusted. Shown only when it's true; `Run another` is
             // likewise a sprint action, not a queue one.
-            if state.practice {
+            if state.runWasPractice {
                 MetaText(text: "PRACTICE MODE · SCORES SAVED TO HISTORY, SCHEDULE UNCHANGED",
                          font: WCFont.mono(10.5), tracking: 0.63, color: Theme.metaFaint)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -89,7 +89,7 @@ struct SessionRecapScreen: View {
 
             PrimaryButton(title: "Done") { state.finish() }
 
-            if state.practice {
+            if state.runWasPractice {
                 // Returns to Setup with the filter and session size preserved.
                 Button { state.runAnother() } label: {
                     Text("Run another")
@@ -143,8 +143,8 @@ private struct RecapRow: View {
                     }
                     .padding(.top, 2)
                 }
-                .padding(.top, 15)
-                .padding(.bottom, 16)
+                .padding(.top, Metrics.rowTopPadding)
+                .padding(.bottom, Metrics.rowBottomPadding)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

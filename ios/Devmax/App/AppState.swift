@@ -21,7 +21,6 @@ final class AppState: ObservableObject {
     @Published var load: LoadState = .loading
     @Published var queue: [DueCard] = []
     @Published var filter: ScoreStyle.Band?
-    @Published var upcoming: [CardSummary] = []
     @Published var sheet: Sheet?
     @Published var addPending = false
     @Published var addError = false
@@ -89,11 +88,7 @@ final class AppState: ObservableObject {
     }
 
     var headerStatus: String {
-        switch load {
-        case .loading: return "CHECKING"
-        case .error: return "OFFLINE"
-        case .ready: return queue.isEmpty ? "NOTHING DUE" : "\(queue.count) CARDS DUE"
-        }
+        load.status { queue.isEmpty ? "NOTHING DUE" : "\(queue.count) CARDS DUE" }
     }
 
     var headerDate: String {
@@ -115,9 +110,9 @@ final class AppState: ObservableObject {
             queue = try await api.due()
             DueCache.record(count: queue.count)
             load = .ready
-            if queue.isEmpty {
-                upcoming = (try? await api.cards(sort: "next_review", mode: "conversational")) ?? []
-            }
+            // Today's "COMING UP" list and Coverage read the same library, so
+            // it is fetched once into one store rather than twice into two.
+            if queue.isEmpty { await loadLibrary() }
             settings = (try? await api.settings()) ?? settings
         } catch {
             load = .error
@@ -191,55 +186,35 @@ final class AppState: ObservableObject {
             if wa != wb { return wa < wb }
             return (a.daysSinceReview ?? 0) > (b.daysSinceReview ?? 0)
         }
-        let top = Array(ranked.prefix(setupSize + 4))
-
         // Seeded so the same seed always yields the same set — Shuffle is the only
-        // thing that changes it, not a re-render.
-        var lcg = seed &* 9301 &+ 49297
-        var pool = top
-        var shuffled: [CardSummary] = []
-        while !pool.isEmpty {
-            lcg = (lcg &* 9301 &+ 49297) % 233_280
-            let index = Int(Double(lcg) / 233_280 * Double(pool.count))
-            shuffled.append(pool.remove(at: min(max(index, 0), pool.count - 1)))
-        }
-
-        // `uniquingKeysWith` rather than `uniqueKeysWithValues`: a duplicated id
-        // from the server would otherwise trap inside a view body.
-        let order = Dictionary(
-            ranked.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first }
-        )
-        return shuffled.prefix(setupSize).sorted { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
+        // thing that changes it, not a re-render. Filtering `ranked` at the end is
+        // what puts the walk back into rank order.
+        var rng = SeededGenerator(seed: seed)
+        let chosen = Set(ranked.prefix(setupSize + 4).shuffled(using: &rng).prefix(setupSize).map(\.id))
+        return ranked.filter { chosen.contains($0.id) }
     }
 
     var setupStatus: String {
-        switch libraryLoad {
-        case .loading: return "CHECKING"
-        case .error: return "OFFLINE"
-        case .ready:
-            guard !setupCats.isEmpty else {
-                return "\(library.count) CARDS IN LIBRARY"
-            }
+        libraryLoad.status {
+            guard !setupCats.isEmpty else { return "\(library.count) CARDS IN LIBRARY" }
             let n = sprintPool.count
             return "\(n) CARD\(n == 1 ? "" : "S") IN FILTER"
         }
     }
 
-    /// Fewer than a session's minimum in the filtered pool.
-    var setupEmpty: Bool { libraryLoad == .ready && sprintPool.count < Self.minSessionSize }
+    /// The filtered pool holds at least a session's minimum. When the library has
+    /// loaded and this is false, the pool is too narrow and Setup says so.
     var setupReady: Bool { libraryLoad == .ready && sprintPool.count >= Self.minSessionSize }
 
     /// The category chip's second line: its most urgent count, in priority order.
     func chipNote(for category: String) -> String {
         let cards = library.filter { $0.category == category }
-        func count(_ tier: ScoreStyle.Tier) -> Int {
-            cards.filter { ScoreStyle.Tier.of($0.lastScore) == tier }.count
-        }
-        let weak = count(.cold) + count(.shaky)
+        let weak = Self.tally(cards, [.cold, .shaky])
         if weak > 0 { return "\(weak) shaky" }
-        if count(.untested) > 0 { return "\(count(.untested)) untested" }
-        if count(.developing) > 0 { return "\(count(.developing)) developing" }
-        return "\(count(.solid)) solid"
+        for tier in [ScoreStyle.Tier.untested, .developing] where Self.tally(cards, [tier]) > 0 {
+            return "\(Self.tally(cards, [tier])) \(tier.rawValue)"
+        }
+        return "\(Self.tally(cards, [.solid])) solid"
     }
 
     func toggleCategory(_ name: String) {
@@ -247,7 +222,7 @@ final class AppState: ObservableObject {
     }
 
     func startSprint() {
-        let cards = sprintSet.map(\.asQueueCard)
+        let cards = sprintSet.map { $0.asQueueCard() }
         guard !cards.isEmpty else { return }
         beginSession(cards: cards, practice: true, replacingPath: true)
     }
@@ -269,16 +244,16 @@ final class AppState: ObservableObject {
             }
     }
 
-    private static func tally(_ cards: [CardSummary], _ tiers: [ScoreStyle.Tier]) -> Int {
+    /// How many of `cards` fall in any of `tiers`. The one tier counter — the
+    /// chip notes, the Coverage section headers and the section ordering all go
+    /// through it, so adjacent screens cannot report different numbers for the
+    /// same category.
+    static func tally(_ cards: [CardSummary], _ tiers: [ScoreStyle.Tier]) -> Int {
         cards.filter { tiers.contains(ScoreStyle.Tier.of($0.lastScore)) }.count
     }
 
     var coverageStatus: String {
-        switch libraryLoad {
-        case .loading: return "CHECKING"
-        case .error: return "OFFLINE"
-        case .ready: return "\(library.count) CARDS · \(categories.count) CATEGORIES"
-        }
+        libraryLoad.status { "\(library.count) CARDS · \(categories.count) CATEGORIES" }
     }
 
     /// `MECHANISM 4.1 · TRADE-OFFS 2.8 · FAILURE MODES 3.2`.
@@ -482,7 +457,7 @@ final class AppState: ObservableObject {
                     run.append(
                         RunEntry(
                             id: card.id, topic: card.topic, category: card.category,
-                            score: score, feedback: feedback
+                            score: score, feedback: feedback, practice: wasPractice
                         )
                     )
                 }
@@ -531,6 +506,12 @@ final class AppState: ObservableObject {
         return Double(run.map(\.score).reduce(0, +)) / Double(run.count)
     }
 
+    /// Whether the server left the schedule alone, as it reported per card —
+    /// not what the client asked for. If the query param were ever lost, the
+    /// Conversation screen would print a real schedule; the recap must not then
+    /// claim the schedule was untouched.
+    var runWasPractice: Bool { run.allSatisfy(\.practice) && !run.isEmpty }
+
     func runAnother() {
         path = [.sprintSetup]
         Task { await loadLibrary() }
@@ -564,17 +545,14 @@ final class AppState: ObservableObject {
             if let card = queue.first(where: { $0.resumable }) { beginSession(cards: [card]) }
         case "setup", "sprint-setup":
             enterSprintSetup()
-        case "coverage":
+        case "coverage", "coverage-expanded":
             enterSprintSetup()
             await waitForLibrary()
             path.append(.coverage)
-        case "coverage-expanded":
-            enterSprintSetup()
-            await waitForLibrary()
-            path.append(.coverage)
-            if let section = coverageSections.first,
+            if route == "coverage-expanded",
+               let section = coverageSections.first,
                let tier = ScoreStyle.Tier.allCases.first(where: { tier in
-                   section.cards.contains { ScoreStyle.Tier.of($0.lastScore) == tier }
+                   Self.tally(section.cards, [tier]) > 0
                }) {
                 covOpen = OpenTier(category: section.category, tier: tier)
             }
@@ -606,17 +584,15 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func waitForQuestion() async {
-        for _ in 0..<40 where stage == .loadingQuestion {
+    /// Screenshot routing only — poll until a load settles, then carry on.
+    private func waitUntil(_ ready: () -> Bool) async {
+        for _ in 0..<40 where !ready() {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
-    private func waitForLibrary() async {
-        for _ in 0..<40 where libraryLoad == .loading {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-    }
+    private func waitForQuestion() async { await waitUntil { stage != .loadingQuestion } }
+    private func waitForLibrary() async { await waitUntil { libraryLoad != .loading } }
 
     private func advance(to route: String) async {
         let answer = "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
@@ -664,5 +640,42 @@ final class AppState: ObservableObject {
 extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+extension AppState.LoadState {
+    /// Every screen's mono status line reads the same while loading or offline
+    /// and only differs once the data is in hand — so only that part is written
+    /// per screen. The two strings are copy, and copy is final.
+    func status(_ ready: () -> String) -> String {
+        switch self {
+        case .loading: return "CHECKING"
+        case .error: return "OFFLINE"
+        case .ready: return ready()
+        }
+    }
+}
+
+/// A deterministic source for `shuffled(using:)`, so Review Sprint's suggested
+/// set is stable for a given seed and only Shuffle re-rolls it.
+///
+/// Not for anything that needs real randomness — this is a plain LCG whose only
+/// job is reproducibility.
+struct SeededGenerator: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: Int) {
+        // Any non-zero start works; the constant just keeps small seeds from
+        // producing near-identical first draws.
+        state = UInt64(truncatingIfNeeded: seed) &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+    }
+
+    mutating func next() -> UInt64 {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        // Xorshift the high bits down: the low bits of a raw LCG cycle short.
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

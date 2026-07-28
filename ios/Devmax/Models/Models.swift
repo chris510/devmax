@@ -39,11 +39,13 @@ struct CardSummary: Codable, Identifiable, Equatable {
 
     /// Review Sprint walks library cards through the same Conversation screen the
     /// daily queue uses, so the set is adapted rather than the screen generalised.
-    /// Nothing in the library is mid-answer, so `resumable` is always false.
-    var asQueueCard: DueCard {
+    /// `resumable` is not a library fact — only a live session with a saved draft
+    /// makes a card resumable — so it is supplied by whoever builds the queue.
+    func asQueueCard(resumable: Bool = false) -> DueCard {
         DueCard(
             id: id, topic: topic, category: category, masterySummary: masterySummary,
-            lastScore: lastScore, dueLabel: dueLabel, resumable: false, missedCount: missedCount
+            lastScore: lastScore, dueLabel: dueLabel, resumable: resumable,
+            missedCount: missedCount
         )
     }
 }
@@ -182,4 +184,6 @@ struct RunEntry: Identifiable, Equatable {
     let category: String
     let score: Int
     let feedback: String
+    /// As the server reported it for this card, not as the client requested it.
+    let practice: Bool
 }

@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, timedelta
+from datetime import date, timedelta, tzinfo
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,7 +13,7 @@ from app.models import (
     Card,
     Session,
 )
-from app.routers.deps import local_today
+from app.routers.deps import local_calendar, local_today
 from app.schemas import (
     CardDetail,
     CardSummary,
@@ -36,12 +36,12 @@ from app.services.cards import (
 router = APIRouter(tags=["cards"])
 
 
-def _summary(card: Card, today: date) -> CardSummary:
+def _summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
     """One card as the library sees it. Two fields are derived, not stored."""
     return CardSummary(
         **card.model_dump(),
         due_label=due_label(card.next_review_at, today),
-        days_since_review=days_since_review(card, today),
+        days_since_review=days_since_review(card, today, tz),
     )
 
 
@@ -141,7 +141,7 @@ async def list_cards(
     db: AsyncSession = Depends(get_session),
 ) -> list[CardSummary]:
     """The whole library. Backs Review Sprint Setup and Coverage."""
-    today = await local_today(db)
+    today, tz = await local_calendar(db)
     statement = select(Card)
     if mode != "all":
         statement = statement.where(Card.delivery_mode == mode)
@@ -149,7 +149,7 @@ async def list_cards(
         statement = statement.order_by(col(Card.ease_factor).asc(), col(Card.next_review_at).asc())
     else:
         statement = statement.order_by(col(Card.next_review_at).asc())
-    return [_summary(c, today) for c in (await db.exec(statement)).all()]
+    return [_summary(c, today, tz) for c in (await db.exec(statement)).all()]
 
 
 @router.get("/cards/{card_id}", response_model=CardDetail)
@@ -158,7 +158,7 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
-    today = await local_today(db)
+    today, tz = await local_calendar(db)
     sessions = (
         await db.exec(
             select(Session)
@@ -168,7 +168,7 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
     ).all()
 
     return CardDetail(
-        **_summary(card, today).model_dump(),
+        **_summary(card, today, tz).model_dump(),
         sessions=[
             SessionHistory(
                 id=s.id,
@@ -184,7 +184,7 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
 
 @router.post("/cards", response_model=CardSummary, status_code=201)
 async def create_card(body: CreateCard, db: AsyncSession = Depends(get_session)) -> CardSummary:
-    today = await local_today(db)
+    today, tz = await local_calendar(db)
     card = Card(
         topic=body.topic.strip(),
         category="Unsorted",
@@ -197,4 +197,4 @@ async def create_card(body: CreateCard, db: AsyncSession = Depends(get_session))
     db.add(card)
     await db.commit()
     await db.refresh(card)
-    return _summary(card, today)
+    return _summary(card, today, tz)

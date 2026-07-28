@@ -1,6 +1,6 @@
 """Pure card-derived values. No request context, so all directly unit-testable."""
 
-from datetime import date
+from datetime import date, tzinfo
 
 from app.models import Card, Session
 from app.schemas import Turn
@@ -27,11 +27,16 @@ def due_label(next_review_at: date, today: date) -> str:
     return f"{days} days overdue"
 
 
-def days_since_review(card: Card, today: date) -> int | None:
-    """None until the card has been answered once."""
+def days_since_review(card: Card, today: date, tz: tzinfo) -> int | None:
+    """None until the card has been answered once.
+
+    `last_reviewed_at` is stored in UTC and `today` is a local calendar day, so
+    the timestamp is converted before its date is taken — otherwise a card
+    reviewed this evening reads as reviewed tomorrow.
+    """
     if card.last_reviewed_at is None:
         return None
-    return (today - card.last_reviewed_at.date()).days
+    return (today - card.last_reviewed_at.astimezone(tz).date()).days
 
 
 def classify_tier(card: Card, today: date) -> str:

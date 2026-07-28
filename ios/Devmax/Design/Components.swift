@@ -78,6 +78,47 @@ struct SecondaryButton: View {
     }
 }
 
+/// One quiet mono line of counts, each segment tappable: `2 shaky · 1 cold`.
+///
+/// Today's mastery-band filter and Coverage's per-category tier line are the same
+/// control over different vocabularies — the open segment switches from
+/// `meta-alt` to its own colour and gains a 1px underline. The vocabularies stay
+/// separate (that invariant is about meaning, not pixels); only the rendering is
+/// shared, so the treatment can't drift between the two screens.
+///
+/// Not a dashboard: no percentages, no bars, no second line.
+struct CountSegments: View {
+    struct Segment: Identifiable {
+        let id: String
+        let text: String
+        let color: Color
+        let isActive: Bool
+    }
+
+    let segments: [Segment]
+    let onTap: (Segment) -> Void
+
+    var body: some View {
+        FlowLayout(horizontalSpacing: 7, verticalSpacing: 3) {
+            ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+                Button { onTap(segment) } label: {
+                    VStack(spacing: 1) {
+                        Text(segment.text + (index < segments.count - 1 ? " ·" : ""))
+                            .font(WCFont.mono(11))
+                            .tracking(0.33)
+                            .foregroundStyle(segment.isActive ? segment.color : Theme.metaAlt)
+                        Rectangle()
+                            .fill(segment.isActive ? segment.color : .clear)
+                            .frame(height: 1)
+                    }
+                    .fixedSize()
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
 /// Bordered − / value / +. Settings' "reviews per day" and Review Sprint's
 /// "session size" are the same control at the same geometry in the design, so
 /// they are the same component here.

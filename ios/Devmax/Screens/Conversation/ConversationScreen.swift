@@ -85,8 +85,8 @@ struct ConversationScreen: View {
         HStack(spacing: 8) {
             ForEach(state.rail) { stop in
                 Circle()
-                    .fill(railFill(stop))
-                    .overlay(Circle().strokeBorder(railBorder(stop), lineWidth: 1))
+                    .fill(railColor(stop, idle: .clear))
+                    .overlay(Circle().strokeBorder(railColor(stop, idle: Theme.border), lineWidth: 1))
                     .frame(width: stop.isCurrent ? 9 : 7, height: stop.isCurrent ? 9 : 7)
                     .animation(Motion.fade, value: stop.coveredScore)
             }
@@ -104,7 +104,7 @@ struct ConversationScreen: View {
                         Text(Self.chipLabel(stop.topic).uppercased())
                             .font(WCFont.mono(9.5))
                             .tracking(0.95)
-                            .foregroundStyle(chipColor(stop))
+                            .foregroundStyle(railColor(stop, current: Theme.accentSelectedText, idle: Theme.metaDim))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(
@@ -113,7 +113,7 @@ struct ConversationScreen: View {
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: Metrics.chipRadius)
-                                    .strokeBorder(railBorder(stop), lineWidth: 1)
+                                    .strokeBorder(railColor(stop, idle: Theme.border), lineWidth: 1)
                             )
                             .fixedSize()
                             .id(stop.id)
@@ -131,22 +131,14 @@ struct ConversationScreen: View {
         topic.count > 16 ? String(topic.prefix(15)) + "…" : topic
     }
 
-    private func railFill(_ stop: AppState.RailStop) -> Color {
-        if stop.isCurrent { return Theme.accent }
+    /// Not yet reached, current, or covered — the covered stop always carries
+    /// that card's score colour, which is the one rule worth writing once.
+    private func railColor(
+        _ stop: AppState.RailStop, current: Color = Theme.accent, idle: Color
+    ) -> Color {
+        if stop.isCurrent { return current }
         if let score = stop.coveredScore { return ScoreStyle.color(for: score) }
-        return .clear
-    }
-
-    private func railBorder(_ stop: AppState.RailStop) -> Color {
-        if stop.isCurrent { return Theme.accent }
-        if let score = stop.coveredScore { return ScoreStyle.color(for: score) }
-        return Theme.border
-    }
-
-    private func chipColor(_ stop: AppState.RailStop) -> Color {
-        if stop.isCurrent { return Theme.accentSelectedText }
-        if let score = stop.coveredScore { return ScoreStyle.color(for: score) }
-        return Theme.metaDim
+        return idle
     }
 
     // MARK: - Thread
