@@ -187,3 +187,12 @@ struct RunEntry: Identifiable, Equatable {
     /// As the server reported it for this card, not as the client requested it.
     let practice: Bool
 }
+
+/// Device-local preferences. Distinct from `AppSettings`, which the server owns
+/// because the scheduler acts on it — nothing here leaves the phone.
+enum Preferences {
+    /// Whether a card's question is spoken when it opens. On by default: the
+    /// product is built for answering half-awake or in line, where hearing the
+    /// question beats reading it.
+    static let readAloudKey = "wc.readAloud"
+}

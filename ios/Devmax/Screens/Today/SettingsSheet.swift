@@ -4,16 +4,35 @@ import SwiftUI
 struct SettingsSheet: View {
     @EnvironmentObject private var state: AppState
     @State private var draft: AppSettings = .placeholder
+    // Device-local, so it stays out of `AppSettings` and off the server: which
+    // phone reads questions aloud is not something the scheduler needs to know.
+    @AppStorage(Preferences.readAloudKey) private var readAloud = true
 
     var body: some View {
-        SheetChrome(title: "Settings") {
+        SheetChrome(title: "Settings", height: 412) {
             VStack(alignment: .leading, spacing: 22) {
                 reviewsPerDay
+                readAloudRow
                 windows
             }
         }
         .onAppear { draft = state.settings }
         .onDisappear { state.saveSettings(draft) }
+    }
+
+    private var readAloudRow: some View {
+        HStack(spacing: 12) {
+            Toggle34(isOn: $readAloud)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Read questions aloud")
+                    .font(TypeRole.body)
+                    .foregroundStyle(Theme.text)
+                Text("Speaks the question when a card opens")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.metaAlt)
+            }
+            Spacer()
+        }
     }
 
     private var reviewsPerDay: some View {
@@ -119,6 +138,10 @@ struct TimeChip: View {
 struct SheetChrome<Content: View>: View {
     let title: String
     var serifTitle: Bool = false
+    /// Overrides the designed height. Settings needs it — the read-aloud toggle
+    /// is a control the handoff never drew, and at the designed 340 the extra
+    /// row pushed the title and Close out through the top of the sheet.
+    var height: CGFloat? = nil
     @ViewBuilder let content: Content
     @EnvironmentObject private var state: AppState
 
@@ -149,5 +172,5 @@ struct SheetChrome<Content: View>: View {
         .presentationCornerRadius(Metrics.sheetRadius)
     }
 
-    private var sheetHeight: CGFloat { serifTitle ? 380 : 340 }
+    private var sheetHeight: CGFloat { height ?? (serifTitle ? 380 : 340) }
 }

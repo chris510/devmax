@@ -6,6 +6,7 @@ struct ConversationScreen: View {
     @EnvironmentObject private var flags: DebugFlags
     @StateObject private var speech = SpeechService()
     @StateObject private var speaker = SpeakerService()
+    @AppStorage(Preferences.readAloudKey) private var readAloud = true
     @FocusState private var draftFocused: Bool
 
     /// Answer bubbles and the live transcript cap at 84% — of the thread's content
@@ -515,7 +516,10 @@ struct ConversationScreen: View {
     // MARK: - TTS
 
     private func readLatestQuestion() {
-        guard flags.ttsEnabled,
+        // Two independent gates. `WC_TTS` is the screenshot override and stays
+        // debug-only; `readAloud` is the user's, and is the one that works in a
+        // Release build — where `WC_TTS` reads its default and is always true.
+        guard flags.ttsEnabled, readAloud,
               let last = state.thread.last(where: { $0.role != .answer })
         else { return }
         speaker.speak(last.text)
