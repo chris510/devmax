@@ -212,9 +212,22 @@ change faster than this file does — do not write Anthropic calls from memory.
 - **APNs production is still untested.** A TestFlight build gets a *production* token, so
   `APNS_USE_SANDBOX` must flip to `false` and `WC_APS_ENVIRONMENT` to `production` together
   — a mismatch fails silently as `BadDeviceToken`.
-- **The pooler is untested.** The schema is verified against real Postgres, but a hosted
-  Postgres fronted by pgbouncer is a known friction point for asyncpg and prepared
-  statements. Smoke-test one real connection before trusting a deploy.
+- **The pooler has now been tested locally, and the hazard is real.** The whole suite
+  passes through PgBouncer 1.25 in `transaction` mode, and so does the live app
+  (writes plus 30 concurrent reads, no errors). The underlying incompatibility
+  reproduces exactly as documented: raw asyncpg with its statement cache on, through a
+  pooler that does not rewrite prepared statements, fails with
+  `DuplicatePreparedStatementError: prepared statement "__asyncpg_stmt_1__" already
+  exists`. Setting `statement_cache_size=0` fixes it, which is what `db.engine_kwargs`
+  already does — so that setting is load-bearing, not defensive.
+
+  **Two caveats before trusting a hosted pooler.** PgBouncer ≥1.21 defaults
+  `max_prepared_statements=200` and rewrites prepared statements itself, which masks
+  the bug entirely — the failure above only reproduces with it forced to `0`. So a
+  green local test does not prove a hosted pooler is safe if it runs the legacy
+  setting. And the *test suite* connects with its own engine in `conftest`, bypassing
+  `engine_kwargs`, so suite-green through a pooler is weaker evidence than it looks.
+  The app path is the one that matters.
 - **`alembic revision --autogenerate` is disabled on purpose** (`target_metadata = None`).
   `SQLModel.metadata` diverges from the handwritten migration — the four CHECK constraints,
   every `server_default`, TEXT/SMALLINT vs VARCHAR/INTEGER — so autogenerate would emit a

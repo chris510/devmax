@@ -38,6 +38,7 @@ SDK_TIMEOUT_SECONDS = 45.0
 # no-op (no error, just cache_read=0 forever). Padding to reach the floor would cost
 # more input tokens per call than caching could return at this volume. The cache_*
 # fields in the log line below prove it stays at zero.
+
 # Shared by every rubric that grades a spoken answer. Hoisted rather than restated
 # so a change to how transcription artifacts are treated cannot apply to one rubric
 # and not the other — they grade the same transcripts and write the same column.
@@ -187,6 +188,24 @@ SCORE_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": False,
 }
+
+
+# Stray wrappers the model occasionally leaves on `mastery_summary` — matched
+# straight quotes, curly quotes, and CJK brackets have all shown up in live output
+# (`shaky.'`, `shaky.」`). The string renders verbatim on Today and Card History and
+# is fed back as context to the next scoring call, so it is cleaned on ingest rather
+# than at each of those three read sites.
+_SUMMARY_WRAPPERS = "\"'`«»‘’“”「」『』"
+
+
+def clean_summary(text: str) -> str:
+    """Trim a model-written rolling summary to what should reach the database.
+
+    Deliberately conservative: it strips surrounding whitespace and stray wrapper
+    punctuation and nothing else. Sentence-final `.`/`!`/`?` survive, because those
+    are the summary's own text rather than packaging around it.
+    """
+    return text.strip().strip(_SUMMARY_WRAPPERS).strip()
 
 
 def derive_composite(mechanism: int, trade_offs: int, failure_modes: int) -> int:
@@ -436,7 +455,7 @@ async def score_answer(
         trade_off_awareness=trade_offs,
         failure_mode_awareness=failure_modes,
         feedback=str(data.get("feedback", "")).strip(),
-        mastery_summary=str(data.get("mastery_summary", "")).strip(),
+        mastery_summary=clean_summary(str(data.get("mastery_summary", ""))),
     )
 
 
@@ -490,5 +509,5 @@ async def score_reattempt(
 
     return ReattemptResult(
         mechanism_accuracy=mechanism,
-        mastery_summary=str(data.get("mastery_summary", "")).strip(),
+        mastery_summary=clean_summary(str(data.get("mastery_summary", ""))),
     )
