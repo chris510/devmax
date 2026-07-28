@@ -98,7 +98,10 @@ def make_card(**overrides) -> Card:
         ease_factor=2.5,
         interval_days=1,
         repetitions=0,
-        next_review_at=date(2026, 7, 24),
+        # Relative, not a fixed calendar day. With interval_days=1 the lapse
+        # cutoff is two days, so a hardcoded past date silently reclassifies any
+        # "solid" fixture as cold once real time drifts past it.
+        next_review_at=local_today(),
         mastery_summary="",
     )
     return Card(**{**defaults, **overrides})
@@ -116,6 +119,15 @@ def in_window(monkeypatch):
 
     from app.routers import internal
 
+    # Only the time of day is pinned. Fixing the calendar day too made the
+    # trigger-review tests depend on how far real time had drifted from it:
+    # they build due dates with `local_today() - 3 days`, so once the real date
+    # passed 2026-07-27 those cards landed in the pinned day's future and the
+    # endpoint correctly answered `nothing_due`.
     monkeypatch.setattr(
-        internal, "now_in", lambda tz: datetime(2026, 7, 24, 7, 30, tzinfo=ZoneInfo(tz))
+        internal,
+        "now_in",
+        lambda tz: datetime.now(ZoneInfo(tz)).replace(
+            hour=7, minute=30, second=0, microsecond=0
+        ),
     )

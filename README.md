@@ -87,14 +87,22 @@ The prototype's Tweaks are launch environment variables, so any state — includ
 failure paths — can be reached in one command:
 
 ```sh
-xcrun simctl launch --setenv WC_ROUTE=score <device> com.christrinh.devmax
+SIMCTL_CHILD_WC_ROUTE=score xcrun simctl launch <device> com.christrinh.devmax
 ```
+
+`simctl` passes an environment variable to the app only when it's prefixed `SIMCTL_CHILD_`;
+the `--setenv` flag it once accepted is gone, and today's `simctl` reads it as the device
+argument and fails with `Invalid device`.
 
 | Variable | Values |
 |---|---|
-| `WC_ROUTE` | `question` `recording` `text` `followup` `score` `resume` `submit-failure` `history` `history-empty` `settings` `add` `filter` |
+| `WC_ROUTE` | `question` `recording` `processing` `text` `followup` `score` `resume` `submit-failure` `history` `history-empty` `settings` `add` `filter` `setup` (alias `sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded` |
 | `WC_LOAD` | `auto` `loading` `error` |
+| `WC_RAIL_STYLE` | `dots` (ships) `chips` (exists only for the side-by-side) |
 | `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS` `WC_SIM_SPEECH` | `1` / `0` |
+
+`WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
+`WC_BASE_URL` overrides where it points.
 
 Forced failures succeed on the retry, as in the prototype, so each failure path walks end to
 end. Use a 390×844 simulator (iPhone 16e / 14 / 15) to match the design frame.

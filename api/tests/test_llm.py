@@ -69,10 +69,11 @@ def stub_completion(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) ->
 
 # The two thresholds are independent (score 2 fails SM-2, score 3 passes; both
 # probe), so the gate is checked across the whole 0-5 range rather than at a
-# single boundary.
+# single boundary. 0 is the other edge that matters: it is the one failing score
+# that does not probe — see docs/DEVIATIONS.md §15.
 @pytest.mark.parametrize(
     ("score", "expected"),
-    [(0, "complete"), (1, "complete"), (2, "follow_up"), (3, "follow_up"), (4, "complete"),
+    [(0, "complete"), (1, "follow_up"), (2, "follow_up"), (3, "follow_up"), (4, "complete"),
      (5, "complete")],
 )
 async def test_only_shaky_scores_probe(

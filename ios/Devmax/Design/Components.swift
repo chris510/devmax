@@ -271,3 +271,30 @@ struct FlowLayout: Layout {
         }
     }
 }
+
+/// A row's topic with its category set inline after it, dropping to its own line
+/// when the topic is long. Shared by Review Sprint's preview rows and Session
+/// Recap's — `sprint-setup-default.png` and `session-recap.png` show both
+/// behaviours, and the wrap is why this can't be an `HStack`: that compresses
+/// the topic instead, wrapping the title and stranding the category beside it.
+///
+/// Deliberately takes no styling parameters. A caller that needs different
+/// values wants a different component, not a knob on this one.
+struct TopicWithCategory: View {
+    let topic: String
+    let category: String
+
+    var body: some View {
+        FlowLayout(horizontalSpacing: 8, verticalSpacing: 2) {
+            Text(topic)
+                .font(TypeRole.rowTopic)
+                .tracking(-0.165)
+                .foregroundStyle(Theme.text)
+                .fixedSize()
+            MetaText(text: category, font: WCFont.mono(10), tracking: 1.0,
+                     color: Theme.metaDim, uppercased: true)
+                .fixedSize()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

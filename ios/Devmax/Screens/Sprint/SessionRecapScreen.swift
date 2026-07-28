@@ -118,19 +118,7 @@ private struct RecapRow: View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: toggle) {
                 HStack(alignment: .top, spacing: 14) {
-                    // The category sits inline after the topic and drops to its
-                    // own line when the topic is long — see `session-recap.png`.
-                    FlowLayout(horizontalSpacing: 8, verticalSpacing: 2) {
-                        Text(entry.topic)
-                            .font(TypeRole.rowTopic)
-                            .tracking(-0.165)
-                            .foregroundStyle(Theme.text)
-                            .fixedSize()
-                        MetaText(text: entry.category, font: WCFont.mono(10), tracking: 1.0,
-                                 color: Theme.metaDim, uppercased: true)
-                            .fixedSize()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    TopicWithCategory(topic: entry.topic, category: entry.category)
 
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("\(entry.score)")

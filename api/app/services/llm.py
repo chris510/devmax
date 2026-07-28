@@ -17,7 +17,10 @@ from app.config import get_settings
 
 log = logging.getLogger(__name__)
 
-FOLLOW_UP_LOW = 2
+# The composite band that earns a second attempt before scoring. `spec.md` says
+# 2-3; the low end is 1, and 0 is deliberately still excluded — docs/DEVIATIONS.md
+# §15 has the reasoning.
+FOLLOW_UP_LOW = 1
 FOLLOW_UP_HIGH = 3
 
 # Retries match the SDK's own default, pinned so a future SDK change can't

@@ -162,10 +162,22 @@ final class AppState: ObservableObject {
         Task { await loadLibrary() }
     }
 
-    /// Every category present in the library, alphabetical. Derived from the data
-    /// rather than hardcoded, so a new category appears without a code change.
+    /// The curriculum order the design ships, not alphabetical — it runs from
+    /// fundamentals outward, and `sprint-setup-default.png` shows it exactly.
+    /// (`CATEGORIES` in the prototype, Devmax.dc.html.)
+    private static let categoryOrder = [
+        "Core Concept", "Distributed Systems", "Databases", "Networking",
+        "Concurrency", "Caching", "Operating Systems", "API Design", "Reliability",
+    ]
+
+    /// Every category present in the library, in curriculum order. Anything the
+    /// list doesn't know about — a quick-added card lands in `Unsorted` — sorts
+    /// alphabetically after it, so a new category still appears without a code
+    /// change rather than being silently dropped.
     var categories: [String] {
-        Array(Set(library.map(\.category))).sorted()
+        let present = Set(library.map(\.category))
+        let known = Self.categoryOrder.filter(present.contains)
+        return known + present.subtracting(Self.categoryOrder).sorted()
     }
 
     /// The cards a sprint would draw from: the whole library, or just the
@@ -330,7 +342,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    func openCard(_ card: DueCard) async {
+    /// Clears the previous card off the screen. Synchronous and separate from
+    /// `openCard` because `nextCard` navigates before the fetch is even
+    /// scheduled — leaving the reset inside the async body let the outgoing
+    /// card's score block render for a frame on the incoming card's screen.
+    private func resetForNewCard() {
         stage = .loadingQuestion
         thread = []
         draft = ""
@@ -339,6 +355,10 @@ final class AppState: ObservableObject {
         resumeAvailable = false
         storedPartial = ""
         inputMode = DebugFlags.shared.textFirst ? .text : .voice
+    }
+
+    func openCard(_ card: DueCard) async {
+        resetForNewCard()
 
         do {
             let start = try await api.startSession(cardID: card.id, practice: practice)
@@ -495,6 +515,9 @@ final class AppState: ObservableObject {
         cursor += 1
         guard let card = currentCard else { return }
         path = [.conversation(card.id)]
+        // Before the Task, not inside it: the stage must leave `.result` in the
+        // same turn the path changes.
+        resetForNewCard()
         Task { await openCard(card) }
     }
 

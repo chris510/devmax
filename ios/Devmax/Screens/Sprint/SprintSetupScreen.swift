@@ -69,16 +69,18 @@ struct SprintSetupScreen: View {
                     withAnimation(Motion.fadeFast) { state.toggleCategory(name) }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(name.uppercased())
-                            .font(WCFont.mono(10))
-                            .tracking(1.0)
-                            .foregroundStyle(on ? Theme.accentSelectedText : Theme.meta)
+                        MetaText(text: name, font: WCFont.mono(10), tracking: 1.0,
+                                 color: on ? Theme.accentSelectedText : Theme.meta,
+                                 uppercased: true)
                         // The category's most urgent count — the same tier data
                         // that powers Coverage, shown where it gets acted on.
-                        Text(state.chipNote(for: name))
-                            .font(WCFont.mono(9.5))
-                            .tracking(0.76)
-                            .foregroundStyle(on ? Theme.accentChipNote : Theme.metaFaint)
+                        // The prototype uppercases the whole chip in CSS, so this
+                        // is uppercased here while Coverage's identical-looking
+                        // tier line stays in the case the design writes it.
+                        MetaText(text: state.chipNote(for: name), font: WCFont.mono(9.5),
+                                 tracking: 0.76,
+                                 color: on ? Theme.accentChipNote : Theme.metaFaint,
+                                 uppercased: true)
                     }
                     .fixedSize()
                     .padding(.horizontal, 10)
@@ -205,15 +207,7 @@ private struct SprintPreviewRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Metrics.scoreColumnGap) {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(card.topic)
-                        .font(TypeRole.rowTopic)
-                        .tracking(-0.165)
-                        .foregroundStyle(Theme.text)
-                    MetaText(text: card.category, font: WCFont.mono(10), tracking: 1.0,
-                             color: Theme.metaDim, uppercased: true)
-                    Spacer(minLength: 0)
-                }
+                TopicWithCategory(topic: card.topic, category: card.category)
 
                 if !card.masterySummary.isEmpty {
                     Text(card.masterySummary)
