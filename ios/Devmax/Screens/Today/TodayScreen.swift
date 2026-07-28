@@ -168,15 +168,18 @@ struct TodayRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     // The topic name is its own tap target — everything else on the
                     // row starts a Conversation.
+                    // The underline is drawn by the text, not stacked under it. A
+                    // separate rule had to be width-locked with `.fixedSize()` to
+                    // match the topic, which stopped the topic wrapping and pushed
+                    // long ones off both edges of the row. The prototype's
+                    // `border-bottom: 1px dotted` follows each wrapped line, and
+                    // unlike the other underlined spans it carries no `nowrap`.
                     Button(action: onOpenHistory) {
-                        VStack(spacing: 2) {
-                            Text(card.topic)
-                                .font(TypeRole.rowTopic)
-                                .tracking(-0.165)
-                                .foregroundStyle(Theme.text)
-                            DottedUnderline()
-                        }
-                        .fixedSize()
+                        Text(card.topic)
+                            .font(TypeRole.rowTopic)
+                            .tracking(-0.165)
+                            .foregroundStyle(Theme.text)
+                            .underline(true, pattern: .dot, color: Theme.dottedUnderline)
                     }
                     .buttonStyle(.plain)
 

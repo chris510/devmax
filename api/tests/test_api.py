@@ -7,7 +7,7 @@ from sqlmodel import select
 from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, DeviceToken, Session
 from app.routers import internal
 from app.services import llm
-from app.services.llm import LLMError, ScoreResult
+from app.services.llm import LLMError, ReattemptResult, ScoreResult
 from tests.conftest import API_HEADERS, CRON_HEADERS, local_today, make_card
 
 
@@ -757,3 +757,205 @@ async def test_health_needs_no_api_key_and_checks_the_database(client):
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+# --- coached re-attempt (turn 3) --------------------------------------------
+
+
+@pytest.fixture
+def stub_reattempt(monkeypatch):
+    """Stub turn 3's scorer. Separate call, separate stub — as in the app."""
+    calls: list[dict] = []
+
+    async def _reattempt(**kwargs) -> ReattemptResult:
+        calls.append(kwargs)
+        return _reattempt.result
+
+    _reattempt.result = ReattemptResult(mechanism_accuracy=4, mastery_summary="reconstructed it")
+    monkeypatch.setattr(llm, "score_reattempt", _reattempt)
+    return _reattempt, calls
+
+
+async def _failed_session(client, db, stub, mechanism=1):
+    """Run a session to completion with a failing mechanism score."""
+    stub.result = completed(mechanism, feedback="Ring position decides ownership.")
+    card = make_card(repetitions=3, interval_days=10, ease_factor=2.5)
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    body = (
+        await client.post(
+            f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "wrong"}
+        )
+    ).json()
+    return card, uuid.UUID(start["session_id"]), body
+
+
+async def test_reattempt_never_touches_sm2_or_the_score(client, db, stub_llm, stub_reattempt):
+    """The whole feature's guarantee: turn 3 is barred from the scheduler.
+
+    A post-correction turn measures coached performance. If it reached `quality_for`
+    it would inflate the interval by the ease factor on exactly the cards just
+    gotten wrong — so this asserts the full write set, not just the outcome.
+    """
+    score, _ = stub_llm
+    card, session_id, _ = await _failed_session(client, db, score)
+    await db.refresh(card)
+    before = (card.ease_factor, card.interval_days, card.repetitions, card.next_review_at)
+
+    resp = await client.post(
+        f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json={"text": "it owns the arc"}
+    )
+    assert resp.status_code == 200
+
+    await db.refresh(card)
+    assert (card.ease_factor, card.interval_days, card.repetitions, card.next_review_at) == before
+    # The unaided attempt still describes the card: a 4 on the re-attempt must not
+    # relabel a card the engineer could not reconstruct on its own.
+    assert card.last_score == 1
+    assert card.last_mechanism_accuracy == 1
+
+    session = await db.get(Session, session_id)
+    await db.refresh(session)
+    assert session.score == 1
+    assert session.mechanism_accuracy == 1
+    assert session.reattempt_mechanism_accuracy == 4
+
+
+async def test_reattempt_writes_mastery_and_the_transcript(client, db, stub_llm, stub_reattempt):
+    score, _ = stub_llm
+    reattempt, calls = stub_reattempt
+    card, session_id, _ = await _failed_session(client, db, score)
+
+    body = (
+        await client.post(
+            f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json={"text": "in my words"}
+        )
+    ).json()
+
+    assert body == {"mastery_summary": "reconstructed it"}
+    await db.refresh(card)
+    assert card.mastery_summary == "reconstructed it"
+
+    session = await db.get(Session, session_id)
+    await db.refresh(session)
+    assert session.reattempt_answer == "in my words"
+    # Turn 3 re-asks the card's own question rather than generating a new one, so
+    # nothing about the prompt is stored — it is a fixed preface plus this column.
+    assert calls[0]["question_asked"] == session.question_asked
+    # Without the feedback text the model cannot tell reconstruction from recitation.
+    assert calls[0]["feedback_given"] == "Ring position decides ownership."
+    # And without the unaided score it cannot tell this was a coached turn at all,
+    # so it writes summaries that read as unaided mastery.
+    assert calls[0]["unaided_mechanism"] == 1
+
+
+async def test_reattempt_cannot_be_replayed(client, db, stub_llm, stub_reattempt):
+    score, _ = stub_llm
+    _, session_id, _ = await _failed_session(client, db, score)
+
+    body = {"text": "the arc, not the name"}
+    first = await client.post(f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json=body)
+    second = await client.post(f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json=body)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+
+@pytest.mark.parametrize("mechanism", [3, 4, 5])
+async def test_reattempt_rejected_when_the_mechanism_passed(
+    client, db, stub_llm, stub_reattempt, mechanism
+):
+    """Above the band there is no correction to re-attempt — the rubric gave none."""
+    score, _ = stub_llm
+    _, session_id, body = await _failed_session(client, db, score, mechanism=mechanism)
+
+    assert body["reattempt_offered"] is False
+    resp = await client.post(
+        f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json={"text": "x"}
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.parametrize("mechanism", [0, 1, 2])
+async def test_complete_offers_a_reattempt_inside_the_band(
+    client, db, stub_llm, stub_reattempt, mechanism
+):
+    score, _ = stub_llm
+    _, _, body = await _failed_session(client, db, score, mechanism=mechanism)
+    assert body["reattempt_offered"] is True
+
+
+async def test_reattempt_rejected_before_the_session_completes(
+    client, db, stub_llm, stub_reattempt
+):
+    """No score means no correction was ever stated, so there is nothing to say back."""
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    resp = await client.post(
+        f"/sessions/{start['session_id']}/reattempt", headers=API_HEADERS, json={"text": "early"}
+    )
+    assert resp.status_code == 409
+
+
+async def test_reattempt_failure_leaves_the_row_untouched(client, db, stub_llm, monkeypatch):
+    """Scored before anything is written — a failed call loses nothing."""
+    score, _ = stub_llm
+    _, session_id, _ = await _failed_session(client, db, score)
+
+    async def _boom(**kwargs):
+        raise LLMError("upstream is down")
+
+    monkeypatch.setattr(llm, "score_reattempt", _boom)
+    resp = await client.post(
+        f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json={"text": "lost"}
+    )
+    assert resp.status_code == 503
+
+    session = await db.get(Session, session_id)
+    await db.refresh(session)
+    assert session.reattempt_used is False
+    assert session.reattempt_answer == ""
+
+
+async def test_reattempt_rejects_empty_text(client, db, stub_llm, stub_reattempt):
+    """An empty body would spend the one re-attempt and rewrite mastery on a 0."""
+    score, _ = stub_llm
+    _, session_id, _ = await _failed_session(client, db, score)
+
+    resp = await client.post(f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json={})
+
+    assert resp.status_code == 422
+    session = await db.get(Session, session_id)
+    await db.refresh(session)
+    assert session.reattempt_used is False
+
+
+async def test_reattempt_expires_once_the_card_is_reviewed_again(
+    client, db, stub_llm, stub_reattempt
+):
+    """A stale session's coaching must not overwrite a newer review's summary.
+
+    `mastery_summary` is live context for the next `score_answer`, so this is the
+    one indirect path by which turn 3 could reach a future scheduling decision.
+    """
+    score, _ = stub_llm
+    card, session_id, _ = await _failed_session(client, db, score)
+
+    # A second, later session on the same card scores well and rewrites mastery.
+    score.result = completed(5, 5, 5, mastery_summary="solid, unaided")
+    later = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    await client.post(
+        f"/sessions/{later['session_id']}/answers", headers=API_HEADERS, json={"text": "good"}
+    )
+
+    resp = await client.post(
+        f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json={"text": "late"}
+    )
+
+    assert resp.status_code == 409
+    await db.refresh(card)
+    assert card.mastery_summary == "solid, unaided"

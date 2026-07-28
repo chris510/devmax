@@ -64,6 +64,10 @@ protocol DevmaxAPI {
     func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart
     func saveDraft(sessionID: UUID, text: String) async throws
     func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome
+    /// Turn 3, after the session is already complete and scored. Returns nothing:
+    /// the server rewrites the card's mastery summary and there is no second score,
+    /// so the client has nothing to display and nothing to store.
+    func submitReattempt(sessionID: UUID, text: String) async throws
     func settings() async throws -> AppSettings
     func updateSettings(_ settings: AppSettings) async throws -> AppSettings
     func registerDeviceToken(_ token: String) async throws
@@ -157,6 +161,11 @@ struct LiveAPI: DevmaxAPI {
         let body = try Self.encoder.encode(["text": text])
         let data = try await request("POST", "sessions/\(sessionID)/answers", body: body)
         return try Self.decoder.decode(AnswerOutcome.self, from: data)
+    }
+
+    func submitReattempt(sessionID: UUID, text: String) async throws {
+        let body = try Self.encoder.encode(["text": text])
+        _ = try await request("POST", "sessions/\(sessionID)/reattempt", body: body)
     }
 
     func settings() async throws -> AppSettings {

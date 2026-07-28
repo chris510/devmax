@@ -280,7 +280,10 @@ Rules to encode in the prompt:
   `status: "follow_up"` with a probe targeting the specific gap instead of
   scoring. Otherwise return `status: "complete"`.
 - **Maximum one follow-up per session** — if `follow_up_used` is already
-  true, always return `complete`.
+  true, always return `complete`. A session may carry at most one further
+  *coached re-attempt* after completion; it is a separate call
+  (`llm.score_reattempt`) on a separate endpoint and never reaches SM-2.
+  See `docs/multi-turn-coaching-design.md`.
 - `feedback` is one or two sentences, specific to what was said and what
   was missed. Not generic encouragement.
 - `mastery_summary` is a rewritten rolling summary (1–2 sentences,

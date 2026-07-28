@@ -190,31 +190,6 @@ struct MetaText: View {
     }
 }
 
-/// The 1px dotted underline on a Today row's topic name — the affordance for
-/// "tap for history".
-struct DottedUnderline: View {
-    var color: Color = Theme.dottedUnderline
-
-    var body: some View {
-        Rectangle()
-            .fill(.clear)
-            .frame(height: 1)
-            .overlay(
-                Line()
-                    .stroke(color, style: StrokeStyle(lineWidth: 1, dash: [1, 2]))
-            )
-    }
-}
-
-private struct Line: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.width, y: rect.midY))
-        return path
-    }
-}
-
 /// Wrapping mono chips with 8px column / 3px row gaps, each `white-space: nowrap`.
 struct WrappingChips: View {
     let chips: [Chip]
@@ -244,7 +219,11 @@ struct FlowLayout: Layout {
         let width = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            // Measured against the row width, not `.unspecified`. An unbounded
+            // proposal makes a long `Text` report its full single-line width, and
+            // the layout then places it past both edges instead of wrapping it —
+            // invisible with the short fixture topics, obvious with real ones.
+            let size = view.sizeThatFits(ProposedViewSize(width: width, height: nil))
             if x > 0, x + size.width > width {
                 x = 0
                 y += rowHeight + verticalSpacing
@@ -259,7 +238,7 @@ struct FlowLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = view.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + verticalSpacing
@@ -286,11 +265,13 @@ struct TopicWithCategory: View {
 
     var body: some View {
         FlowLayout(horizontalSpacing: 8, verticalSpacing: 2) {
+            // No `.fixedSize()` on the topic: it has to be free to wrap when it
+            // is wider than the row. The category keeps one, since a two-line
+            // category tag is never right.
             Text(topic)
                 .font(TypeRole.rowTopic)
                 .tracking(-0.165)
                 .foregroundStyle(Theme.text)
-                .fixedSize()
             MetaText(text: category, font: WCFont.mono(10), tracking: 1.0,
                      color: Theme.metaDim, uppercased: true)
                 .fixedSize()

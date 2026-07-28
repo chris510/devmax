@@ -31,13 +31,31 @@ FOLLOW_UP_HIGH = 3
 SDK_MAX_RETRIES = 2
 SDK_TIMEOUT_SECONDS = 45.0
 
-# Byte-identical across every call — but *not* a prompt-cache breakpoint. The
-# minimum cacheable prefix is 1024 tokens on Sonnet 5 and 4096 on Haiku 4.5;
-# this rubric is ~450 and QUESTION_RUBRIC ~180, so a `cache_control` marker here
-# would silently no-op (no error, just cache_read=0 forever). Padding to reach
-# the floor would cost more input tokens per call than caching could return at
-# this volume. The cache_* fields in the log line below prove it stays at zero.
-SCORING_RUBRIC = """\
+# Every rubric below is byte-identical across calls — but none is a prompt-cache
+# breakpoint. The minimum cacheable prefix is 1024 tokens on Sonnet 5 and 4096 on
+# Haiku 4.5; measured via `count_tokens`, SCORING_RUBRIC is ~770, REATTEMPT_RUBRIC
+# ~810 and QUESTION_RUBRIC ~220, so a `cache_control` marker on any would silently
+# no-op (no error, just cache_read=0 forever). Padding to reach the floor would cost
+# more input tokens per call than caching could return at this volume. The cache_*
+# fields in the log line below prove it stays at zero.
+# Shared by every rubric that grades a spoken answer. Hoisted rather than restated
+# so a change to how transcription artifacts are treated cannot apply to one rubric
+# and not the other — they grade the same transcripts and write the same column.
+# Interpolation happens once at import, so each rubric string stays byte-identical
+# across calls (see the cache note above).
+VOICE_TRANSCRIPT_RULE = """\
+Answers arrive as voice transcripts. They will be conversational and disfluent and \
+may contain speech-to-text errors. Score the substance. Never penalize verbal filler \
+("um", "like", "so yeah"), false starts, or obvious transcription artifacts — if a \
+word is clearly a mis-transcription of the right technical term, treat it as correct.\
+"""
+
+MASTERY_SUMMARY_RULE = """\
+`mastery_summary` replaces the card's previous rolling summary. One or two sentences \
+in lowercase fragment style, e.g. "solid on ring mechanics, shaky on virtual nodes".\
+"""
+
+SCORING_RUBRIC = f"""\
 You are grading a spaced-repetition recall session for a senior backend engineer \
 preparing for interviews at Anthropic, OpenAI, and Google.
 
@@ -54,10 +72,7 @@ Score the answer on three axes, 0-5 each, independently:
 
 Do not score fluency, length, confidence, or enthusiasm.
 
-Answers arrive as voice transcripts. They will be conversational and disfluent and \
-may contain speech-to-text errors. Score the substance. Never penalize verbal filler \
-("um", "like", "so yeah"), false starts, or obvious transcription artifacts — if a \
-word is clearly a mis-transcription of the right technical term, treat it as correct.
+{VOICE_TRANSCRIPT_RULE}
 
 `feedback` is one to three sentences, and its content depends on mechanism_accuracy:
   - If mechanism_accuracy <= 2: state the correct mechanism directly, in plain terms —
@@ -73,8 +88,7 @@ word is clearly a mis-transcription of the right technical term, treat it as cor
 phrased as one short question and prefaced with "One more — ". Always write one, \
 even when the answer was strong; the caller decides whether to use it.
 
-`mastery_summary` replaces the card's previous rolling summary. One or two sentences \
-in lowercase fragment style, e.g. "solid on ring mechanics, shaky on virtual nodes".
+{MASTERY_SUMMARY_RULE}
 
 Return only the structured fields. No preamble, no code fences, no commentary.\
 """
@@ -92,6 +106,57 @@ target that area. Do not repeat any of the recent questions listed.
 The question is read aloud and answered by voice in under two minutes. One question, \
 no multi-part sub-questions, no preamble.\
 """
+
+REATTEMPT_RUBRIC = f"""\
+You are grading a coached re-attempt in a spaced-repetition session for a senior \
+backend engineer.
+
+The engineer answered, scored poorly on mechanism accuracy, and was then TOLD the \
+correct mechanism. They are now saying it back. You are grading whether they \
+reconstructed it, not whether it matches what they were told.
+
+  5 accurate reconstruction in their own framing, plus a correct extension they \
+supplied themselves — applied it to the specific scenario, named a consequence, or \
+connected it to something the feedback did not mention. The extension must be \
+correct and do actual work; naming adjacent jargon is not an extension.
+  3-4 accurate reconstruction in their own words, no real extension
+  1-2 accurate, but tracks the feedback's phrasing and structure closely enough that \
+it reads as echo rather than re-derivation
+  0 did not reproduce the mechanism, or reproduced it wrongly, even with the answer \
+in front of them
+
+Grade what they generated, not how fluently they said it. This is not a polish \
+judgement and it does not contradict the transcript rule below: a halting, disfluent \
+answer that genuinely re-derives the mechanism outranks a smooth echo of it. \
+Restating the feedback well proves it was read, not that it was encoded.
+
+Length is not evidence. A long answer that is mostly hedging and half-memories is \
+not a 5 — score the mechanism they actually produced.
+
+{VOICE_TRANSCRIPT_RULE}
+
+{MASTERY_SUMMARY_RULE}
+
+The summary must record that this was *coached*. The engineer had already failed \
+this card unaided — that is the only reason this turn exists — so a reconstruction \
+here, however good, is not evidence they can recall it cold. Say so explicitly, \
+whatever the score: "got there after being told", "solid once corrected", "could \
+only parrot it back". Never write a summary that reads as unaided mastery. This is \
+the one failure that makes this whole turn worse than not asking, because the \
+summary is what the next session grades against.
+
+Return only the structured fields. No preamble, no code fences, no commentary.\
+"""
+
+REATTEMPT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mechanism_accuracy": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "mastery_summary": {"type": "string"},
+    },
+    "required": ["mechanism_accuracy", "mastery_summary"],
+    "additionalProperties": False,
+}
 
 QUESTION_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -184,6 +249,19 @@ class ScoreResult:
         missing = [axis for axis in AXES if getattr(self, axis) is None]
         if missing:
             raise ValueError(f"a complete ScoreResult is missing {', '.join(missing)}")
+
+
+@dataclass(frozen=True)
+class ReattemptResult:
+    """Turn 3's grade. One axis and a summary — no composite, by design.
+
+    There is deliberately no `score` field. Deriving a composite from a single axis
+    would invent the two it doesn't have, and the composite is what the app displays
+    and what history records. Turn 3 changes neither.
+    """
+
+    mechanism_accuracy: int
+    mastery_summary: str
 
 
 @lru_cache
@@ -358,5 +436,59 @@ async def score_answer(
         trade_off_awareness=trade_offs,
         failure_mode_awareness=failure_modes,
         feedback=str(data.get("feedback", "")).strip(),
+        mastery_summary=str(data.get("mastery_summary", "")).strip(),
+    )
+
+
+async def score_reattempt(
+    *,
+    topic: str,
+    question_asked: str,
+    feedback_given: str,
+    reattempt_answer: str,
+    unaided_mechanism: int,
+) -> ReattemptResult:
+    """Grade turn 3 — the coached re-attempt. Never reaches SM-2.
+
+    `feedback_given` is not optional context: without the text the engineer was
+    shown, the model cannot tell reconstruction from recitation, which is the only
+    thing this call measures. See docs/multi-turn-coaching-design.md §5.2.
+
+    The turn-1/2 answers are deliberately absent — grading the re-attempt against
+    the failed attempt invites scoring the delta rather than the reconstruction. But
+    the unaided *score* is passed, because without it the model cannot know this was
+    a coached turn at all and writes summaries that read as unaided mastery. That
+    text is what the next session grades against, so an over-generous summary here
+    is the one way turn 3 reaches a future scheduling decision.
+    """
+    settings = get_settings()
+    transcript = [
+        f"Topic: {topic}",
+        "",
+        f"QUESTION: {question_asked}",
+        f"UNAIDED MECHANISM SCORE, BEFORE THEY WERE TOLD: {unaided_mechanism}/5",
+        f"CORRECT MECHANISM, AS STATED TO THEM: {feedback_given}",
+        f"THEIR RE-ATTEMPT: {reattempt_answer}",
+    ]
+
+    data = await _complete(
+        model=settings.reattempt_model,
+        effort=settings.reattempt_effort,
+        rubric=REATTEMPT_RUBRIC,
+        user_content="\n".join(transcript),
+        schema=REATTEMPT_SCHEMA,
+        # One enum integer and two sentences — well under 100 output tokens. Sized to
+        # bound the worst case, not the expected one: a degenerate generation on a
+        # turn the user is waiting through should fail fast, not run for 4000 tokens.
+        max_tokens=512,
+    )
+
+    try:
+        mechanism = int(data["mechanism_accuracy"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LLMError(f"re-attempt response had no usable score: {data!r}") from exc
+
+    return ReattemptResult(
+        mechanism_accuracy=mechanism,
         mastery_summary=str(data.get("mastery_summary", "")).strip(),
     )

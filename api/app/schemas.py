@@ -104,6 +104,26 @@ class CompleteOut(BaseModel):
     # A practice run left the schedule alone; the two fields above are the card's
     # unchanged values, and the session-end line says so instead of quoting them.
     practice: bool = False
+    # Whether the client should offer the coached re-attempt. Server-computed so the
+    # `mechanism_accuracy <= 2` gate lives in one place and the app never sees a
+    # per-axis score it has nowhere to display.
+    reattempt_offered: bool = False
+    # The exact prompt to show for turn 3, or null when it isn't offered. Sent by the
+    # server for the same reason turns 1 and 2 are: it is the question the answer
+    # will be graded against, and the client cannot reliably reconstruct it — on a
+    # resumed follow-up session the client's copy of "the question" is the probe.
+    reattempt_prompt: str | None = None
+
+
+class ReattemptOut(BaseModel):
+    """Deliberately carries no score.
+
+    Turn 3's `mechanism_accuracy` is stored but never returned — the app shows one
+    numeral per session and that numeral is turn 2's composite. Sending a second
+    number to a client that has no place to put it invites putting it somewhere.
+    """
+
+    mastery_summary: str
 
 
 class DeviceTokenIn(BaseModel):

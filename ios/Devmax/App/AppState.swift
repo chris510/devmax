@@ -447,8 +447,17 @@ final class AppState: ObservableObject {
         }
     }
 
-    func submit(_ text: String) async {
-        guard let sessionID, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+    /// The submit envelope every turn shares: the optimistic thread write, the
+    /// processing stage, and — the part that matters — the rollback.
+    ///
+    /// Losing a spoken answer is the worst failure mode in the product, so that
+    /// recovery path exists exactly once. `send` supplies only the network call;
+    /// the caller handles the outcome. Returns nil when the call failed or the
+    /// text was empty, in which case the rollback has already run.
+    private func sendAnswer<T>(
+        _ text: String, via send: (UUID, String) async throws -> T
+    ) async -> T? {
+        guard let sessionID, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         let answering = stage
         submitError = false
 
@@ -457,41 +466,105 @@ final class AppState: ObservableObject {
         stage = .processing
 
         do {
-            let outcome = try await api.submitAnswer(sessionID: sessionID, text: text)
+            let value = try await send(sessionID, text)
+            // The request outlives the screen: ✕ is live during `.processing`, so the
+            // user can close the session and open another card while this is in
+            // flight. Applying a stale result would score the wrong card.
+            guard self.sessionID == sessionID else { return nil }
             if let card = currentCard { DraftStore.clear(for: card.id) }
             draft = ""
-
-            switch outcome {
-            case .followUp(let question):
-                thread.append(ThreadEntry(role: .followUpQuestion, text: question))
-                stage = .followUp
-            case .complete(let score, let feedback, let nextReviewAt, let intervalDays, let wasPractice):
-                result = SessionResult(
-                    score: score,
-                    feedback: feedback,
-                    scheduleLine: wasPractice
-                        ? Self.practiceScheduleLine
-                        : Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays)
-                )
-                if let card = currentCard {
-                    run.append(
-                        RunEntry(
-                            id: card.id, topic: card.topic, category: card.category,
-                            score: score, feedback: feedback, practice: wasPractice
-                        )
-                    )
-                }
-                stage = .result
-            }
+            return value
         } catch {
-            // The highest-stakes failure in the app. Remove the optimistic answer,
-            // restore the text verbatim, rewind the stage so the control is live
-            // again, and show the inline strip. No toast, no data loss.
+            guard self.sessionID == sessionID else { return nil }
+            // Remove the optimistic answer, restore the text verbatim, rewind the
+            // stage so the control is live again, and show the inline strip. No
+            // toast, no data loss.
+            //
+            // The identity guard above is what makes `removeLast` safe: without it a
+            // late failure pops the *new* card's question off an already-reset
+            // thread, or traps outright on an empty one.
             thread.removeLast()
             draft = text
-            stage = (answering == .recordingFollowUp || answering == .followUp) ? .followUp : .idle
+            stage = answering.answeringTwin
             submitError = true
+            return nil
         }
+    }
+
+    func submit(_ text: String) async {
+        // Turn 3 goes to a different endpoint. Dispatched here rather than at each
+        // of the three call sites in ConversationScreen — the view sends an answer
+        // and doesn't need to know which turn it belongs to.
+        if stage.isReattempt {
+            await submitReattempt(text)
+            return
+        }
+
+        guard let outcome = await sendAnswer(
+            text, via: { id, body in try await self.api.submitAnswer(sessionID: id, text: body) }
+        ) else { return }
+
+        switch outcome {
+        case .followUp(let question):
+            thread.append(ThreadEntry(role: .followUpQuestion, text: question))
+            stage = .followUp
+        case .complete(
+            let score, let feedback, let nextReviewAt, let intervalDays, let wasPractice,
+            let reattemptOffered, let reattemptPrompt
+        ):
+            result = SessionResult(
+                score: score,
+                feedback: feedback,
+                scheduleLine: wasPractice
+                    ? Self.practiceScheduleLine
+                    : Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays),
+                reattemptOffered: reattemptOffered,
+                reattemptPrompt: reattemptPrompt
+            )
+            if let card = currentCard {
+                run.append(
+                    RunEntry(
+                        id: card.id, topic: card.topic, category: card.category,
+                        score: score, feedback: feedback, practice: wasPractice
+                    )
+                )
+            }
+            stage = .result
+        }
+    }
+
+    /// Open turn 3. The session is already complete and the schedule already
+    /// applied, so this only adds a turn to the thread — nothing here can change
+    /// the score the user is looking at.
+    func beginReattempt() {
+        // The prompt arrives with the score, so the tap is still instant — but the
+        // server composed it. Deriving it from the thread was wrong on a resumed
+        // follow-up session, where the client's only `.question` entry holds the
+        // probe rather than the card's question.
+        guard let result, result.reattemptOffered, stage == .result,
+              let prompt = result.reattemptPrompt
+        else { return }
+        thread.append(ThreadEntry(role: .reattemptQuestion, text: prompt))
+        draft = ""
+        submitError = false
+        stage = .reattempt
+    }
+
+    /// Submit turn 3. Deliberately does not touch `result.score` or `run`: the
+    /// numeral on screen and the recap row both describe the unaided attempt, and a
+    /// coached re-attempt is not evidence about that.
+    ///
+    /// Private because `submit` is the only caller — the view sends an answer and
+    /// the dispatch above decides which turn it is.
+    private func submitReattempt(_ text: String) async {
+        guard await sendAnswer(
+            text, via: { id, body in try await self.api.submitReattempt(sessionID: id, text: body) }
+        ) != nil else { return }
+
+        // Back to the score block, with the re-attempt now in the thread above it.
+        // The affordance is gone because the server refuses a second one.
+        result?.reattemptOffered = false
+        stage = .result
     }
 
     /// The session-end button. `Next card` on every card but the last; on the last
@@ -631,7 +704,10 @@ final class AppState: ObservableObject {
         case "processing":
             thread.append(ThreadEntry(role: .answer, text: answer))
             stage = .processing
-        case "followup", "score", "submit-failure":
+        case "followup", "score", "submit-failure", "reattempt", "reattempt-answered":
+            // The re-attempt routes need a failing mechanism to be reachable at all,
+            // so they force it rather than making the caller remember a second flag.
+            if route.hasPrefix("reattempt") { DebugFlags.shared.failedMechanism = true }
             await submit(answer)
             if route == "followup" { return }
             if route == "submit-failure" {
@@ -640,6 +716,10 @@ final class AppState: ObservableObject {
             }
             await submit("Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes.")
             await submit("Right — and replication follows the successor list.")
+            guard route.hasPrefix("reattempt") else { return }
+            beginReattempt()
+            if route == "reattempt" { return }
+            await submit("Right — so it's the arc, not the node name. Each node owns the stretch of hash space that ends at its own position.")
         default:
             return
         }

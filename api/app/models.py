@@ -107,6 +107,17 @@ class Session(SQLModel, table=True):
     failure_mode_awareness: int | None = None
     feedback: str = ""
     follow_up_used: bool = False
+
+    # Turn 3: a coached re-attempt, offered only after the correction has been
+    # stated and only when the mechanism was wrong. Scored on one axis, written to
+    # the mastery summary, and barred from SM-2 and from `score` — it measures
+    # coached performance, not recall. See docs/multi-turn-coaching-design.md §4.
+    reattempt_answer: str = ""
+    reattempt_mechanism_accuracy: int | None = None
+    # Guards replay, and named to mirror `follow_up_used` — the other structural cap
+    # in this table. "Used", not "offered": the session completes either way, so
+    # nothing here distinguishes an offer declined from one never made.
+    reattempt_used: bool = False
     # A Review Sprint run. Scored and written to history exactly like a normal
     # session; the card's SM-2 fields are left untouched.
     practice: bool = False

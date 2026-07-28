@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     scoring_effort: str | None = "low"
     question_effort: str | None = None
 
+    # Turn 3, the coached re-attempt. Mirrors the scoring model deliberately — it
+    # grades the same axis against the same transcript, so a weaker model would
+    # write a mastery summary the scoring call then reads as peer evidence.
+    #
+    # UNSWEPT. `scoring_effort`'s "low" was chosen from a live sweep; this one is
+    # inherited, not measured. The task is narrower than scoring (one axis, no
+    # composite, no probe), so "low" is the right prior — but run
+    # scripts/effort_sweep.py against this prompt before treating it as settled.
+    reattempt_model: str = "claude-sonnet-5"
+    reattempt_effort: str | None = "low"
+
     apns_key_id: str = ""
     apns_team_id: str = ""
     apns_bundle_id: str = ""
