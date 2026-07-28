@@ -8,6 +8,9 @@ final class DebugFlags: ObservableObject {
     static let shared = DebugFlags()
 
     enum LoadState: String, CaseIterable { case auto, loading, error }
+    /// The two prototyped progress rails. `dots` is the shipped option; `chips`
+    /// stays reachable only for side-by-side comparison.
+    enum RailStyle: String, CaseIterable { case dots, chips }
 
     @Published var useMockAPI: Bool
     @Published var loadState: LoadState
@@ -19,6 +22,7 @@ final class DebugFlags: ObservableObject {
     /// Fakes streaming speech-to-text by typing the transcript out, as the
     /// prototype does — the simulator has no usable microphone.
     @Published var simulateSpeech: Bool
+    @Published var railStyle: RailStyle
 
     /// Drives the app straight to one designed state at launch, so every
     /// screenshot in the handoff can be reproduced and compared without hand
@@ -48,6 +52,7 @@ final class DebugFlags: ObservableObject {
         simulateSpeech = Self.isDebug && flag("WC_SIM_SPEECH", default: true)
 
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
+        railStyle = RailStyle(rawValue: env["WC_RAIL_STYLE"] ?? "") ?? .dots
         failSubmit = flag("WC_FAIL_SUBMIT")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
@@ -63,6 +68,10 @@ actor MockAPI: DevmaxAPI {
 
     private var submitAttempts = 0
     private var addAttempts = 0
+    private var completions = 0
+    /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
+    /// back the way the server does.
+    private var sessionIsPractice = false
     private var storedSettings = AppSettings.placeholder
     private var extraCards: [DueCard] = []
 
@@ -78,40 +87,93 @@ actor MockAPI: DevmaxAPI {
             throw APIError.status(500)
         }
         if await MainActor.run(body: { DebugFlags.shared.emptyQueue }) { return [] }
-        return extraCards + [
-            DueCard(
-                id: Self.chID, topic: "Consistent hashing", category: "Core Concept",
-                masterySummary: "solid on ring mechanics, shaky on virtual nodes",
-                lastScore: 2, dueLabel: "3 days overdue", resumable: false, missedCount: 0
-            ),
-            DueCard(
-                id: Self.raftID, topic: "Raft leader election", category: "Distributed Systems",
-                masterySummary: "can describe terms and voting; fuzzy on log-matching safety",
-                lastScore: 1, dueLabel: "1 day overdue", resumable: true, missedCount: 2
-            ),
-            DueCard(
-                id: Self.pgID, topic: "Postgres index types", category: "Databases",
-                masterySummary: "confident on B-tree vs GIN; hasn't explained index bloat",
-                lastScore: 3, dueLabel: "due today", resumable: false, missedCount: 0
-            ),
-        ]
+        // The queue is the first three library cards, adapted — one fixture list,
+        // not two. These fixtures *are* the screenshot acceptance test, so a
+        // mastery string edited in one place and not the other would make Today
+        // and Coverage disagree about the same card with nothing to catch it.
+        // The Raft card is the one carrying a stored partial answer.
+        return extraCards + Self.library.prefix(3).map {
+            $0.asQueueCard(resumable: $0.id == Self.raftID)
+        }
     }
 
+    /// The whole library: the three due cards plus ten that exist only for Review
+    /// Sprint and Coverage — 13 across 9 categories, matching the handoff.
+    ///
+    /// Every card's axis triple derives to its own `lastScore` under the backend's
+    /// `derive_composite`, so the fixture can't drift into a state the server
+    /// could never produce. Their means are the rollup line in `coverage.png`:
+    /// `MECHANISM 2.7 · TRADE-OFFS 1.4 · FAILURE MODES 2.3`.
     func cards(sort: String, mode: String) async throws -> [CardSummary] {
-        [
-            CardSummary(id: UUID(), topic: "TCP congestion control", category: "Core Concept",
-                        deliveryMode: "conversational", masterySummary: "", lastScore: nil,
-                        easeFactor: 2.5, intervalDays: 1, repetitions: 0,
-                        nextReviewAt: "2026-07-25", missedCount: 0),
-            CardSummary(id: Self.pgID, topic: "Postgres index types", category: "Databases",
-                        deliveryMode: "conversational", masterySummary: "", lastScore: 3,
-                        easeFactor: 2.5, intervalDays: 7, repetitions: 2,
-                        nextReviewAt: "2026-07-25", missedCount: 0),
-            CardSummary(id: UUID(), topic: "Bloom filters", category: "Core Concept",
-                        deliveryMode: "conversational", masterySummary: "", lastScore: nil,
-                        easeFactor: 2.5, intervalDays: 1, repetitions: 0,
-                        nextReviewAt: "2026-07-26", missedCount: 0),
-        ]
+        try await Task.sleep(nanoseconds: 350_000_000)
+        if await MainActor.run(body: { DebugFlags.shared.loadState == .error }) {
+            throw APIError.status(500)
+        }
+        return Self.library
+    }
+
+    private static let library: [CardSummary] = [
+        // The three cards that are due today — no days-since-review, so Coverage
+        // shows their due label instead.
+        Self.summary(Self.chID, "Consistent hashing", "Core Concept",
+                "solid on ring mechanics, shaky on virtual nodes",
+                score: 2, axes: (2, 2, 4), due: "3 days overdue", ago: nil),
+        Self.summary(Self.raftID, "Raft leader election", "Distributed Systems",
+                "can describe terms and voting; fuzzy on log-matching safety",
+                score: 1, axes: (1, 1, 2), due: "1 day overdue", ago: nil, missed: 2),
+        Self.summary(Self.pgID, "Postgres index types", "Databases",
+                "confident on B-tree vs GIN; hasn't explained index bloat",
+                score: 3, axes: (4, 1, 2), due: "due today", ago: nil),
+
+        Self.summary(Self.id(0xE1), "TCP congestion control", "Networking",
+                "explains slow start; cubic vs reno unclear",
+                score: 2, axes: (2, 2, 3), due: "not due", ago: 9),
+        Self.summary(Self.id(0xE2), "Bloom filters", "Core Concept",
+                "solid on false positives; sizing math shaky",
+                score: 3, axes: (5, 2, 2), due: "not due", ago: 12),
+        Self.summary(Self.id(0xE3), "MVCC in Postgres", "Databases",
+                "knows snapshots; vacuum reasoning thin",
+                score: 1, axes: (1, 0, 2), due: "not due", ago: 15),
+        Self.summary(Self.id(0xE4), "Optimistic vs pessimistic locking", "Concurrency",
+                "good on retry loops; no contention math",
+                score: 4, axes: (5, 3, 2), due: "not due", ago: 6),
+        Self.summary(Self.id(0xE5), "Cache invalidation strategies", "Caching",
+                "write-through clear; TTL tradeoffs vague",
+                score: 2, axes: (2, 1, 3), due: "not due", ago: 21),
+        Self.summary(Self.id(0xE6), "Idempotency keys", "API Design",
+                "can define; storage lifetime unexplained",
+                score: 3, axes: (4, 1, 2), due: "not due", ago: 4),
+        // The one untested card — its axes stay nil, so the rollup ignores it.
+        Self.summary(Self.id(0xE7), "Virtual memory and page faults", "Operating Systems",
+                "no signal yet", score: nil, axes: nil, due: "not due", ago: 30),
+        Self.summary(Self.id(0xE8), "Backpressure and load shedding", "Reliability",
+                "names the patterns; no queue-depth reasoning",
+                score: 1, axes: (1, 1, 2), due: "not due", ago: 18),
+        Self.summary(Self.id(0xE9), "TLS handshake", "Networking",
+                "session resumption unclear",
+                score: 2, axes: (2, 1, 2), due: "not due", ago: 11),
+        Self.summary(Self.id(0xEA), "CAP in practice", "Distributed Systems",
+                "quotes the theorem; weak on partition behaviour",
+                score: 3, axes: (3, 2, 2), due: "not due", ago: 8),
+    ]
+
+    private static func id(_ byte: UInt8) -> UUID {
+        UUID(uuidString: String(format: "00000000-0000-0000-0000-0000000000%02x", byte))!
+    }
+
+    private static func summary(
+        _ id: UUID, _ topic: String, _ category: String, _ mastery: String,
+        score: Int?, axes: (Int, Int, Int)?, due: String, ago: Int?, missed: Int = 0
+    ) -> CardSummary {
+        CardSummary(
+            id: id, topic: topic, category: category, deliveryMode: "conversational",
+            masterySummary: mastery, lastScore: score,
+            lastMechanismAccuracy: axes?.0,
+            lastTradeOffAwareness: axes?.1,
+            lastFailureModeAwareness: axes?.2,
+            easeFactor: 2.5, intervalDays: 7, repetitions: score == nil ? 0 : 2,
+            nextReviewAt: "2026-07-25", dueLabel: due, daysSinceReview: ago, missedCount: missed
+        )
     }
 
     func card(_ id: UUID) async throws -> CardDetail {
@@ -185,15 +247,15 @@ actor MockAPI: DevmaxAPI {
             resumable: false, missedCount: 0
         )
         extraCards.insert(card, at: 0)
-        return CardSummary(
-            id: card.id, topic: topic, category: "Unsorted", deliveryMode: "conversational",
-            masterySummary: "", lastScore: nil, easeFactor: 2.5, intervalDays: 1,
-            repetitions: 0, nextReviewAt: "2026-07-24", missedCount: 0
+        return Self.summary(
+            card.id, topic, "Unsorted", "", score: nil, axes: nil,
+            due: card.dueLabel, ago: nil
         )
     }
 
-    func startSession(cardID: UUID) async throws -> SessionStart {
+    func startSession(cardID: UUID, practice: Bool = false) async throws -> SessionStart {
         try await Task.sleep(nanoseconds: 500_000_000)
+        sessionIsPractice = practice
         if cardID == Self.raftID {
             return SessionStart(
                 sessionId: UUID(),
@@ -210,9 +272,20 @@ actor MockAPI: DevmaxAPI {
                 isFollowUp: false, draftText: "", resumed: false
             )
         }
+        if cardID == Self.chID {
+            return SessionStart(
+                sessionId: UUID(),
+                question: "You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't.",
+                isFollowUp: false, draftText: "", resumed: false
+            )
+        }
+        // A library card walked in a Review Sprint. The same question comes back
+        // every time for a given card, which is what `canonical_question` does
+        // server-side.
+        let topic = Self.library.first { $0.id == cardID }?.topic ?? "this topic"
         return SessionStart(
             sessionId: UUID(),
-            question: "You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't.",
+            question: "Reconstruct \(topic.lowercased()) from memory — what is the mechanism, and where does it break?",
             isFollowUp: false, draftText: "", resumed: false
         )
     }
@@ -228,11 +301,17 @@ actor MockAPI: DevmaxAPI {
         if submitAttempts <= 2 {
             return .followUp(question: "One more — how do virtual nodes change the amount of data that moves?")
         }
+        // Sprint runs vary so the recap has something to show; a daily review
+        // keeps the fixture the Conversation screenshots were taken against.
+        let scores = [3, 4, 2, 2, 3, 3]
+        let score = sessionIsPractice ? scores[completions % scores.count] : 3
+        completions += 1
         return .complete(
-            score: 3,
+            score: score,
             feedback: "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.",
             nextReviewAt: "2026-07-27",
-            intervalDays: 3
+            intervalDays: 3,
+            practice: sessionIsPractice
         )
     }
 

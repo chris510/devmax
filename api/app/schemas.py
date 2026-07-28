@@ -23,10 +23,18 @@ class CardSummary(BaseModel):
     delivery_mode: str
     mastery_summary: str
     last_score: int | None
+    # The three axes behind `last_score`. Coverage's rollup means these across the
+    # library; nothing else consumes them.
+    last_mechanism_accuracy: int | None = None
+    last_trade_off_awareness: int | None = None
+    last_failure_mode_awareness: int | None = None
     ease_factor: float
     interval_days: int
     repetitions: int
     next_review_at: date
+    # Both computed server-side so the client never reimplements date math.
+    due_label: str
+    days_since_review: int | None
     missed_count: int
 
 
@@ -93,6 +101,9 @@ class CompleteOut(BaseModel):
     feedback: str
     next_review_at: date
     interval_days: int
+    # A practice run left the schedule alone; the two fields above are the card's
+    # unchanged values, and the session-end line says so instead of quoting them.
+    practice: bool = False
 
 
 class DeviceTokenIn(BaseModel):

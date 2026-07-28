@@ -10,12 +10,27 @@ from app.services.llm import LLMError, ScoreResult
 from tests.conftest import API_HEADERS, CRON_HEADERS, local_today, make_card
 
 
+def completed(mechanism: int, trade_offs: int = 0, failure_modes: int = 0, **kwargs) -> ScoreResult:
+    """A complete result built the way `score_answer` builds one: axes first."""
+    return ScoreResult(
+        status="complete",
+        score=llm.derive_composite(mechanism, trade_offs, failure_modes),
+        mechanism_accuracy=mechanism,
+        trade_off_awareness=trade_offs,
+        failure_mode_awareness=failure_modes,
+        **{"feedback": "Good.", "mastery_summary": "ok", **kwargs},
+    )
+
+
 @pytest.fixture
 def stub_llm(monkeypatch):
     """Mock Anthropic entirely — no live calls in CI."""
 
-    async def _question(**_kwargs) -> str:
-        return "You're adding a node to a consistent-hashing ring. What moves?"
+    questions: list[dict] = []
+
+    async def _question(**kwargs) -> str:
+        questions.append(kwargs)
+        return f"You're adding a node to a ring. What moves? ({len(questions)})"
 
     calls: list[dict] = []
 
@@ -23,7 +38,8 @@ def stub_llm(monkeypatch):
         calls.append(kwargs)
         return _score.result
 
-    _score.result = ScoreResult(status="complete", score=4, feedback="Good.", mastery_summary="ok")
+    _score.result = completed(4, 3)
+    _score.questions = questions
 
     monkeypatch.setattr(llm, "generate_question", _question)
     monkeypatch.setattr(llm, "score_answer", _score)
@@ -131,7 +147,7 @@ async def test_follow_up_used_is_passed_so_a_second_probe_cannot_happen(client, 
     )
     assert calls[0]["follow_up_used"] is False
 
-    score.result = ScoreResult(status="complete", score=3, feedback="ok", mastery_summary="s")
+    score.result = completed(3, mastery_summary="s")
     resp = await client.post(
         f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "more"}
     )
@@ -142,9 +158,7 @@ async def test_follow_up_used_is_passed_so_a_second_probe_cannot_happen(client, 
 
 async def test_completing_a_session_applies_sm2_and_updates_the_card(client, db, stub_llm):
     score, _ = stub_llm
-    score.result = ScoreResult(
-        status="complete", score=4, feedback="Good on ring mechanics.", mastery_summary="solid"
-    )
+    score.result = completed(4, 3, feedback="Good on ring mechanics.", mastery_summary="solid")
 
     card = make_card(repetitions=1, interval_days=1, ease_factor=2.5)
     db.add(card)
@@ -166,6 +180,232 @@ async def test_completing_a_session_applies_sm2_and_updates_the_card(client, db,
     assert card.last_score == 4
     assert card.mastery_summary == "solid"
     assert card.next_review_at == local_today() + timedelta(days=6)
+    # Denormalised alongside last_score so Coverage's rollup is one query.
+    assert card.last_mechanism_accuracy == 4
+    assert card.last_trade_off_awareness == 3
+    assert card.last_failure_mode_awareness == 0
+    assert card.last_reviewed_at is not None
+
+
+# --- mechanism-gated scheduling ---------------------------------------------
+# The composite score is a display concern. What reschedules a card is whether
+# the mechanism was reconstructed — nothing else.
+
+
+async def test_scheduling_gates_on_mechanism_not_the_composite(client, db, stub_llm):
+    """A thin-but-correct answer and a complete one move the card identically.
+
+    Composite 3 vs 5. Under the old blended quality those produced different ease
+    deltas, which let "knew it, didn't volunteer the failure modes" drag the
+    interval down on a topic the user actually knows.
+    """
+    score, _ = stub_llm
+    eases = []
+
+    for result in (completed(3), completed(5, 5, 5)):
+        card = make_card(repetitions=1, interval_days=1, ease_factor=2.5)
+        db.add(card)
+        await db.commit()
+        start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+        score.result = result
+        body = (
+            await client.post(
+                f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+            )
+        ).json()
+
+        await db.refresh(card)
+        eases.append(card.ease_factor)
+        assert body["interval_days"] == 6
+        assert card.repetitions == 2
+
+    assert eases[0] == eases[1]
+
+
+async def test_a_wrong_mechanism_fails_the_card_however_deep_the_rest(client, db, stub_llm):
+    """Depth cannot rescue a broken mechanism — the composite caps at the axis."""
+    score, _ = stub_llm
+    score.result = completed(2, 5, 5)
+
+    card = make_card(repetitions=3, interval_days=12, ease_factor=2.5)
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    body = (
+        await client.post(
+            f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+        )
+    ).json()
+
+    assert body["score"] == 2
+    await db.refresh(card)
+    assert card.repetitions == 0
+    assert card.interval_days == 1
+    assert card.ease_factor < 2.5
+
+
+async def test_missed_count_still_never_reaches_the_ease_factor(client, db, stub_llm):
+    """Unchanged by the gate rewrite — compliance is not retention."""
+    score, _ = stub_llm
+    score.result = completed(5, 5, 5)
+
+    card = make_card(repetitions=1, interval_days=1, ease_factor=2.5, missed_count=9)
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    await client.post(
+        f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+    )
+
+    await db.refresh(card)
+    assert card.missed_count == 9
+    assert card.ease_factor == 2.5  # a "good" rating is ease-neutral
+
+
+# --- the canonical question -------------------------------------------------
+
+
+async def test_the_first_session_generates_and_persists_the_question(client, db, stub_llm):
+    score, _ = stub_llm
+    card = make_card()
+    db.add(card)
+    await db.commit()
+
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    await db.refresh(card)
+    assert card.canonical_question == start["question"]
+    assert len(score.questions) == 1
+
+
+async def test_later_sessions_reuse_the_question_without_calling_the_model(
+    client, db, stub_llm
+):
+    """Testing the same retrieval repeatedly is the point; it also saves a call."""
+    score, _ = stub_llm
+    card = make_card()
+    db.add(card)
+    await db.commit()
+
+    first = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    await client.post(
+        f"/sessions/{first['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+    )
+    second = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    assert second["question"] == first["question"]
+    assert second["session_id"] != first["session_id"]
+    assert len(score.questions) == 1  # no second generation call
+
+
+async def test_clearing_the_column_re_rolls_the_question(client, db, stub_llm):
+    """The documented escape hatch for a badly worded canonical question."""
+    score, _ = stub_llm
+    card = make_card()
+    db.add(card)
+    await db.commit()
+
+    first = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    await client.post(
+        f"/sessions/{first['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+    )
+    await db.refresh(card)
+    card.canonical_question = None
+    db.add(card)
+    await db.commit()
+
+    second = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    assert second["question"] != first["question"]
+    assert len(score.questions) == 2
+
+
+# --- practice mode ----------------------------------------------------------
+
+
+async def test_a_practice_session_scores_without_touching_the_schedule(client, db, stub_llm):
+    """Review Sprint: scores land in history, the review schedule does not move."""
+    score, _ = stub_llm
+    score.result = completed(5, 5, 5, mastery_summary="solid all round")
+
+    due = local_today() + timedelta(days=9)
+    card = make_card(repetitions=3, interval_days=12, ease_factor=2.4, next_review_at=due)
+    db.add(card)
+    await db.commit()
+
+    start = (
+        await client.post(f"/cards/{card.id}/sessions?practice=true", headers=API_HEADERS)
+    ).json()
+    body = (
+        await client.post(
+            f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+        )
+    ).json()
+
+    assert body["practice"] is True
+    # The schedule fields echo the card's untouched values.
+    assert body["interval_days"] == 12
+    assert body["next_review_at"] == due.isoformat()
+
+    await db.refresh(card)
+    assert (card.interval_days, card.repetitions, card.ease_factor) == (12, 3, 2.4)
+    assert card.next_review_at == due
+    # Mastery signal is real and is written.
+    assert card.last_score == 5
+    assert card.mastery_summary == "solid all round"
+
+    detail = (await client.get(f"/cards/{card.id}", headers=API_HEADERS)).json()
+    assert len(detail["sessions"]) == 1
+    assert detail["sessions"][0]["score"] == 5
+
+
+async def test_a_practice_session_is_not_the_default(client, db, stub_llm):
+    card = make_card(repetitions=1, interval_days=1)
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    body = (
+        await client.post(
+            f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+        )
+    ).json()
+
+    assert body["practice"] is False
+    await db.refresh(card)
+    assert card.interval_days == 6
+
+
+# --- the card library -------------------------------------------------------
+# Review Sprint Setup and Coverage both read GET /cards, so the fields they need
+# are computed server-side rather than re-derived on the client.
+
+
+async def test_the_library_carries_due_labels_and_axis_scores(client, db, stub_llm):
+    score, _ = stub_llm
+    score.result = completed(4, 3, 1)
+
+    card = make_card(next_review_at=local_today() - timedelta(days=3))
+    db.add(card)
+    await db.commit()
+
+    row = (await client.get("/cards", headers=API_HEADERS)).json()[0]
+    assert row["due_label"] == "3 days overdue"
+    assert row["days_since_review"] is None
+    assert row["last_mechanism_accuracy"] is None
+
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    await client.post(
+        f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "a"}
+    )
+
+    row = (await client.get("/cards", headers=API_HEADERS)).json()[0]
+    assert row["days_since_review"] == 0
+    assert row["last_mechanism_accuracy"] == 4
+    assert row["last_trade_off_awareness"] == 3
+    assert row["last_failure_mode_awareness"] == 1
 
 
 async def test_answering_a_complete_session_returns_409(client, db, stub_llm):

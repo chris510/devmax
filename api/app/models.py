@@ -58,11 +58,23 @@ class Card(SQLModel, table=True):
     target_week: int | None = None
     delivery_mode: str = DELIVERY_CONVERSATIONAL
 
+    # Generated once, then reused for every session on this card. Repeating the same
+    # retrieval is the point — a fresh question each time puts every review in the
+    # weak-transfer regime. Null until the first session generates one.
+    canonical_question: str | None = None
+
     ease_factor: float = 2.5
     interval_days: int = 1
     repetitions: int = 0
     next_review_at: date
     last_score: int | None = None
+    # The three axes behind `last_score`, denormalised from the latest complete
+    # session the same way `last_score` is. Coverage's axis rollup is a mean across
+    # cards, so it needs the per-card latest value, not a scan of every session.
+    last_mechanism_accuracy: int | None = None
+    last_trade_off_awareness: int | None = None
+    last_failure_mode_awareness: int | None = None
+    last_reviewed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     mastery_summary: str = ""
     # Compliance signal only — never feeds SM-2.
     missed_count: int = 0
@@ -86,9 +98,18 @@ class Session(SQLModel, table=True):
     # In-progress, unsubmitted. Losing this is the worst failure mode in the product.
     draft_text: str = ""
 
+    # Composite, derived in code from the three axes below — never model-produced.
+    # Null on rows written before the decomposition shipped; those keep their
+    # original blended score for history display.
     score: int | None = None
+    mechanism_accuracy: int | None = None
+    trade_off_awareness: int | None = None
+    failure_mode_awareness: int | None = None
     feedback: str = ""
     follow_up_used: bool = False
+    # A Review Sprint run. Scored and written to history exactly like a normal
+    # session; the card's SM-2 fields are left untouched.
+    practice: bool = False
     status: str = STATUS_OPEN
 
     started_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)

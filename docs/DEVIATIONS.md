@@ -147,6 +147,88 @@ diverges from the handwritten migration: the four CHECK constraints, every
 `alembic revision --autogenerate` would have emitted a revision dropping the
 constraints. `target_metadata` is now `None`; write revisions by hand.
 
+## 10. The score is derived in code, not returned by the model
+
+**Spec** (§LLM integration) has the scoring call return a single blended
+`score: 0-5`, with the rubric asking the model to weigh three axes in its head.
+
+The schema now asks for the three axes separately — `mechanism_accuracy`,
+`trade_off_awareness`, `failure_mode_awareness` — and `derive_composite` computes
+the 0–5 number from them. The bands are a direct restatement of the ones the
+blended rubric described (0/1 mechanism wrong, 3 mechanism only, 4 + trade-offs,
+5 complete), so `last_score`, Card History, and the session score block see no
+change in meaning.
+
+Two things needed this. Precise feedback has to know *which* axis was weak to
+state the right content, and the scheduler needs mechanism accuracy as a
+standalone number (§11). Deriving the composite also removes a real failure mode:
+the model used to return a blended score that could disagree with its own stated
+reasoning.
+
+## 11. Scheduling gates on mechanism accuracy, in two buckets
+
+**Spec** (§SM-2 implementation) feeds SM-2 the final session score, using its full
+0–5 range for both the pass/fail branch and the ease-factor delta.
+
+`quality_for` now derives SM-2's quality from `mechanism_accuracy` alone,
+collapsed to two buckets — `again` below 3, `good` at 3 or above. The composite
+score no longer reaches the scheduler at all; it is purely a display concern.
+
+**The pass/fail branch is unchanged in behaviour.** `derive_composite` returns 2
+or less for exactly the mechanism scores that fail, so "composite < 3" and
+"mechanism < 3" select the same sessions. What changes is the ease factor: not
+volunteering the failure modes on a topic the user can reconstruct correctly is a
+depth gap, not a retention failure, and it used to drag the interval down.
+
+The audit this follows describes ratings in FSRS terms; this codebase schedules
+with SM-2, so the two ratings are mapped onto SM-2 qualities — `again` → 2 (the
+mildest failing quality) and `good` → 4 (the ease-neutral one, delta 0.0). That
+mapping is the one judgement call in the change, and it lives in
+`RATING_QUALITY` so it can be re-tuned in one place.
+
+## 12. Four denormalised columns on `cards`
+
+`cards` gains `last_mechanism_accuracy`, `last_trade_off_awareness`,
+`last_failure_mode_awareness`, and `last_reviewed_at`, written in the same
+transaction as `last_score`.
+
+Coverage's axis rollup is a mean *across cards* of each card's latest value, and
+Review Sprint ranks on least-recently-reviewed. Both are one indexed read this
+way; deriving them would mean a latest-session-per-card join on every load of two
+screens. This mirrors the existing `last_score` denormalisation rather than
+introducing a new pattern.
+
+## 13. Practice-mode sessions
+
+Not in `spec.md` at all — Review Sprint is a design-handoff feature that landed
+after the spec was written.
+
+`POST /cards/{id}/sessions?practice=true` marks the session. On completion it is
+scored, written to the card's history, and updates the card's mastery signal
+(`last_score`, the three axes, `mastery_summary`, `last_reviewed_at`) exactly like
+a normal session — but `ease_factor`, `interval_days`, `repetitions`, and
+`next_review_at` are left untouched, and `CompleteOut.practice` tells the client
+to say so instead of quoting a schedule it didn't change.
+
+The split is deliberate: a score earned in a sprint is real signal about what the
+user knows, so hiding it from the mastery line would make Today and Coverage
+lie. What a sprint must not do is move the review schedule, because the user was
+promised it wouldn't.
+
+## 14. Session Recap's practice footnote is conditional
+
+The one place the **design handoff** is not followed literally.
+
+`design_handoff_devmax_initial/README.md` §Screen 5 prints
+`PRACTICE MODE · SCORES SAVED TO HISTORY, SCHEDULE UNCHANGED` as a fixed footnote,
+and also routes *any* multi-card session to Session Recap — including a normal
+daily run, which does reschedule every card it touched. Printing it there would
+state something false on the one screen whose entire job is to be trusted.
+
+The footnote and the `Run another` action are shown only in practice mode. The
+handoff's two sentences disagree with each other; this resolves the disagreement
+in favour of not misleading.
+
 ---
 
 ## Known limitation, not a deviation
