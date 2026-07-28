@@ -13,6 +13,7 @@ no auth UI, no gamification.
 ```
 api/     FastAPI + SQLModel on Postgres, deployed to Railway — built to spec.md
 ios/     SwiftUI app — built to design_handoff_devmax_initial/
+assets/  App icon kit — svg/ is the re-export source of truth
 .github/ Cron workflows that drive the push loop
 ```
 

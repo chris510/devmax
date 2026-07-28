@@ -87,7 +87,8 @@ exact value rather than eyeballing the PNG — that is how the real fidelity bug
   every other mono string is written in the case the design shows it in, and several are
   deliberately lowercase (`3 days overdue`, `2 shaky · 1 cold`).
 - **Accent `#57b6c2` is for primary buttons, score/status indicators, the recording ring, and
-  the caret. Nothing else.**
+  the caret. Nothing else** in the UI. The app icon's bottom bar uses it too, deliberately —
+  that is the only use outside a screen.
 - **Score color is never the only signal** — the numeral is always present; the dot is
   decorative reinforcement.
 - **Dark mode only.** Light mode is in scope for the product but not designed yet.
@@ -111,6 +112,7 @@ devmax/
 │   ├── README.md                    # Design handoff — authoritative for iOS
 │   ├── prototype/                   # HTML reference (read for exact values, don't lift)
 │   └── screenshots/                 # 29 states; the fidelity bar
+├── assets/app_icon/                 # Icon kit — `svg/` is the re-export source of truth
 ├── api/                             # Python 3.12 / FastAPI / SQLModel / Postgres / Railway
 │   ├── app/services/scheduler.py    # SM-2 — pure, the highest-value test surface
 │   ├── app/services/llm.py          # Question gen + scoring (Anthropic)

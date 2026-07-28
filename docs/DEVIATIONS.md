@@ -240,3 +240,32 @@ unreachable, so this is inert today. Fixing it properly needs a `push_log` table
 
 **Trigger condition: if the cron moves to hourly, or `reviews_per_day` rises above
 the number of daily fires, add `push_log` first.**
+
+---
+
+## Deviation from the design handoff, not `spec.md`
+
+`design_handoff_devmax_initial/README.md` §Assets says: *"None. No images, no
+icons, no SVG."* Every screen still honors that — the launch screen is a bare
+`#0D0F11` and no Swift file loads an image. But an iOS app needs an icon and the
+handoff never specified one, so it came from a later kit, now in
+`assets/app_icon/`. That kit's README owns the geometry and re-export rules; only
+the two wiring decisions live here.
+
+- **Only the dark master is shipped.** `AppIcon.appiconset` carries a single 1024
+  in the default slot; iOS derives the dark and tinted home-screen variants
+  itself, which flat art with high foreground/background contrast handles well.
+  The kit's light pair and monochrome SVG are committed as delivered but unused.
+- **The catalog copy is RGB, not RGBA — and stripping alpha is not a blanket
+  rule.** App Store Connect rejects a marketing icon carrying an alpha channel,
+  so `AppIcon.appiconset/icon-1024.png` is re-encoded to colortype 2, otherwise
+  pixel-identical to the kit master. **Re-export and you must strip alpha again —
+  but only on the 14 full-bleed squares**: the 10 `devmax-icon-{1024,512,180,167,
+  152,120,87,80,60,40}.png` plus the 4 under `png/light/`. Their alpha is
+  uniformly 255, so it is dead weight. The other 6 — the 4 `png/android/`
+  foregrounds and both `devmax-icon-rounded-*.png` — carry real transparency, and
+  flattening those destroys them.
+
+Nothing verifies either rule. An RGBA marketing icon builds, installs, and runs
+fine, and fails only at App Store upload — so a CI check on the catalog PNG's
+colortype would be worth more than this paragraph.
