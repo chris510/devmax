@@ -183,8 +183,14 @@ warning (expected at this stage) and no tracebacks.
 
 ```sh
 railway run --service <api-service> \
-  python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
+  python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27
 ```
+
+**`--start-date 2026-07-27` is not a placeholder — use exactly that.** The local
+Postgres was seeded with it, and `seed.py` dedupes by topic, so re-running with the
+same date is idempotent while a different one misaligns every week boundary. It was
+chosen over a later Monday because both align the same way, but this one makes cards
+come due immediately; seed a week out and the app is unusable until they land.
 
 **Use `--file`, never `--fixtures`.** The fixtures carry invented session history
 and a fake 14-hour-old in-progress draft that would render a bogus resume banner on
@@ -192,8 +198,7 @@ a real card. `seed.py` refuses any non-local database without `--force`, and tha
 check treats `postgres.railway.internal` as real — a private address is still
 production.
 
-**Record the `--start-date`.** Re-running with the same value is idempotent (dedupe
-is by topic); a different value misaligns the week boundaries.
+126 cards seed from `api/cards.json`: 99 conversational, 27 desk, staggered ~2/day.
 
 Due dates are staggered so exactly `reviews_per_day` conversational cards come due
 per day. Check it:
@@ -256,8 +261,12 @@ xcodebuild -project Devmax.xcodeproj -scheme Devmax \
 Check against the live server before going to a device:
 
 ```sh
-xcrun simctl launch --setenv WC_MOCK=0 <device> com.christrinh.devmax
+SIMCTL_CHILD_WC_MOCK=0 xcrun simctl launch <device> com.christrinh.devmax
 ```
+
+`simctl` only forwards a variable to the app when it is prefixed `SIMCTL_CHILD_`.
+The `--setenv` flag it once accepted is gone — today's `simctl` reads the next
+argument as the device and fails with `Invalid device`.
 
 Today should load real cards, and **Card History must render non-blank** — that's
 the proof for the date-decoding fix.
