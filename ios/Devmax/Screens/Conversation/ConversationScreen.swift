@@ -472,12 +472,20 @@ struct ConversationScreen: View {
     private func toggleRecording() {
         speaker.stop()
         if isRecording {
-            speech.stop()
-            let text = speech.transcript
-            state.updateDraft(text)
-            // Submitting is the other moment a pending debounce can't be waited out.
-            state.flushDraft()
-            Task { await state.submit(text) }
+            // Leave the recording stage before awaiting, so a second tap during
+            // finalization can't start a new capture or submit twice. sendAnswer
+            // sets this again; doing it here just closes the window.
+            state.stage = .processing
+            Task {
+                // finish(), not stop(): the recognizer's last corrected result
+                // arrives after the audio ends, and reading the transcript
+                // synchronously cut the end off every spoken answer.
+                let text = await speech.finish()
+                state.updateDraft(text)
+                // Submitting is the other moment a pending debounce can't be waited out.
+                state.flushDraft()
+                await state.submit(text)
+            }
         } else {
             state.submitError = false
             state.stage = state.stage.recordingTwin

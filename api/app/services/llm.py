@@ -88,6 +88,9 @@ Do not score fluency, length, confidence, or enthusiasm.
 `follow_up_question` is a probe at the single most important gap in this answer, \
 phrased as one short question and prefaced with "One more — ". Always write one, \
 even when the answer was strong; the caller decides whether to use it.
+Anchor it in what was actually said — refer to the specific claim, term, or example \
+the answer used, so the probe could not have been written before hearing it. A probe \
+that would fit any answer to this question is a failure.
 
 {MASTERY_SUMMARY_RULE}
 
