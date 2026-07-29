@@ -314,26 +314,26 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
    "due_count": N}` and a banner. **Restore the real windows immediately** — see
    §Scheduling.
 5. Tap the notification → it should deep-link into that card. Answer by voice.
-6. Confirm an unattended scheduled fire at 15:20 UTC.
+6. Confirm an unattended scheduled fire at 17:00 UTC during PDT or 18:00 UTC
+   during PST.
 
 ---
 
 ## Scheduling
 
-Two GitHub Actions crons, in UTC, at `20 15` and `10 5`. These are *not* the obvious
-translations of the 07:10 and 21:00 window starts, and the difference matters.
+Three GitHub Actions crons run in UTC: a paired morning trigger at `0 17` and
+`0 18`, plus an evening trigger at `10 5`.
 
-GitHub cron doesn't observe DST but the windows are local and do. Both windows are
-wider than the one-hour shift (80 and 90 minutes), so a fixed UTC time exists that
-lands inside them under either offset:
+GitHub cron doesn't observe DST but the windows are local and do. The morning
+notification is pinned to 10:00 local by firing on both possible UTC translations:
 
-- morning `07:10–08:30` local → `15:10–15:30` UTC → **`20 15`** (08:20 PDT / 07:20 PST)
+- morning `09:20–10:40` local → **`0 17` and `0 18`**; the backend accepts the
+  10:00 local fire and returns `outside_window` for its 09:00/11:00 companion
 - evening `21:00–22:30` local → `05:00–05:30` UTC → **`10 5`** (22:10 PDT / 21:10 PST)
 
-**This only holds while every enabled window stays wider than 60 minutes and
-contains the chosen time.** If you narrow a window in `PUT /settings`, the trigger
-workflow will start failing with `outside_window` — that failure is deliberate, and
-it means the schedule and the windows have drifted apart. Fix one or the other.
+The workflow treats `outside_window` as expected only for the paired morning
+expressions. An evening or manually dispatched trigger outside every window still
+fails loudly because the cron schedule and `PUT /settings` have drifted apart.
 
 The crons stay on GitHub Actions rather than moving to Railway cron. Railway cron is
 also UTC, so it would inherit the identical DST problem, and it needs a service that
