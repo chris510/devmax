@@ -46,11 +46,11 @@ The flag was implemented as specified, but it cannot do that job: it controls
 `next_review_at = today`. `--weeks-through 2` still put 38 cards in the queue at
 once.
 
-Due dates are now dealt across each card's target week at the configured
-`reviews_per_day` rate (one a day for desk cards, which never enter the push loop),
-so seeding all 111 puts exactly 2 conversational cards in the queue per day.
-`--weeks-through` is kept as a safety valve. Adds `--start-date` so later loads
-align to the same week boundaries.
+Due dates are dealt across each card's target week at the configured
+`reviews_per_day` rate (one a day for desk cards, which never enter the push loop).
+The 2026 curriculum revision added `--activate-week N`: it selects one learned
+cohort and schedules it from `--start-date`, so lesson completion rather than the
+calendar controls activation. `--weeks-through` remains for bulk verification.
 
 ## 3. Prompt caching is configured but never engages
 
@@ -70,9 +70,10 @@ is harmless.
 **Spec** (§Seeding) describes it as "already generated — 111 cards from the study
 plan".
 
-It was not in the repo. Authored to the contract `seed.py` consumes: 111 cards over
-six weeks, 84 conversational and 27 desk, split by the spec's category →
-`delivery_mode` mapping. See `api/cards.json`.
+It was not in the repo. The first authored version grew to 126 cards over six
+weeks and is preserved at `api/archive/cards-legacy-126.json`. It was replaced by
+the lesson-gated 54-card recall spine in `api/cards.json`; the curriculum rationale
+and activation contract live in `docs/CURRICULUM.md`.
 
 ## 5. `POST /device-tokens` is insert-if-absent, not upsert
 

@@ -1,0 +1,44 @@
+[
+  {
+    "topic": "Chat delivery: partitioning message history while preserving per-conversation order and deduplication",
+    "category": "Anthropic",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Image transformation pipeline: idempotent stages, bounded fan-out, and backpressure",
+    "category": "Anthropic",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Large model distribution: version manifests, chunk verification, regional caches, and atomic rollout",
+    "category": "Anthropic",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Batch inference scheduling: dynamic batching, fairness, cancellation, and tail-latency limits",
+    "category": "Anthropic",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Concurrent web crawling: URL-frontier ownership, politeness, deduplication, and worker shutdown",
+    "category": "Anthropic",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Inference latency debugging: separating queueing, preprocessing, model execution, and network time",
+    "category": "Anthropic",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+    "evidence": "reported_question_theme"
+  }
+]

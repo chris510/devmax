@@ -24,7 +24,7 @@ services `devmax` + `Postgres`).
 | ✅ | Railway project + Postgres (18, not 17 — migrations applied clean) | done |
 | ✅ | Six app variables set; migrations 0001–0003 ran via `preDeployCommand` | done |
 | ✅ | Two GitHub repo secrets; first green cron run confirmed | done |
-| ✅ | Seed 126 cards (99 conversational, 27 desk), 4 due immediately | done |
+| ☐ | Reset the legacy 126-card curriculum; activate week 1 (6 conversational cards) | after curriculum deploy |
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
@@ -86,18 +86,18 @@ records *your voice*, not the fixture paragraph.
 
 ## Traps that will cost you an hour each
 
-**Seed with `railway ssh`, not `railway run`** — and the date is `2026-07-27`, exactly.
+**Seed with `railway ssh`, not `railway run`.** Activate a cohort only after its
+source lessons are complete.
 ```sh
 railway ssh --service <api> \
-  "python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27"
+  "python -m app.seed --file cards.json --activate-week 1 --start-date <today>"
 ```
 `railway run` executes locally with Railway's variables injected, so `DATABASE_URL`
 points at `postgres.railway.internal` and never connects. `railway ssh` also needs a
 registered key first (`railway ssh keys add`) and prompts once to trust the host.
-`seed.py` dedupes by topic, so re-running with the same date is idempotent; a
-different date misaligns every week boundary. It was chosen over a later Monday
-because both align the same way, but this one makes cards due immediately — seed a
-week out and the app is unusable until they land. **Use `--file`, never
+`seed.py` dedupes by topic, so re-running a cohort is idempotent.
+`--activate-week` schedules that cohort from the supplied date while preserving its
+curriculum week metadata. **Use `--file`, never
 `--fixtures`**: the fixtures carry invented history and a fake 14-hour-old draft that
 renders a bogus resume banner on a real card.
 

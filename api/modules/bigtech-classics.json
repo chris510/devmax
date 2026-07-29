@@ -1,5 +1,5 @@
 [
-  { "topic": "Design a web crawler with politeness and dedup", "category": "Big Tech Classic", "target_week": 1 },
-  { "topic": "Design a file sync service with chunking and conflict resolution", "category": "Big Tech Classic", "target_week": 1 },
+  { "topic": "Web-crawler frontier: politeness, retry scheduling, URL deduplication, and worker ownership", "category": "Big Tech Classic", "target_week": 1 },
+  { "topic": "File-sync change propagation: chunking, content hashes, tombstones, and conflict resolution", "category": "Big Tech Classic", "target_week": 1 },
   { "topic": "Composite index column order and covering indexes", "category": "Big Tech Classic", "target_week": 2 }
 ]

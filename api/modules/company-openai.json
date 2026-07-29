@@ -1,0 +1,44 @@
+[
+  {
+    "topic": "KV snapshot serialization: framing, versioning, checksums, and forward-compatible decoding",
+    "category": "OpenAI",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/guides/openai/l5",
+    "evidence": "level_guide_and_reported_questions"
+  },
+  {
+    "topic": "Token-credit accounting: ledger entries, idempotent debits, reservations, and reconciliation",
+    "category": "OpenAI",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/guides/openai/l5",
+    "evidence": "level_guide_and_reported_questions"
+  },
+  {
+    "topic": "Bounded blocking queue: condition signaling, capacity invariants, fairness, and graceful shutdown",
+    "category": "OpenAI",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/guides/openai/l5",
+    "evidence": "level_guide_and_reported_questions"
+  },
+  {
+    "topic": "Versioned follow graph: immutable snapshots, incremental updates, and recommendation consistency",
+    "category": "OpenAI",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/OpenAI",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "CI/CD workflow execution: DAG scheduling, isolated workers, retries, artifacts, and cancellation",
+    "category": "OpenAI",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/guides/openai/l5",
+    "evidence": "level_guide_and_reported_questions"
+  },
+  {
+    "topic": "Devbox isolation: sandbox lifecycle, image caching, resource quotas, and hostile workload containment",
+    "category": "OpenAI",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/OpenAI",
+    "evidence": "reported_question_theme"
+  }
+]

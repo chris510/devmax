@@ -1,0 +1,44 @@
+[
+  {
+    "topic": "Distributed cache control plane: ownership, replication, invalidation, and regional failure",
+    "category": "Google",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/guides/google/l5",
+    "evidence": "level_guide_and_reported_questions"
+  },
+  {
+    "topic": "Global denylist propagation: low-latency lookup, regional policy, incremental updates, and staleness",
+    "category": "Google",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Google",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Windowed top-K aggregation: local sketches, hot-key mitigation, merge, and late events",
+    "category": "Google",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Google",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Scarce reservation holds: expiry, contention control, idempotent payment, and release",
+    "category": "Google",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Google",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "File backup and sync: content chunking, deduplication, change detection, and conflict handling",
+    "category": "Google",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Google",
+    "evidence": "reported_question_theme"
+  },
+  {
+    "topic": "Global rollout safety: cohorts, health gates, pause, rollback, and version reconciliation",
+    "category": "Google",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/community/questions/company/Google",
+    "evidence": "reported_question_theme"
+  }
+]

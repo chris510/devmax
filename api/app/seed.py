@@ -2,9 +2,14 @@
 
 Two sources:
 
-* ``cards.json`` — the 126-card study plan (spec.md §Seeding, docs/CURRICULUM.md).
-  Six weeks, 99 conversational and 27 desk cards. This is what you seed a real
-  database with.
+* ``cards.json`` — the 54-card system-design recall spine
+  (spec.md §Seeding, docs/CURRICULUM.md). Nine teaching weeks followed by three
+  weeks of mocks and gap-driven additions. Activate one week only after its
+  source lessons are complete.
+* ``library/*.json`` — reference material that is never part of the automatic
+  push curriculum. Coding lives here because implementation practice happens in
+  an editor; seed a card only when external practice proves the recall prompt is
+  useful.
 * ``modules/*.json`` — company-shaped card sets in the same schema, seeded on
   demand when a loop is scheduled rather than as part of the daily rotation.
 * ``--fixtures`` — the three cards from the design prototype, with their invented
@@ -13,12 +18,12 @@ Two sources:
   load them into a real study queue; the guard in main() refuses by default.
 
     uv run python -m app.seed --fixtures
-    uv run python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
+    uv run python -m app.seed --file cards.json --activate-week 1 --start-date 2026-08-03
 
-Due dates are staggered across each card's target week at the configured
-``reviews_per_day`` rate, so seeding the whole plan puts one session's worth in
-the queue on day one rather than the whole cohort. Record the ``--start-date`` you
-use: reusing it keeps later loads aligned to the same week boundaries.
+``--activate-week`` selects exactly one curriculum week and schedules it from the
+given start date, regardless of its original week number. This makes lesson
+completion—not the calendar—the gate. The older ``--weeks-through`` bulk path
+remains useful for local verification and clean-room imports.
 """
 
 import argparse
@@ -87,14 +92,36 @@ def _within(entry: dict, weeks_through: int) -> bool:
     return week is None or week <= weeks_through
 
 
-async def load_from_file(path: Path, weeks_through: int, start: date | None = None) -> int:
-    entries = [e for e in json.loads(path.read_text()) if _within(e, weeks_through)]
+def _selected_entries(
+    entries: list[dict], weeks_through: int, activate_week: int | None
+) -> list[dict]:
+    if activate_week is not None:
+        return [entry for entry in entries if entry.get("target_week") == activate_week]
+    return [entry for entry in entries if _within(entry, weeks_through)]
+
+
+def _schedule_entries(entries: list[dict], activate_week: int | None) -> list[dict]:
+    if activate_week is None:
+        return entries
+    return [{**entry, "target_week": 1} for entry in entries]
+
+
+async def load_from_file(
+    path: Path,
+    weeks_through: int,
+    start: date | None = None,
+    activate_week: int | None = None,
+) -> int:
+    entries = _selected_entries(json.loads(path.read_text()), weeks_through, activate_week)
     added = 0
     async with session_factory() as db:
         settings = await get_settings_row(db)
         begin = start or now_in(settings.timezone).date()
 
-        due_dates = _schedule(entries, begin, settings.reviews_per_day)
+        # An activated week starts now. Keep the original target_week on Card so
+        # Coverage can explain curriculum order, but schedule it as a fresh week 1.
+        schedule_entries = _schedule_entries(entries, activate_week)
+        due_dates = _schedule(schedule_entries, begin, settings.reviews_per_day)
         for entry, due in zip(entries, due_dates, strict=True):
             existing = (await db.exec(select(Card).where(Card.topic == entry["topic"]))).first()
             if existing is not None:
@@ -290,8 +317,6 @@ async def load_fixtures() -> int:
     return added
 
 
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Devmax cards")
     parser.add_argument("--file", type=Path, help="cards.json from the study plan")
@@ -299,8 +324,14 @@ def main() -> None:
         "--weeks-through",
         type=int,
         default=2,
-        help="only load cards with target_week <= N (default 2; a safety valve, not "
-        "the throttle — due dates are staggered across each target week)",
+        help="bulk-load cards with target_week <= N (default 2; intended for local "
+        "verification and clean-room imports)",
+    )
+    parser.add_argument(
+        "--activate-week",
+        type=int,
+        help="load exactly curriculum week N and schedule it from --start-date; "
+        "preferred for the production learning sequence",
     )
     parser.add_argument(
         "--start-date",
@@ -319,6 +350,8 @@ def main() -> None:
         help="allow --fixtures against a production database",
     )
     args = parser.parse_args()
+    if args.activate_week is not None and args.activate_week < 1:
+        parser.error("--activate-week must be at least 1")
 
     if args.fixtures:
         # The fixtures carry invented session history and a 14-hour-old draft, which
@@ -335,7 +368,14 @@ def main() -> None:
             )
         print(f"seeded {asyncio.run(load_fixtures())} fixture cards")
     elif args.file:
-        added = asyncio.run(load_from_file(args.file, args.weeks_through, args.start_date))
+        added = asyncio.run(
+            load_from_file(
+                args.file,
+                args.weeks_through,
+                args.start_date,
+                activate_week=args.activate_week,
+            )
+        )
         print(f"seeded {added} cards")
     else:
         parser.error("pass --fixtures or --file cards.json")
