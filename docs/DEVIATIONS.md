@@ -371,6 +371,21 @@ SQLite, and invisible because the `daily_limit` branch had no test. Local
 boundaries are now `.astimezone(UTC)`'d before binding, and the read-side
 normaliser that `sessions.py` already had was promoted to `deps.as_utc` and shared.
 
+**That fix is at the wrong altitude, deliberately, and should be finished.** There
+are now four call sites doing "make SQLite and Postgres agree about tzinfo" by
+hand, and a fifth that does *not* — `services/cards.days_since_review` calls
+`.astimezone(tz)` on a value that is naive under SQLite, where `.astimezone`
+reads it as system local time rather than UTC. The correct fix is to make
+`models.TZ_DATETIME` a `TypeDecorator` whose `process_bind_param` returns
+`value.astimezone(UTC)` and whose `process_result_value` re-attaches UTC when
+naive: a literal compared against a typed column inherits that column's bind
+processor, so all four hand-written conversions delete, every `TZ_DATETIME`
+column becomes correct by construction, and `days_since_review` is fixed without
+being touched. It is *less* code than the status quo. It is not in this change
+because it alters bind and result processing for all eight timestamp columns —
+including code paths this change never touches — and no Postgres was available to
+verify it. Do it on its own, against a real database.
+
 ---
 
 ## Deviation from the design handoff, not `spec.md`

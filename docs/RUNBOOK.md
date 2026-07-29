@@ -396,14 +396,18 @@ emails first; click Enable in the Actions tab.
 
 In order.
 
-1. **Did the workflow run?** Actions tab. A red run shows the response body.
+1. **Did the workflow run?** Actions tab. A red run shows the response body. A 500
+   means every enabled notification window in `settings` is unparseable — the one
+   configuration fault the endpoint refuses to answer quietly, precisely because
+   `outside_window` is otherwise indistinguishable from working normally.
 2. **`{"sent": false, "reason": ...}`** — each reason is specific. All but the last
    are routine at a 30-minute poll and none of them fail the job:
    - `outside_window` — no enabled window contains the current local time. The
      usual answer, ~46 times a day. If it is *always* this, check `GET /settings`:
      a window turned off, or a timezone that no longer matches where you are.
-   - `already_pushed` — this window already produced a push, or every due card was
-     already pushed earlier today.
+   - `already_pushed` — this window already produced a push.
+   - `already_offered` — the window is free, but every due card already went out
+     earlier today. A card is never pushed twice in one day.
    - `nothing_due` — legitimately nothing due.
    - `daily_limit` — already sent `reviews_per_day` pushes today.
    - `no_devices` — nothing was delivered: no registered token, or APNs credentials

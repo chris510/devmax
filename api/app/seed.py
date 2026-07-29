@@ -173,7 +173,7 @@ async def retire_from_file(
     path: Path,
     dry_run: bool = False,
     db: AsyncSession | None = None,
-) -> tuple[int, int, list[str]]:
+) -> tuple[list[str], int]:
     """Delete every card whose topic appears in `path`, along with its sessions.
 
     Retirement is by **explicit manifest**, never "delete anything missing from
@@ -187,28 +187,24 @@ async def retire_from_file(
     foreign keys unless asked, so leaning on the cascade would mean the behaviour
     under test and the behaviour in production are different code paths.
 
-    Returns (cards, sessions, topics). Idempotent: a second run matches nothing.
+    Returns the retired topics and the number of sessions removed with them.
+    Idempotent: a second run matches nothing and reports `([], 0)`.
     """
     topics = {entry["topic"] for entry in json.loads(path.read_text())}
     async with _session(db) as db:
         cards = (await db.exec(select(Card).where(col(Card.topic).in_(topics)))).all()
-        if not cards:
-            return 0, 0, []
-
         card_ids = [card.id for card in cards]
-        sessions = (
-            await db.exec(select(Session).where(col(Session.card_id).in_(card_ids)))
-        ).all()
-        matched = sorted(card.topic for card in cards)
+        sessions = (await db.exec(select(Session).where(col(Session.card_id).in_(card_ids)))).all()
+        retired = sorted(card.topic for card in cards)
         if dry_run:
-            return len(cards), len(sessions), matched
+            return retired, len(sessions)
 
         for session in sessions:
             await db.delete(session)
         for card in cards:
             await db.delete(card)
         await db.commit()
-        return len(cards), len(sessions), matched
+        return retired, len(sessions)
 
 
 def _fixtures() -> list[dict]:
@@ -446,13 +442,11 @@ def main() -> None:
                 "--retire-file deletes cards and their session history. Re-run with "
                 "--dry-run to see what would go, or --confirm to do it."
             )
-        cards, sessions, topics = asyncio.run(
-            retire_from_file(args.retire_file, dry_run=args.dry_run)
-        )
-        for topic in topics:
+        retired, sessions = asyncio.run(retire_from_file(args.retire_file, dry_run=args.dry_run))
+        for topic in retired:
             print(f"  {topic}")
         verb = "would retire" if args.dry_run else "retired"
-        print(f"{verb} {cards} cards and {sessions} sessions")
+        print(f"{verb} {len(retired)} cards and {sessions} sessions")
     elif args.fixtures:
         # The fixtures carry invented session history and a 14-hour-old draft, which
         # would render a bogus resume banner on a real card. They exist to reproduce

@@ -8,7 +8,14 @@ from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, DeviceToken, 
 from app.routers import internal
 from app.services import llm
 from app.services.llm import LLMError, ReattemptResult, ScoreResult
-from tests.conftest import API_HEADERS, CRON_HEADERS, local_today, make_card
+from tests.conftest import (
+    API_HEADERS,
+    CRON_HEADERS,
+    local_today,
+    local_today_at,
+    make_card,
+    pin_clock,
+)
 
 
 def completed(mechanism: int, trade_offs: int = 0, failure_modes: int = 0, **kwargs) -> ScoreResult:
@@ -482,38 +489,9 @@ async def test_starting_a_session_twice_resumes_the_live_one(client, db, stub_ll
 # --- cron -------------------------------------------------------------------
 
 
-def pin_clock(monkeypatch, hour: int, minute: int = 0) -> None:
-    """Pin the time of day the endpoint sees — never the calendar day.
-
-    Same reasoning as the `in_window` fixture: these tests build due dates from
-    `local_today()`, so freezing the date too drifts them out of the queue.
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    monkeypatch.setattr(
-        internal,
-        "now_in",
-        lambda tz: datetime.now(ZoneInfo(tz)).replace(
-            hour=hour, minute=minute, second=0, microsecond=0
-        ),
-    )
-
-
-def local_today_at(hour: int, minute: int = 0):
-    """A timezone-aware stamp for today at a local wall-clock time."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from app.models import Settings
-
-    return datetime.now(ZoneInfo(Settings().timezone)).replace(
-        hour=hour, minute=minute, second=0, microsecond=0
-    )
-
-
 @pytest.fixture
 def capture_push(monkeypatch):
+    """Records every push instead of sending one, and reports it reached a device."""
     sent: list[dict] = []
 
     async def _push(**kwargs):
@@ -585,7 +563,7 @@ async def test_the_same_card_is_not_offered_twice_in_one_day(
 
     # `due_count` still reports the whole queue — it is the notification's "N due"
     # and has to agree with GET /cards/due. Only the selection skips the card.
-    assert body["reason"] == "already_pushed"
+    assert body["reason"] == "already_offered"
     assert body["due_count"] == 1
     assert capture_push == []
 
@@ -646,12 +624,14 @@ async def test_a_malformed_window_is_skipped_rather_than_raising(
 
     One bad string must not take every poll down with a 500.
     """
-    from app.models import Settings
+    from app.models import DEFAULT_WINDOWS, Settings
 
     settings = await db.get(Settings, 1)
+    # The good window is the shipped default, so this keeps asserting what it
+    # means to assert if those times ever move.
     settings.windows = [
         {"label": "Broken", "from": "25:99", "to": "nonsense", "on": True},
-        {"label": "Morning", "from": "07:10", "to": "08:30", "on": True},
+        *DEFAULT_WINDOWS,
     ]
     db.add(settings)
     db.add(make_card(next_review_at=local_today() - timedelta(days=3)))
@@ -663,17 +643,41 @@ async def test_a_malformed_window_is_skipped_rather_than_raising(
     assert body["sent"] is True
 
 
+async def test_a_wholly_unparseable_settings_row_fails_loudly(client, db, monkeypatch):
+    """The one case where silence would be worse than a red workflow run.
+
+    `outside_window` is the normal answer ~46 times a day, so if every window were
+    skipped the product would degrade to "no push ever arrives again" with nothing
+    to notice it by. A 500 fails the job, which is the only breakage signal the
+    polled workflow still has.
+    """
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [{"label": "Broken", "from": "25:99", "to": "nonsense", "on": True}]
+    db.add(settings)
+    await db.commit()
+
+    pin_clock(monkeypatch, 7, 30)
+    assert (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).status_code == 500
+
+
+async def test_every_window_switched_off_is_quiet_not_an_error(client, db, monkeypatch):
+    """Turning pushes off is legitimate, and must not read as a broken row."""
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [{"label": "Morning", "from": "07:10", "to": "08:30", "on": False}]
+    db.add(settings)
+    await db.commit()
+
+    pin_clock(monkeypatch, 7, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+    assert body["reason"] == "outside_window"
+
+
 async def test_trigger_review_no_ops_outside_the_window(client, db, monkeypatch):
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from app.routers import internal
-
-    monkeypatch.setattr(
-        internal,
-        "now_in",
-        lambda tz: datetime(2026, 7, 24, 3, 0, tzinfo=ZoneInfo(tz)),
-    )
+    pin_clock(monkeypatch, 3, 0)
     db.add(make_card(next_review_at=local_today()))
     await db.commit()
 
@@ -689,7 +693,7 @@ async def test_trigger_review_no_ops_when_nothing_due(client, db, in_window):
     assert body["reason"] == "nothing_due"
 
 
-async def test_trigger_review_never_calls_claude(client, db, in_window, monkeypatch):
+async def test_trigger_review_never_calls_claude(client, db, in_window, monkeypatch, capture_push):
     """Generating a question for a push that may never be opened wastes tokens."""
 
     async def _fail(**_kwargs):
@@ -698,14 +702,6 @@ async def test_trigger_review_never_calls_claude(client, db, in_window, monkeypa
     monkeypatch.setattr(llm, "generate_question", _fail)
     monkeypatch.setattr(llm, "score_answer", _fail)
 
-    sent: list[dict] = []
-
-    async def _push(**kwargs):
-        sent.append(kwargs)
-        return 1
-
-    monkeypatch.setattr(internal, "send_push", _push)
-
     card = make_card(next_review_at=local_today() - timedelta(days=3))
     db.add(card)
     await db.commit()
@@ -713,8 +709,8 @@ async def test_trigger_review_never_calls_claude(client, db, in_window, monkeypa
     body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
     assert body["sent"] is True
     assert body["due_count"] == 1
-    assert sent[0]["title"] == "1 due"
-    assert sent[0]["body"] == "Consistent hashing"
+    assert capture_push[0]["title"] == "1 due"
+    assert capture_push[0]["body"] == "Consistent hashing"
 
 
 async def test_undelivered_push_does_not_mark_the_card_as_pushed(
@@ -1232,3 +1228,36 @@ async def test_reattempt_expires_once_the_card_is_reviewed_again(
     assert resp.status_code == 409
     await db.refresh(card)
     assert card.mastery_summary == "solid, unaided"
+
+
+async def test_the_minimum_window_is_at_least_the_poll_interval():
+    """The one cross-artifact coupling this design still has, pinned.
+
+    `MIN_WINDOW_MINUTES` exists because a window shorter than the gap between two
+    polls can never be landed in. Nothing but this test stops someone loosening
+    the cron — to cut Actions minutes, say — and silently making every 30-to-59
+    minute window unfireable while `PUT /settings` keeps accepting them.
+    """
+    import re
+    from pathlib import Path
+
+    from app.schemas import MIN_WINDOW_MINUTES
+
+    workflow = (
+        Path(__file__).resolve().parents[2] / ".github/workflows/trigger-review.yml"
+    ).read_text()
+    schedule = re.search(r"- cron: '(\S+) (\S+) \* \* \*'", workflow)
+    assert schedule, "trigger-review.yml no longer has a parseable every-hour cron"
+
+    minutes, hours = schedule.group(1), schedule.group(2)
+    assert hours == "*", "the poll is meant to run every hour; the gap maths below assumes it"
+
+    fires = sorted(int(m) for m in minutes.split(","))
+    gaps = [b - a for a, b in zip(fires, fires[1:], strict=False)] + [60 - fires[-1] + fires[0]]
+    # The shortest window we accept must be at least as long as the *longest*
+    # stretch between two polls, or it can sit entirely inside that stretch.
+    assert max(gaps) <= MIN_WINDOW_MINUTES, (
+        f"cron fires at :{fires} leave a {max(gaps)}-minute stretch with no poll, but "
+        f"windows as short as {MIN_WINDOW_MINUTES} minutes are accepted — one could fall "
+        f"entirely between two polls and never fire"
+    )

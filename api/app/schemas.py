@@ -147,44 +147,49 @@ class SettingsOut(BaseModel):
     windows: list[NotificationWindow]
 
 
-# The cron polls this often, so a window shorter than one interval can fall
-# between two polls and never fire. Kept in sync with the schedule in
-# .github/workflows/trigger-review.yml.
+# A window shorter than the cron's poll interval can fall between two polls and
+# never fire, so this is the floor. Pinned against the actual schedule in
+# .github/workflows/trigger-review.yml by
+# `test_the_minimum_window_is_at_least_the_poll_interval` — a comment alone is
+# the same hand-synced coupling this whole change set exists to remove.
 MIN_WINDOW_MINUTES = 30
 
 
-class SettingsIn(SettingsOut):
-    """Write side only.
+def _minutes(t: time) -> int:
+    return t.hour * 60 + t.minute
 
-    The validator deliberately does not live on `NotificationWindow` or
-    `SettingsOut`: `read_settings` rebuilds those from the stored JSON, so a rule
-    there would make `GET /settings` fail on any row written before the rule
-    existed — including the hand-widened windows docs/RUNBOOK.md describes for
-    testing a push. Reads stay permissive; writes are constrained.
+
+class NotificationWindowIn(NotificationWindow):
+    """A notification window on the write path, where the rules apply.
+
+    Deliberately a separate model from `NotificationWindow`: `read_settings`
+    rebuilds that one from stored JSON, so a rule there would make
+    `GET /settings` fail on any row written before the rule existed — including
+    the hand-widened windows docs/RUNBOOK.md describes for testing a push. Reads
+    stay permissive; writes are constrained.
+
+    Validating per window rather than across the whole settings object also puts
+    the offending index in the 422's `loc`, so a client can point at the window
+    it rejected instead of the request body as a whole.
     """
 
     @model_validator(mode="after")
-    def _windows_are_usable(self) -> "SettingsIn":
-        for window in self.windows:
-            try:
-                start = time.fromisoformat(window.from_)
-                end = time.fromisoformat(window.to)
-            except ValueError as exc:
-                raise ValueError(
-                    f"{window.label}: times must be HH:MM, got "
-                    f"{window.from_!r} and {window.to!r}"
-                ) from exc
-
-            span = (
-                end.hour * 60 + end.minute - start.hour * 60 - start.minute
+    def _usable(self) -> "NotificationWindowIn":
+        try:
+            span = _minutes(time.fromisoformat(self.to)) - _minutes(time.fromisoformat(self.from_))
+        except ValueError as exc:
+            raise ValueError("times must be 24-hour HH:MM") from exc
+        if span < MIN_WINDOW_MINUTES:
+            # A non-positive span covers `to` before `from`, and `to == from` —
+            # both two taps away in the app, which advances each end separately.
+            raise ValueError(
+                f"a window must run at least {MIN_WINDOW_MINUTES} minutes; this one is {span}"
             )
-            if span < MIN_WINDOW_MINUTES:
-                # Covers `to` before `from` too, which reads as a negative span.
-                raise ValueError(
-                    f"{window.label}: window must be at least {MIN_WINDOW_MINUTES} "
-                    f"minutes long, got {span}"
-                )
         return self
+
+
+class SettingsIn(SettingsOut):
+    windows: list[NotificationWindowIn]
 
 
 class TriggerResult(BaseModel):
@@ -194,7 +199,11 @@ class TriggerResult(BaseModel):
     reason: (
         Literal[
             "outside_window",
+            # This window already produced a push...
             "already_pushed",
+            # ...versus: every due card was already offered earlier today. Two
+            # different facts, kept apart so a log tells you which one happened.
+            "already_offered",
             "daily_limit",
             "nothing_due",
             "no_devices",

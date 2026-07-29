@@ -44,7 +44,19 @@ def upgrade() -> None:
         "cards",
         sa.Column("missed_counted_at", sa.DateTime(timezone=True), nullable=True),
     )
+    # The semantics above, made structural rather than left to the one writer that
+    # currently maintains them. A stamp ahead of `last_pushed_at` would silently
+    # suppress missed-counting on that card forever, and `missed_count` is the
+    # product's only compliance signal — the kind of invariant the other ten CHECK
+    # constraints in this schema exist to protect.
+    op.create_check_constraint(
+        "ck_cards_missed_counted_at",
+        "cards",
+        "missed_counted_at IS NULL OR "
+        "(last_pushed_at IS NOT NULL AND missed_counted_at <= last_pushed_at)",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("ck_cards_missed_counted_at", "cards", type_="check")
     op.drop_column("cards", "missed_counted_at")

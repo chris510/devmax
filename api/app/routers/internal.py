@@ -1,7 +1,8 @@
 import logging
 from datetime import UTC, datetime, time, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlmodel import col, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -19,33 +20,50 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 MISSED_AFTER = timedelta(hours=4)
 
 
-def _active_window(settings: Settings, at: datetime) -> tuple[dict, datetime] | None:
-    """The enabled window `at` falls inside, plus its local start today.
+def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
+    """The local start of the enabled window `at` falls inside, or None.
 
-    Returns the window rather than a bool because the per-window guard below needs
-    to know *which* window is open, not merely that one is.
+    The start instant is all the per-window guard needs; the window's identity is
+    not returned because nothing consumes it.
 
-    A malformed window is skipped, not raised on. `PUT /settings` validates times
-    now, but rows written before it did — or edited by hand — would otherwise take
-    down every poll with a 500.
+    On overlap the latest-starting window wins — taking the earlier one would let
+    a push already spent in it suppress the window the user is actually in.
+
+    A malformed window is skipped rather than raised on, so one bad entry costs
+    its own window and not its neighbours. But if *every* enabled window is
+    unparseable the poll raises: `outside_window` is the normal answer ~46 times
+    a day, so quietly returning it would turn a broken settings row into "no push
+    ever arrives again" with nothing to notice it by. A 500 fails the workflow,
+    which is the only breakage signal left.
     """
-    matches: list[tuple[dict, datetime]] = []
+    now = at.time()
+    starts: list[time] = []
+    parsed = 0
+    malformed = 0
     for window in settings.windows:
         if not window.get("on"):
             continue
         try:
-            start = time.fromisoformat(str(window["from"]))
-            end = time.fromisoformat(str(window["to"]))
+            start = time.fromisoformat(window["from"])
+            end = time.fromisoformat(window["to"])
         except (KeyError, TypeError, ValueError):
+            malformed += 1
             logger.warning("skipping malformed notification window: %r", window)
             continue
-        if start <= at.time() <= end:
-            # `at.tzinfo` is the ZoneInfo itself, not a fixed offset, so combine()
-            # re-resolves the offset for that wall time and stays right across DST.
-            matches.append((window, datetime.combine(at.date(), start, tzinfo=at.tzinfo)))
-    # On overlap the latest-starting match wins: that is the window the user is in
-    # now, and taking the earlier one would let its spent push suppress this one.
-    return max(matches, key=lambda m: m[1], default=None)
+        parsed += 1
+        if start <= now <= end:
+            starts.append(start)
+
+    if not starts:
+        if malformed and not parsed:
+            raise HTTPException(
+                status_code=500,
+                detail=f"every enabled notification window is unparseable ({malformed})",
+            )
+        return None
+    # `at.tzinfo` is the ZoneInfo itself, not a fixed offset, so combine()
+    # re-resolves the offset for that wall time and stays right across DST.
+    return datetime.combine(at.date(), max(starts), tzinfo=at.tzinfo)
 
 
 @router.post("/trigger-review", response_model=TriggerResult)
@@ -69,10 +87,9 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     settings = await get_settings_row(db)
     local_now = now_in(settings.timezone)
 
-    active = _active_window(settings, local_now)
-    if active is None:
+    window_start_local = _active_window_start(settings, local_now)
+    if window_start_local is None:
         return TriggerResult(sent=False, reason="outside_window")
-    _window, window_start_local = active
 
     # Both boundaries are converted to UTC before they are bound into a query.
     # SQLite's DATETIME bind processor keeps the wall-clock fields and drops the
@@ -83,29 +100,26 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     day_start = datetime.combine(today, time.min, tzinfo=local_now.tzinfo).astimezone(UTC)
     window_start = window_start_local.astimezone(UTC)
 
+    # Both guards below read the same fact, so they share one query. `window_start`
+    # is always >= `day_start` — a window begins on the day it belongs to — so the
+    # newest push today answers "has this window fired" and the count answers "is
+    # the day spent". Aggregates rather than entities: a `select(Card)` here
+    # hydrated every matching row, unbounded TEXT columns and all, to produce a
+    # count and a boolean. `IS NOT NULL` is implied by the `>=`.
+    pushed_today, latest_push = (
+        await db.exec(
+            select(func.count(), func.max(col(Card.last_pushed_at))).where(
+                col(Card.last_pushed_at) >= day_start
+            )
+        )
+    ).one()
+
     # One push per window, not one per poll. Without this a 30-minute poll fires
     # repeatedly across an 80-minute window and burns the whole day's budget
     # before the evening window ever opens.
-    already = (
-        await db.exec(
-            select(Card).where(
-                col(Card.last_pushed_at).is_not(None),
-                col(Card.last_pushed_at) >= window_start,
-            )
-        )
-    ).first()
-    if already is not None:
+    if latest_push is not None and as_utc(latest_push) >= window_start:
         return TriggerResult(sent=False, reason="already_pushed")
-
-    pushed_today = (
-        await db.exec(
-            select(Card).where(
-                col(Card.last_pushed_at).is_not(None),
-                col(Card.last_pushed_at) >= day_start,
-            )
-        )
-    ).all()
-    if len(pushed_today) >= settings.reviews_per_day:
+    if pushed_today >= settings.reviews_per_day:
         return TriggerResult(sent=False, reason="daily_limit")
 
     due = (
@@ -125,14 +139,13 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     # has to agree with what GET /cards/due shows. Only the *selection* skips cards
     # pushed earlier today, so the evening window advances to the next card instead
     # of repeating the morning's. One unanswered card is not worth two
-    # notifications. Filtered here rather than in SQL: `due` is already
-    # materialised for the count, and an OR over a nullable column in the WHERE
-    # would defeat the partial index this query exists to use.
+    # notifications. Filtered here rather than in SQL simply because `due` is
+    # already materialised for the count, so a second predicate would buy nothing.
     candidates = [
         c for c in due if c.last_pushed_at is None or as_utc(c.last_pushed_at) < day_start
     ]
     if not candidates:
-        return TriggerResult(sent=False, reason="already_pushed", due_count=len(due))
+        return TriggerResult(sent=False, reason="already_offered", due_count=len(due))
 
     top = candidates[0]
     tokens = [t.token for t in (await db.exec(select(DeviceToken))).all()]

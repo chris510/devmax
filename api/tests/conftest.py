@@ -1,7 +1,7 @@
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("API_KEY", "test-api-key")
@@ -107,27 +107,33 @@ def make_card(**overrides) -> Card:
     return Card(**{**defaults, **overrides})
 
 
-@pytest.fixture
-def in_window(monkeypatch):
-    """Pins the clock to 07:30 local — inside the default morning window.
+def local_today_at(hour: int, minute: int = 0, tz: str | None = None) -> datetime:
+    """Today at a local wall-clock time, in the configured zone.
 
-    Every /internal/trigger-review test needs this; `_in_window` reads the wall
-    clock, so without it the suite passes or fails depending on the hour it runs.
+    Only the time of day is set; the calendar day stays today. Fixing the date
+    too made the trigger-review tests depend on how far real time had drifted
+    from it: they build due dates with `local_today() - 3 days`, so once the
+    real date passed the pinned one those cards landed in the pinned day's
+    future and the endpoint correctly answered `nothing_due`.
     """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+    return now_in(tz or Settings().timezone).replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
 
+
+def pin_clock(monkeypatch, hour: int, minute: int = 0) -> None:
+    """Pin the local time `/internal/trigger-review` sees.
+
+    `_active_window` reads the wall clock, so without this the suite passes or
+    fails depending on the hour it runs. Patches `internal.now_in`, not
+    `deps.now_in` — the router imports the name into its own namespace.
+    """
     from app.routers import internal
 
-    # Only the time of day is pinned. Fixing the calendar day too made the
-    # trigger-review tests depend on how far real time had drifted from it:
-    # they build due dates with `local_today() - 3 days`, so once the real date
-    # passed 2026-07-27 those cards landed in the pinned day's future and the
-    # endpoint correctly answered `nothing_due`.
-    monkeypatch.setattr(
-        internal,
-        "now_in",
-        lambda tz: datetime.now(ZoneInfo(tz)).replace(
-            hour=7, minute=30, second=0, microsecond=0
-        ),
-    )
+    monkeypatch.setattr(internal, "now_in", lambda tz: local_today_at(hour, minute, tz))
+
+
+@pytest.fixture
+def in_window(monkeypatch):
+    """07:30 local — inside the default 07:10–08:30 morning window."""
+    pin_clock(monkeypatch, 7, 30)
