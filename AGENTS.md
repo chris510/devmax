@@ -80,6 +80,20 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **Never call Claude from `/internal/trigger-review`.** Generating a question for a push
   that may never be opened wastes tokens and latency. Question generation happens on
   engagement, in `POST /cards/{id}/sessions`.
+- **The cron carries no schedule — the settings row does.** `trigger-review` is a dumb
+  30-minute poll; `windows`, `timezone` and `reviews_per_day` decide everything, so a
+  window edited in the app takes effect on the next poll with no redeploy. Consequences
+  that are load-bearing: `outside_window` is the *normal* response, at most one push per
+  window (`already_pushed`), a card is never offered twice in one day, and a window under
+  30 minutes is rejected because it could fall between polls. Do not reintroduce time
+  arithmetic into the YAML.
+- **`check-missed` must never clear `last_pushed_at`.** It is the only evidence that a
+  push went out, and both the daily cap and the per-window guard read it. Which push was
+  already counted lives on `missed_counted_at`.
+- **Seeding never deletes.** `seed.py` dedupes by topic and only adds, so replacing a
+  curriculum needs an explicit `--retire-file <manifest>`. Retirement is by named
+  manifest, never by diffing against the current deck — that is what keeps `library/`,
+  `modules/` and gap-driven cards out of reach. It hard-deletes and sessions cascade.
 - **Losing a spoken answer is the worst failure mode in the product.** `PATCH /sessions/{id}/draft`
   must stay cheap, idempotent, and never blocked behind anything slow. On the client, disk is
   the source of truth for instant rehydration; the server draft is the durable backup.

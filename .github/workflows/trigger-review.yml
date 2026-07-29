@@ -2,26 +2,28 @@ name: Trigger review push
 
 on:
   schedule:
-    # GitHub cron is UTC and does not observe DST, but the notification windows are
-    # local (America/Los_Angeles) and do. Morning therefore uses a paired trigger:
-    # 17:00 UTC is 10:00 PDT / 09:00 PST, while 18:00 UTC is 11:00 PDT / 10:00 PST.
-    # The backend's narrow 09:20-10:40 window accepts exactly one of them. The other
-    # returns outside_window as an expected no-op.
+    # Deliberately dumb. The notification windows, the timezone they are read in,
+    # and the daily budget all live in the settings row, so this schedule's only
+    # job is to poll often enough that an edit in the app takes effect within one
+    # interval — no DST arithmetic, no commit, no redeploy. It used to carry a
+    # hand-maintained UTC approximation of those windows, which disagreed with
+    # them for four months of every year; see docs/DEVIATIONS.md §1.
     #
-    # Evening keeps one fixed trigger because its 90-minute window is wider than
-    # the DST shift: 05:10 UTC is 22:10 PDT / 21:10 PST.
-    - cron: '0 17 * * *'    # 10:00 PDT / 09:00 PST
-    - cron: '0 18 * * *'    # 11:00 PDT / 10:00 PST
-    - cron: '10 5 * * *'    # 22:10 PDT / 21:10 PST
+    # Most fires land outside every window and return
+    # {"sent": false, "reason": "outside_window"}. That is the expected steady
+    # state, not a failure. The endpoint sends at most one push per window.
+    #
+    # Offset off :00/:30 because GitHub queues scheduled runs behind everyone
+    # else's top-of-the-hour crons and drops them under load.
+    - cron: '7,37 * * * *'
   workflow_dispatch:
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-      # The endpoint validates the notification window itself, so a late trigger
-      # either still lands in-window or correctly no-ops. Retries cover the double
-      # cold start of a sleeping container plus a database waking from idle.
+      # Retries cover the double cold start of a sleeping container plus a
+      # database waking from idle.
       - name: POST /internal/trigger-review
         run: |
           body=$(curl -sS --fail-with-body \
@@ -30,27 +32,15 @@ jobs:
             -H "X-Cron-Secret: $CRON_SECRET")
           echo "$body"
 
-          reason=$(printf '%s' "$body" | jq -r '.reason // empty')
-          case "$reason" in
-            outside_window)
-              case "$SCHEDULE" in
-                '0 17 * * *'|'0 18 * * *')
-                  echo "Expected DST companion no-op outside the 10:00 local window."
-                  ;;
-                *)
-                  echo "::error::Fired outside every notification window. The cron schedule \
-          and the windows in PUT /settings no longer agree — see the comment above the \
-          schedule in this file."
-                  exit 1
-                  ;;
-              esac
-              ;;
-            no_devices)
-              echo "::warning::Nothing delivered — no registered device token, or the \
+          # The only reason worth surfacing. outside_window, already_pushed,
+          # daily_limit and nothing_due are all routine at a 30-minute poll;
+          # no_devices means the phone or APNs is misconfigured and no push will
+          # arrive until someone looks. A non-2xx still fails the job through
+          # --fail-with-body, which is the real breakage signal now.
+          if [ "$(printf '%s' "$body" | jq -r '.reason // empty')" = "no_devices" ]; then
+            echo "::warning::Nothing delivered — no registered device token, or the \
           APNs credentials are not configured on the app."
-              ;;
-          esac
+          fi
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          SCHEDULE: ${{ github.event.schedule }}

@@ -19,21 +19,30 @@ Two sources:
 
     uv run python -m app.seed --fixtures
     uv run python -m app.seed --file cards.json --activate-week 1 --start-date 2026-08-03
+    uv run python -m app.seed --retire-file archive/cards-legacy-126.json --dry-run
 
 ``--activate-week`` selects exactly one curriculum week and schedules it from the
 given start date, regardless of its original week number. This makes lesson
 completion—not the calendar—the gate. The older ``--weeks-through`` bulk path
 remains useful for local verification and clean-room imports.
+
+``--retire-file`` is the only path that deletes. Loading is additive and dedupes
+by topic, so swapping a curriculum needs an explicit retirement of the old one —
+naming the manifest to delete rather than diffing against the current deck, so
+``library/``, ``modules/`` and gap-driven cards stay out of reach.
 """
 
 import argparse
 import asyncio
 import json
 from collections import defaultdict
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from sqlmodel import select
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_settings
 from app.db import is_local_database, session_factory
@@ -55,6 +64,22 @@ def delivery_mode_for(category: str) -> str:
 
 
 DAYS_PER_WEEK = 7
+
+
+@asynccontextmanager
+async def _session(db: AsyncSession | None) -> AsyncIterator[AsyncSession]:
+    """Use the caller's session if there is one, otherwise open our own.
+
+    The loaders were written to open `session_factory()` themselves, which is why
+    nothing in tests/test_seed.py could touch a database. Threading an optional
+    session through leaves every CLI call site unchanged and lets tests pass the
+    `db` fixture in.
+    """
+    if db is not None:
+        yield db
+    else:
+        async with session_factory() as owned:
+            yield owned
 
 
 def _schedule(entries: list[dict], start: date, per_day: int) -> list[date]:
@@ -111,10 +136,11 @@ async def load_from_file(
     weeks_through: int,
     start: date | None = None,
     activate_week: int | None = None,
+    db: AsyncSession | None = None,
 ) -> int:
     entries = _selected_entries(json.loads(path.read_text()), weeks_through, activate_week)
     added = 0
-    async with session_factory() as db:
+    async with _session(db) as db:
         settings = await get_settings_row(db)
         begin = start or now_in(settings.timezone).date()
 
@@ -141,6 +167,48 @@ async def load_from_file(
             added += 1
         await db.commit()
     return added
+
+
+async def retire_from_file(
+    path: Path,
+    dry_run: bool = False,
+    db: AsyncSession | None = None,
+) -> tuple[int, int, list[str]]:
+    """Delete every card whose topic appears in `path`, along with its sessions.
+
+    Retirement is by **explicit manifest**, never "delete anything missing from
+    cards.json". The same database also holds `library/` reference cards,
+    `modules/` company overlays, and gap-driven cards added through POST /cards.
+    None of those appear in the base manifest, and a curriculum swap has no
+    business touching them — so the caller names exactly what is being retired.
+
+    Sessions are deleted explicitly even though `sessions.card_id` is already
+    ON DELETE CASCADE. The default test database is SQLite, which does not enforce
+    foreign keys unless asked, so leaning on the cascade would mean the behaviour
+    under test and the behaviour in production are different code paths.
+
+    Returns (cards, sessions, topics). Idempotent: a second run matches nothing.
+    """
+    topics = {entry["topic"] for entry in json.loads(path.read_text())}
+    async with _session(db) as db:
+        cards = (await db.exec(select(Card).where(col(Card.topic).in_(topics)))).all()
+        if not cards:
+            return 0, 0, []
+
+        card_ids = [card.id for card in cards]
+        sessions = (
+            await db.exec(select(Session).where(col(Session.card_id).in_(card_ids)))
+        ).all()
+        matched = sorted(card.topic for card in cards)
+        if dry_run:
+            return len(cards), len(sessions), matched
+
+        for session in sessions:
+            await db.delete(session)
+        for card in cards:
+            await db.delete(card)
+        await db.commit()
+        return len(cards), len(sessions), matched
 
 
 def _fixtures() -> list[dict]:
@@ -261,10 +329,10 @@ def _fixtures() -> list[dict]:
     ]
 
 
-async def load_fixtures() -> int:
+async def load_fixtures(db: AsyncSession | None = None) -> int:
     now = datetime.now(UTC)
     added = 0
-    async with session_factory() as db:
+    async with _session(db) as db:
         # The configured timezone, not the container's: a UTC server would seed
         # these a day early after 17:00 PT.
         today = await local_today(db)
@@ -340,6 +408,22 @@ def main() -> None:
         "timezone). Reuse the same value on later loads so weeks stay aligned.",
     )
     parser.add_argument(
+        "--retire-file",
+        type=Path,
+        help="delete every card named in this manifest, and its sessions "
+        "(e.g. archive/cards-legacy-126.json). Needs --dry-run or --confirm",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --retire-file, report what would be deleted and stop",
+    )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="with --retire-file, actually delete",
+    )
+    parser.add_argument(
         "--fixtures",
         action="store_true",
         help="load the three design-prototype cards plus one desk card",
@@ -353,7 +437,23 @@ def main() -> None:
     if args.activate_week is not None and args.activate_week < 1:
         parser.error("--activate-week must be at least 1")
 
-    if args.fixtures:
+    if args.retire_file:
+        # The inverse of the --fixtures guard below: that one refuses to touch a
+        # production database, whereas retiring a curriculum is *for* production.
+        # So the gate is an explicit acknowledgement rather than a host check.
+        if not args.dry_run and not args.confirm:
+            parser.error(
+                "--retire-file deletes cards and their session history. Re-run with "
+                "--dry-run to see what would go, or --confirm to do it."
+            )
+        cards, sessions, topics = asyncio.run(
+            retire_from_file(args.retire_file, dry_run=args.dry_run)
+        )
+        for topic in topics:
+            print(f"  {topic}")
+        verb = "would retire" if args.dry_run else "retired"
+        print(f"{verb} {cards} cards and {sessions} sessions")
+    elif args.fixtures:
         # The fixtures carry invented session history and a 14-hour-old draft, which
         # would render a bogus resume banner on a real card. They exist to reproduce
         # the design screenshots, not to seed a study queue.

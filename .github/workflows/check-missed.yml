@@ -2,9 +2,11 @@ name: Check missed reviews
 
 on:
   schedule:
-    # Offset off the hour so this never lands on the same minute as a trigger-review
-    # fire: check-missed clears last_pushed_at, which is the evidence trigger-review
-    # counts against reviews_per_day.
+    # Offset so this never lands on the same minute as a trigger-review poll —
+    # purely to keep the two jobs off the same row, not for correctness. It used
+    # to be load-bearing: check-missed cleared last_pushed_at, which is the
+    # evidence trigger-review counts against reviews_per_day. Migration 0004
+    # moved that erasure to missed_counted_at, so the two no longer contend.
     - cron: '35 */4 * * *'
   workflow_dispatch:
 

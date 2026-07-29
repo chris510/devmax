@@ -1,8 +1,8 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DueCard(BaseModel):
@@ -147,15 +147,60 @@ class SettingsOut(BaseModel):
     windows: list[NotificationWindow]
 
 
+# The cron polls this often, so a window shorter than one interval can fall
+# between two polls and never fire. Kept in sync with the schedule in
+# .github/workflows/trigger-review.yml.
+MIN_WINDOW_MINUTES = 30
+
+
 class SettingsIn(SettingsOut):
-    pass
+    """Write side only.
+
+    The validator deliberately does not live on `NotificationWindow` or
+    `SettingsOut`: `read_settings` rebuilds those from the stored JSON, so a rule
+    there would make `GET /settings` fail on any row written before the rule
+    existed — including the hand-widened windows docs/RUNBOOK.md describes for
+    testing a push. Reads stay permissive; writes are constrained.
+    """
+
+    @model_validator(mode="after")
+    def _windows_are_usable(self) -> "SettingsIn":
+        for window in self.windows:
+            try:
+                start = time.fromisoformat(window.from_)
+                end = time.fromisoformat(window.to)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{window.label}: times must be HH:MM, got "
+                    f"{window.from_!r} and {window.to!r}"
+                ) from exc
+
+            span = (
+                end.hour * 60 + end.minute - start.hour * 60 - start.minute
+            )
+            if span < MIN_WINDOW_MINUTES:
+                # Covers `to` before `from` too, which reads as a negative span.
+                raise ValueError(
+                    f"{window.label}: window must be at least {MIN_WINDOW_MINUTES} "
+                    f"minutes long, got {span}"
+                )
+        return self
 
 
 class TriggerResult(BaseModel):
     sent: bool
     # Constrained because this is what the cron consumer branches on — a typo'd
     # reason should fail here, not read as an unrecognised-but-valid state.
-    reason: Literal["outside_window", "daily_limit", "nothing_due", "no_devices"] | None = None
+    reason: (
+        Literal[
+            "outside_window",
+            "already_pushed",
+            "daily_limit",
+            "nothing_due",
+            "no_devices",
+        ]
+        | None
+    ) = None
     card_id: uuid.UUID | None = None
     due_count: int | None = None
 

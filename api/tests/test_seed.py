@@ -12,18 +12,22 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from sqlmodel import select
 
 from app.db import is_local_database
-from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK
+from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK, Card, Session
 from app.seed import (
     _schedule,
     _schedule_entries,
     _selected_entries,
     delivery_mode_for,
+    retire_from_file,
 )
 
 START = date(2026, 8, 3)
-CARDS_JSON = Path(__file__).resolve().parent.parent / "cards.json"
+API = Path(__file__).resolve().parent.parent
+CARDS_JSON = API / "cards.json"
+LEGACY_JSON = API / "archive" / "cards-legacy-126.json"
 
 
 def study_plan() -> list[dict]:
@@ -195,3 +199,103 @@ def test_the_fixtures_guard_treats_any_unrecognised_host_as_real(url: str) -> No
 )
 def test_local_databases_still_accept_fixtures(url: str) -> None:
     assert is_local_database(url)
+
+
+# --- retiring a curriculum ---------------------------------------------------
+
+
+def legacy_manifest() -> list[dict]:
+    return json.loads(LEGACY_JSON.read_text())
+
+
+def test_the_retire_manifest_shares_no_topic_with_any_live_deck() -> None:
+    """The standing guard that makes `--retire-file` safe to run.
+
+    Retirement matches on topic, so a curriculum edit that reintroduced a legacy
+    topic would turn the prune into silent data loss on a live card. Nothing
+    stops that but this assertion.
+    """
+    live = {entry["topic"] for entry in study_plan()}
+    for path in sorted((API / "library").glob("*.json")) + sorted((API / "modules").glob("*.json")):
+        live |= {entry["topic"] for entry in json.loads(path.read_text())}
+
+    retiring = {entry["topic"] for entry in legacy_manifest()}
+    assert retiring & live == set()
+
+
+def test_the_retire_manifest_has_the_shape_the_prune_expects() -> None:
+    entries = legacy_manifest()
+    topics = [entry["topic"] for entry in entries]
+
+    assert len(entries) == 126
+    assert len(set(topics)) == len(topics)
+
+
+async def test_retire_deletes_only_the_topics_in_the_manifest(db, tmp_path) -> None:
+    manifest = tmp_path / "retire.json"
+    manifest.write_text(json.dumps([{"topic": "Doomed"}]))
+    db.add(Card(topic="Doomed", category="Core Concept", next_review_at=START))
+    db.add(Card(topic="Kept", category="Core Concept", next_review_at=START))
+    await db.commit()
+
+    cards, sessions, topics = await retire_from_file(manifest, db=db)
+
+    assert (cards, sessions, topics) == (1, 0, ["Doomed"])
+    assert [c.topic for c in (await db.exec(select(Card))).all()] == ["Kept"]
+
+
+async def test_retire_removes_the_sessions_that_belonged_to_the_card(db, tmp_path) -> None:
+    """Asserted on SQLite too, which is why the delete is explicit.
+
+    `sessions.card_id` is ON DELETE CASCADE, but SQLite does not enforce foreign
+    keys unless asked and nothing here asks. Leaning on the cascade would let this
+    test pass over orphan rows that production would never produce.
+    """
+    manifest = tmp_path / "retire.json"
+    manifest.write_text(json.dumps([{"topic": "Doomed"}]))
+    doomed = Card(topic="Doomed", category="Core Concept", next_review_at=START)
+    kept = Card(topic="Kept", category="Core Concept", next_review_at=START)
+    db.add(doomed)
+    db.add(kept)
+    await db.commit()
+    db.add(Session(card_id=doomed.id, question_asked="q1"))
+    db.add(Session(card_id=doomed.id, question_asked="q2"))
+    db.add(Session(card_id=kept.id, question_asked="q3"))
+    await db.commit()
+
+    cards, sessions, _ = await retire_from_file(manifest, db=db)
+
+    assert (cards, sessions) == (1, 2)
+    survivors = (await db.exec(select(Session))).all()
+    assert [s.question_asked for s in survivors] == ["q3"]
+
+
+async def test_a_dry_run_reports_without_deleting(db, tmp_path) -> None:
+    manifest = tmp_path / "retire.json"
+    manifest.write_text(json.dumps([{"topic": "Doomed"}]))
+    card = Card(topic="Doomed", category="Core Concept", next_review_at=START)
+    db.add(card)
+    await db.commit()
+    db.add(Session(card_id=card.id, question_asked="q1"))
+    await db.commit()
+
+    cards, sessions, topics = await retire_from_file(manifest, dry_run=True, db=db)
+
+    assert (cards, sessions, topics) == (1, 1, ["Doomed"])
+    assert len((await db.exec(select(Card))).all()) == 1
+    assert len((await db.exec(select(Session))).all()) == 1
+
+
+async def test_retiring_twice_is_a_no_op(db, tmp_path) -> None:
+    manifest = tmp_path / "retire.json"
+    manifest.write_text(json.dumps([{"topic": "Doomed"}]))
+    db.add(Card(topic="Doomed", category="Core Concept", next_review_at=START))
+    await db.commit()
+
+    await retire_from_file(manifest, db=db)
+    assert await retire_from_file(manifest, db=db) == (0, 0, [])
+
+
+async def test_a_manifest_topic_absent_from_the_database_is_not_an_error(db) -> None:
+    """The real case: the legacy deck against a database that never held it."""
+    assert await retire_from_file(LEGACY_JSON, db=db) == (0, 0, [])

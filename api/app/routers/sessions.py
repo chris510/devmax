@@ -14,7 +14,7 @@ from app.models import (
     Card,
     Session,
 )
-from app.routers.deps import local_today
+from app.routers.deps import as_utc, local_today
 from app.schemas import (
     AnswerIn,
     CompleteOut,
@@ -40,16 +40,6 @@ REATTEMPT_MAX_MECHANISM = 2
 # re-attempt is the same retrieval, now informed. Composed server-side and sent to
 # the client, so what is displayed is what the answer is graded against.
 REATTEMPT_PREFACE = "In your words — "
-
-
-def _as_utc(value: datetime) -> datetime:
-    """Normalize a timestamp read back from the database before comparing it.
-
-    Every timestamp is written tz-aware, but SQLite silently drops `tzinfo` on read
-    while Postgres keeps it — the same divergence `models.TZ_DATETIME` documents. A
-    bare `<` between the two raises TypeError, so comparisons normalize first.
-    """
-    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _reattempt_eligible(session: Session) -> bool:
@@ -306,7 +296,7 @@ async def submit_reattempt(
     # session's coaching overwrite a newer review's assessment, and that is the one
     # indirect route by which turn 3 could reach a future scheduling decision.
     if card.last_reviewed_at is not None and session.ended_at is not None:
-        if _as_utc(card.last_reviewed_at) > _as_utc(session.ended_at):
+        if as_utc(card.last_reviewed_at) > as_utc(session.ended_at):
             raise HTTPException(status_code=409, detail="card has been reviewed since")
 
     # Scored before anything is written, matching `submit_answer` — a failed call

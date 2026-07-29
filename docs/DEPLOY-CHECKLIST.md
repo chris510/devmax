@@ -24,7 +24,9 @@ services `devmax` + `Postgres`).
 | ✅ | Railway project + Postgres (18, not 17 — migrations applied clean) | done |
 | ✅ | Six app variables set; migrations 0001–0003 ran via `preDeployCommand` | done |
 | ✅ | Two GitHub repo secrets; first green cron run confirmed | done |
-| ✅ | Reset the legacy 126-card curriculum; activate week 1 (6 conversational cards) | done |
+| ✅ | Activate week 1 (6 conversational cards) | done |
+| ☐ | **Retire the legacy 126-card deck** — recorded as done, but no tooling existed to do it, and pushes were still drawing from it. `--retire-file` is that tooling | **do this before re-enabling the poll** |
+| ☐ | **Re-enable the `Trigger review push` workflow** — `disabled_manually` since 2026-07-28; step 1's "re-enable at the end of step 4" never happened, so no push has ever fired on schedule | **required** |
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
@@ -57,9 +59,15 @@ curl -sS -X PUT -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
 **1. Decide the cron question before you merge anything else.**
 Scheduled workflows only fire from the default branch, so a merge makes
 `trigger-review` and `check-missed` live. Until the backend is deployed **and** both
-GitHub secrets exist, they fail — 8 red runs a day, each with an email. Either do
+GitHub secrets exist, they fail — one red run per poll, each with an email. Either do
 step 2 the same day, or disable both workflows in the repo's Actions tab now and
 re-enable at the end of step 4. (RUNBOOK §2.)
+
+> **This is the step that bit.** Both workflows were disabled on 2026-07-28 and
+> `trigger-review` was never re-enabled, so every "first push" was fired by hand and
+> the schedule has never run unattended. Disabling is a *state change in the Actions
+> tab*; merging a new YAML does not undo it. If you disable here, put the re-enable
+> on the checklist above, not just in this paragraph.
 
 **2. Railway: project, Postgres, variables, deploy, domain.** (RUNBOOK §3.)
 Root directory is `api`. `preDeployCommand` is `alembic upgrade head`; healthcheck is
@@ -85,6 +93,12 @@ records *your voice*, not the fixture paragraph.
 ---
 
 ## Traps that will cost you an hour each
+
+**Loading a curriculum never removes the last one.** `seed.py` dedupes by topic and
+only adds, so activating a new deck alongside an old one leaves both — and the old
+one, being overdue, wins every push. Retire explicitly:
+`--retire-file archive/cards-legacy-126.json --dry-run`, then `--confirm`. It is a
+hard delete and sessions cascade. RUNBOOK §Retiring a curriculum.
 
 **Seed with `railway ssh`, not `railway run`.** Activate a cohort only after its
 source lessons are complete.

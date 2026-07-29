@@ -482,6 +482,187 @@ async def test_starting_a_session_twice_resumes_the_live_one(client, db, stub_ll
 # --- cron -------------------------------------------------------------------
 
 
+def pin_clock(monkeypatch, hour: int, minute: int = 0) -> None:
+    """Pin the time of day the endpoint sees — never the calendar day.
+
+    Same reasoning as the `in_window` fixture: these tests build due dates from
+    `local_today()`, so freezing the date too drifts them out of the queue.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        internal,
+        "now_in",
+        lambda tz: datetime.now(ZoneInfo(tz)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        ),
+    )
+
+
+def local_today_at(hour: int, minute: int = 0):
+    """A timezone-aware stamp for today at a local wall-clock time."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.models import Settings
+
+    return datetime.now(ZoneInfo(Settings().timezone)).replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
+
+
+@pytest.fixture
+def capture_push(monkeypatch):
+    sent: list[dict] = []
+
+    async def _push(**kwargs):
+        sent.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(internal, "send_push", _push)
+    return sent
+
+
+async def test_a_second_poll_inside_the_same_window_does_not_push_again(
+    client, db, in_window, capture_push
+):
+    """The workflow polls every 30 minutes; the window decides, not the poll.
+
+    Without a per-window guard an 80-minute window takes three polls, and the
+    day's whole `reviews_per_day` budget is spent before evening opens.
+    """
+    db.add(make_card(next_review_at=local_today() - timedelta(days=3)))
+    db.add(make_card(topic="Raft", next_review_at=local_today() - timedelta(days=2)))
+    await db.commit()
+
+    first = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+    second = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert first["sent"] is True
+    assert second == {
+        "sent": False,
+        "reason": "already_pushed",
+        "card_id": None,
+        "due_count": None,
+    }
+    assert len(capture_push) == 1
+
+
+async def test_a_morning_push_does_not_block_the_evening_window(
+    client, db, monkeypatch, capture_push
+):
+    """Each window gets its own push. The guard is per window, not per day."""
+    db.add(make_card(topic="Pushed this morning", last_pushed_at=local_today_at(7, 15)))
+    db.add(make_card(topic="Raft", next_review_at=local_today() - timedelta(days=2)))
+    await db.commit()
+
+    pin_clock(monkeypatch, 21, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["sent"] is True
+    assert capture_push[0]["body"] == "Raft"
+
+
+async def test_the_same_card_is_not_offered_twice_in_one_day(
+    client, db, monkeypatch, capture_push
+):
+    """One unanswered card is not worth two notifications.
+
+    The evening window takes the next card down, or stays quiet — it never
+    repeats the morning's.
+    """
+    db.add(
+        make_card(
+            next_review_at=local_today() - timedelta(days=3),
+            last_pushed_at=local_today_at(7, 15),
+        )
+    )
+    await db.commit()
+
+    pin_clock(monkeypatch, 21, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    # `due_count` still reports the whole queue — it is the notification's "N due"
+    # and has to agree with GET /cards/due. Only the selection skips the card.
+    assert body["reason"] == "already_pushed"
+    assert body["due_count"] == 1
+    assert capture_push == []
+
+
+async def test_the_daily_budget_is_a_backstop_behind_the_window_guard(
+    client, db, monkeypatch, capture_push
+):
+    """`reviews_per_day` is 2, so a third push is refused even in a fresh window."""
+    db.add(make_card(topic="First", last_pushed_at=local_today_at(7, 15)))
+    db.add(make_card(topic="Second", last_pushed_at=local_today_at(7, 45)))
+    db.add(make_card(topic="Raft", next_review_at=local_today() - timedelta(days=2)))
+    await db.commit()
+
+    pin_clock(monkeypatch, 21, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["reason"] == "daily_limit"
+    assert capture_push == []
+
+
+async def test_a_missed_push_still_counts_against_the_daily_budget(
+    client, db, monkeypatch, capture_push
+):
+    """The bug migration 0004 exists to fix, end to end.
+
+    check-missed used to clear `last_pushed_at` after counting a review missed,
+    which handed the day's budget straight back: ignore the morning push and the
+    evening one went out anyway, on top of a `reviews_per_day` of 1.
+    """
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.reviews_per_day = 1
+    db.add(settings)
+    db.add(make_card(topic="Ignored", last_pushed_at=local_today_at(7, 15)))
+    db.add(make_card(topic="Raft", next_review_at=local_today() - timedelta(days=2)))
+    await db.commit()
+
+    # check-missed reads the real clock, not the pinned one, so its four-hour
+    # cutoff would only clear the morning stamp when the suite happens to run
+    # after 11:15 local. Widening it keeps the test about the budget rather than
+    # about the hour it runs at.
+    monkeypatch.setattr(internal, "MISSED_AFTER", timedelta(days=-1))
+    marked = (await client.post("/internal/check-missed", headers=CRON_HEADERS)).json()
+    assert marked == {"marked_missed": 1}, "the push must actually be counted missed"
+
+    pin_clock(monkeypatch, 21, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["reason"] == "daily_limit"
+    assert capture_push == []
+
+
+async def test_a_malformed_window_is_skipped_rather_than_raising(
+    client, db, monkeypatch, capture_push
+):
+    """`PUT /settings` validates times now, but rows predating that rule exist.
+
+    One bad string must not take every poll down with a 500.
+    """
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [
+        {"label": "Broken", "from": "25:99", "to": "nonsense", "on": True},
+        {"label": "Morning", "from": "07:10", "to": "08:30", "on": True},
+    ]
+    db.add(settings)
+    db.add(make_card(next_review_at=local_today() - timedelta(days=3)))
+    await db.commit()
+
+    pin_clock(monkeypatch, 7, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["sent"] is True
+
+
 async def test_trigger_review_no_ops_outside_the_window(client, db, monkeypatch):
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -580,6 +761,62 @@ async def test_check_missed_increments_count_without_touching_ease_factor(client
     assert card.ease_factor == 2.5
 
 
+async def test_check_missed_keeps_the_record_that_a_push_went_out(client, db):
+    """`last_pushed_at` is trigger-review's evidence, not check-missed's scratch space.
+
+    Clearing it handed the day's budget back and would re-open a window that had
+    already been satisfied. The count is recorded on its own column instead.
+    """
+    from datetime import UTC, datetime
+
+    pushed_at = datetime.now(UTC) - timedelta(hours=6)
+    card = make_card(last_pushed_at=pushed_at)
+    db.add(card)
+    await db.commit()
+
+    await client.post("/internal/check-missed", headers=CRON_HEADERS)
+
+    await db.refresh(card)
+    assert card.last_pushed_at is not None
+    assert card.missed_counted_at == card.last_pushed_at
+
+
+async def test_check_missed_does_not_count_the_same_push_twice(client, db):
+    """It runs every four hours; an unanswered push must not accrue a miss each time."""
+    from datetime import UTC, datetime
+
+    card = make_card(last_pushed_at=datetime.now(UTC) - timedelta(hours=6))
+    db.add(card)
+    await db.commit()
+
+    first = (await client.post("/internal/check-missed", headers=CRON_HEADERS)).json()
+    second = (await client.post("/internal/check-missed", headers=CRON_HEADERS)).json()
+
+    assert first == {"marked_missed": 1}
+    assert second == {"marked_missed": 0}
+    await db.refresh(card)
+    assert card.missed_count == 1
+
+
+async def test_a_later_push_becomes_missable_again(client, db):
+    """The stamp gates one push, not the card forever."""
+    from datetime import UTC, datetime
+
+    card = make_card(last_pushed_at=datetime.now(UTC) - timedelta(hours=9))
+    db.add(card)
+    await db.commit()
+    await client.post("/internal/check-missed", headers=CRON_HEADERS)
+
+    card.last_pushed_at = datetime.now(UTC) - timedelta(hours=5)
+    db.add(card)
+    await db.commit()
+
+    body = (await client.post("/internal/check-missed", headers=CRON_HEADERS)).json()
+    assert body == {"marked_missed": 1}
+    await db.refresh(card)
+    assert card.missed_count == 2
+
+
 # --- overview ---------------------------------------------------------------
 
 
@@ -670,6 +907,42 @@ async def test_settings_rejects_out_of_range_reviews_per_day(client):
     payload["reviews_per_day"] = 7
 
     assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "from_,to,why",
+    [
+        ("07:10", "07:25", "shorter than the poll interval"),
+        ("08:30", "07:10", "backwards, which reads as a negative span"),
+        ("25:99", "26:00", "not a time at all"),
+    ],
+)
+async def test_settings_rejects_a_window_the_poll_could_miss(client, from_, to, why):
+    """The cron polls every 30 minutes, so a shorter window can fall between two polls."""
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["windows"] = [{"label": "Morning", "on": True, "from": from_, "to": to}]
+
+    response = await client.put("/settings", headers=API_HEADERS, json=payload)
+    assert response.status_code == 422, why
+
+
+async def test_reading_settings_still_works_on_a_row_written_before_the_rule(client, db):
+    """Validation constrains writes, not reads.
+
+    `read_settings` rebuilds the window models from stored JSON. Putting the rule
+    on the shared model would make GET fail on rows that predate it — including
+    the hand-widened windows the runbook uses to test a push.
+    """
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [{"label": "Tiny", "from": "07:10", "to": "07:12", "on": True}]
+    db.add(settings)
+    await db.commit()
+
+    response = await client.get("/settings", headers=API_HEADERS)
+    assert response.status_code == 200
+    assert response.json()["windows"][0]["to"] == "07:12"
 
 
 async def test_settings_defaults_are_served_before_any_write(client):

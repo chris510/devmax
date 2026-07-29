@@ -79,6 +79,11 @@ class Card(SQLModel, table=True):
     # Compliance signal only — never feeds SM-2.
     missed_count: int = 0
     last_pushed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    # The `last_pushed_at` value check-missed has already counted — a push instant,
+    # not a counting instant. Equal means counted; NULL or older means this push is
+    # still uncounted. Replaces clearing `last_pushed_at`, which destroyed the
+    # evidence both the daily cap and the per-window guard read.
+    missed_counted_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
 
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)

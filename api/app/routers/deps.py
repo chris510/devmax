@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends
@@ -22,6 +22,16 @@ async def get_settings_row(db: AsyncSession) -> Settings:
 
 def now_in(tz: str) -> datetime:
     return datetime.now(ZoneInfo(tz))
+
+
+def as_utc(value: datetime) -> datetime:
+    """Normalize a timestamp read back from the database before comparing it.
+
+    Every timestamp is written tz-aware, but SQLite silently drops `tzinfo` on read
+    while Postgres keeps it — the same divergence `models.TZ_DATETIME` documents. A
+    bare `<` between the two raises TypeError, so comparisons normalize first.
+    """
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 async def local_today(db: AsyncSession) -> date:
