@@ -36,10 +36,20 @@ final class SpeechService: ObservableObject {
     /// partials. A recognizer that never reports `isFinal` must not hang a submit.
     private static let finalizationDeadline = Duration.seconds(3)
 
+    /// Terms to bias recognition toward, set per recording from the card under
+    /// review. See `SpeechVocabulary`.
+    private var vocabulary: [String] = []
+
     /// Recording resumes onto existing text rather than replacing it, so
     /// "Tap to keep going" continues the transcript where it stopped.
-    func start(continuing existing: String = "", simulated: Bool = false, simulate text: String = "") {
+    func start(
+        continuing existing: String = "",
+        vocabulary: [String] = [],
+        simulated: Bool = false,
+        simulate text: String = ""
+    ) {
         transcript = existing
+        self.vocabulary = vocabulary
 
         if simulated {
             isRecording = true
@@ -185,6 +195,9 @@ final class SpeechService: ObservableObject {
         request.shouldReportPartialResults = true
         // Keeps audio on device — this is a private, single-user app.
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        // Biases recognition toward this curriculum's vocabulary, which is
+        // exactly what a general-purpose language model mishears.
+        request.contextualStrings = vocabulary
         self.request = request
 
         let prefix = transcript.isEmpty ? "" : transcript + " "
