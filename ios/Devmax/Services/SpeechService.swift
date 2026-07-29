@@ -21,43 +21,102 @@ final class SpeechService: ObservableObject {
     private var simulationTimer: Timer?
     private var simulationTarget = ""
 
+    /// Resumed with the final transcription once the recognizer has flushed the
+    /// audio still in flight. Non-nil only while `finish()` is waiting.
+    private var finalization: CheckedContinuation<String, Never>?
+    private var finalizationTimeout: Task<Void, Never>?
+
+    /// A recognition callback that arrives after its recording ended must not
+    /// write into the next recording's transcript.
+    private var generation = 0
+
+    private enum CaptureError: Error { case unavailable }
+
+    /// How long to wait for a final result before giving up and submitting the
+    /// partials. A recognizer that never reports `isFinal` must not hang a submit.
+    private static let finalizationDeadline = Duration.seconds(3)
+
     /// Recording resumes onto existing text rather than replacing it, so
     /// "Tap to keep going" continues the transcript where it stopped.
     func start(continuing existing: String = "", simulated: Bool = false, simulate text: String = "") {
         transcript = existing
-        isRecording = true
 
         if simulated {
+            isRecording = true
             startSimulation(fullText: text)
+            return
+        }
+
+        // The screen flips to its recording state the instant the mic is tapped,
+        // so anything spoken before capture actually begins is lost outright.
+        // Once permission has been granted — every session after the first —
+        // start synchronously rather than paying an await hop to re-learn an
+        // answer already on disk. That gap is why answers arrived mid-sentence.
+        if permissionsGranted {
+            beginCaptureOrDegrade()
             return
         }
 
         Task {
             guard await requestPermissions() else {
                 unavailable = true
-                isRecording = false
                 return
             }
-            do { try beginCapture() } catch {
-                unavailable = true
-                isRecording = false
-            }
+            beginCaptureOrDegrade()
         }
     }
 
-    func stop() {
+    /// Ends recording and waits for the recognizer's final transcription.
+    ///
+    /// `stop()` cannot serve the submit path: the caller reads the transcript
+    /// immediately afterwards, while `SFSpeechRecognizer` delivers its last
+    /// corrected result asynchronously *after* the audio ends. Reading
+    /// synchronously truncated the tail of every spoken answer.
+    func finish() async -> String {
+        guard isRecording else { return transcript }
         isRecording = false
+
         simulationTimer?.invalidate()
         simulationTimer = nil
-        task?.finish()
-        task = nil
-        request?.endAudio()
-        request = nil
-        if engine.isRunning {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
+
+        // No recognizer task means nothing is in flight — the simulated
+        // transcript is already whatever the typewriter reached.
+        guard task != nil else {
+            teardown()
+            return transcript
         }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+        stopEngine()
+
+        // endAudio() tells the recognizer no more buffers are coming; it then
+        // emits one last `isFinal` result. Releasing the task or deactivating the
+        // audio session before that lands is what dropped the end of an answer.
+        request?.endAudio()
+
+        let text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            finalization = continuation
+            finalizationTimeout = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.finalizationDeadline)
+                self?.completeFinalization()
+            }
+        }
+
+        teardown()
+        return text
+    }
+
+    /// Ends recording and discards anything still in flight. For leaving the
+    /// screen or swapping input modes — never for submitting, which needs
+    /// `finish()`.
+    func stop() {
+        isRecording = false
+        generation += 1
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+        task?.cancel()
+        // Unblocks a `finish()` racing with this teardown.
+        completeFinalization()
+        teardown()
     }
 
     func reset() {
@@ -68,21 +127,55 @@ final class SpeechService: ObservableObject {
     /// Restores text verbatim after a submit failure, or when swapping input modes.
     func restore(_ text: String) { transcript = text }
 
+    private var permissionsGranted: Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized
+            && AVAudioApplication.shared.recordPermission == .granted
+    }
+
     private func requestPermissions() async -> Bool {
         let speech = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
         guard speech == .authorized else { return false }
-        return await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
+        return await AVAudioApplication.requestRecordPermission()
+    }
+
+    private func beginCaptureOrDegrade() {
+        do {
+            try beginCapture()
+            isRecording = true
+        } catch {
+            unavailable = true
+            isRecording = false
         }
     }
 
+    private func completeFinalization() {
+        finalizationTimeout?.cancel()
+        finalizationTimeout = nil
+        guard let continuation = finalization else { return }
+        finalization = nil
+        continuation.resume(returning: transcript)
+    }
+
+    private func stopEngine() {
+        if engine.isRunning { engine.stop() }
+        // Outside the isRunning check on purpose: the tap's closure retains the
+        // recognition request, so leaving it installed keeps that request alive
+        // long after teardown nils it.
+        engine.inputNode.removeTap(onBus: 0)
+    }
+
+    private func teardown() {
+        task = nil
+        request = nil
+        simulationTarget = ""
+        stopEngine()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     private func beginCapture() throws {
-        guard let recognizer, recognizer.isAvailable else {
-            unavailable = true
-            return
-        }
+        guard let recognizer, recognizer.isAvailable else { throw CaptureError.unavailable }
 
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.playAndRecord, mode: .measurement, options: .duckOthers)
@@ -104,13 +197,18 @@ final class SpeechService: ObservableObject {
         engine.prepare()
         try engine.start()
 
+        generation += 1
+        let capture = generation
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             Task { @MainActor in
+                guard self.generation == capture else { return }
                 if let result {
                     self.transcript = prefix + result.bestTranscription.formattedString
                 }
-                if error != nil { self.stop() }
+                if result?.isFinal == true || error != nil {
+                    self.completeFinalization()
+                }
             }
         }
     }

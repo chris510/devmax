@@ -182,9 +182,16 @@ warning (expected at this stage) and no tracebacks.
 ## 4. Seeding **(you)**
 
 ```sh
-railway run --service <api-service> \
-  python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27
+railway ssh --service <api-service> \
+  "python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27"
 ```
+
+**It must be `railway ssh`, not `railway run`.** `railway run` executes the process
+on your machine with Railway's variables injected — and `DATABASE_URL` resolves to
+`postgres.railway.internal`, which only exists inside Railway's network. The seed
+has to run *in* the container. First connection prompts once to trust
+`ssh.railway.com`, and `railway ssh` needs a registered key
+(`railway ssh keys add`) before it will connect at all.
 
 **`--start-date 2026-07-27` is not a placeholder — use exactly that.** The local
 Postgres was seeded with it, and `seed.py` dedupes by topic, so re-running with the
@@ -194,9 +201,11 @@ come due immediately; seed a week out and the app is unusable until they land.
 
 **Use `--file`, never `--fixtures`.** The fixtures carry invented session history
 and a fake 14-hour-old in-progress draft that would render a bogus resume banner on
-a real card. `seed.py` refuses any non-local database without `--force`, and that
+a real card. `seed.py` refuses a non-local database without `--force`, and that
 check treats `postgres.railway.internal` as real — a private address is still
-production.
+production. Note the guard sits *inside* the `--fixtures` branch
+(`app/seed.py:331`): the `--file` path is ungated, so nothing stops a wrong
+`--start-date` but the dedupe.
 
 126 cards seed from `api/cards.json`: 99 conversational, 27 desk, staggered ~2/day.
 

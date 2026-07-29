@@ -8,6 +8,10 @@ struct ConversationScreen: View {
     @StateObject private var speaker = SpeakerService()
     @AppStorage(Preferences.readAloudKey) private var readAloud = true
     @FocusState private var draftFocused: Bool
+    /// Set while `speech.finish()` waits for the recognizer's last result. The
+    /// stage is still a recording one during that gap, so without this a second
+    /// tap would submit the same answer twice.
+    @State private var finalizing = false
 
     /// Answer bubbles and the live transcript cap at 84% — of the thread's content
     /// width, not the screen's.
@@ -446,11 +450,16 @@ struct ConversationScreen: View {
             MetaText(text: micLabel, font: TypeRole.metaRow, tracking: 1.2, color: Theme.metaAlt)
 
             Button {
-                // Swapping input mode carries the text across and never navigates away.
-                state.updateDraft(speech.transcript.isEmpty ? state.draft : speech.transcript)
-                speech.stop()
-                state.inputMode = .text
-                draftFocused = true
+                // Swapping input mode carries the text across and never navigates
+                // away — so it has to finalize like a submit does, not discard.
+                // Reading the transcript straight after stop() dropped whatever
+                // was still in flight.
+                Task {
+                    let spoken = await speech.finish()
+                    state.updateDraft(spoken.isEmpty ? state.draft : spoken)
+                    state.inputMode = .text
+                    draftFocused = true
+                }
             } label: {
                 Text("Type instead")
                     .font(TypeRole.secondaryAction)
@@ -472,12 +481,22 @@ struct ConversationScreen: View {
     private func toggleRecording() {
         speaker.stop()
         if isRecording {
-            speech.stop()
-            let text = speech.transcript
-            state.updateDraft(text)
-            // Submitting is the other moment a pending debounce can't be waited out.
-            state.flushDraft()
-            Task { await state.submit(text) }
+            // The stage must stay the recording one until `submit` reads it:
+            // it carries which turn this answer belongs to, and `sendAnswer`
+            // rewinds to it if the submit fails.
+            guard !finalizing else { return }
+            finalizing = true
+            Task {
+                // finish(), not stop(): the recognizer's last corrected result
+                // arrives after the audio ends, and reading the transcript
+                // synchronously cut the end off every spoken answer.
+                let text = await speech.finish()
+                finalizing = false
+                state.updateDraft(text)
+                // Submitting is the other moment a pending debounce can't be waited out.
+                state.flushDraft()
+                await state.submit(text)
+            }
         } else {
             state.submitError = false
             state.stage = state.stage.recordingTwin
