@@ -38,7 +38,16 @@ final class SpeechService: ObservableObject {
 
     /// Recording resumes onto existing text rather than replacing it, so
     /// "Tap to keep going" continues the transcript where it stopped.
-    func start(continuing existing: String = "", simulated: Bool = false, simulate text: String = "") {
+    ///
+    /// `vocabulary` biases recognition toward the card under review — see
+    /// `SpeechVocabulary`. It is threaded through rather than stored: it is only
+    /// meaningful for the capture it starts.
+    func start(
+        continuing existing: String = "",
+        vocabulary: [String] = [],
+        simulated: Bool = false,
+        simulate text: String = ""
+    ) {
         transcript = existing
 
         if simulated {
@@ -53,7 +62,7 @@ final class SpeechService: ObservableObject {
         // start synchronously rather than paying an await hop to re-learn an
         // answer already on disk. That gap is why answers arrived mid-sentence.
         if permissionsGranted {
-            beginCaptureOrDegrade()
+            beginCaptureOrDegrade(vocabulary: vocabulary)
             return
         }
 
@@ -62,7 +71,7 @@ final class SpeechService: ObservableObject {
                 unavailable = true
                 return
             }
-            beginCaptureOrDegrade()
+            beginCaptureOrDegrade(vocabulary: vocabulary)
         }
     }
 
@@ -140,9 +149,9 @@ final class SpeechService: ObservableObject {
         return await AVAudioApplication.requestRecordPermission()
     }
 
-    private func beginCaptureOrDegrade() {
+    private func beginCaptureOrDegrade(vocabulary: [String]) {
         do {
-            try beginCapture()
+            try beginCapture(vocabulary: vocabulary)
             isRecording = true
         } catch {
             unavailable = true
@@ -174,7 +183,7 @@ final class SpeechService: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func beginCapture() throws {
+    private func beginCapture(vocabulary: [String]) throws {
         guard let recognizer, recognizer.isAvailable else { throw CaptureError.unavailable }
 
         let audioSession = AVAudioSession.sharedInstance()
@@ -185,6 +194,9 @@ final class SpeechService: ObservableObject {
         request.shouldReportPartialResults = true
         // Keeps audio on device — this is a private, single-user app.
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        // Biases recognition toward this curriculum's vocabulary, which is
+        // exactly what a general-purpose language model mishears.
+        request.contextualStrings = vocabulary
         self.request = request
 
         let prefix = transcript.isEmpty ? "" : transcript + " "

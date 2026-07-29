@@ -502,6 +502,7 @@ struct ConversationScreen: View {
             state.stage = state.stage.recordingTwin
             speech.start(
                 continuing: state.draft,
+                vocabulary: SpeechVocabulary.terms(for: state.currentCard?.topic),
                 simulated: flags.simulateSpeech,
                 simulate: Self.simulatedAnswer(for: state.stage)
             )
