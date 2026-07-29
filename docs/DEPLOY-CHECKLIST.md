@@ -28,21 +28,31 @@ services `devmax` + `Postgres`).
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
-| ☐ | First push | **start here** — only `outside_window` stands in the way |
+| ✅ | **First push delivered, tapped, and a session opened** | done |
 | ☐ | `reattempt_effort` sweep | independent — can happen any time |
 
 ---
 
 ## Order, and why it is this order
 
-**Steps 1–6 are done, and so are step 7's APNs variables.** They are kept below as the
-record of what was done and why. All that is left is the push itself: a single `curl`
-to `/internal/trigger-review` inside a notification window, or the morning cron.
+**The deploy is complete — steps 1 through 7 are all done.** They are kept below as the
+record of what was done and why, and as the procedure for doing it again.
 
 Verified end to end on 2026-07-29: a Release build signed with the team provisioning
 profile is installed on the iPhone, `aps-environment=development` matches
-`APNS_USE_SANDBOX=true`, one row exists in `device_tokens`, and the device's
-`GET /cards/due` returns 200 against the deployed API.
+`APNS_USE_SANDBOX=true`, and a real push was delivered, tapped, and turned into a
+session with a live question-generation call — the whole loop, in production.
+
+**To fire a push outside a notification window** (this is how the first one was
+tested), widen the window through the app's own API rather than editing the settings
+row by hand, then restore it:
+
+```sh
+curl -sS -H "X-API-Key: $API_KEY" $B/settings > /tmp/settings_backup.json
+# edit the Evening window's `to` to 23:59, PUT it back, fire trigger-review, then:
+curl -sS -X PUT -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d @/tmp/settings_backup.json $B/settings
+```
 
 **1. Decide the cron question before you merge anything else.**
 Scheduled workflows only fire from the default branch, so a merge makes
