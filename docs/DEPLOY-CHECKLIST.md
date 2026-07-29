@@ -4,7 +4,9 @@
 detailed procedure; this is the running status, the ordering, and the traps that
 cost time. When both disagree, the RUNBOOK is the procedure and this is the state.
 
-Last updated: **2026-07-28**.
+Last updated: **2026-07-29**. Live at
+`https://devmax-production.up.railway.app` (Railway project `profound-purpose`,
+services `devmax` + `Postgres`).
 
 ---
 
@@ -19,18 +21,24 @@ Last updated: **2026-07-28**.
 | ✅ | APNs push delivered to a **physical iPhone** from a local server | done |
 | ✅ | Pooler verified against PgBouncer 1.25 `transaction` mode | done |
 | ✅ | **Apple Developer paid membership** | **done — longest lead time is behind you** |
-| ☐ | Railway project + Postgres | **start here** |
-| ☐ | Nine secrets set | blocked on Railway |
-| ☐ | Two GitHub repo secrets | blocked on Railway domain |
-| ☐ | Seed 126 cards | blocked on Railway |
-| ☐ | First real Claude call against the deployed API | blocked on seed |
-| ☐ | iOS Release build to device | blocked on Railway domain |
-| ☐ | First push | blocked on all of the above |
+| ✅ | Railway project + Postgres (18, not 17 — migrations applied clean) | done |
+| ✅ | Six app variables set; migrations 0001–0003 ran via `preDeployCommand` | done |
+| ✅ | Two GitHub repo secrets; first green cron run confirmed | done |
+| ✅ | Seed 126 cards (99 conversational, 27 desk), 4 due immediately | done |
+| ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
+| ✅ | APNs variables — four set, key parses in-container, warning gone | done |
+| ☐ | iOS Release build to device | **start here** — needs a Mac + Xcode |
+| ☐ | First push | blocked on the build: `device_tokens` is empty |
 | ☐ | `reattempt_effort` sweep | independent — can happen any time |
 
 ---
 
 ## Order, and why it is this order
+
+**Steps 1–5 and the APNs half of step 7 are done.** They are kept below as the record
+of what was done and why. The only work left is **step 6, the iOS Release build** —
+`device_tokens` is empty, so nothing can be pushed to until a real build registers a
+token. After that, step 7's push is a single `curl` inside a notification window.
 
 **1. Decide the cron question before you merge anything else.**
 Scheduled workflows only fire from the default branch, so a merge makes
@@ -64,11 +72,14 @@ records *your voice*, not the fixture paragraph.
 
 ## Traps that will cost you an hour each
 
-**The seed date is `2026-07-27`, exactly.**
+**Seed with `railway ssh`, not `railway run`** — and the date is `2026-07-27`, exactly.
 ```sh
-railway run --service <api> \
-  python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27
+railway ssh --service <api> \
+  "python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27"
 ```
+`railway run` executes locally with Railway's variables injected, so `DATABASE_URL`
+points at `postgres.railway.internal` and never connects. `railway ssh` also needs a
+registered key first (`railway ssh keys add`) and prompts once to trust the host.
 `seed.py` dedupes by topic, so re-running with the same date is idempotent; a
 different date misaligns every week boundary. It was chosen over a later Monday
 because both align the same way, but this one makes cards due immediately — seed a
