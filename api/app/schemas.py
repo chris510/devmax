@@ -1,8 +1,8 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DueCard(BaseModel):
@@ -147,15 +147,69 @@ class SettingsOut(BaseModel):
     windows: list[NotificationWindow]
 
 
+# A window shorter than the cron's poll interval can fall between two polls and
+# never fire, so this is the floor. Pinned against the actual schedule in
+# .github/workflows/trigger-review.yml by
+# `test_the_minimum_window_is_at_least_the_poll_interval` — a comment alone is
+# the same hand-synced coupling this whole change set exists to remove.
+MIN_WINDOW_MINUTES = 30
+
+
+def _minutes(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+
+class NotificationWindowIn(NotificationWindow):
+    """A notification window on the write path, where the rules apply.
+
+    Deliberately a separate model from `NotificationWindow`: `read_settings`
+    rebuilds that one from stored JSON, so a rule there would make
+    `GET /settings` fail on any row written before the rule existed — including
+    the hand-widened windows docs/RUNBOOK.md describes for testing a push. Reads
+    stay permissive; writes are constrained.
+
+    Validating per window rather than across the whole settings object also puts
+    the offending index in the 422's `loc`, so a client can point at the window
+    it rejected instead of the request body as a whole.
+    """
+
+    @model_validator(mode="after")
+    def _usable(self) -> "NotificationWindowIn":
+        try:
+            span = _minutes(time.fromisoformat(self.to)) - _minutes(time.fromisoformat(self.from_))
+        except ValueError as exc:
+            raise ValueError("times must be 24-hour HH:MM") from exc
+        if span < MIN_WINDOW_MINUTES:
+            # A non-positive span covers `to` before `from`, and `to == from` —
+            # both two taps away in the app, which advances each end separately.
+            raise ValueError(
+                f"a window must run at least {MIN_WINDOW_MINUTES} minutes; this one is {span}"
+            )
+        return self
+
+
 class SettingsIn(SettingsOut):
-    pass
+    windows: list[NotificationWindowIn]
 
 
 class TriggerResult(BaseModel):
     sent: bool
     # Constrained because this is what the cron consumer branches on — a typo'd
     # reason should fail here, not read as an unrecognised-but-valid state.
-    reason: Literal["outside_window", "daily_limit", "nothing_due", "no_devices"] | None = None
+    reason: (
+        Literal[
+            "outside_window",
+            # This window already produced a push...
+            "already_pushed",
+            # ...versus: every due card was already offered earlier today. Two
+            # different facts, kept apart so a log tells you which one happened.
+            "already_offered",
+            "daily_limit",
+            "nothing_due",
+            "no_devices",
+        ]
+        | None
+    ) = None
     card_id: uuid.UUID | None = None
     due_count: int | None = None
 

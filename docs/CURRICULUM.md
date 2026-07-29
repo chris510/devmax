@@ -165,6 +165,29 @@ Do not activate the next week merely because seven calendar days passed.
 `--weeks-through N` remains available for local verification and clean-room bulk
 imports, but it is not the recommended production learning workflow.
 
+## Retirement rule
+
+**Deduplication makes activation safe; it does not make replacement safe.** Seeding
+only ever adds, so retiring a deck is a separate, explicit act:
+
+```sh
+uv run python -m app.seed --retire-file archive/cards-legacy-126.json --dry-run
+uv run python -m app.seed --retire-file archive/cards-legacy-126.json --confirm
+```
+
+The manifest passed to `--retire-file` *is* the delete list. Retirement never
+computes a difference against the current deck, so reference material in
+`api/library/`, company overlays in `api/modules/`, and gap-driven cards created
+through `POST /cards` cannot be caught by it.
+
+This is a hard delete and the cards' session history cascades with them. A card
+retired by mistake cannot be restored with its scores; only re-seeded blank.
+
+**A retired topic must never reappear in a live manifest.** Retirement matches on
+topic, so reintroducing one would aim the prune at a live card.
+`test_the_retire_manifest_shares_no_topic_with_any_live_deck` is the guard, and it
+covers `cards.json`, `library/`, and `modules/` together.
+
 ## Twelve-week program
 
 ### Weeks 1–3 — delivery and core concepts

@@ -10,7 +10,7 @@ spec says it's for.
 
 ---
 
-## 1. The cron schedule breaks for four months a year
+## 1. The cron carries no schedule; the settings row is the schedule
 
 **Spec** (§GitHub Actions cron) prescribes:
 
@@ -28,13 +28,29 @@ GitHub cron is UTC and does not observe DST; the notification windows are local
 and return `{"sent": false, "reason": "outside_window"}` with HTTP 200 — a green
 workflow and no pushes, for four months.
 
-Both windows are wider than the 60-minute shift, so a fixed UTC time exists inside
-them under either offset: `15:10–15:30` and `05:00–05:30` UTC. The comment in
-`spec.md` about tolerating cron *lateness* doesn't cover a schedule that is an hour
-*early*.
+The first fix pinned fixed UTC times inside both windows, later a DST-paired morning
+trigger, and made the workflow fail on `outside_window` so a narrowed window broke
+loudly. All of that was arithmetic in a YAML file trying to *predict* a value the
+database already held, and it had to be redone by hand every time a window moved.
 
-The workflows now also read the response body and fail on `outside_window`, so if
-a window is ever narrowed below the shift the breakage is loud instead of silent.
+**It is now a 30-minute poll — `7,37 * * * *` — and the workflow encodes nothing
+else.** `_active_window` compares the current *local* time against the settings row
+on every call, so DST is not a special case: `ZoneInfo` resolves the offset for the
+wall time being tested. Changing a window in the app takes effect on the next poll
+with no commit and no redeploy, which is the property the paired schedule could
+never have.
+
+What that costs, and why it is still the right trade:
+
+- `outside_window` goes from an error to the overwhelmingly common response (~46 of
+  48 daily runs). The workflow no longer branches on it; a non-2xx is the breakage
+  signal now.
+- Polling inside a window would push repeatedly, so the endpoint gained a
+  per-window guard (§17) — the poll had to become idempotent within a window.
+- A window shorter than the poll interval can be skipped entirely, so `SettingsIn`
+  now rejects anything under 30 minutes. That is a genuine new constraint on the
+  user, accepted because every boundary pair the iOS `TimeChip` can produce is at
+  least 35 minutes apart.
 
 ## 2. `--weeks-through` cannot prevent the day-one flood
 
@@ -74,6 +90,11 @@ It was not in the repo. The first authored version grew to 126 cards over six
 weeks and is preserved at `api/archive/cards-legacy-126.json`. It was replaced by
 the lesson-gated 54-card recall spine in `api/cards.json`; the curriculum rationale
 and activation contract live in `docs/CURRICULUM.md`.
+
+Replacing a manifest does not replace a database. `seed.py` only ever added, so the
+swap left both decks live, and the retired cards — already overdue — sorted ahead of
+the new ones in every push. `--retire-file` is the delete path that was missing;
+see `docs/RUNBOOK.md` §Retiring a curriculum.
 
 ## 5. `POST /device-tokens` is insert-if-absent, not upsert
 
@@ -314,15 +335,56 @@ rejected alternative (a separate coaching mode) and why.
 
 ---
 
-## Known limitation, not a deviation
+## 17. One push per window, and a push record that survives being counted missed
 
-`/internal/trigger-review` enforces `reviews_per_day` by counting *cards stamped
-today* rather than pushes, and `check-missed` clears `last_pushed_at`, erasing that
-evidence. With two cron fires a day and `reviews_per_day: 2` the branch is
-unreachable, so this is inert today. Fixing it properly needs a `push_log` table.
+The 30-minute poll (§1) breaks two things that a twice-daily cron hid, and both
+fixes live in `/internal/trigger-review`.
 
-**Trigger condition: if the cron moves to hourly, or `reviews_per_day` rises above
-the number of daily fires, add `push_log` first.**
+**A poll is not a push.** Firing every 30 minutes inside an 80-minute window would
+send three notifications and empty a `reviews_per_day` of 2 before evening opened.
+So `_active_window` returns the matched window's local start instead of a bool, and
+the endpoint refuses if any card was pushed at or after it — `already_pushed`. The
+guard is per window rather than per day precisely so the evening window still gets
+its own push.
+
+**A card is not offered twice in one day.** Without that, the evening window would
+re-push the ignored morning card. `due_count` still reports the whole queue — it is
+the notification's "N due" and has to agree with `GET /cards/due` — but the
+*selection* skips anything stamped today. A side effect is that every push in a day
+lands on a distinct card, so the card count equals the push count and the
+`reviews_per_day` cap became exact; that is what retired the `push_log` table this
+section used to demand.
+
+**`check-missed` stopped erasing the evidence.** It cleared `last_pushed_at` so a
+push wasn't counted twice, but that field is the *only* record trigger-review has
+that a push went out — clearing it handed the day's budget back, and would have
+re-opened a window that had already been satisfied. Migration 0004 adds
+`missed_counted_at`, which holds the `last_pushed_at` value already counted, so
+`missed_counted_at < last_pushed_at` reads exactly as "this push is still
+uncounted".
+
+**One bug found while doing it.** SQLite's `DATETIME` bind processor keeps a
+tz-aware value's wall-clock fields and drops the offset, so the pre-existing
+`last_pushed_at >= day_start` comparison bound a Pacific midnight against
+UTC-stored timestamps and was off by the offset — correct on Postgres, wrong on
+SQLite, and invisible because the `daily_limit` branch had no test. Local
+boundaries are now `.astimezone(UTC)`'d before binding, and the read-side
+normaliser that `sessions.py` already had was promoted to `deps.as_utc` and shared.
+
+**That fix is at the wrong altitude, deliberately, and should be finished.** There
+are now four call sites doing "make SQLite and Postgres agree about tzinfo" by
+hand, and a fifth that does *not* — `services/cards.days_since_review` calls
+`.astimezone(tz)` on a value that is naive under SQLite, where `.astimezone`
+reads it as system local time rather than UTC. The correct fix is to make
+`models.TZ_DATETIME` a `TypeDecorator` whose `process_bind_param` returns
+`value.astimezone(UTC)` and whose `process_result_value` re-attaches UTC when
+naive: a literal compared against a typed column inherits that column's bind
+processor, so all four hand-written conversions delete, every `TZ_DATETIME`
+column becomes correct by construction, and `days_since_review` is fixed without
+being touched. It is *less* code than the status quo. It is not in this change
+because it alters bind and result processing for all eight timestamp columns —
+including code paths this change never touches — and no Postgres was available to
+verify it. Do it on its own, against a real database.
 
 ---
 

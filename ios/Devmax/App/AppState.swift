@@ -136,8 +136,20 @@ final class AppState: ObservableObject {
     }
 
     func saveSettings(_ new: AppSettings) {
+        let previous = settings
         settings = new
-        Task { _ = try? await api.updateSettings(new) }
+        Task {
+            // The server is the authority on whether a window is usable: it rejects
+            // one shorter than the cron's poll interval, and TimeChip advances
+            // `from` and `to` independently, so `from == to` is two taps away.
+            // Discarding the response left the sheet showing a window as saved
+            // that was never stored. Adopting it means a rejected edit snaps back.
+            guard let saved = try? await api.updateSettings(new) else {
+                settings = previous
+                return
+            }
+            settings = saved
+        }
     }
 
     // MARK: - Review Sprint

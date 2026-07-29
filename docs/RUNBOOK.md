@@ -209,6 +209,40 @@ The base manifest contains 54 conversational cards: six in each of nine teaching
 weeks. Activate one week at a time. Coding patterns live in `api/library/` and
 company overlays live in `api/modules/`; neither is part of the automatic base seed.
 
+### Retiring a curriculum
+
+**Loading never deletes.** `seed.py` dedupes by topic and only ever adds, so
+swapping one curriculum for another leaves both in the database — and since the old
+deck's cards are already overdue, they sort ahead of the new ones and every push
+draws from the retired material. That is exactly what happened to the legacy
+126-card deck; the swap looked like it had failed when in fact the new cards were
+seeded and simply outranked.
+
+```sh
+railway ssh --service <api> \
+  "python -m app.seed --retire-file archive/cards-legacy-126.json --dry-run"
+railway ssh --service <api> \
+  "python -m app.seed --retire-file archive/cards-legacy-126.json --confirm"
+```
+
+`--dry-run` prints the matched topics and the session count and stops; nothing is
+deleted without `--confirm`. The manifest is the delete list — retirement never
+diffs against the current deck, so `library/`, `modules/`, and gap-driven cards from
+`POST /cards` are structurally out of reach. `archive/` ships in the image
+(`.dockerignore` doesn't exclude it), so the path above resolves inside the
+container.
+
+This is a **hard delete**, and `sessions.card_id` cascades: the retired cards' answer
+history goes with them. A test pins that the legacy manifest shares no topic with any
+live deck — if that ever fails, stop, because the prune would take a live card.
+
+Afterwards, confirm the queue actually changed:
+
+```sh
+curl -sS -H "X-API-Key: $API_KEY" $B/cards | jq length
+curl -sS -H "X-API-Key: $API_KEY" $B/cards/due | jq -r '.[].topic'
+```
+
 Due dates are staggered so exactly `reviews_per_day` conversational cards come due
 per day. Check it:
 
@@ -309,36 +343,49 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
    (check the device console for `devmax: APNs registration failed`) or the build
    is still in mock mode.
 3. Confirm `GET /cards/due` is non-empty.
-4. Don't wait for the cron. Widen a window to cover now via `PUT /settings`, run the
-   Trigger review workflow manually, expect `{"sent": true, "card_id": ...,
-   "due_count": N}` and a banner. **Restore the real windows immediately** — see
-   §Scheduling.
+4. Don't wait for the poll. Widen a window to cover now via `PUT /settings` (at
+   least 30 minutes, or the write is rejected 422), run the Trigger review workflow
+   manually, expect `{"sent": true, "card_id": ..., "due_count": N}` and a banner.
+   **Restore the real windows immediately** — see §Scheduling.
 5. Tap the notification → it should deep-link into that card. Answer by voice.
-6. Confirm an unattended scheduled fire at 17:00 UTC during PDT or 18:00 UTC
-   during PST.
+6. Dispatch the workflow a second time while still inside that widened window and
+   confirm `{"sent": false, "reason": "already_pushed"}`. That one response is what
+   keeps a 30-minute poll from emptying the day's budget in one window.
+7. Confirm an unattended scheduled fire — any `:07` or `:37` inside a window.
 
 ---
 
 ## Scheduling
 
-Three GitHub Actions crons run in UTC: a paired morning trigger at `0 17` and
-`0 18`, plus an evening trigger at `10 5`.
+**The workflow carries no schedule.** `trigger-review` polls
+`/internal/trigger-review` every 30 minutes (`7,37 * * * *`, offset off the hour
+because GitHub queues top-of-hour crons behind everyone else's and drops them
+under load). The endpoint decides for itself whether to push.
 
-GitHub cron doesn't observe DST but the windows are local and do. The morning
-notification is pinned to 10:00 local by firing on both possible UTC translations:
+Everything about *when* lives in the settings row: `windows`, `timezone`, and
+`reviews_per_day`. Change a window in the app and the next poll obeys it — no
+commit, no redeploy, and no DST arithmetic anywhere, because the comparison happens
+in local time on the server. That replaced a hand-maintained UTC approximation of
+the windows which disagreed with them for four months a year (`docs/DEVIATIONS.md`
+§1).
 
-- morning `09:20–10:40` local → **`0 17` and `0 18`**; the backend accepts the
-  10:00 local fire and returns `outside_window` for its 09:00/11:00 companion
-- evening `21:00–22:30` local → `05:00–05:30` UTC → **`10 5`** (22:10 PDT / 21:10 PST)
+Consequences worth knowing:
 
-The workflow treats `outside_window` as expected only for the paired morning
-expressions. An evening or manually dispatched trigger outside every window still
-fails loudly because the cron schedule and `PUT /settings` have drifted apart.
+- **Most runs return `outside_window`.** At a 30-minute poll that is ~46 of 48 runs
+  a day. It is the expected steady state and no longer fails the job.
+- **At most one push per window.** The endpoint refuses a second push inside a
+  window that already produced one, and returns `already_pushed`.
+- **A window must be at least 30 minutes long.** `PUT /settings` rejects anything
+  shorter with a 422, because a shorter window can fall between two polls and never
+  fire. There is deliberately no *maximum* — widening a window to cover now is how
+  you test a push. Note this leaves no margin against GitHub running a poll late;
+  the shipped windows (80 and 90 minutes) have plenty.
+- **Actions minutes.** 96 runs/day. Free on a public repo; if this repo ever goes
+  private, that is well past the 2,000-minute free tier and the cadence should drop.
 
-The crons stay on GitHub Actions rather than moving to Railway cron. Railway cron is
-also UTC, so it would inherit the identical DST problem, and it needs a service that
-exits on completion — a second service just to make one HTTP call. GitHub Actions is
-already where the code lives and the workflow can assert on the response body.
+The poll stays on GitHub Actions rather than moving to Railway cron: Railway cron
+needs a service that exits on completion — a second service just to make one HTTP
+call — and GitHub Actions is already where the code lives.
 
 Scheduled workflows are disabled after 60 days of repository inactivity. GitHub
 emails first; click Enable in the Actions tab.
@@ -349,9 +396,18 @@ emails first; click Enable in the Actions tab.
 
 In order.
 
-1. **Did the workflow run?** Actions tab. A red run shows the response body.
-2. **`{"sent": false, "reason": ...}`** — each reason is specific:
-   - `outside_window` — schedule/window drift, see above. The job fails on this.
+1. **Did the workflow run?** Actions tab. A red run shows the response body. A 500
+   means every enabled notification window in `settings` is unparseable — the one
+   configuration fault the endpoint refuses to answer quietly, precisely because
+   `outside_window` is otherwise indistinguishable from working normally.
+2. **`{"sent": false, "reason": ...}`** — each reason is specific. All but the last
+   are routine at a 30-minute poll and none of them fail the job:
+   - `outside_window` — no enabled window contains the current local time. The
+     usual answer, ~46 times a day. If it is *always* this, check `GET /settings`:
+     a window turned off, or a timezone that no longer matches where you are.
+   - `already_pushed` — this window already produced a push.
+   - `already_offered` — the window is free, but every due card already went out
+     earlier today. A card is never pushed twice in one day.
    - `nothing_due` — legitimately nothing due.
    - `daily_limit` — already sent `reviews_per_day` pushes today.
    - `no_devices` — nothing was delivered: no registered token, or APNs credentials
@@ -385,10 +441,17 @@ rather than half-written. A session stuck in `open` or `awaiting_follow_up` is
 resumable by design — starting a session on that card returns the existing one.
 There is no `abandoned` transition; nothing sets it.
 
-## Known limitation: the daily push cap
+## The daily push cap — resolved, no `push_log` needed
 
-`/internal/trigger-review` counts *cards stamped today*, not pushes, and
-`check-missed` clears `last_pushed_at`. With two cron fires a day and
-`reviews_per_day: 2` the branch is unreachable, so this is currently harmless.
-**If you ever move to an hourly cron or raise `reviews_per_day`, add a `push_log`
-table first** — otherwise the cap can be exceeded.
+This section used to warn that moving to a frequent cron required a `push_log`
+table first, because the cap counted *cards stamped today* rather than pushes, and
+`check-missed` cleared `last_pushed_at` out from under it. The move happened; the
+table was not needed.
+
+Two changes closed the gap instead. `check-missed` now records which push it
+counted on `missed_counted_at` (migration 0004) rather than erasing
+`last_pushed_at`, so the evidence survives. And `trigger-review` never offers a card
+it already pushed today, so every push in a day lands on a distinct card — which
+makes the card count *equal* the push count, and the cap exact.
+
+Reintroduce a `push_log` only if a card ever needs to be pushed twice in one day.
