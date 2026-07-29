@@ -20,11 +20,11 @@ final class SpeechService: ObservableObject {
     private var task: SFSpeechRecognitionTask?
     private var simulationTimer: Timer?
     private var simulationTarget = ""
-    private var simulating = false
 
     /// Resumed with the final transcription once the recognizer has flushed the
     /// audio still in flight. Non-nil only while `finish()` is waiting.
     private var finalization: CheckedContinuation<String, Never>?
+    private var finalizationTimeout: Task<Void, Never>?
 
     /// A recognition callback that arrives after its recording ended must not
     /// write into the next recording's transcript.
@@ -34,7 +34,7 @@ final class SpeechService: ObservableObject {
 
     /// How long to wait for a final result before giving up and submitting the
     /// partials. A recognizer that never reports `isFinal` must not hang a submit.
-    private static let finalizationTimeout = Duration.seconds(3)
+    private static let finalizationDeadline = Duration.seconds(3)
 
     /// Recording resumes onto existing text rather than replacing it, so
     /// "Tap to keep going" continues the transcript where it stopped.
@@ -42,7 +42,6 @@ final class SpeechService: ObservableObject {
         transcript = existing
 
         if simulated {
-            simulating = true
             isRecording = true
             startSimulation(fullText: text)
             return
@@ -61,7 +60,6 @@ final class SpeechService: ObservableObject {
         Task {
             guard await requestPermissions() else {
                 unavailable = true
-                isRecording = false
                 return
             }
             beginCaptureOrDegrade()
@@ -80,19 +78,15 @@ final class SpeechService: ObservableObject {
 
         simulationTimer?.invalidate()
         simulationTimer = nil
-        if simulating {
-            simulating = false
-            simulationTarget = ""
-            return transcript
-        }
 
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-
+        // No recognizer task means nothing is in flight — the simulated
+        // transcript is already whatever the typewriter reached.
         guard task != nil else {
             teardown()
             return transcript
         }
+
+        stopEngine()
 
         // endAudio() tells the recognizer no more buffers are coming; it then
         // emits one last `isFinal` result. Releasing the task or deactivating the
@@ -101,8 +95,8 @@ final class SpeechService: ObservableObject {
 
         let text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
             finalization = continuation
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: Self.finalizationTimeout)
+            finalizationTimeout = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.finalizationDeadline)
                 self?.completeFinalization()
             }
         }
@@ -116,11 +110,9 @@ final class SpeechService: ObservableObject {
     /// `finish()`.
     func stop() {
         isRecording = false
-        simulating = false
         generation += 1
         simulationTimer?.invalidate()
         simulationTimer = nil
-        simulationTarget = ""
         task?.cancel()
         // Unblocks a `finish()` racing with this teardown.
         completeFinalization()
@@ -159,18 +151,26 @@ final class SpeechService: ObservableObject {
     }
 
     private func completeFinalization() {
+        finalizationTimeout?.cancel()
+        finalizationTimeout = nil
         guard let continuation = finalization else { return }
         finalization = nil
         continuation.resume(returning: transcript)
     }
 
+    private func stopEngine() {
+        if engine.isRunning { engine.stop() }
+        // Outside the isRunning check on purpose: the tap's closure retains the
+        // recognition request, so leaving it installed keeps that request alive
+        // long after teardown nils it.
+        engine.inputNode.removeTap(onBus: 0)
+    }
+
     private func teardown() {
         task = nil
         request = nil
-        if engine.isRunning {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
-        }
+        simulationTarget = ""
+        stopEngine()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
