@@ -3,8 +3,8 @@ import XCTest
 
 /// Turn 3 must reach `POST /sessions/{id}/reattempt`, never `/answers`.
 ///
-/// Both tests here are regressions for real bugs. The routing test is for one that
-/// nearly shipped: `ConversationScreen` briefly set `stage = .processing` before
+/// These are regressions for a bug that nearly shipped: `ConversationScreen`
+/// briefly set `stage = .processing` before
 /// awaiting the recognizer's final transcript, to stop a second tap submitting
 /// twice. That looked like a duplicate of what `sendAnswer` already does, but
 /// `Stage` is data — `submit` dispatches turn 3 on `stage.isReattempt` — so a

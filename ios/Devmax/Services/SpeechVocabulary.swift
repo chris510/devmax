@@ -34,6 +34,9 @@ enum SpeechVocabulary {
         "read-through", "write-through", "revalidation", "authoritative nameserver",
     ]
 
+    /// Set once, so the per-tap path only pays a hash lookup per candidate.
+    private static let standingSet = Set(standing)
+
     /// The standing terms plus the words of the card being reviewed, which is the
     /// single best predictor of what is about to be said. Topics are short, so
     /// this stays well inside the length the recognizer handles well.
@@ -43,12 +46,25 @@ enum SpeechVocabulary {
     static func terms(for topic: String?) -> [String] {
         guard let topic, !topic.isEmpty else { return standing }
 
+        // Splitting on non-alphanumerics rather than spaces: a quarter of the
+        // topics carry punctuation ("HTTP caching: ETags, Cache-Control, and
+        // revalidation"), and "ETags," is not a term anything will match. The
+        // hyphen survives so "write-ahead" and "at-least-once" stay whole.
         let words = topic
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" })
             .map(String.init)
-            // Function words carry no bias and only dilute the list.
-            .filter { $0.count > 3 }
+            // Function words carry no bias. An initialism is never one, and is
+            // the class the recognizer handles worst — so length alone would
+            // throw away exactly the terms most worth biasing.
+            .filter { $0.count > 3 || $0 == $0.uppercased() }
 
-        return standing + [topic] + words
+        // A duplicate spends a slot in a budget that works by staying short —
+        // and a one-word topic would otherwise be added as both phrase and word.
+        var seen = standingSet
+        var additions: [String] = []
+        for term in [topic] + words where seen.insert(term).inserted {
+            additions.append(term)
+        }
+        return standing + additions
     }
 }
