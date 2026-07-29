@@ -24,7 +24,7 @@ services `devmax` + `Postgres`).
 | ✅ | Railway project + Postgres (18, not 17 — migrations applied clean) | done |
 | ✅ | Six app variables set; migrations 0001–0003 ran via `preDeployCommand` | done |
 | ✅ | Two GitHub repo secrets; first green cron run confirmed | done |
-| ☐ | Reset the legacy 126-card curriculum; activate week 1 (6 conversational cards) | after curriculum deploy |
+| ✅ | Reset the legacy 126-card curriculum; activate week 1 (6 conversational cards) | done |
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
