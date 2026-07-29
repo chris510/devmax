@@ -195,14 +195,14 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **`cards.json` was written here, not delivered.** `spec.md` §Seeding says the 111-card
-  study plan is "already generated," but it never was; `api/cards.json` is a 126-card plan
-  authored against `app/seed.py`'s documented contract (`docs/CURRICULUM.md` records the
-  111 → 126 expansion). Seed from it with `--file`. `--fixtures` is for the design states
-  only — it seeds the four cards the screenshots depict, with invented history and a fake
-  in-progress draft, and refuses a non-local database without `--force`.
-- **Not yet deployed.** No Railway project exists yet. `docs/RUNBOOK.md` is the ordered path
-  from a clean repo to a push arriving on a phone.
+- **The curriculum is lesson-gated.** `api/cards.json` is a 54-card system-design recall
+  spine: six cards in each of nine teaching weeks, followed by three weeks of mocks and
+  gap-driven additions. Activate one cohort with `--activate-week N` only after its Hello
+  Interview source lessons are complete. The retired 126-card plan lives at
+  `api/archive/cards-legacy-126.json`; coding is a desk-only reference library, and
+  company material is on demand. `docs/CURRICULUM.md` is authoritative for content.
+- **Production is live on Railway.** `docs/DEPLOY-CHECKLIST.md` records the current state;
+  `docs/RUNBOOK.md` is the procedure for reproducing it.
 - **Anthropic and APNs have both been exercised for real, locally.** `services/llm.py` runs
   against the live API (see `scripts/effort_sweep.py`, which is also how `scoring_effort`
   was chosen), and a real APNs push has reached a physical iPhone from a local server using

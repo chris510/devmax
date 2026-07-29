@@ -547,8 +547,10 @@ Fly.io health checks.
 
 ## Seeding
 
-Include a management script that loads `cards.json` (already generated —
-111 cards from the study plan) into the `cards` table. It must set
+Include a management script that loads `cards.json` (the 54-card,
+nine-teaching-week recall spine documented in `docs/CURRICULUM.md`) into the
+`cards` table. The manifest carries source and activation metadata for
+auditability; the runtime stores only the card fields above. The script must set
 `delivery_mode` by category:
 
 - `'desk'` — Coding Warmup, Coding Pattern, Tier 2 Practical Build
@@ -556,9 +558,12 @@ Include a management script that loads `cards.json` (already generated —
   System Design Pattern, System Design Problem, Company-Specific Problem,
   Behavioral)
 
-Add a `--weeks-through N` flag that only loads cards with
-`target_week <= N`, so the initial queue isn't flooded with 111 cards on
-day one. Default to loading weeks 1–2 only.
+Add an `--activate-week N` flag that loads exactly one curriculum week and
+schedules it from `--start-date`. This is the production path: lesson
+completion, not the calendar, controls when a cohort enters review.
+
+Keep `--weeks-through N` for local verification and clean-room bulk imports.
+Due dates must still be staggered so a bulk import does not flood the queue.
 
 ---
 

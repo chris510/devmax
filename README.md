@@ -37,12 +37,16 @@ uv run uvicorn app.main:app --reload --port 8083
 ```
 
 `--fixtures` seeds exactly the cards every screenshot depicts, so the designs are
-reproducible against a real server. For a real queue use the study plan instead — it
-staggers due dates so only one session's worth comes due per day:
+reproducible against a real server. For a real queue, activate a curriculum week only
+after its source lessons are complete:
 
 ```sh
-uv run python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-08-03
+uv run python -m app.seed --file cards.json --activate-week 1 --start-date 2026-08-03
 ```
+
+The 12-week program is documented in `docs/CURRICULUM.md`. The base manifest has
+nine six-card teaching cohorts; weeks 10–12 are reserved for mocks and gap-driven
+cards.
 
 Never load `--fixtures` into a real database: they carry invented session history and a fake
 in-progress draft. The seeder refuses any non-local database without `--force`.

@@ -1,221 +1,314 @@
-# Curriculum — what goes in the deck and why
+# Curriculum — 12-week senior-backend interview plan
 
-`cards.json` is not an arbitrary list. This document records how the deck is shaped,
-what gets added, what gets retired, and what deliberately lives outside this app.
+`api/cards.json` is a recall spine, not a complete interview-preparation
+program. Devmax tests whether a mechanism can be reconstructed out loud in
+under two minutes. Coding execution, full system designs, and behavioral story
+authoring happen outside the app.
 
-Companion to `spec.md` (backend behavior) and `docs/DEVIATIONS.md` (spec drift).
-This file governs **content**, not architecture. It is not a feature backlog.
+This document governs curriculum content and activation. `spec.md` governs
+backend behavior. The retired 126-card deck is preserved at
+`api/archive/cards-legacy-126.json`.
 
----
+## Target
 
-## Scope of this app
+- Senior backend or backend-leaning platform/product roles.
+- Mid-level is an acceptable fallback; preparation is calibrated to the senior
+  bar.
+- Initial target companies: Anthropic, OpenAI, and Google.
+- Twelve weeks at 12–15 focused hours per week. If an interview is scheduled
+  sooner, compress the same dependency order rather than activating everything.
 
-One modality: spaced recall of anything reconstructable out loud in under two
-minutes. `QUESTION_RUBRIC` in `app/services/llm.py` enforces it — mechanism
-reconstruction over definition recall, concrete scenario, one question, no
-multi-part sub-questions.
+The foundation is product/backend system design because it transfers across the
+widest set of roles. Platform, AI-infrastructure, and company-shaped depth are
+on-demand overlays.
 
-Three subjects, in this app: system design, coding patterns, behavioral.
+## Evidence hierarchy
 
-### Explicitly out of scope — do not build
+Cards are justified by one of these sources, in descending order:
 
-* Full timed system design practice. Happens in a browser on an external platform.
-  Every card narrows to a single probe by design; the app will never walk a whole
-  design and should not try.
-* Timed coding rounds. Self-run, CoderPad-style, two problems in 45 minutes.
-  Coding cards drill pattern recognition, not speed under a clock.
-* Behavioral story *authoring*. Stories are written in a doc first, then become
-  cards. The app drills stories that already exist.
+1. A current Hello Interview lesson in the system-design, coding, or behavioral
+   course.
+2. A current level guide for the target role, especially Google L5 and OpenAI
+   L5.
+3. A repeated theme in recent target-company interview reports. Reports are
+   self-selected and sorted by recency/popularity, so they identify themes—not
+   exact question probabilities.
+4. A concrete gap observed in a timed problem, full design, mock, or real
+   interview.
 
-Reading this document is not a mandate to add interview-simulation features.
-`Review Sprint` is the final form of in-app practice.
+The fourth source eventually outranks every generic catalog for personal
+prioritization.
 
----
+Every base card in `api/cards.json` records:
+
+- `source_url`
+- `source_section`
+- `activation_prerequisite`
+- `evidence`
+
+These fields make the repository auditable. The seed loader deliberately stores
+only the app's existing card fields; source metadata is curriculum provenance,
+not runtime state.
+
+## The modality boundary
+
+### Devmax does
+
+- Mechanism reconstruction.
+- Trade-off and failure-mode recall.
+- Spaced repetition after a lesson has been learned.
+- Focused prompts created from an observed practice gap.
+
+### Devmax does not do
+
+- First exposure to a new topic.
+- Timed coding or implementation.
+- A complete 45-minute system-design interview.
+- Behavioral story authoring.
+- Readiness certification.
+
+Readiness comes from external performance. A library full of 4s and 5s is not
+evidence that the user can code under time pressure or navigate a whole design.
 
 ## Deck shape
 
-Current 111 cards:
+### Base recall spine — `api/cards.json`
 
-| Subject | Cards | Share |
-|---|---|---|
-| System design (concepts, technologies, patterns, problems) | 66 | 59% |
-| Coding patterns and warmups | 22 | 20% |
-| Behavioral | 10 | 9% |
-| Practical builds + company-specific | 13 | 12% |
+Fifty-four conversational cards:
 
-**Target direction:** coding and behavioral grow; system design holds roughly flat
-after the additions below. Rationale: coding rounds appear at every level and
-dominate mid-level loops, and behavioral is decisive for level determination at
-both target companies. System design only fully pays off at senior loops.
+| Category | Cards |
+|---|---:|
+| Delivery | 2 |
+| Core Concept | 19 |
+| Key Technology | 12 |
+| System Design Pattern | 21 |
 
-**Do not add coding or behavioral cards speculatively.** That expansion is gated on
-a timed-coding diagnostic that has not been run yet. Adding them before it means
-committing review budget to an unvalidated ranking.
+There are six new cards in each of weeks 1–9. Weeks 10–12 contain no generic
+additions; they are reserved for mocks, target-company overlays, and cards
+earned from observed failures.
 
----
+The base deck intentionally contains no:
 
-## Core additions (19 cards, add now)
+- `System Design Problem`
+- `Company-Specific Problem`
+- `Coding Pattern`
+- `Coding Warmup`
+- `Tier 2 Practical Build`
+- `Behavioral`
 
-Append to `cards.json`. `seed.py` dedupes on `Card.topic`, so re-running is safe.
+Broad prompts such as “Design a news feed” do not fit a two-minute canonical
+question. Run the full problem externally and add a focused mechanism afterward,
+such as “fan-out recovery when a publish partially succeeds.”
 
-```json
-[
-  { "topic": "The delivery framework: requirements, entities, API, high-level, deep dives", "category": "Delivery", "target_week": 1 },
-  { "topic": "Quantifying non-functional requirements and which ones change the design", "category": "Delivery", "target_week": 1 },
+### Coding reference library — `api/library/coding-patterns.json`
 
-  { "topic": "Geospatial indexing: geohash vs quadtree vs S2 cells", "category": "Core Concept", "target_week": 1 },
-  { "topic": "Real-time delivery: polling, long-poll, SSE, and WebSockets, and what each costs the server", "category": "Core Concept", "target_week": 1 },
-  { "topic": "API design: cursor vs offset pagination, versioning, and error semantics", "category": "Core Concept", "target_week": 1 },
-  { "topic": "Bloom filters and when a false positive is acceptable", "category": "Core Concept", "target_week": 2 },
-  { "topic": "Count-Min Sketch and HyperLogLog for heavy hitters and cardinality", "category": "Core Concept", "target_week": 2 },
-  { "topic": "Cache stampede, hot keys, and negative caching", "category": "Core Concept", "target_week": 2 },
-  { "topic": "Data modeling from access patterns: single-table design vs normalized schemas", "category": "Core Concept", "target_week": 2 },
+Seventeen mechanism prompts covering Hello Interview's sixteen coding families
+live in a desk-only reference file (graphs contributes both dependency ordering
+and shortest paths). They are not part of the production seed. Coding happens in
+an editor; a pattern card is seeded only after external practice shows that
+recalling its invariant would help.
 
-  { "topic": "DynamoDB: partition and sort keys, GSI vs LSI, and hot partitions", "category": "Key Technology", "target_week": 2 },
-  { "topic": "Redis as a data-structure store: sorted sets, streams, HyperLogLog, GEO", "category": "Key Technology", "target_week": 2 },
-  { "topic": "Flink: event time vs processing time, watermarks, and checkpointing", "category": "Key Technology", "target_week": 3 },
-  { "topic": "Vector indexes: HNSW vs IVF-PQ and the recall-latency-memory triangle", "category": "Key Technology", "target_week": 3 },
+### Company overlays — `api/modules/company-*.json`
 
-  { "topic": "Distributed locks: TTLs, fencing tokens, and why Redlock is contested", "category": "System Design Pattern", "target_week": 2 },
-  { "topic": "Large blob upload: presigned URLs, chunked resumable uploads, CDN origin", "category": "System Design Pattern", "target_week": 2 },
-  { "topic": "Async job submission with status polling and webhook callback", "category": "System Design Pattern", "target_week": 3 },
+Anthropic, OpenAI, and Google each have a six-card mechanism module derived from
+current level guides and reported-question themes. Activate a module only when a
+matching role or interview loop becomes concrete.
 
-  { "topic": "Design a proximity search service for nearby places", "category": "System Design Problem", "target_week": 2 },
-  { "topic": "Design an ad click aggregator with exactly-once counting", "category": "System Design Problem", "target_week": 3 },
-  { "topic": "Design ticket reservation under scarcity", "category": "System Design Problem", "target_week": 3 }
-]
+Company modules are not predictions that an exact question will repeat. They
+capture transferable mechanisms emphasized by the current evidence.
+
+### Behavioral cards
+
+Do not seed generic behavioral prompts at startup. First write a story catalog
+covering:
+
+1. scope
+2. ownership
+3. ambiguity
+4. perseverance
+5. conflict resolution
+6. growth
+7. communication
+8. leadership
+
+Then create one story-specific card per story. Keep only the Big Three as
+generic transfer prompts:
+
+- tell me about yourself
+- describe a project you are proud of
+- describe a conflict
+
+Story-specific cards establish the evidence. Generic prompts later test whether
+the right story can be selected under ambiguity.
+
+## Activation rule
+
+**A card enters production only after its `activation_prerequisite` is complete.**
+
+Activate one week from the date learning finishes:
+
+```sh
+cd api
+uv run python -m app.seed \
+  --file cards.json \
+  --activate-week 1 \
+  --start-date <today>
 ```
 
-`Delivery` is a new category. `category` is an unconstrained `str` in
-`app/models.py`, so no migration is needed. It is not in `DESK_CATEGORIES`, so these
-cards are conversational and push-eligible — intended.
+`--activate-week N` selects exactly that curriculum week and schedules its cards
+as a fresh cohort beginning on `--start-date`. The original `target_week`
+remains stored on the card for curriculum-order metadata.
 
-### Card phrasing rule
+Re-running the same command is safe because seeding deduplicates on `Card.topic`.
+Do not activate the next week merely because seven calendar days passed.
 
-Topics must name a **mechanism with a reconstructable shape**, not a decision or a
-category comparison. "MVCC: how readers avoid blocking writers" works. "SQL vs
-NoSQL trade-offs" does not — there is nothing to rebuild, so the model can only
-generate recitation prompts, and category comparisons are a known interview
-anti-pattern besides.
+`--weeks-through N` remains available for local verification and clean-room bulk
+imports, but it is not the recommended production learning workflow.
 
----
+## Twelve-week program
 
-## Retire (4 cards)
+### Weeks 1–3 — delivery and core concepts
 
-Remove from `cards.json`. Existing DB rows are left alone; this only affects
-future seeding.
+System design:
 
-| Card | Reason |
-|---|---|
-| Big-O in practice: when constant factors dominate | Not probed in senior design rounds |
-| Hash functions: uniformity, collisions, and load factor | Subsumed by consistent hashing |
-| Processes, threads, and what a context switch actually costs | Rarely load-bearing above mid-level |
-| Tokenization and why token counts drive cost | Thin; covered by metering and prompt-caching cards |
+- delivery framework
+- non-functional requirements and capacity estimation
+- networking and API mechanics
+- data modeling and indexing
+- caching, sharding, consistent hashing, and CAP
 
-Net daily rotation: **111 → 126.**
+External coding:
 
----
+- two pointers
+- sliding window
+- intervals
+- stacks
+- linked lists
+- binary search
+- heaps
+- DFS and BFS
 
-## Modules — seeded on demand, not at startup
+Use the editor for implementation. Add a Devmax coding card only when a failed
+problem exposes a reusable recognition or invariant gap.
 
-Company-shaped depth. Seed only when a loop is scheduled; one to two weeks is
-enough for SM-2 to move a card from untested to solid. Live in `modules/`.
+### Weeks 4–6 — technologies
 
-```
-uv run python -m app.seed --file modules/logistics.json --start-date <today>
-```
+System design:
 
-### `modules/ai-application.json`
-```json
-[
-  { "topic": "Permission-filtered retrieval: ACLs in a vector or search index", "category": "AI Application", "target_week": 1 },
-  { "topic": "Document ingestion: chunking strategy, OCR failures, and re-index on update", "category": "AI Application", "target_week": 1 },
-  { "topic": "Hybrid search: combining BM25 and dense retrieval with reranking", "category": "AI Application", "target_week": 2 },
-  { "topic": "Elasticsearch write path: segments, refresh interval, and near-real-time search", "category": "AI Application", "target_week": 2 }
-]
-```
+- PostgreSQL
+- Redis
+- DynamoDB
+- Cassandra
+- API gateways
+- Kafka
+- Elasticsearch
+- blob storage and CDNs
+- Flink, ZooKeeper, approximate structures, proximity search, and vector indexes
 
-### `modules/logistics.json`
-```json
-[
-  { "topic": "Matching and dispatch under constraints: greedy vs batched assignment", "category": "Logistics", "target_week": 1 },
-  { "topic": "ETA estimation and the read path for a live map", "category": "Logistics", "target_week": 1 },
-  { "topic": "Hot partition mitigation: key salting and two-phase aggregation", "category": "Logistics", "target_week": 2 }
-]
-```
+External coding:
 
-### `modules/realtime-social.json`
-```json
-[
-  { "topic": "Message storage at scale: partitioning by channel and time bucketing", "category": "Realtime Social", "target_week": 1 },
-  { "topic": "Presence at scale: heartbeats, gossip, and eventual accuracy", "category": "Realtime Social", "target_week": 1 },
-  { "topic": "Connection state: sticky routing, reconnect, and missed-message backfill", "category": "Realtime Social", "target_week": 2 }
-]
-```
+- graphs and shortest paths
+- backtracking
+- dynamic programming
+- greedy algorithms
+- tries
+- prefix sums
+- matrices
 
-### `modules/bigtech-classics.json`
-```json
-[
-  { "topic": "Design a web crawler with politeness and dedup", "category": "Big Tech Classic", "target_week": 1 },
-  { "topic": "Design a file sync service with chunking and conflict resolution", "category": "Big Tech Classic", "target_week": 1 },
-  { "topic": "Composite index column order and covering indexes", "category": "Big Tech Classic", "target_week": 2 }
-]
-```
+Begin the behavioral story catalog by the end of week 6.
 
-### `modules/infra-observability.json`
-```json
-[
-  { "topic": "Time-series databases: rollups, retention, and label cardinality blowup", "category": "Infra", "target_week": 1 },
-  { "topic": "API gateway vs load balancer vs service mesh: what each layer owns", "category": "Infra", "target_week": 1 },
-  { "topic": "Durable workflow orchestration vs choreographed sagas", "category": "Infra", "target_week": 2 }
-]
-```
+### Weeks 7–9 — reusable patterns and application
 
-### `modules/model-lab.json` — candidate, not yet split out
+System design:
 
-Six existing core cards are calibrated to model-lab infrastructure: KV cache,
-attention scaling, GPU memory hierarchy, PagedAttention, continuous batching,
-speculative decoding. The first three generalize to anyone reasoning about latency
-and cost as an API consumer. The last three are lab-internal and serve a small
-slice of the target list. If daily volume becomes the binding constraint, move
-those three here first.
+- scaling reads and writes
+- replica lag and fan-out
+- backpressure and queues
+- contention and distributed locks
+- sagas and durable workflows
+- circuit breakers, retries, and exactly-once effects
+- real-time updates
+- large blobs and long-running jobs
+- rate limiting and observability
 
----
+External practice:
 
-## Required code change
+- two complete system designs per week
+- three timed coding sessions per week
+- story catalog completed and Big Three drafted
 
-`QUESTION_RUBRIC` in `app/services/llm.py` hardcodes the target companies:
+Every external session ends with a gap harvest. Add at most one to three focused
+cards for mechanisms that could not be reconstructed.
 
-```
-preparing for interviews at Anthropic, OpenAI, and Google
-```
+### Weeks 10–12 — simulation and target overlays
 
-This skews generated questions toward lab-infrastructure depth. Replace with a
-list-agnostic phrasing:
+No automatic generic cards.
 
-```
-preparing for system design interviews across product and infrastructure companies
-```
+Each week:
 
-Nothing else in the prompt changes. The mechanism-reconstruction instruction and
-the two-minute constraint are correct as written.
+- two full system-design mocks
+- three coding mocks
+- two behavioral practices
+- due Devmax reviews
+- company modules selected for actual roles
+- gap cards only
 
----
+Google-style coding practice must include a plain editor with no execution.
+OpenAI-style practice must include practical, production-shaped implementation
+and testing. Company-specific full designs remain external even when their
+focused mechanisms become cards.
 
-## Operational notes
+## Weekly time budget
 
-`_schedule` staggers due dates from `--start-date` by `target_week`. Reusing an
-original start date pushes new cards into the past or far future. Always pass
-today's date for additions:
+| Phase | Coding | System design | Behavioral | Devmax |
+|---|---:|---:|---:|---:|
+| Weeks 1–3 | 6–7h | 4–5h | 0–1h | 1h |
+| Weeks 4–6 | 6h | 4–5h | 1–2h | 1h |
+| Weeks 7–9 | 5–6h | 4–5h | 1–2h | 1h |
+| Weeks 10–12 | 5h | 5h | 2h | 1h |
 
-```
-uv run python -m app.seed --file cards.json --weeks-through 3 --start-date <today>
-```
+If fewer hours are available, reduce breadth. Do not increase passive card
+volume to compensate for missing external practice.
 
-Cards are deduped on `Card.topic` (`app/seed.py`), so appends never disturb
-existing SM-2 state.
+## Readiness gates
 
-**Keeping the deck honest:** cards are added after a real gap shows up, not from a
-catalog diff. The intended loop is that an external timed session surfaces
-something you could not reconstruct, and it becomes 1-3 cards via QuickAdd in the
-same sitting. Without that, the deck drifts toward whatever a prep site sells.
+Devmax scores are diagnostic, not readiness gates.
+
+### Coding
+
+- Two unseen problems in 45 minutes.
+- Correct or nearly correct implementation.
+- Clear narration, complexity analysis, and manual edge-case testing.
+- At least five to seven sessions in a plain editor without execution.
+
+### System design
+
+- A complete 45-minute design that follows the delivery framework.
+- Requirements and scale quantified before architecture.
+- At least two defended deep dives.
+- Failure modes and trade-offs handled without technology name-dropping.
+- At least three mocks at the target level.
+
+### Behavioral
+
+- Eight written stories with individual actions, measurable results, and
+  learnings.
+- Big Three answers practiced.
+- Stories demonstrate senior scope, judgment, and influence.
+- At least two mocks with follow-up questions.
+
+## Keeping the curriculum honest
+
+A new card must answer all of these:
+
+1. What source lesson or observed failure justifies it?
+2. Can its mechanism be reconstructed in under two minutes?
+3. Does it test a scenario rather than a definition?
+4. Would a different answer change an interview decision or reveal a real gap?
+5. Is it more useful than spending the same review budget on an existing weak
+   card?
+
+Do not add a card because a prep catalog happens to contain a page. Do not add a
+broad problem because it has appeared at a target company. The external session
+is where whole-problem performance is measured; Devmax retains the focused
+lesson afterward.

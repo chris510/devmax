@@ -1,0 +1,138 @@
+[
+  {
+    "topic": "Two pointers: maintaining the invariant that makes one-sided movement safe",
+    "category": "Coding Pattern",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/learn/code/two-pointers/overview",
+    "activation_prerequisite": "Implement at least one unseen two-pointers problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Sliding window: updating state while expanding and contracting a valid range",
+    "category": "Coding Pattern",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/learn/code/sliding-window/fixed-length",
+    "activation_prerequisite": "Implement fixed- and variable-length window problems",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Intervals: sorting and sweeping while preserving the current merged boundary",
+    "category": "Coding Pattern",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/learn/code/intervals/overview",
+    "activation_prerequisite": "Implement an unseen interval problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Stack parsing: storing unresolved work until a closing event supplies context",
+    "category": "Coding Pattern",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/learn/code/stack/overview",
+    "activation_prerequisite": "Implement a stack parsing problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Linked-list pointer surgery: rewiring nodes without losing the remaining list",
+    "category": "Coding Pattern",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/learn/code/linked-list/overview",
+    "activation_prerequisite": "Implement reversal and one multi-pointer linked-list problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Binary search: proving which half still contains the answer after each comparison",
+    "category": "Coding Pattern",
+    "target_week": 1,
+    "source_url": "https://www.hellointerview.com/learn/code/binary-search/overview",
+    "activation_prerequisite": "Implement direct search and binary search on an answer",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Heap selection: retaining only the candidates that can still enter the top K",
+    "category": "Coding Pattern",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/learn/code/heap/overview",
+    "activation_prerequisite": "Implement a top-K or K-way merge problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Depth-first search: defining recursive state, return values, and visited ownership",
+    "category": "Coding Pattern",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/learn/code/depth-first-search/introduction",
+    "activation_prerequisite": "Implement tree and graph DFS problems",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Breadth-first search: preserving level or distance order with a queue",
+    "category": "Coding Pattern",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/learn/code/breadth-first-search/introduction",
+    "activation_prerequisite": "Implement tree and graph BFS problems",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Backtracking: choosing, recursing, and undoing while pruning an invalid branch",
+    "category": "Coding Pattern",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/learn/code/backtracking/overview",
+    "activation_prerequisite": "Implement an unseen backtracking problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Topological ordering: converting dependency constraints into indegrees and a processing frontier",
+    "category": "Coding Pattern",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/learn/code/graphs/topological-sort",
+    "activation_prerequisite": "Implement a dependency-ordering problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Shortest paths: relaxing edges while preserving the best finalized distances",
+    "category": "Coding Pattern",
+    "target_week": 2,
+    "source_url": "https://www.hellointerview.com/learn/code/graphs/shortest-path-algorithms",
+    "activation_prerequisite": "Implement an unseen weighted shortest-path problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Dynamic programming: defining state, transitions, base cases, and evaluation order",
+    "category": "Coding Pattern",
+    "target_week": 3,
+    "source_url": "https://www.hellointerview.com/learn/code/dynamic-programming/fundamentals",
+    "activation_prerequisite": "Implement top-down and bottom-up versions of a problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Greedy algorithms: proving a locally optimal choice cannot damage the global optimum",
+    "category": "Coding Pattern",
+    "target_week": 3,
+    "source_url": "https://www.hellointerview.com/learn/code/greedy/overview",
+    "activation_prerequisite": "Implement and justify an unseen greedy problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Trie traversal: sharing prefix state across insert, lookup, and enumeration",
+    "category": "Coding Pattern",
+    "target_week": 3,
+    "source_url": "https://www.hellointerview.com/learn/code/trie/overview",
+    "activation_prerequisite": "Implement trie insert and prefix lookup",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Prefix sums: turning a range query into the difference of two accumulated states",
+    "category": "Coding Pattern",
+    "target_week": 3,
+    "source_url": "https://www.hellointerview.com/learn/code/prefix-sum/overview",
+    "activation_prerequisite": "Implement a prefix-sum or prefix-frequency problem",
+    "evidence": "official_course"
+  },
+  {
+    "topic": "Matrix traversal: mapping coordinate transforms without overwriting unread state",
+    "category": "Coding Pattern",
+    "target_week": 3,
+    "source_url": "https://www.hellointerview.com/learn/code/matrices/spiral-matrix",
+    "activation_prerequisite": "Implement an in-place matrix transform",
+    "evidence": "official_course"
+  }
+]

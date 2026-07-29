@@ -183,7 +183,7 @@ warning (expected at this stage) and no tracebacks.
 
 ```sh
 railway ssh --service <api-service> \
-  "python -m app.seed --file cards.json --weeks-through 6 --start-date 2026-07-27"
+  "python -m app.seed --file cards.json --activate-week 1 --start-date <today>"
 ```
 
 **It must be `railway ssh`, not `railway run`.** `railway run` executes the process
@@ -193,11 +193,9 @@ has to run *in* the container. First connection prompts once to trust
 `ssh.railway.com`, and `railway ssh` needs a registered key
 (`railway ssh keys add`) before it will connect at all.
 
-**`--start-date 2026-07-27` is not a placeholder — use exactly that.** The local
-Postgres was seeded with it, and `seed.py` dedupes by topic, so re-running with the
-same date is idempotent while a different one misaligns every week boundary. It was
-chosen over a later Monday because both align the same way, but this one makes cards
-come due immediately; seed a week out and the app is unusable until they land.
+`--activate-week` schedules the selected cohort as a fresh week beginning on
+`--start-date`. Use the day its source lessons were completed. Re-running the same
+cohort is idempotent because `seed.py` deduplicates by topic.
 
 **Use `--file`, never `--fixtures`.** The fixtures carry invented session history
 and a fake 14-hour-old in-progress draft that would render a bogus resume banner on
@@ -207,7 +205,9 @@ production. Note the guard sits *inside* the `--fixtures` branch
 (`app/seed.py:331`): the `--file` path is ungated, so nothing stops a wrong
 `--start-date` but the dedupe.
 
-126 cards seed from `api/cards.json`: 99 conversational, 27 desk, staggered ~2/day.
+The base manifest contains 54 conversational cards: six in each of nine teaching
+weeks. Activate one week at a time. Coding patterns live in `api/library/` and
+company overlays live in `api/modules/`; neither is part of the automatic base seed.
 
 Due dates are staggered so exactly `reviews_per_day` conversational cards come due
 per day. Check it:

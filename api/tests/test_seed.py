@@ -15,7 +15,12 @@ import pytest
 
 from app.db import is_local_database
 from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK
-from app.seed import DAYS_PER_WEEK, _schedule, delivery_mode_for
+from app.seed import (
+    _schedule,
+    _schedule_entries,
+    _selected_entries,
+    delivery_mode_for,
+)
 
 START = date(2026, 8, 3)
 CARDS_JSON = Path(__file__).resolve().parent.parent / "cards.json"
@@ -41,20 +46,15 @@ def due_by_mode(entries: list[dict], per_day: int, mode: str) -> collections.Cou
 def test_the_real_study_plan_never_exceeds_the_daily_push_budget() -> None:
     """The whole point: seeding the whole plan must not flood day one.
 
-    Asserted at the shipped `reviews_per_day` of 2. The curriculum additions
-    (docs/CURRICULUM.md) put 16/23/19 conversational cards in weeks 1-3, past the 14
-    that fit at that rate, and `_schedule` clamps the overflow onto each week's last
-    day rather than spilling it into the next. So the budget holds on every day but
-    those six, and the pile-up is pinned below rather than waved through — raising
-    the rate is not the fix available here, because docs/DEVIATIONS.md wants a
-    `push_log` table before the push cap is safe above two a day.
+    The 12-week curriculum has six new cards in each of its nine teaching weeks,
+    below the fourteen that fit at the shipped `reviews_per_day` of two. Weeks
+    10-12 deliberately contain no generic cards: they are for mocks, company
+    overlays, and prompts earned from observed gaps.
     """
     counts = due_by_mode(study_plan(), 2, DELIVERY_CONVERSATIONAL)
-    week_ends = {START + timedelta(days=DAYS_PER_WEEK * week - 1) for week in range(1, 7)}
 
     assert counts[START] == 2, "day one must show one session's worth, not the cohort"
-    assert max(n for day, n in counts.items() if day not in week_ends) <= 2
-    assert max(counts[day] for day in week_ends) == 11, "week 2's last day; see the docstring"
+    assert max(counts.values()) <= 2
 
 
 def test_the_budget_follows_reviews_per_day() -> None:
@@ -99,6 +99,31 @@ def test_a_card_with_no_target_week_is_due_immediately() -> None:
     assert due[0] == START
 
 
+def test_activate_week_selects_only_that_week_and_rebases_its_schedule() -> None:
+    entries = [
+        {"topic": "a", "category": "Core Concept", "target_week": 1},
+        {"topic": "b", "category": "Core Concept", "target_week": 4},
+        {"topic": "c", "category": "Core Concept", "target_week": 4},
+    ]
+
+    selected = _selected_entries(entries, weeks_through=2, activate_week=4)
+    schedule_entries = _schedule_entries(selected, activate_week=4)
+
+    assert [entry["topic"] for entry in selected] == ["b", "c"]
+    assert all(entry["target_week"] == 4 for entry in selected)
+    assert _schedule(schedule_entries, START, per_day=2) == [START, START]
+
+
+def test_bulk_selection_keeps_the_original_weeks_through_behavior() -> None:
+    entries = [
+        {"topic": "a", "target_week": 1},
+        {"topic": "b", "target_week": 2},
+        {"topic": "c", "target_week": 3},
+    ]
+
+    assert [entry["topic"] for entry in _selected_entries(entries, 2, None)] == ["a", "b"]
+
+
 def test_categories_map_to_the_delivery_modes_the_spec_lists() -> None:
     for category in ("Coding Warmup", "Coding Pattern", "Tier 2 Practical Build"):
         assert delivery_mode_for(category) == DELIVERY_DESK
@@ -117,13 +142,29 @@ def test_categories_map_to_the_delivery_modes_the_spec_lists() -> None:
 def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     entries = study_plan()
     modes = collections.Counter(delivery_mode_for(e["category"]) for e in entries)
+    weeks = collections.Counter(e["target_week"] for e in entries)
 
-    assert len(entries) == 126
-    assert modes[DELIVERY_CONVERSATIONAL] == 99
-    assert modes[DELIVERY_DESK] == 27
+    assert len(entries) == 54
+    assert modes[DELIVERY_CONVERSATIONAL] == 54
+    assert modes[DELIVERY_DESK] == 0
+    assert weeks == {week: 6 for week in range(1, 10)}
     # seed.py raises KeyError without a topic, and dedupes on it.
     assert all(e.get("topic") and e.get("target_week") for e in entries)
     assert len({e["topic"] for e in entries}) == len(entries)
+    assert all(e["source_url"].startswith("https://www.hellointerview.com/") for e in entries)
+    assert all(e.get("activation_prerequisite") for e in entries)
+    assert not any(
+        e["category"]
+        in {
+            "Behavioral",
+            "Coding Pattern",
+            "Coding Warmup",
+            "Company-Specific Problem",
+            "System Design Problem",
+            "Tier 2 Practical Build",
+        }
+        for e in entries
+    )
 
 
 @pytest.mark.parametrize(
