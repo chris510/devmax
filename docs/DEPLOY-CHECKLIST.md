@@ -27,18 +27,22 @@ services `devmax` + `Postgres`).
 | ✅ | Seed 126 cards (99 conversational, 27 desk), 4 due immediately | done |
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
-| ☐ | iOS Release build to device | **start here** — needs a Mac + Xcode |
-| ☐ | First push | blocked on the build: `device_tokens` is empty |
+| ✅ | iOS Release build installed on the iPhone; token registered | done |
+| ☐ | First push | **start here** — only `outside_window` stands in the way |
 | ☐ | `reattempt_effort` sweep | independent — can happen any time |
 
 ---
 
 ## Order, and why it is this order
 
-**Steps 1–5 and the APNs half of step 7 are done.** They are kept below as the record
-of what was done and why. The only work left is **step 6, the iOS Release build** —
-`device_tokens` is empty, so nothing can be pushed to until a real build registers a
-token. After that, step 7's push is a single `curl` inside a notification window.
+**Steps 1–6 are done, and so are step 7's APNs variables.** They are kept below as the
+record of what was done and why. All that is left is the push itself: a single `curl`
+to `/internal/trigger-review` inside a notification window, or the morning cron.
+
+Verified end to end on 2026-07-29: a Release build signed with the team provisioning
+profile is installed on the iPhone, `aps-environment=development` matches
+`APNS_USE_SANDBOX=true`, one row exists in `device_tokens`, and the device's
+`GET /cards/due` returns 200 against the deployed API.
 
 **1. Decide the cron question before you merge anything else.**
 Scheduled workflows only fire from the default branch, so a merge makes
