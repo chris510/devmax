@@ -169,6 +169,12 @@ generated or changed during the audit.
 The remaining 48 cards are not yet present in production. There are therefore
 no persisted canonical questions to approve today.
 
+The guarded fresh-start operation then atomically replaced those six cards with
+the corrected week-one cohort. It preserved the one device token and settings
+row. Afterward, production had six cards, zero sessions, zero Study Plans, zero
+generated questions, and untouched SM-2 defaults. Two cards are due on
+2026-07-31, two on 2026-08-01, and two on 2026-08-02.
+
 The current generator strongly instructs the model to produce one concrete,
 non-multipart question answerable in under two minutes. However, the seed loader
 does not persist curriculum provenance, and the generator receives no source
