@@ -438,6 +438,27 @@ async def load_plan_graph(db: AsyncSession, plan: StudyPlan) -> PlanGraph:
     return PlanGraph(plan, list(phases), list(weeks), list(items), list(deps))
 
 
+async def insert_plan_rows(
+    db: AsyncSession, plan: StudyPlan, rows: Mapping[str, Sequence[Any]]
+) -> None:
+    """Insert a whole plan graph in foreign-key order.
+
+    These models deliberately have no SQLAlchemy relationships. Without the
+    flushes, Postgres can receive items before their phases or weeks even though
+    the table-level foreign keys are correct. Every creation path, including
+    deterministic first-party seeds, shares this helper.
+    """
+    db.add(plan)
+    await db.flush()
+    for key in ("phases", "weeks", "items"):
+        for row in rows[key]:
+            db.add(row)
+        await db.flush()
+    for row in rows["dependencies"]:
+        db.add(row)
+    await db.flush()
+
+
 def build_proposal_for(graph: PlanGraph, **kwargs) -> sched.Proposal:
     plan, weeks, items, deps = graph.sched_inputs()
     return sched.build_proposal(plan, weeks, items, deps, **kwargs)
@@ -834,5 +855,4 @@ def blocking_dependencies(
         for pid in prereq_ids
         if pid in graph.item_by_id and graph.item_by_id[pid].status != ITEM_COMPLETE
     ]
-
 

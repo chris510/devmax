@@ -1,0 +1,212 @@
+{
+  "seed_key": "devmax.senior-backend-12-week.v1",
+  "version": 1,
+  "source_guide_path": "../../docs/CURRICULUM.md",
+  "source_guide_sha256": "f32917a38a54d514bdf9c0761de9e0029a4974304068011e1ae5753712a3ba93",
+  "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Work is ordered by dependency: delivery and system-design foundations in Weeks 1–3; concrete backend technologies in Weeks 4–6; reusable architecture patterns and full-design application in Weeks 7–9; interview simulation and target-company calibration in Weeks 10–12.\n\nEach week reserves twelve focused hours across system design, coding, behavioral preparation, and plan-local closed-book retrieval. Global Devmax card reviews continue separately in Today and never determine Study Plan progress. Coding execution and full system designs happen outside the conversational review flow. Every external practice session ends with a gap harvest, and readiness is based on observed mock performance rather than card scores.",
+  "guide_sha256": "a33da322ed2be52b013e35e5fa4d68ad5eeba9ac401fd0eb67d5c3dba795de95",
+  "title": "Senior backend interview preparation",
+  "subject": "Senior backend interview preparation",
+  "subject_slug": "senior-backend-interview-prep",
+  "supports_technical_recall_cards": true,
+  "requested_weeks": 12,
+  "weekly_capacity_minutes": 720,
+  "mode": "flexible",
+  "phases": [
+    {
+      "index": 1,
+      "full_title": "Delivery and system design foundations",
+      "overview_title": "Foundations",
+      "description": "Build the delivery method and core mechanisms that every later design uses."
+    },
+    {
+      "index": 2,
+      "full_title": "Backend technologies and coordination",
+      "overview_title": "Technologies",
+      "description": "Learn where concrete data, messaging, search, and coordination systems fit."
+    },
+    {
+      "index": 3,
+      "full_title": "Reusable architecture patterns and application",
+      "overview_title": "Patterns and application",
+      "description": "Apply reusable scaling, resilience, workflow, and realtime patterns in full designs."
+    },
+    {
+      "index": 4,
+      "full_title": "Interview simulation and target-company calibration",
+      "overview_title": "Simulation",
+      "description": "Convert knowledge into repeatable performance through mocks and focused gap repair."
+    }
+  ],
+  "weeks": [
+    {
+      "index": 1,
+      "phase_index": 1,
+      "full_title": "Delivery framework and decision-driving requirements",
+      "overview_title": "Delivery",
+      "items": [
+        {"key": "W1-L1", "type": "learn", "priority": "core", "title": "Complete the system design delivery framework lesson", "minutes": 180},
+        {"key": "W1-L2", "type": "learn", "priority": "core", "title": "Turn functional and non-functional requirements into design constraints", "minutes": 90},
+        {"key": "W1-P1", "type": "practice", "priority": "core", "title": "Practice two pointers, sliding windows, and intervals", "minutes": 180},
+        {"key": "W1-P2", "type": "practice", "priority": "core", "title": "Deliver one requirements-to-deep-dives system design", "minutes": 150},
+        {"key": "W1-P3", "type": "practice", "priority": "core", "title": "Review the design and harvest specific mechanism gaps", "minutes": 90},
+        {"key": "W1-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the delivery framework closed-book", "minutes": 30, "source_item_key": "W1-L1"}
+      ]
+    },
+    {
+      "index": 2,
+      "phase_index": 1,
+      "full_title": "Request paths, network failures, identity, and data access",
+      "overview_title": "Request and data",
+      "items": [
+        {"key": "W2-L1", "type": "learn", "priority": "core", "title": "Trace request paths and network failure handling", "minutes": 150},
+        {"key": "W2-L2", "type": "learn", "priority": "core", "title": "Study API mechanics, authentication, and authorization boundaries", "minutes": 120},
+        {"key": "W2-P1", "type": "practice", "priority": "core", "title": "Practice stacks, linked lists, and binary search", "minutes": 180},
+        {"key": "W2-P2", "type": "practice", "priority": "core", "title": "Model entities and access patterns for one backend design", "minutes": 150},
+        {"key": "W2-P3", "type": "practice", "priority": "core", "title": "Review failure paths and harvest mechanism gaps", "minutes": 90},
+        {"key": "W2-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the request path and trust boundaries closed-book", "minutes": 30, "source_item_key": "W2-L1"}
+      ]
+    },
+    {
+      "index": 3,
+      "phase_index": 1,
+      "full_title": "Caching, partitioning, replication, and consistency",
+      "overview_title": "Caching and partitions",
+      "items": [
+        {"key": "W3-L1", "type": "learn", "priority": "core", "title": "Study caching, invalidation, and cache failure modes", "minutes": 120},
+        {"key": "W3-L2", "type": "learn", "priority": "core", "title": "Study sharding, consistent hashing, replication, and CAP", "minutes": 150},
+        {"key": "W3-P1", "type": "practice", "priority": "core", "title": "Practice heaps, depth-first search, and breadth-first search", "minutes": 180},
+        {"key": "W3-P2", "type": "practice", "priority": "core", "title": "Design a partitioned and replicated storage path", "minutes": 150},
+        {"key": "W3-P3", "type": "practice", "priority": "core", "title": "Review consistency decisions and harvest mechanism gaps", "minutes": 90},
+        {"key": "W3-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct partitioning and consistency trade-offs closed-book", "minutes": 30, "source_item_key": "W3-L2"}
+      ]
+    },
+    {
+      "index": 4,
+      "phase_index": 2,
+      "full_title": "Relational, cache, and wide-column data systems",
+      "overview_title": "Databases",
+      "items": [
+        {"key": "W4-L1", "type": "learn", "priority": "core", "title": "Study PostgreSQL and Redis mechanics and failure modes", "minutes": 150},
+        {"key": "W4-L2", "type": "learn", "priority": "core", "title": "Study DynamoDB and Cassandra data modeling trade-offs", "minutes": 120},
+        {"key": "W4-P1", "type": "practice", "priority": "core", "title": "Practice graphs, topological ordering, and shortest paths", "minutes": 210},
+        {"key": "W4-P2", "type": "practice", "priority": "core", "title": "Choose and defend storage technologies in one full design", "minutes": 120},
+        {"key": "W4-P3", "type": "practice", "priority": "core", "title": "Start the behavioral story catalog with scope and ownership", "minutes": 90},
+        {"key": "W4-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct database selection trade-offs closed-book", "minutes": 30, "source_item_key": "W4-L1"}
+      ]
+    },
+    {
+      "index": 5,
+      "phase_index": 2,
+      "full_title": "Messaging, search, gateways, and content delivery",
+      "overview_title": "Messaging and search",
+      "items": [
+        {"key": "W5-L1", "type": "learn", "priority": "core", "title": "Study Kafka, API gateway, and asynchronous delivery mechanics", "minutes": 150},
+        {"key": "W5-L2", "type": "learn", "priority": "core", "title": "Study Elasticsearch, blob storage, CDN, and origin behavior", "minutes": 120},
+        {"key": "W5-P1", "type": "practice", "priority": "core", "title": "Practice backtracking, dynamic programming, and greedy algorithms", "minutes": 210},
+        {"key": "W5-P2", "type": "practice", "priority": "core", "title": "Design a searchable media or document delivery system", "minutes": 120},
+        {"key": "W5-P3", "type": "practice", "priority": "core", "title": "Add ambiguity and perseverance stories to the catalog", "minutes": 90},
+        {"key": "W5-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct messaging and search trade-offs closed-book", "minutes": 30, "source_item_key": "W5-L1"}
+      ]
+    },
+    {
+      "index": 6,
+      "phase_index": 2,
+      "full_title": "Coordination, stream processing, and specialized indexes",
+      "overview_title": "Coordination and indexes",
+      "items": [
+        {"key": "W6-L1", "type": "learn", "priority": "core", "title": "Study Flink, ZooKeeper, and coordination guarantees", "minutes": 150},
+        {"key": "W6-L2", "type": "learn", "priority": "core", "title": "Study approximate structures, proximity search, and vector indexes", "minutes": 120},
+        {"key": "W6-P1", "type": "practice", "priority": "core", "title": "Practice tries, prefix sums, and matrix problems", "minutes": 210},
+        {"key": "W6-P2", "type": "practice", "priority": "core", "title": "Design a streaming or proximity-search system", "minutes": 120},
+        {"key": "W6-P3", "type": "practice", "priority": "core", "title": "Complete conflict, growth, communication, and leadership stories", "minutes": 90},
+        {"key": "W6-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct coordination and index trade-offs closed-book", "minutes": 30, "source_item_key": "W6-L1"}
+      ]
+    },
+    {
+      "index": 7,
+      "phase_index": 3,
+      "full_title": "Scaling reads, writes, replicas, and fan-out",
+      "overview_title": "Scaling patterns",
+      "items": [
+        {"key": "W7-L1", "type": "learn", "priority": "core", "title": "Study read scaling, write scaling, replica lag, and fan-out", "minutes": 120},
+        {"key": "W7-P1", "type": "practice", "priority": "core", "title": "Complete a read-heavy full system design", "minutes": 120},
+        {"key": "W7-P2", "type": "practice", "priority": "core", "title": "Complete a write-heavy full system design", "minutes": 120},
+        {"key": "W7-P3", "type": "practice", "priority": "core", "title": "Complete three timed coding sessions", "minutes": 270},
+        {"key": "W7-P4", "type": "practice", "priority": "core", "title": "Practice the Big Three behavioral answers", "minutes": 60},
+        {"key": "W7-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct the week's highest-value gaps", "minutes": 30, "source_item_key": "W7-L1"}
+      ]
+    },
+    {
+      "index": 8,
+      "phase_index": 3,
+      "full_title": "Backpressure, contention, workflows, and resilience",
+      "overview_title": "Resilience patterns",
+      "items": [
+        {"key": "W8-L1", "type": "learn", "priority": "core", "title": "Study backpressure, queues, contention, and distributed locks", "minutes": 60},
+        {"key": "W8-L2", "type": "learn", "priority": "core", "title": "Study sagas, durable workflows, circuit breakers, and retries", "minutes": 60},
+        {"key": "W8-P1", "type": "practice", "priority": "core", "title": "Complete a workflow-heavy full system design", "minutes": 120},
+        {"key": "W8-P2", "type": "practice", "priority": "core", "title": "Complete a failure-heavy full system design", "minutes": 120},
+        {"key": "W8-P3", "type": "practice", "priority": "core", "title": "Complete three timed coding sessions and one behavioral practice", "minutes": 330},
+        {"key": "W8-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct resilience gaps", "minutes": 30, "source_item_key": "W8-L2"}
+      ]
+    },
+    {
+      "index": 9,
+      "phase_index": 3,
+      "full_title": "Realtime delivery, large jobs, quotas, and observability",
+      "overview_title": "Realtime platform",
+      "items": [
+        {"key": "W9-L1", "type": "learn", "priority": "core", "title": "Study realtime updates, large blobs, and long-running jobs", "minutes": 60},
+        {"key": "W9-L2", "type": "learn", "priority": "core", "title": "Study rate limiting, exactly-once effects, and time-series storage", "minutes": 60},
+        {"key": "W9-P1", "type": "practice", "priority": "core", "title": "Complete a realtime full system design", "minutes": 120},
+        {"key": "W9-P2", "type": "practice", "priority": "core", "title": "Complete a platform-control-plane full system design", "minutes": 120},
+        {"key": "W9-P3", "type": "practice", "priority": "core", "title": "Complete three timed coding sessions and one behavioral practice", "minutes": 330},
+        {"key": "W9-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct platform mechanism gaps", "minutes": 30, "source_item_key": "W9-L2"}
+      ]
+    },
+    {
+      "index": 10,
+      "phase_index": 4,
+      "full_title": "Baseline interview simulations and gap diagnosis",
+      "overview_title": "Baseline mocks",
+      "items": [
+        {"key": "W10-P1", "type": "practice", "priority": "core", "title": "Complete two full system design mocks", "minutes": 240},
+        {"key": "W10-P2", "type": "practice", "priority": "core", "title": "Complete three coding mocks", "minutes": 270},
+        {"key": "W10-P3", "type": "practice", "priority": "core", "title": "Complete two behavioral practices with follow-ups", "minutes": 120},
+        {"key": "W10-L1", "type": "learn", "priority": "core", "title": "Compare mock performance with the senior readiness gates", "minutes": 30},
+        {"key": "W10-P4", "type": "practice", "priority": "core", "title": "Repair the highest-impact observed gap", "minutes": 30},
+        {"key": "W10-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the repaired mechanism closed-book", "minutes": 30, "source_item_key": "W10-P4"}
+      ]
+    },
+    {
+      "index": 11,
+      "phase_index": 4,
+      "full_title": "Target-company simulations and constrained practice",
+      "overview_title": "Target simulations",
+      "items": [
+        {"key": "W11-P1", "type": "practice", "priority": "core", "title": "Complete two target-shaped system design mocks", "minutes": 240},
+        {"key": "W11-P2", "type": "practice", "priority": "core", "title": "Complete three coding mocks including a plain-editor session", "minutes": 270},
+        {"key": "W11-P3", "type": "practice", "priority": "core", "title": "Complete two behavioral practices with senior-scope follow-ups", "minutes": 120},
+        {"key": "W11-L1", "type": "learn", "priority": "core", "title": "Review evidence for the active target-company loop", "minutes": 30},
+        {"key": "W11-P4", "type": "practice", "priority": "core", "title": "Repair the highest-impact observed gap", "minutes": 30},
+        {"key": "W11-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the repaired mechanism closed-book", "minutes": 30, "source_item_key": "W11-P4"}
+      ]
+    },
+    {
+      "index": 12,
+      "phase_index": 4,
+      "full_title": "Final simulations and readiness evidence",
+      "overview_title": "Final simulations",
+      "items": [
+        {"key": "W12-P1", "type": "practice", "priority": "core", "title": "Complete two final full system design mocks", "minutes": 240},
+        {"key": "W12-P2", "type": "practice", "priority": "core", "title": "Complete three final coding mocks", "minutes": 270},
+        {"key": "W12-P3", "type": "practice", "priority": "core", "title": "Complete two final behavioral practices", "minutes": 120},
+        {"key": "W12-L1", "type": "learn", "priority": "core", "title": "Evaluate external performance against every readiness gate", "minutes": 30},
+        {"key": "W12-P4", "type": "practice", "priority": "core", "title": "Write the remaining-gap plan for scheduled interviews", "minutes": 30},
+        {"key": "W12-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the final repaired mechanism closed-book", "minutes": 30, "source_item_key": "W12-P4"}
+      ]
+    }
+  ],
+  "dependencies": []
+}

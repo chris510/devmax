@@ -166,30 +166,6 @@ def _block_label(item: StudyPlanItem) -> str | None:
     return f"{WEEKDAYS[item.study_block_weekday - 1]} {hour:02d}:{minute:02d}"
 
 
-async def _insert_plan_rows(db: AsyncSession, plan: StudyPlan, rows: dict[str, Any]) -> None:
-    """Insert a whole plan graph, flushing between levels.
-
-    The flushes are load-bearing. These models declare foreign keys but no
-    SQLAlchemy `relationship()`, and the unit of work orders inserts across
-    mappers from relationships rather than from table-level constraints — so
-    without this it emits `study_plan_items` before `study_plan_phases` (they
-    sort alphabetically) and Postgres rejects the batch on a foreign key. SQLite
-    accepts it, because it does not enforce foreign keys by default, which is
-    exactly the class of bug the Postgres test run exists to catch.
-    """
-    db.add(plan)
-    await db.flush()
-    for key in ("phases", "weeks", "items"):
-        for row in rows[key]:
-            db.add(row)
-        await db.flush()
-    # Dependency edges point at items, so they go last. Self-references need no
-    # second pass — `source_item_id` is already set on the rows above.
-    for row in rows["dependencies"]:
-        db.add(row)
-    await db.flush()
-
-
 # --- Today ------------------------------------------------------------------
 
 
@@ -510,7 +486,7 @@ async def create_plan(
         plan.status = PLAN_PAUSED
         plan.paused_at = _now()
 
-    await _insert_plan_rows(db, plan, rows)
+    await sp.insert_plan_rows(db, plan, rows)
     db.add(
         StudyPlanRevision(
             plan_id=plan.id,
@@ -1358,7 +1334,7 @@ async def duplicate(
     rows = sp.duplicate_plan(
         graph.plan, graph, start_date=spi.default_start_date(await local_today(db))
     )
-    await _insert_plan_rows(db, rows["plan"], rows)
+    await sp.insert_plan_rows(db, rows["plan"], rows)
     db.add(
         StudyPlanDuplication(source_plan_id=graph.plan.id, duplicated_plan_id=rows["plan"].id)
     )
@@ -1657,7 +1633,7 @@ async def accept_card_proposals(
         created.append(card.id)
 
     # The links reference both the cards and the acceptance, and the unit of work
-    # would otherwise emit them first — see `_insert_plan_rows` for why ordering
+    # would otherwise emit them first — see `sp.insert_plan_rows` for why ordering
     # is manual here. Still one transaction: a flush is not a commit.
     await db.flush()
     for link in links:

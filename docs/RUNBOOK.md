@@ -203,6 +203,8 @@ warning (expected at this stage) and no tracebacks.
 ```sh
 railway ssh --service <api-service> \
   "python -m app.seed --file cards.json --activate-week 1 --start-date <today>"
+railway ssh --service <api-service> \
+  "python -m app.seed_study_plan --activate --start-date <monday-of-this-week>"
 ```
 
 **It must be `railway ssh`, not `railway run`.** `railway run` executes the process
@@ -227,6 +229,18 @@ production. Note the guard sits *inside* the `--fixtures` branch
 The base manifest contains 54 conversational cards: six in each of nine teaching
 weeks. Activate one week at a time. Coding patterns live in `api/library/` and
 company overlays live in `api/modules/`; neither is part of the automatic base seed.
+
+The second command creates the separate first-party Study Plan that powers
+Today's plan line and the phase/week timeline. It makes no LLM call and never
+reads or writes cards, sessions, scores, mastery, or SM-2 state. The committed
+manifest is 12 weeks, four phases, 72 plan items, and 12 hours per week. Its
+stable seed key makes the command idempotent. `--activate` refuses to displace
+another active plan; pause that plan in the app first if switching is intentional.
+Use the Monday containing the first practice day so Week 1 aligns with the
+timeline's calendar labels.
+
+There is no combined wipe-and-seed operation. Card retirement is explicit and
+destructive; Study Plan bootstrap is additive and independent.
 
 ### Retiring a curriculum
 
