@@ -24,8 +24,9 @@ services `devmax` + `Postgres`).
 | ✅ | Railway project + Postgres (18, not 17 — migrations applied clean) | done |
 | ✅ | Six app variables set; migrations 0001–0003 ran via `preDeployCommand` | done |
 | ✅ | Two GitHub repo secrets; manual trigger fallback confirmed | done |
-| ✅ | Activate week 1 (6 conversational cards) | done |
-| ☐ | **Retire the legacy 126-card deck** — recorded as done, but no tooling existed to do it, and pushes were still drawing from it. `--retire-file` is that tooling | **do this before re-enabling the poll** |
+| ✅ | Activate week 1 (6 corrected conversational cards, fresh from 2026-07-31) | done |
+| ✅ | **Retire the legacy 126-card deck** — production verified at only the six current cards before the source-audited reset | done |
+| ✅ | **Source-audit and reset the curriculum** — 54-card manifest corrected; six empty production cards atomically replaced; settings and device preserved | done |
 | ✅ | **Reliable review polling** — 15-minute loop enabled in the single API replica; first authenticated production poll returned the expected `outside_window` | done |
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
