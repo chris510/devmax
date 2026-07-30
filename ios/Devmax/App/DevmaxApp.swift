@@ -73,6 +73,10 @@ struct RootView: View {
                         PlanCardsScreen(planID: id, itemID: itemID)
                     case .planUpdates(let id):
                         PlanUpdatesScreen(planID: id)
+                    case .planLifecycle(let id, let action, let origin):
+                        PlanLifecycleConfirmationScreen(
+                            planID: id, action: action, origin: origin
+                        )
                     case .planRecap(let id):
                         PlanRecapScreen(planID: id)
                     case .planAudit(let destination):

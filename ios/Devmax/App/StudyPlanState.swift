@@ -407,28 +407,24 @@ final class StudyPlanState: ObservableObject {
     }
 
     @discardableResult
-    func lifecycle(_ action: String, planID: UUID) async -> Bool {
+    func lifecycle(_ action: PlanLifecycleAction, planID: UUID) async -> Bool {
         guard !lifecycleBusy else { return false }
         lifecycleBusy = true
         applyError = nil
         defer { lifecycleBusy = false }
         do {
             switch action {
-            case "pause":
+            case .pause:
                 overview = try await api.pausePlan(planID)
                 await StudyReminderService.shared.cancelAll(planID: planID)
-            case "complete": overview = try await api.completePlan(planID)
-            case "archive": overview = try await api.archivePlan(planID)
-            case "duplicate": overview = try await api.duplicatePlan(planID)
-            case "activate":
+            case .complete: overview = try await api.completePlan(planID)
+            case .archive: overview = try await api.archivePlan(planID)
+            case .duplicate: overview = try await api.duplicatePlan(planID)
+            case .activate:
+                let target = try await api.planOverview(planID)
                 overview = try await api.activatePlan(
-                    planID, revision: overview?.revision ?? 1
+                    planID, revision: target.revision
                 )
-            case "resume":
-                overview = try await api.applyResume(
-                    planID, revision: overview?.revision ?? 1
-                )
-            default: return false
             }
             await loadPlans()
             return true
