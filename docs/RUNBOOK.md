@@ -16,10 +16,10 @@ local Postgres 17, including through a PgBouncer running in `transaction` mode (
 
 | Account | Used for | Notes |
 |---|---|---|
-| Railway | The API *and* Postgres | Two services in one project. |
+| Railway | The API, Postgres, and trigger poller | Two persistent services plus one short-lived cron service. |
 | Anthropic | Question generation + scoring | Set a low monthly spend cap; expect cents at ~4 calls/day. |
 | Apple Developer | Push notifications | **Paid membership required.** A free personal team cannot carry the Push Notifications entitlement. Longest lead time — start here. |
-| GitHub | The two cron workflows | Already have it; two repo secrets to add. |
+| GitHub | CI, check-missed, and the manual push fallback | Already have it; two repo secrets to add. |
 
 ---
 
@@ -37,35 +37,37 @@ openssl rand -base64 32   # CRON_SECRET
 |---|---|---|
 | `DATABASE_URL` | Railway service variable | Reference the Postgres service, don't paste — see §3 |
 | `API_KEY` | Railway | `ios/Config/Secrets.xcconfig`, inside the app binary |
-| `CRON_SECRET` | Railway | GitHub repo secret. **Never** in the app. |
+| `CRON_SECRET` | Railway API service | Railway trigger-review reference + GitHub repo secret. **Never** in the app. |
 | `ANTHROPIC_API_KEY` | Railway | — |
 | `APNS_KEY_ID` | Railway | — |
 | `APNS_TEAM_ID` | Railway | — |
 | `APNS_BUNDLE_ID` | Railway | `com.christrinh.devmax` |
 | `APNS_PRIVATE_KEY` | Railway | The `.p8` file, offline |
-| `API_BASE_URL` | GitHub repo secret | Your Railway public domain |
+| `API_BASE_URL` | Railway trigger-review service + GitHub repo secret | Your Railway public domain |
 
 `APNS_USE_SANDBOX` and `LOG_LEVEL` are ordinary Railway variables, not secrets.
 
 ### Rotation
 
-- **`CRON_SECRET`** lives in two places. Update Railway, then the GitHub secret,
-  within the same minute, then run the workflow manually to confirm. A missed cron
-  in between is a harmless no-op, but don't rotate on a day you care.
+- **`CRON_SECRET`** is owned by the API service. The trigger-review cron service
+  references it as `${{devmax.CRON_SECRET}}`; GitHub holds a copy for the manual
+  fallback and check-missed. Update Railway, then the GitHub secret, within the
+  same minute, then run the fallback workflow manually to confirm.
 - **`API_KEY`** is also inside an installed binary. Rotating it bricks the phone
   until you install a new build. Only rotate alongside a build and install; never
   remotely.
 
 ---
 
-## 2. Merging is what starts the crons
+## 2. Merging starts the GitHub schedule
 
 Scheduled workflows only fire from the default branch, so the merge is what makes
-`trigger-review` and `check-missed` live. Until the backend is deployed and the two
-GitHub secrets exist they will fail — 8 red runs a day, with email.
+`check-missed` live. Until the backend is deployed and the two GitHub secrets exist
+it will fail. `trigger-review.yml` is deliberately manual-only; production delivery
+uses the Railway cron service configured in §3.
 
-Either do §3 promptly, or disable both workflows in the repo's Actions tab and
-re-enable them at the end of §3. CI itself will pass on merge.
+Either do §3 promptly, or disable `check-missed` in the repo's Actions tab and
+re-enable it at the end of §3. CI itself will pass on merge.
 
 ---
 
@@ -81,6 +83,29 @@ re-enable them at the end of §3. CI itself will pass on merge.
 
 `api/railway.json` already pins the rest: build from the Dockerfile, `alembic
 upgrade head` as the `preDeployCommand`, and `/health` as the healthcheck.
+
+### Add the trigger-review cron service
+
+Create a third service from the same GitHub repository and set:
+
+```
+Name                 = trigger-review
+Branch               = main
+Root Directory       = api
+Config File Path     = /api/railway.trigger-review.json
+API_BASE_URL         = https://<your-app>.up.railway.app
+CRON_SECRET          = ${{devmax.CRON_SECRET}}
+```
+
+The service-specific config builds the existing Dockerfile, runs
+`python -m app.cron_trigger_review`, polls every 15 minutes, and exits. It
+explicitly removes the API service's migration, healthcheck, and restart settings;
+a cron execution that stays active would suppress every later run.
+
+Do not add a public domain or database variables. This process only makes one
+authenticated HTTP request to the API. Normal responses, including
+`outside_window`, exit successfully. A non-2xx response, exhausted network retries,
+invalid JSON, or `no_devices` exits nonzero so the failed execution is visible.
 
 ### Wire the database
 
@@ -350,17 +375,17 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
 5. Tap the notification → it should deep-link into that card. Answer by voice.
 6. Dispatch the workflow a second time while still inside that widened window and
    confirm `{"sent": false, "reason": "already_pushed"}`. That one response is what
-   keeps a 30-minute poll from emptying the day's budget in one window.
-7. Confirm an unattended scheduled fire — any `:07` or `:37` inside a window.
+   keeps a frequent poll from emptying the day's budget in one window.
+7. Confirm an unattended Railway cron fire — approximately `:00`, `:15`, `:30`, or
+   `:45` inside a window. Railway may start a run a few minutes late.
 
 ---
 
 ## Scheduling
 
-**The workflow carries no schedule.** `trigger-review` polls
-`/internal/trigger-review` every 30 minutes (`7,37 * * * *`, offset off the hour
-because GitHub queues top-of-hour crons behind everyone else's and drops them
-under load). The endpoint decides for itself whether to push.
+**The cron carries no notification schedule.** A short-lived Railway service polls
+`/internal/trigger-review` every 15 minutes (`*/15 * * * *`). The endpoint decides
+for itself whether to push.
 
 Everything about *when* lives in the settings row: `windows`, `timezone`, and
 `reviews_per_day`. Change a window in the app and the next poll obeys it — no
@@ -371,24 +396,25 @@ the windows which disagreed with them for four months a year (`docs/DEVIATIONS.m
 
 Consequences worth knowing:
 
-- **Most runs return `outside_window`.** At a 30-minute poll that is ~46 of 48 runs
+- **Most runs return `outside_window`.** At a 15-minute poll that is ~94 of 96 runs
   a day. It is the expected steady state and no longer fails the job.
 - **At most one push per window.** The endpoint refuses a second push inside a
   window that already produced one, and returns `already_pushed`.
 - **A window must be at least 30 minutes long.** `PUT /settings` rejects anything
-  shorter with a 422, because a shorter window can fall between two polls and never
-  fire. There is deliberately no *maximum* — widening a window to cover now is how
-  you test a push. Note this leaves no margin against GitHub running a poll late;
-  the shipped windows (80 and 90 minutes) have plenty.
-- **Actions minutes.** 96 runs/day. Free on a public repo; if this repo ever goes
-  private, that is well past the 2,000-minute free tier and the cadence should drop.
+  shorter with a 422. The 15-minute cadence gives every accepted window multiple
+  attempts; keeping the 30-minute product constraint preserves that margin.
+  There is deliberately no *maximum* — widening a window to cover now is how you
+  test a push.
 
-The poll stays on GitHub Actions rather than moving to Railway cron: Railway cron
-needs a service that exits on completion — a second service just to make one HTTP
-call — and GitHub Actions is already where the code lives.
+The poll originally lived on GitHub Actions. On its first unattended production
+day, GitHub created no run during the entire 21:00–22:30 window: the surrounding
+runs landed at 20:24 and 23:09 and both returned `outside_window`. GitHub documents
+scheduled events as delayable and droppable, so `trigger-review.yml` is now
+`workflow_dispatch`-only. Keep it as a manual fallback, but do not restore its
+`schedule` block while the Railway cron is enabled.
 
-Scheduled workflows are disabled after 60 days of repository inactivity. GitHub
-emails first; click Enable in the Actions tab.
+`check-missed` remains a GitHub schedule. A delayed or dropped bookkeeping run is
+caught by the next run and cannot prevent a notification from being delivered.
 
 ---
 
@@ -396,14 +422,16 @@ emails first; click Enable in the Actions tab.
 
 In order.
 
-1. **Did the workflow run?** Actions tab. A red run shows the response body. A 500
+1. **Did the Railway cron run?** Open the `trigger-review` service deployments. A
+   completed execution prints the response body; a failed one prints the HTTP or
+   network error. A 500
    means every enabled notification window in `settings` is unparseable — the one
    configuration fault the endpoint refuses to answer quietly, precisely because
    `outside_window` is otherwise indistinguishable from working normally.
 2. **`{"sent": false, "reason": ...}`** — each reason is specific. All but the last
-   are routine at a 30-minute poll and none of them fail the job:
+   are routine at a 15-minute poll and none of them fail the job:
    - `outside_window` — no enabled window contains the current local time. The
-     usual answer, ~46 times a day. If it is *always* this, check `GET /settings`:
+     usual answer, ~94 times a day. If it is *always* this, check `GET /settings`:
      a window turned off, or a timezone that no longer matches where you are.
    - `already_pushed` — this window already produced a push.
    - `already_offered` — the window is free, but every due card already went out

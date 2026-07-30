@@ -1,21 +1,10 @@
 name: Trigger review push
 
 on:
-  schedule:
-    # Deliberately dumb. The notification windows, the timezone they are read in,
-    # and the daily budget all live in the settings row, so this schedule's only
-    # job is to poll often enough that an edit in the app takes effect within one
-    # interval — no DST arithmetic, no commit, no redeploy. It used to carry a
-    # hand-maintained UTC approximation of those windows, which disagreed with
-    # them for four months of every year; see docs/DEVIATIONS.md §1.
-    #
-    # Most fires land outside every window and return
-    # {"sent": false, "reason": "outside_window"}. That is the expected steady
-    # state, not a failure. The endpoint sends at most one push per window.
-    #
-    # Offset off :00/:30 because GitHub queues scheduled runs behind everyone
-    # else's top-of-the-hour crons and drops them under load.
-    - cron: '7,37 * * * *'
+  # Production polling lives on the short-lived Railway cron service defined by
+  # api/railway.trigger-review.json. Keep this manual path as an independent
+  # fallback, but never schedule both providers or every notification window gets
+  # duplicate poll traffic.
   workflow_dispatch:
 
 jobs:
@@ -33,7 +22,7 @@ jobs:
           echo "$body"
 
           # The only reason worth surfacing. outside_window, already_pushed,
-          # daily_limit and nothing_due are all routine at a 30-minute poll;
+          # daily_limit and nothing_due are all routine poll responses;
           # no_devices means the phone or APNs is misconfigured and no push will
           # arrive until someone looks. A non-2xx still fails the job through
           # --fail-with-body, which is the real breakage signal now.

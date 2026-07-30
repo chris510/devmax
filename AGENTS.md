@@ -82,7 +82,7 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   that may never be opened wastes tokens and latency. Question generation happens on
   engagement, in `POST /cards/{id}/sessions`.
 - **The cron carries no schedule — the settings row does.** `trigger-review` is a dumb
-  30-minute poll; `windows`, `timezone` and `reviews_per_day` decide everything, so a
+  15-minute poll; `windows`, `timezone` and `reviews_per_day` decide everything, so a
   window edited in the app takes effect on the next poll with no redeploy. Consequences
   that are load-bearing: `outside_window` is the *normal* response, at most one push per
   window (`already_pushed`), a card is never offered twice in one day, and a window under
@@ -174,7 +174,7 @@ devmax/
 │   ├── Devmax/Services/          # APIClient, MockAPI, Speech, Speaker, DraftStore,
 │   │                             #   StudyPlanMock, GuideDraftStore, StudyReminderService
 │   └── Devmax/Screens/           # Today, Conversation, History, Sprint, StudyPlan
-└── .github/workflows/               # trigger-review + check-missed cron
+└── .github/workflows/               # check-missed cron + manual trigger fallback
 ```
 
 ## Working here

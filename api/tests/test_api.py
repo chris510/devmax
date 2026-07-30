@@ -1235,29 +1235,30 @@ async def test_the_minimum_window_is_at_least_the_poll_interval():
 
     `MIN_WINDOW_MINUTES` exists because a window shorter than the gap between two
     polls can never be landed in. Nothing but this test stops someone loosening
-    the cron — to cut Actions minutes, say — and silently making every 30-to-59
-    minute window unfireable while `PUT /settings` keeps accepting them.
+    the Railway cron and silently making accepted windows unfireable.
     """
-    import re
+    import json
     from pathlib import Path
 
     from app.schemas import MIN_WINDOW_MINUTES
 
-    workflow = (
-        Path(__file__).resolve().parents[2] / ".github/workflows/trigger-review.yml"
-    ).read_text()
-    schedule = re.search(r"- cron: '(\S+) (\S+) \* \* \*'", workflow)
-    assert schedule, "trigger-review.yml no longer has a parseable every-hour cron"
+    config = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "railway.trigger-review.json"
+        ).read_text()
+    )
+    schedule = config["deploy"]["cronSchedule"]
+    prefix, hours, day, month, weekday = schedule.split()
+    assert (
+        prefix.startswith("*/")
+        and hours == "*"
+        and day == "*"
+        and month == "*"
+        and weekday == "*"
+    ), "trigger-review must remain a fixed-minute provider-level poll"
 
-    minutes, hours = schedule.group(1), schedule.group(2)
-    assert hours == "*", "the poll is meant to run every hour; the gap maths below assumes it"
-
-    fires = sorted(int(m) for m in minutes.split(","))
-    gaps = [b - a for a, b in zip(fires, fires[1:], strict=False)] + [60 - fires[-1] + fires[0]]
-    # The shortest window we accept must be at least as long as the *longest*
-    # stretch between two polls, or it can sit entirely inside that stretch.
-    assert max(gaps) <= MIN_WINDOW_MINUTES, (
-        f"cron fires at :{fires} leave a {max(gaps)}-minute stretch with no poll, but "
-        f"windows as short as {MIN_WINDOW_MINUTES} minutes are accepted — one could fall "
-        f"entirely between two polls and never fire"
+    poll_interval = int(prefix.removeprefix("*/"))
+    assert poll_interval <= MIN_WINDOW_MINUTES, (
+        f"cron leaves {poll_interval} minutes between polls, but windows as short as "
+        f"{MIN_WINDOW_MINUTES} minutes are accepted"
     )

@@ -33,8 +33,8 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
     its own window and not its neighbours. But if *every* enabled window is
     unparseable the poll raises: `outside_window` is the normal answer ~46 times
     a day, so quietly returning it would turn a broken settings row into "no push
-    ever arrives again" with nothing to notice it by. A 500 fails the workflow,
-    which is the only breakage signal left.
+    ever arrives again" with nothing to notice it by. A 500 fails the cron run,
+    which is the breakage signal.
     """
     now = at.time()
     starts: list[time] = []
@@ -68,7 +68,7 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
 
 @router.post("/trigger-review", response_model=TriggerResult)
 async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResult:
-    """Polled by GitHub Actions every 30 minutes; decides for itself whether to push.
+    """Polled by a short-lived Railway cron service; decides whether to push.
 
     The workflow encodes no schedule beyond "often". Everything about *when* a push
     goes out — the notification windows, the timezone they are read in, and the
@@ -114,7 +114,7 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
         )
     ).one()
 
-    # One push per window, not one per poll. Without this a 30-minute poll fires
+    # One push per window, not one per poll. Without this a frequent poll fires
     # repeatedly across an 80-minute window and burns the whole day's budget
     # before the evening window ever opens.
     if latest_push is not None and as_utc(latest_push) >= window_start:

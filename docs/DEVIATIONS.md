@@ -19,7 +19,8 @@ spec says it's for.
 - cron: '0 4 * * *'     # 21:00 PT
 ```
 
-**We use** `20 15 * * *` and `10 5 * * *`.
+**We use** a provider-level `*/15 * * * *` poll that carries no notification
+schedule.
 
 GitHub cron is UTC and does not observe DST; the notification windows are local
 (`America/Los_Angeles`) and do. `14:10` UTC is 07:10 PDT but **06:10 PST**, and
@@ -33,24 +34,31 @@ trigger, and made the workflow fail on `outside_window` so a narrowed window bro
 loudly. All of that was arithmetic in a YAML file trying to *predict* a value the
 database already held, and it had to be redone by hand every time a window moved.
 
-**It is now a 30-minute poll — `7,37 * * * *` — and the workflow encodes nothing
-else.** `_active_window` compares the current *local* time against the settings row
-on every call, so DST is not a special case: `ZoneInfo` resolves the offset for the
-wall time being tested. Changing a window in the app takes effect on the next poll
-with no commit and no redeploy, which is the property the paired schedule could
-never have.
+**It is now a 15-minute Railway cron poll — `*/15 * * * *` — and the cron service
+encodes nothing else.** `_active_window` compares the current *local* time against
+the settings row on every call, so DST is not a special case: `ZoneInfo` resolves
+the offset for the wall time being tested. Changing a window in the app takes
+effect on the next poll with no commit and no redeploy, which is the property the
+paired schedule could never have.
+
+The first provider for this dumb poll was GitHub Actions. Its own documentation
+says scheduled events may be delayed or dropped, and the first production evening
+proved that caveat was load-bearing rather than theoretical: the `7,37` schedule
+ran at 20:24 and then 23:09, skipping the entire 21:00–22:30 window. Both green
+runs returned `outside_window`; APNs was never called despite four due cards.
+`api/railway.trigger-review.json` now defines a short-lived Railway cron service
+that calls the same endpoint and exits. The GitHub workflow remains
+`workflow_dispatch`-only as an independent manual fallback.
 
 What that costs, and why it is still the right trade:
 
-- `outside_window` goes from an error to the overwhelmingly common response (~46 of
-  48 daily runs). The workflow no longer branches on it; a non-2xx is the breakage
-  signal now.
+- `outside_window` is the overwhelmingly common response (~94 of 96 daily runs).
+  The poller does not treat it as an error; a non-2xx is the breakage signal.
 - Polling inside a window would push repeatedly, so the endpoint gained a
   per-window guard (§17) — the poll had to become idempotent within a window.
-- A window shorter than the poll interval can be skipped entirely, so `SettingsIn`
-  now rejects anything under 30 minutes. That is a genuine new constraint on the
-  user, accepted because every boundary pair the iOS `TimeChip` can produce is at
-  least 35 minutes apart.
+- `SettingsIn` still rejects windows under 30 minutes. The 15-minute poll no
+  longer strictly requires that floor, but keeping it gives each accepted window
+  multiple delivery attempts and preserves the shipped settings contract.
 
 ## 2. `--weeks-through` cannot prevent the day-one flood
 
@@ -165,9 +173,12 @@ network address is still a production database. Merging the two predicates would
 the fixtures — invented session history and a fake in-progress draft — into a real
 study queue.
 
-The GitHub Actions crons stay where they are. Railway cron is also UTC, so it would
-inherit the identical DST problem from §1, and it requires a service that exits on
-completion — a second service to make one HTTP call.
+`check-missed` stays on GitHub Actions because a delayed run is caught by the next
+one and does not gate delivery. The load-bearing `trigger-review` poll moved to a
+short-lived Railway cron after GitHub dropped every scheduled event inside a real
+notification window. Railway cron is also UTC, but §1's provider-level poll
+contains no wall-clock schedule, so UTC is irrelevant; the settings row still
+performs every local-time decision.
 
 ## 9. `alembic` autogenerate is disabled
 
@@ -345,7 +356,7 @@ rejected alternative (a separate coaching mode) and why.
 
 ## 17. One push per window, and a push record that survives being counted missed
 
-The 30-minute poll (§1) breaks two things that a twice-daily cron hid, and both
+The frequent poll (§1) breaks two things that a twice-daily cron hid, and both
 fixes live in `/internal/trigger-review`.
 
 **A poll is not a push.** Firing every 30 minutes inside an 80-minute window would
