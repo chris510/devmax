@@ -4,8 +4,8 @@
 detailed procedure; this is the running status, the ordering, and the traps that
 cost time. When both disagree, the RUNBOOK is the procedure and this is the state.
 
-Last updated: **2026-07-29**. Live at
-`https://devmax-production.up.railway.app` (Railway project `profound-purpose`,
+Last updated: **2026-07-30**. Live at
+`https://devmax-production.up.railway.app` (Railway project `devmax`,
 services `devmax` + `Postgres`).
 
 ---
@@ -23,10 +23,10 @@ services `devmax` + `Postgres`).
 | ✅ | **Apple Developer paid membership** | **done — longest lead time is behind you** |
 | ✅ | Railway project + Postgres (18, not 17 — migrations applied clean) | done |
 | ✅ | Six app variables set; migrations 0001–0003 ran via `preDeployCommand` | done |
-| ✅ | Two GitHub repo secrets; first green cron run confirmed | done |
+| ✅ | Two GitHub repo secrets; manual trigger fallback confirmed | done |
 | ✅ | Activate week 1 (6 conversational cards) | done |
 | ☐ | **Retire the legacy 126-card deck** — recorded as done, but no tooling existed to do it, and pushes were still drawing from it. `--retire-file` is that tooling | **do this before re-enabling the poll** |
-| ☐ | **Re-enable the `Trigger review push` workflow** — `disabled_manually` since 2026-07-28; step 1's "re-enable at the end of step 4" never happened, so no push has ever fired on schedule | **required** |
+| ✅ | **Reliable review polling** — 15-minute loop enabled in the single API replica; first authenticated production poll returned the expected `outside_window` | done |
 | ✅ | First real Claude call — question gen + both scoring turns, SM-2 once | done |
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
@@ -56,18 +56,18 @@ curl -sS -X PUT -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
   -d @/tmp/settings_backup.json $B/settings
 ```
 
-**1. Decide the cron question before you merge anything else.**
-Scheduled workflows only fire from the default branch, so a merge makes
-`trigger-review` and `check-missed` live. Until the backend is deployed **and** both
-GitHub secrets exist, they fail — one red run per poll, each with an email. Either do
-step 2 the same day, or disable both workflows in the repo's Actions tab now and
-re-enable at the end of step 4. (RUNBOOK §2.)
+**1. Decide the polling question before you merge anything else.**
+`check-missed` still runs on GitHub Actions, while production `trigger-review`
+polling runs every 15 minutes inside the single API replica. Set
+`REVIEW_POLLER_ENABLED=true` only after the backend, APNs credentials, and device
+registration are ready. Keep the GitHub trigger workflow as a manual fallback.
+(RUNBOOK §2.)
 
-> **This is the step that bit.** Both workflows were disabled on 2026-07-28 and
-> `trigger-review` was never re-enabled, so every "first push" was fired by hand and
-> the schedule has never run unattended. Disabling is a *state change in the Actions
-> tab*; merging a new YAML does not undo it. If you disable here, put the re-enable
-> on the checklist above, not just in this paragraph.
+> **This is the step that bit.** The GitHub trigger was first left disabled, then,
+> once enabled, its scheduled events were delayed or dropped across an entire live
+> notification window. A standalone Railway cron also failed before its container
+> started. The in-process loop removes both external scheduling dependencies; do not
+> scale the API above one replica without adding a distributed poll lock.
 
 **2. Railway: project, Postgres, variables, deploy, domain.** (RUNBOOK §3.)
 Root directory is `api`. `preDeployCommand` is `alembic upgrade head`; healthcheck is
