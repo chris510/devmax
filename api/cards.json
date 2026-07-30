@@ -164,7 +164,7 @@
   {
     "topic": "PostgreSQL query path: indexes, transactions, replicas, and the write bottleneck",
     "category": "Key Technology",
-    "target_week": 4,
+    "target_week": 7,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
     "source_section": "PostgreSQL",
     "activation_prerequisite": "Complete PostgreSQL",
@@ -173,7 +173,7 @@
   {
     "topic": "Redis data structures: choosing strings, hashes, sorted sets, streams, and HyperLogLog by access pattern",
     "category": "Key Technology",
-    "target_week": 4,
+    "target_week": 7,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/redis",
     "source_section": "Redis",
     "activation_prerequisite": "Complete Redis",
@@ -182,7 +182,7 @@
   {
     "topic": "Redis durability and eviction: reconstructing failure behavior under memory pressure",
     "category": "Key Technology",
-    "target_week": 4,
+    "target_week": 7,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/redis",
     "source_section": "Redis",
     "activation_prerequisite": "Complete Redis",
@@ -191,7 +191,7 @@
   {
     "topic": "DynamoDB keys and indexes: distributing access without creating a hot partition",
     "category": "Key Technology",
-    "target_week": 4,
+    "target_week": 7,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/dynamodb",
     "source_section": "DynamoDB",
     "activation_prerequisite": "Complete DynamoDB",
@@ -200,7 +200,7 @@
   {
     "topic": "Cassandra write and read paths: commit log, memtable, SSTables, compaction, and repair",
     "category": "Key Technology",
-    "target_week": 4,
+    "target_week": 7,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/cassandra",
     "source_section": "Cassandra",
     "activation_prerequisite": "Complete Cassandra",
@@ -209,7 +209,7 @@
   {
     "topic": "API gateway request handling: authentication, quotas, routing, and policy enforcement",
     "category": "Key Technology",
-    "target_week": 4,
+    "target_week": 7,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/api-gateway",
     "source_section": "API Gateway",
     "activation_prerequisite": "Complete API Gateway",
@@ -218,7 +218,7 @@
   {
     "topic": "Kafka partition mechanics: ordering, offsets, consumer groups, and rebalancing",
     "category": "Key Technology",
-    "target_week": 5,
+    "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/kafka",
     "source_section": "Kafka",
     "activation_prerequisite": "Complete Kafka",
@@ -227,7 +227,7 @@
   {
     "topic": "At-least-once event processing: retries, idempotent consumers, and poison-message handling",
     "category": "System Design Pattern",
-    "target_week": 5,
+    "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/kafka",
     "source_section": "Kafka",
     "activation_prerequisite": "Complete Kafka",
@@ -236,7 +236,7 @@
   {
     "topic": "Transactional outbox: atomically committing business data before reliable publication",
     "category": "System Design Pattern",
-    "target_week": 5,
+    "target_week": 6,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
     "source_section": "Multi-step Processes",
     "activation_prerequisite": "Complete Multi-step Processes",
@@ -245,7 +245,7 @@
   {
     "topic": "Elasticsearch indexing: inverted indexes, immutable segments, refresh, merge, and near-real-time search",
     "category": "Key Technology",
-    "target_week": 5,
+    "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/elasticsearch",
     "source_section": "Elasticsearch",
     "activation_prerequisite": "Complete Elasticsearch",
@@ -254,7 +254,7 @@
   {
     "topic": "Large-object upload: presigned URLs, multipart chunks, checksums, and resumability",
     "category": "System Design Pattern",
-    "target_week": 5,
+    "target_week": 6,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/large-blobs",
     "source_section": "Handling Large Blobs",
     "activation_prerequisite": "Complete Handling Large Blobs",
@@ -263,7 +263,7 @@
   {
     "topic": "CDN delivery: cache hierarchy, origin shielding, invalidation, and signed access",
     "category": "Key Technology",
-    "target_week": 5,
+    "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
     "source_section": "Scaling Reads",
     "activation_prerequisite": "Complete Scaling Reads",
@@ -272,7 +272,7 @@
   {
     "topic": "Flink event-time processing: watermarks, late data, state, and checkpoints",
     "category": "Key Technology",
-    "target_week": 6,
+    "target_week": 9,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/flink",
     "source_section": "Flink",
     "activation_prerequisite": "Complete Flink",
@@ -281,7 +281,7 @@
   {
     "topic": "ZooKeeper coordination: ephemeral nodes, watches, leases, and session failure",
     "category": "Key Technology",
-    "target_week": 6,
+    "target_week": 9,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/zookeeper",
     "source_section": "ZooKeeper",
     "activation_prerequisite": "Complete ZooKeeper",
@@ -290,7 +290,7 @@
   {
     "topic": "Bloom filters: sizing the bitset and accepting false positives to avoid expensive reads",
     "category": "Core Concept",
-    "target_week": 6,
+    "target_week": 9,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/data-structures-for-big-data",
     "source_section": "Data Structures for Big Data",
     "activation_prerequisite": "Complete Data Structures for Big Data",
@@ -299,7 +299,7 @@
   {
     "topic": "Count-Min Sketch and HyperLogLog: approximate frequency and cardinality under bounded memory",
     "category": "Core Concept",
-    "target_week": 6,
+    "target_week": 9,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/data-structures-for-big-data",
     "source_section": "Data Structures for Big Data",
     "activation_prerequisite": "Complete Data Structures for Big Data",
@@ -308,7 +308,7 @@
   {
     "topic": "Geospatial indexing: mapping coordinates into cells for nearby-candidate retrieval",
     "category": "Core Concept",
-    "target_week": 6,
+    "target_week": 9,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/proximity-search",
     "source_section": "Proximity Search",
     "activation_prerequisite": "Complete Proximity Search",
@@ -317,7 +317,7 @@
   {
     "topic": "Vector index search: HNSW traversal and the recall, latency, and memory trade-off",
     "category": "Key Technology",
-    "target_week": 6,
+    "target_week": 9,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/vector-databases",
     "source_section": "Vector Databases",
     "activation_prerequisite": "Complete Vector Databases",
@@ -326,7 +326,7 @@
   {
     "topic": "Scaling reads: composing caches, read replicas, and denormalized views",
     "category": "System Design Pattern",
-    "target_week": 7,
+    "target_week": 4,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
     "source_section": "Scaling Reads",
     "activation_prerequisite": "Complete Scaling Reads",
@@ -335,7 +335,7 @@
   {
     "topic": "Replica lag: preserving read-your-writes and monotonic reads after a write",
     "category": "System Design Pattern",
-    "target_week": 7,
+    "target_week": 4,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
     "source_section": "Scaling Reads",
     "activation_prerequisite": "Complete Scaling Reads",
@@ -344,7 +344,7 @@
   {
     "topic": "Fan-out mechanics: choosing write-time materialization or read-time aggregation",
     "category": "System Design Pattern",
-    "target_week": 7,
+    "target_week": 4,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
     "source_section": "Scaling Reads",
     "activation_prerequisite": "Complete Scaling Reads",
@@ -353,7 +353,7 @@
   {
     "topic": "Scaling writes: partitioning, batching, and asynchronous ingestion under skew",
     "category": "System Design Pattern",
-    "target_week": 7,
+    "target_week": 4,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-writes",
     "source_section": "Scaling Writes",
     "activation_prerequisite": "Complete Scaling Writes",
@@ -362,7 +362,7 @@
   {
     "topic": "Backpressure and load shedding: keeping overload from becoming a cascading failure",
     "category": "System Design Pattern",
-    "target_week": 7,
+    "target_week": 4,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-writes",
     "source_section": "Scaling Writes",
     "activation_prerequisite": "Complete Scaling Writes",
@@ -371,7 +371,7 @@
   {
     "topic": "Queue workers: controlling concurrency, ordering, retries, and dead-letter handling",
     "category": "System Design Pattern",
-    "target_week": 7,
+    "target_week": 4,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/long-running-tasks",
     "source_section": "Managing Long Running Tasks",
     "activation_prerequisite": "Complete Managing Long Running Tasks",
@@ -380,7 +380,7 @@
   {
     "topic": "Contention control: choosing a conditional write, pessimistic lock, OCC, or serializable isolation for one invariant",
     "category": "System Design Pattern",
-    "target_week": 8,
+    "target_week": 5,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/dealing-with-contention",
     "source_section": "Dealing with Contention",
     "activation_prerequisite": "Complete Dealing with Contention",
@@ -389,7 +389,7 @@
   {
     "topic": "Distributed locks: leases, TTL expiry, fencing tokens, and stale owners",
     "category": "System Design Pattern",
-    "target_week": 8,
+    "target_week": 5,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/dealing-with-contention",
     "source_section": "Dealing with Contention",
     "activation_prerequisite": "Complete Dealing with Contention",
@@ -398,7 +398,7 @@
   {
     "topic": "Saga compensation: recovering a partially completed multi-service workflow",
     "category": "System Design Pattern",
-    "target_week": 8,
+    "target_week": 5,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
     "source_section": "Multi-step Processes",
     "activation_prerequisite": "Complete Multi-step Processes",
@@ -407,7 +407,7 @@
   {
     "topic": "Durable workflow orchestration: persisting progress across retries, crashes, and long waits",
     "category": "System Design Pattern",
-    "target_week": 8,
+    "target_week": 5,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
     "source_section": "Multi-step Processes",
     "activation_prerequisite": "Complete Multi-step Processes",
@@ -416,7 +416,7 @@
   {
     "topic": "Circuit breakers, bulkheads, and jittered retries: containing a dependency failure",
     "category": "System Design Pattern",
-    "target_week": 8,
+    "target_week": 5,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
     "source_section": "Multi-step Processes",
     "activation_prerequisite": "Complete Multi-step Processes",
@@ -425,7 +425,7 @@
   {
     "topic": "Exactly-once effects: combining at-least-once delivery with deduplication and idempotency",
     "category": "System Design Pattern",
-    "target_week": 8,
+    "target_week": 5,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
     "source_section": "Multi-step Processes",
     "activation_prerequisite": "Complete Multi-step Processes",
@@ -434,7 +434,7 @@
   {
     "topic": "Real-time delivery: server polling, long-polling, SSE, and WebSocket connection state",
     "category": "System Design Pattern",
-    "target_week": 9,
+    "target_week": 6,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/realtime-updates",
     "source_section": "Real-time Updates",
     "activation_prerequisite": "Complete Real-time Updates",
@@ -443,7 +443,7 @@
   {
     "topic": "Reconnect recovery: heartbeats, sticky routing, missed-event cursors, and backfill",
     "category": "System Design Pattern",
-    "target_week": 9,
+    "target_week": 6,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/realtime-updates",
     "source_section": "Real-time Updates",
     "activation_prerequisite": "Complete Real-time Updates",
@@ -452,7 +452,7 @@
   {
     "topic": "Large-blob delivery: resumable upload, asynchronous processing, object storage, and CDN origin",
     "category": "System Design Pattern",
-    "target_week": 9,
+    "target_week": 6,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/large-blobs",
     "source_section": "Handling Large Blobs",
     "activation_prerequisite": "Complete Handling Large Blobs",
@@ -461,7 +461,7 @@
   {
     "topic": "Long-running jobs: submission tokens, status polling, cancellation, and webhook completion",
     "category": "System Design Pattern",
-    "target_week": 9,
+    "target_week": 6,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/long-running-tasks",
     "source_section": "Managing Long Running Tasks",
     "activation_prerequisite": "Complete Managing Long Running Tasks",
@@ -470,7 +470,7 @@
   {
     "topic": "Distributed rate limiting: token buckets, window counters, atomic updates, and regional drift",
     "category": "System Design Pattern",
-    "target_week": 9,
+    "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter",
     "source_section": "Rate Limiter",
     "activation_prerequisite": "Complete the Rate Limiter breakdown",
@@ -479,7 +479,7 @@
   {
     "topic": "Time-series storage: append-only writes, time partitioning, compression, rollups, and label-cardinality limits",
     "category": "System Design Pattern",
-    "target_week": 9,
+    "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/time-series-databases",
     "source_section": "Time Series Databases",
     "activation_prerequisite": "Complete Time Series Databases",

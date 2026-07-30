@@ -158,6 +158,14 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     assert len({e["topic"] for e in entries}) == len(entries)
     assert all(e["source_url"].startswith("https://www.hellointerview.com/") for e in entries)
     assert all(e.get("activation_prerequisite") for e in entries)
+    assert all(
+        e["category"] == "System Design Pattern"
+        for e in entries
+        if 4 <= e["target_week"] <= 6
+    )
+    assert all(
+        e["target_week"] >= 7 for e in entries if e["category"] == "Key Technology"
+    )
     assert not any(
         e["category"]
         in {
