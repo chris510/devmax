@@ -203,6 +203,8 @@ enum StudyPlanFixtures {
             coreComplete: 3, coreTotal: 5,
             // 660 of 720 — the canonical baseline.
             plannedMinutes: 660, capacityMinutes: 720,
+            coreLine: "3 of 5 Core complete",
+            capacityLine: "11h of 12h planned",
             sections: [
                 WeekSection(
                     type: "learn", label: "LEARN", aside: "Core · 240 min",

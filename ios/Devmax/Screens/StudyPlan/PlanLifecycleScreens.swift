@@ -339,36 +339,54 @@ struct PlanAuditScreen: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var plan: StudyPlanState
 
-    private var title: String {
-        switch destination {
-        case "estimate-audit": return "Workload estimates"
-        case "retrieval-audit": return "Retrieval activities"
-        case "dependency-audit": return "Dependencies"
-        case "source-coverage": return "Source coverage"
-        case "capacity": return "Capacity"
-        default: return "Review"
-        }
-    }
+    /// One table rather than three parallel switches. The switch version had
+    /// drifted: the server emits eight destinations and only five had a title,
+    /// four had an explanation, so `deadline` and `titles` rendered the capacity
+    /// copy under a "Review" heading.
+    private static let copy: [String: (title: String, explanation: String)] = [
+        "estimate-audit": (
+            "Workload estimates",
+            "These were estimated from the scope of the work rather than read from "
+                + "your guide. Confirm them or edit the estimate."
+        ),
+        "retrieval-audit": (
+            "Retrieval activities",
+            "These retrieval activities were proposed by the import rather than found "
+                + "in your guide. They consume plan capacity and don't block a week. "
+                + "Approve the ones you want."
+        ),
+        "dependency-audit": (
+            "Dependencies",
+            "Only uncertain, contradictory, or schedule-changing links appear here. An "
+                + "unconfirmed one uses the conservative order and says so."
+        ),
+        "source-coverage": (
+            "Source coverage",
+            "Parts of your guide the import couldn't place, and any quote whose link "
+                + "back to the guide didn't resolve."
+        ),
+        "capacity": (
+            "Capacity",
+            "One or more weeks is over its capacity. Raise the weekly capacity, "
+                + "lengthen the plan, or edit the estimates."
+        ),
+        "deadline": (
+            "Deadline",
+            "The plan would finish after the date you fixed. The deadline doesn't move "
+                + "— shorten the plan, raise the weekly capacity, or reduce scope."
+        ),
+        "titles": (
+            "Short titles",
+            "Some generated week or phase labels are too long, too vague, or repeated "
+                + "within a phase. Edit them before creating the plan."
+        ),
+    ]
+
+    private var title: String { Self.copy[destination]?.title ?? "Review" }
 
     private var explanation: String {
-        switch destination {
-        case "estimate-audit":
-            return "These were estimated from the scope of the work rather than read "
-                + "from your guide. Confirm them or edit the estimate."
-        case "retrieval-audit":
-            return "These retrieval activities were proposed by the import rather than "
-                + "found in your guide. They consume plan capacity and don't block a "
-                + "week. Approve the ones you want."
-        case "dependency-audit":
-            return "Only uncertain, contradictory, or schedule-changing links appear "
-                + "here. An unconfirmed one uses the conservative order and says so."
-        case "source-coverage":
-            return "Parts of your guide the import couldn't place, and any quote whose "
-                + "link back to the guide didn't resolve."
-        default:
-            return "One or more weeks is over its capacity. Raise the weekly capacity, "
-                + "lengthen the plan, or edit the estimates."
-        }
+        Self.copy[destination]?.explanation
+            ?? "Review this before creating the plan."
     }
 
     private var check: PlanCheck? {

@@ -8,7 +8,6 @@ from sqlmodel import Field, SQLModel
 
 # Postgres in production; the variant keeps the SQLite test schema compilable.
 JSON_TYPE = JSONB().with_variant(JSON(), "sqlite")
-WINDOWS_TYPE = JSON_TYPE
 
 # Every timestamp column is `timestamptz` in migration 0001 and every value written
 # is tz-aware (`_now()` below). A bare `datetime` annotation would map to a naive
@@ -149,7 +148,7 @@ class Settings(SQLModel, table=True):
     reviews_per_day: int = 2
     windows: list[dict[str, Any]] = Field(
         default_factory=lambda: list(DEFAULT_WINDOWS),
-        sa_column=Column(WINDOWS_TYPE, nullable=False),
+        sa_column=Column(JSON_TYPE, nullable=False),
     )
     timezone: str = "America/Los_Angeles"
 
@@ -165,58 +164,46 @@ class Settings(SQLModel, table=True):
 PLAN_ACTIVE = "active"
 PLAN_PAUSED = "paused"
 PLAN_COMPLETED = "completed"
-PLAN_ARCHIVED = "archived"
-PLAN_STATUSES = (PLAN_ACTIVE, PLAN_PAUSED, PLAN_COMPLETED, PLAN_ARCHIVED)
 # Completed is not archived. Both are terminal for scheduling; only one means
 # the work was finished, and the Plans sheet lists them separately.
-PLAN_TERMINAL_STATUSES = (PLAN_COMPLETED, PLAN_ARCHIVED)
+PLAN_ARCHIVED = "archived"
 
 MODE_FLEXIBLE = "flexible"
 MODE_FIXED = "fixed"
-PLAN_MODES = (MODE_FLEXIBLE, MODE_FIXED)
 
 ITEM_LEARN = "learn"
 ITEM_PRACTICE = "practice"
 ITEM_RETRIEVE = "retrieve"
-ITEM_TYPES = (ITEM_LEARN, ITEM_PRACTICE, ITEM_RETRIEVE)
 
 PRIORITY_CORE = "core"
 PRIORITY_OPTIONAL = "optional"
 PRIORITY_RECURRING = "recurring"
-PRIORITIES = (PRIORITY_CORE, PRIORITY_OPTIONAL, PRIORITY_RECURRING)
 
 ITEM_PENDING = "pending"
 ITEM_COMPLETE = "complete"
 ITEM_DEFERRED = "deferred"
+# `removed` is out of the plan entirely; `deferred` is out of the schedule but
+# kept for the recap.
 ITEM_REMOVED = "removed"
-ITEM_STATUSES = (ITEM_PENDING, ITEM_COMPLETE, ITEM_DEFERRED, ITEM_REMOVED)
-# Statuses that consume capacity and hold a place in the week. `removed` is out
-# of the plan entirely; `deferred` is out of the schedule but kept for the recap.
-ITEM_SCHEDULED_STATUSES = (ITEM_PENDING, ITEM_COMPLETE)
 
 ORIGIN_IMPORTED = "imported"
 ORIGIN_GENERATED = "generated"
 ORIGIN_MANUAL = "manual"
-ORIGINS = (ORIGIN_IMPORTED, ORIGIN_GENERATED, ORIGIN_MANUAL)
 
 ESTIMATE_IMPORTED = "imported"
 ESTIMATE_GENERATED = "generated"
 ESTIMATE_USER_EDITED = "user_edited"
-ESTIMATE_SOURCES = (ESTIMATE_IMPORTED, ESTIMATE_GENERATED, ESTIMATE_USER_EDITED)
 
 CONFIDENCE_HIGH = "high"
 CONFIDENCE_MEDIUM = "medium"
 CONFIDENCE_NEEDS_REVIEW = "needs_review"
-CONFIDENCES = (CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, CONFIDENCE_NEEDS_REVIEW)
 
 DEP_HARD = "hard"
 DEP_SOFT = "soft"
-DEP_KINDS = (DEP_HARD, DEP_SOFT)
 
 DEP_IMPORTED = "imported"
 DEP_INFERRED = "inferred"
 DEP_USER_ADDED = "user_added"
-DEP_SOURCES = (DEP_IMPORTED, DEP_INFERRED, DEP_USER_ADDED)
 
 # Revision kinds. Every material schedule change writes one; display-only edits
 # (an overview title, a note) do not.
@@ -230,23 +217,10 @@ REVISION_ACTIVATE = "activate"
 REVISION_COMPLETE = "complete"
 REVISION_ARCHIVE = "archive"
 REVISION_ITEM_EDIT = "item_edit"
-REVISION_KINDS = (
-    REVISION_CREATED,
-    REVISION_CAPACITY,
-    REVISION_REPLAN,
-    REVISION_REOPEN,
-    REVISION_RESUME,
-    REVISION_PAUSE,
-    REVISION_ACTIVATE,
-    REVISION_COMPLETE,
-    REVISION_ARCHIVE,
-    REVISION_ITEM_EDIT,
-)
 
 DRAFT_PENDING = "pending"
 DRAFT_READY = "ready"
 DRAFT_FAILED = "failed"
-DRAFT_STATUSES = (DRAFT_PENDING, DRAFT_READY, DRAFT_FAILED)
 
 # A candidate is selectable only when all five gate questions passed. Everything
 # else is displayed under NOT SUGGESTED with no action, or resolved by the user.
@@ -256,24 +230,14 @@ DISPOSITION_EXISTING = "existing"
 DISPOSITION_POSSIBLE_OVERLAP = "possible_overlap"
 DISPOSITION_ACCEPTED = "accepted"
 DISPOSITION_SKIPPED = "skipped"
-DISPOSITIONS = (
-    DISPOSITION_SUGGESTED,
-    DISPOSITION_NOT_SUGGESTED,
-    DISPOSITION_EXISTING,
-    DISPOSITION_POSSIBLE_OVERLAP,
-    DISPOSITION_ACCEPTED,
-    DISPOSITION_SKIPPED,
-)
 
 DUPLICATE_NONE = "none"
 DUPLICATE_EXACT = "exact"
 DUPLICATE_POSSIBLE = "possible"
-DUPLICATE_RESULTS = (DUPLICATE_NONE, DUPLICATE_EXACT, DUPLICATE_POSSIBLE)
 
 ACCEPTANCE_PROCESSING = "processing"
 ACCEPTANCE_COMMITTED = "committed"
 ACCEPTANCE_FAILED = "failed"
-ACCEPTANCE_STATUSES = (ACCEPTANCE_PROCESSING, ACCEPTANCE_COMMITTED, ACCEPTANCE_FAILED)
 
 
 class StudyPlan(SQLModel, table=True):

@@ -170,14 +170,31 @@ def effective_capacity_minutes(
     return default_minutes
 
 
-def week_start_date(plan: SchedPlan, index: int) -> date:
+def week_start(start_date: date, index: int) -> date:
     """Plan weeks are seven-day blocks from `start_date`. 1-based.
 
     This is the only place a plan week becomes a calendar date, and it is
     deliberately coarse: everything downstream renders `week of <date>`. No
     completion *day* is ever derived from weekly capacity.
+
+    Takes a bare date rather than a plan so the preview screen — which has a
+    draft, not a plan — can use it too instead of reimplementing the arithmetic.
     """
-    return plan.start_date + timedelta(days=DAYS_PER_WEEK * (index - 1))
+    return start_date + timedelta(days=DAYS_PER_WEEK * (index - 1))
+
+
+def week_of_label(start_date: date, index: int) -> str:
+    """`week of 19 Oct`. Plan-week precision — never a completion day."""
+    start = week_start(start_date, index)
+    return f"week of {start.day} {start.strftime('%b')}"
+
+
+def forecast_label(start_date: date, index: int) -> str:
+    return f"Est. completion · {week_of_label(start_date, index)}"
+
+
+def week_start_date(plan: SchedPlan, index: int) -> date:
+    return week_start(plan.start_date, index)
 
 
 def week_end_date(plan: SchedPlan, index: int) -> date:

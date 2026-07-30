@@ -132,6 +132,19 @@ async def _get_graph(db: AsyncSession, plan_id: uuid.UUID) -> sp.PlanGraph:
     return await sp.load_plan_graph(db, await _get_plan(db, plan_id))
 
 
+async def _commit_activation(db: AsyncSession) -> None:
+    """Commit a transaction that made a plan active.
+
+    The partial unique index is the last line of defence against two active
+    plans; a concurrent activation lands here rather than corrupting the state.
+    """
+    try:
+        await db.commit()
+    except IntegrityError as exc:  # pragma: no cover — the partial index backstop
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="another plan is already active") from exc
+
+
 def _require_current(plan: StudyPlan, base_plan_revision: int) -> None:
     """A proposal computed against an older plan is refused, not merged.
 
@@ -143,7 +156,7 @@ def _require_current(plan: StudyPlan, base_plan_revision: int) -> None:
 
 
 def _forecast_label(plan: StudyPlan, week: int) -> str:
-    return f"Est. completion · {sp.week_of_label(plan, week)}"
+    return sched.forecast_label(plan.start_date, week)
 
 
 def _block_label(item: StudyPlanItem) -> str | None:
@@ -170,10 +183,8 @@ async def _insert_plan_rows(db: AsyncSession, plan: StudyPlan, rows: dict[str, A
         for row in rows[key]:
             db.add(row)
         await db.flush()
-    # Self-references and dependency edges point at items, so they go last.
-    for row in rows["items"]:
-        if getattr(row, "source_item_id", None) is not None:
-            db.add(row)
+    # Dependency edges point at items, so they go last. Self-references need no
+    # second pass — `source_item_id` is already set on the rows above.
     for row in rows["dependencies"]:
         db.add(row)
     await db.flush()
@@ -224,6 +235,7 @@ async def active_summary(db: AsyncSession = Depends(get_session)) -> ActivePlanS
                     col(StudyPlanItem.study_block_weekday),
                     col(StudyPlanItem.study_block_minute_of_day),
                 )
+                .limit(1)
             )
         ).all()
         if blocks:
@@ -271,10 +283,9 @@ def _preview_response(draft: StudyPlanGuideDraft) -> PreviewOut:
 
     last_week = max((w["index"] for w in weeks), default=0)
     start = date.fromisoformat(preview["start_date"]) if preview.get("start_date") else None
-    forecast = ""
-    if start and last_week:
-        week_start = start + (last_week - 1) * (date(2000, 1, 8) - date(2000, 1, 1))
-        forecast = f"Est. completion · week of {week_start.day} {week_start.strftime('%b')}"
+    # Same helper the plan screens use, so the label the user reads before
+    # committing cannot drift from the one they read afterwards.
+    forecast = sched.forecast_label(start, last_week) if start and last_week else ""
 
     return PreviewOut(
         draft_id=draft.id,
@@ -513,9 +524,17 @@ async def create_plan(
 
     try:
         await db.commit()
-    except IntegrityError as exc:  # pragma: no cover — the partial index backstop
+    except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="another plan is already active") from exc
+        # Distinguished, because these have completely different fixes and the
+        # blanket message sent a rubric violation ("type": "review" reaching a
+        # CHECK constraint) to a user reading "another plan is already active".
+        detail = (
+            "another plan is already active"
+            if "uq_study_plans_one_active" in str(exc)
+            else "the imported plan has a value the schema rejects; retry the import"
+        )
+        raise HTTPException(status_code=409, detail=detail) from exc
 
     return await _overview(db, plan.id)
 
@@ -644,7 +663,7 @@ async def _overview(db: AsyncSession, plan_id: uuid.UUID) -> PlanOverview:
         forecast_label=_forecast_label(plan, plan.forecast_end_plan_week),
         forecast_end_plan_week=plan.forecast_end_plan_week,
         revision=plan.revision,
-        supports_recall_cards=sp.subject_supports_cards(plan.subject_slug, True),
+        supports_recall_cards=sp.slug_supports_cards(plan.subject_slug),
         phases=phase_rows,
         latest_change=(latest.summary or None) if latest else None,
     )
@@ -668,9 +687,15 @@ async def get_week(
 
     items = graph.items_in(week)
     scheduled = [i for i in items if i.status in (ITEM_PENDING, ITEM_COMPLETE)]
-    core_done, core_total = sp.core_progress(scheduled)
     capacity = week.override_capacity_minutes or graph.plan.default_weekly_capacity_minutes
-    planned = sum(i.estimate_minutes for i in scheduled)
+    # The scheduler owns this arithmetic. Recomputing it here was a second
+    # implementation of "what is in this week", and only the scheduler's was
+    # covered by tests.
+    workload = sched.summarise_week(
+        sp.to_sched_items(items, graph.weeks, graph.phases)
+    )
+    core_done, core_total = workload.core_complete, workload.core_total
+    planned = workload.scheduled_plan_minutes
 
     sections: list[WeekSection] = []
     for kind, label in (
@@ -681,13 +706,15 @@ async def get_week(
         rows_in = [i for i in scheduled if i.type == kind]
         if not rows_in:
             continue
-        core = sum(i.estimate_minutes for i in rows_in if i.priority == PRIORITY_CORE)
-        optional = sum(
-            i.estimate_minutes for i in rows_in if i.priority == PRIORITY_OPTIONAL
+        section = sched.summarise_week(
+            sp.to_sched_items(rows_in, graph.weeks, graph.phases)
         )
+        core, optional = section.core_minutes, section.optional_minutes
         if kind == ITEM_RETRIEVE:
-            done = sum(1 for i in rows_in if i.status == ITEM_COMPLETE)
-            aside = f"{done} of {len(rows_in)} done · Doesn't block the week"
+            aside = (
+                f"{section.retrieval_complete} of {section.retrieval_total} done "
+                "· Doesn't block the week"
+            )
             # V3.5 moved both of these out of the week header and under Retrieve,
             # where the boundary they describe is the thing being read.
             note = (
@@ -733,6 +760,10 @@ async def get_week(
         core_total=core_total,
         planned_minutes=planned,
         capacity_minutes=capacity,
+        core_line=f"{core_done} of {core_total} Core complete",
+        capacity_line=(
+            f"{sched.format_hours(planned)} of {sched.format_hours(capacity)} planned"
+        ),
         sections=sections,
     )
 
@@ -771,7 +802,7 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
         linked_card_ids=[link.card_id for link in links],
         card_proposals_available=(
             item.status == ITEM_COMPLETE
-            and sp.subject_supports_cards(graph.plan.subject_slug, True)
+            and sp.slug_supports_cards(graph.plan.subject_slug)
         ),
         blocked_by=[b.full_title for b in sp.blocking_dependencies(graph, item)],
     )
@@ -919,7 +950,7 @@ def _replan_kwargs(body: ReplanRequest) -> dict[str, Any]:
     }
 
 
-def _replan_copy(graph: sp.PlanGraph, proposal: sched.Proposal) -> tuple[str, str]:
+def _replan_copy(proposal: sched.Proposal) -> tuple[str, str]:
     """Lead with the outcome, then the arithmetic. V3.5 §3."""
     if not proposal.moves and not proposal.unresolved:
         return ("Nothing needs to move.", "Every week still fits its capacity.")
@@ -954,7 +985,7 @@ async def preview_replan(
     graph = await _get_graph(db, plan_id)
     _require_current(graph.plan, body.base_plan_revision)
     proposal = sp.build_proposal_for(graph, **_replan_kwargs(body))
-    headline, text = _replan_copy(graph, proposal)
+    headline, text = _replan_copy(proposal)
     return _proposal_out(
         graph,
         proposal,
@@ -976,7 +1007,7 @@ async def apply_replan(
     if not proposal.valid:
         raise HTTPException(status_code=409, detail="proposal does not validate")
 
-    headline, text = _replan_copy(graph, proposal)
+    headline, text = _replan_copy(proposal)
     for item_id in body.deferred_item_ids:
         item = graph.item_by_id.get(item_id)
         if item is not None:
@@ -1020,7 +1051,7 @@ async def update_capacity(
 
     overrides = {index: body.override_capacity_minutes}
     proposal = sp.build_proposal_for(graph, capacity_overrides=overrides)
-    headline, text = _replan_copy(graph, proposal)
+    headline, text = _replan_copy(proposal)
 
     if proposal.valid and not proposal.moves:
         effective = (
@@ -1095,7 +1126,7 @@ async def preview_reopen(
         for i in items
     ]
     proposal = sched.build_proposal(plan, weeks, items, deps)
-    headline, text = _replan_copy(graph, proposal)
+    headline, text = _replan_copy(proposal)
     return _proposal_out(
         graph,
         proposal,
@@ -1247,7 +1278,7 @@ async def preview_resume(
             "the gap before resuming."
         )
     elif proposal.moves:
-        headline, text = _replan_copy(graph, proposal)
+        headline, text = _replan_copy(proposal)
     else:
         headline = "Nothing needs to move."
         text = "The pause was short enough that the schedule still fits."
@@ -1278,36 +1309,8 @@ async def apply_resume(
             status_code=409, detail="resuming needs a replan; preview and apply it first"
         )
 
-    before = sp.plan_snapshot(graph)
-    current = await sp.active_plan(db)
-    if current is not None and current.id != graph.plan.id:
-        current.status = PLAN_PAUSED
-        current.paused_at = _now()
-        current.updated_at = current.paused_at
-        db.add(current)
-        # Flushed before the activation below: the partial unique index is
-        # checked per statement, so both rows must never be 'active' at once
-        # even inside a single transaction.
-        await db.flush()
-
-    graph.plan.status = PLAN_ACTIVE
-    graph.plan.paused_at = None
-    graph.plan.revision += 1
-    graph.plan.updated_at = _now()
-    db.add(graph.plan)
-    sp.record_revision(
-        db,
-        graph,
-        kind=REVISION_RESUME,
-        before=before,
-        after={"status": PLAN_ACTIVE},
-        summary="Plan resumed",
-    )
-    try:
-        await db.commit()
-    except IntegrityError as exc:  # pragma: no cover — the partial index backstop
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="another plan is already active") from exc
+    await sp.make_active(db, graph, kind=REVISION_RESUME, summary="Plan resumed")
+    await _commit_activation(db)
     return await _overview(db, plan_id)
 
 
@@ -1319,38 +1322,10 @@ async def activate_plan(
 ) -> PlanOverview:
     graph = await _get_graph(db, plan_id)
     _require_current(graph.plan, base_plan_revision)
-    before = sp.plan_snapshot(graph)
-
-    current = await sp.active_plan(db)
-    if current is not None and current.id != graph.plan.id:
-        current.status = PLAN_PAUSED
-        current.paused_at = _now()
-        current.updated_at = current.paused_at
-        db.add(current)
-        # Flushed before the activation below: the partial unique index is
-        # checked per statement, so both rows must never be 'active' at once
-        # even inside a single transaction.
-        await db.flush()
-
-    graph.plan.status = PLAN_ACTIVE
-    graph.plan.paused_at = None
-    graph.plan.archived_at = None
-    graph.plan.revision += 1
-    graph.plan.updated_at = _now()
-    db.add(graph.plan)
-    sp.record_revision(
-        db,
-        graph,
-        kind=REVISION_ACTIVATE,
-        before=before,
-        after={"status": PLAN_ACTIVE},
-        summary="Made this the active plan",
+    await sp.make_active(
+        db, graph, kind=REVISION_ACTIVATE, summary="Made this the active plan"
     )
-    try:
-        await db.commit()
-    except IntegrityError as exc:  # pragma: no cover
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="another plan is already active") from exc
+    await _commit_activation(db)
     return await _overview(db, plan_id)
 
 
@@ -1441,7 +1416,7 @@ async def create_card_proposals(
     if item.status != ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is not complete")
 
-    supported = sp.subject_supports_cards(graph.plan.subject_slug, True)
+    supported = sp.slug_supports_cards(graph.plan.subject_slug)
     if not supported:
         return CardProposalList(
             plan_id=plan_id,
@@ -1469,6 +1444,7 @@ async def create_card_proposals(
                 .where(col(Card.last_score).is_not(None))
                 .where(col(Card.last_score) <= 3)
                 .order_by(col(Card.last_score))
+                .limit(10)
             )
         ).all()
         candidates = await llm.propose_cards(
@@ -1477,7 +1453,7 @@ async def create_card_proposals(
             why_it_matters=item.why_it_matters,
             done_when=item.done_when,
             source_excerpt=item.source_excerpt,
-            existing_weak_topics=[c.topic for c in weak[:10]],
+            existing_weak_topics=[c.topic for c in weak],
         )
         existing_cards = await sp.normalized_card_index(db)
         for candidate in candidates[: sp.MAX_SUGGESTED_CARDS]:
@@ -1547,7 +1523,7 @@ async def list_card_proposals(
     return CardProposalList(
         plan_id=plan_id,
         item_id=item_id,
-        supports_recall_cards=sp.subject_supports_cards(plan.subject_slug, True),
+        supports_recall_cards=sp.slug_supports_cards(plan.subject_slug),
         suggested_count=sum(1 for r in out if r.disposition == DISPOSITION_SUGGESTED),
         proposals=out,
         note=CARD_BOUNDARY_NOTE,

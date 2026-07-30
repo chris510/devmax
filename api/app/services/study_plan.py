@@ -18,11 +18,10 @@ from dataclasses import asdict
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlmodel import col, select
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models import (
-    ACCEPTANCE_COMMITTED,
     DEP_HARD,
     DISPOSITION_EXISTING,
     DISPOSITION_NOT_SUGGESTED,
@@ -193,19 +192,6 @@ async def normalized_card_index(db: AsyncSession) -> dict[str, Card]:
     return index
 
 
-async def find_exact_duplicate(db: AsyncSession, topic: str) -> Card | None:
-    """The exact normalized-topic match, evaluated against `cards` right now.
-
-    Called once when a proposal is built and **again inside the acceptance
-    transaction**, because a card can be written by hand between the two. Use
-    `normalized_card_index` directly when checking a whole batch.
-    """
-    target = normalize_topic(topic)
-    if not target:
-        return None
-    return (await normalized_card_index(db)).get(target)
-
-
 def classify_duplicate(
     exact: Card | None, semantic_card_id: uuid.UUID | None
 ) -> tuple[str, uuid.UUID | None]:
@@ -224,21 +210,27 @@ def subject_tokens(subject_slug: str) -> set[str]:
     return {t for t in _SLUG_SPLIT.split(subject_slug.casefold()) if t}
 
 
-def subject_supports_cards(subject_slug: str, importer_says_supported: bool) -> bool:
-    """Two keys, and a veto. All three have to agree.
+def slug_supports_cards(subject_slug: str) -> bool:
+    """Does this subject slug name something the technical rubric can grade?
 
-    The importer must say the subject is supported, the slug must name something
-    the technical rubric can grade, and nothing in the slug may name a subject it
-    cannot. A model that misreads an anatomy guide as distributed systems still
-    cannot open the card path, and neither can one that reports a law syllabus as
-    supported.
+    The deny list wins: `anatomy-of-distributed-systems` is refused however many
+    technical words it also contains.
     """
-    if not importer_says_supported:
-        return False
     tokens = subject_tokens(subject_slug)
     if tokens & NON_TECHNICAL_SUBJECT_TOKENS:
         return False
     return bool(tokens & TECHNICAL_SUBJECT_TOKENS)
+
+
+def subject_supports_cards(subject_slug: str, importer_says_supported: bool) -> bool:
+    """Two keys, and a veto — the rule applied once, at import.
+
+    Only the importer calls this, because it is the only caller that has the
+    model's answer. Everything after creation reads the slug through
+    `slug_supports_cards`, which is what the stored plan can actually be
+    re-derived from.
+    """
+    return bool(importer_says_supported) and slug_supports_cards(subject_slug)
 
 
 # --- the gate ---------------------------------------------------------------
@@ -582,6 +574,40 @@ async def active_plan(db: AsyncSession) -> StudyPlan | None:
     ).first()
 
 
+async def make_active(
+    db: AsyncSession, graph: PlanGraph, *, kind: str, summary: str
+) -> StudyPlanRevision:
+    """Make this the active plan, pausing whichever one currently is.
+
+    The partial unique index only *detects* two active plans; the flush below is
+    what avoids them. The index is evaluated per statement, so the incumbent's
+    pause has to reach the database before this plan's activation does — and
+    that ordering was previously hand-rolled at three call sites, which is two
+    more than an invariant should have.
+    """
+    before = plan_snapshot(graph)
+    now = _now()
+
+    current = await active_plan(db)
+    if current is not None and current.id != graph.plan.id:
+        current.status = PLAN_PAUSED
+        current.paused_at = now
+        current.updated_at = now
+        db.add(current)
+        await db.flush()
+
+    graph.plan.status = PLAN_ACTIVE
+    graph.plan.paused_at = None
+    graph.plan.archived_at = None
+    graph.plan.revision += 1
+    graph.plan.updated_at = now
+    db.add(graph.plan)
+    return record_revision(
+        db, graph, kind=kind, before=before, after={"status": PLAN_ACTIVE},
+        summary=summary,
+    )
+
+
 def pause(db: AsyncSession, graph: PlanGraph) -> StudyPlanRevision:
     """Freeze progression. Dates do not move by themselves."""
     before = plan_snapshot(graph)
@@ -761,9 +787,7 @@ def week_range_label(weeks: Sequence[StudyPlanWeek]) -> str:
 
 
 def week_of_label(plan: StudyPlan, index: int) -> str:
-    """`week of 19 Oct`. Plan-week precision — never a completion day."""
-    start = sched.week_start_date(to_sched_plan(plan), index)
-    return f"week of {start.day} {start.strftime('%b')}"
+    return sched.week_of_label(plan.start_date, index)
 
 
 def phase_status(phase_index: int, current_phase_index: int) -> str:
@@ -812,54 +836,3 @@ def blocking_dependencies(
     ]
 
 
-async def committed_card_ids(db: AsyncSession, plan_id: uuid.UUID) -> list[uuid.UUID]:
-    from app.models import StudyPlanCardLink
-
-    rows = (
-        await db.exec(
-            select(StudyPlanCardLink).where(col(StudyPlanCardLink.plan_id) == plan_id)
-        )
-    ).all()
-    return [r.card_id for r in rows]
-
-
-__all__ = [
-    "ACCEPTANCE_COMMITTED",
-    "GATE_QUESTIONS",
-    "MAX_SUGGESTED_CARDS",
-    "PlanGraph",
-    "TECHNICAL_SUBJECT_TOKENS",
-    "apply_proposal",
-    "active_plan",
-    "archive",
-    "blocking_dependencies",
-    "build_proposal_for",
-    "classify_duplicate",
-    "committed_card_ids",
-    "complete",
-    "core_progress",
-    "deadline_fits",
-    "disposition_for",
-    "display_title",
-    "duplicate_plan",
-    "find_exact_duplicate",
-    "normalized_card_index",
-    "first_failed_gate",
-    "gate_passed",
-    "load_plan_graph",
-    "normalize_topic",
-    "normalise_gate_results",
-    "pause",
-    "phase_status",
-    "plan_snapshot",
-    "proposal_snapshot",
-    "record_revision",
-    "request_hash",
-    "selectable",
-    "subject_supports_cards",
-    "subject_tokens",
-    "to_sched_plan",
-    "week_of_label",
-    "week_range_label",
-    "week_status",
-]

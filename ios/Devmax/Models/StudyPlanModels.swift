@@ -139,13 +139,11 @@ struct WeekDetail: Codable, Equatable {
     let coreTotal: Int
     let plannedMinutes: Int
     let capacityMinutes: Int
+    /// The two facts under the title, rendered server-side like `dueLabel` —
+    /// the client does not reimplement the hours rounding.
+    let coreLine: String
+    let capacityLine: String
     let sections: [WeekSection]
-
-    /// The two facts under the title, and only two.
-    var coreLine: String { "\(coreComplete) of \(coreTotal) Core complete" }
-    var capacityLine: String {
-        "\(PlanFormat.hours(plannedMinutes)) of \(PlanFormat.hours(capacityMinutes)) planned"
-    }
 }
 
 struct PlanItemDetail: Codable, Equatable, Identifiable {
@@ -184,6 +182,25 @@ struct PlanItemDetail: Codable, Equatable, Identifiable {
         parts.append(priority.uppercased())
         if isComplete { parts.append("COMPLETE") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Which decision a proposal screen is showing.
+///
+/// Typed rather than a string: the untyped version silently lost the capacity
+/// case — `PlanCapacitySheet` pushed `"capacity"`, the screen's loader had no
+/// branch for it and fell through to the replan preview, and Apply then dropped
+/// the override. An exhaustive switch makes that a build failure.
+enum ProposalKind: String, Codable, Hashable {
+    case replan, reopen, capacity, resume
+
+    var applyLabel: String {
+        switch self {
+        case .reopen: return "Reopen"
+        case .resume: return "Apply and resume"
+        case .capacity: return "Apply capacity"
+        case .replan: return "Apply adjustment"
+        }
     }
 }
 
@@ -308,7 +325,6 @@ struct PlanPreview: Codable, Equatable {
         "\(weeks) weeks · \(phases) phases · \(PlanFormat.hours(weeklyCapacityMinutes)) "
             + "per week · \(mode.capitalized)"
     }
-    var unresolvedCount: Int { checks.filter { !$0.isResolved }.count }
 }
 
 struct PlanListEntry: Codable, Equatable, Identifiable {
@@ -388,9 +404,7 @@ struct CardProposal: Codable, Equatable, Identifiable {
     /// Only a clean five-of-five candidate is selectable, and only these count.
     var isSuggested: Bool { disposition == "suggested" }
     var isPossibleOverlap: Bool { disposition == "possible_overlap" }
-    var isExisting: Bool { disposition == "existing" }
     var isNotSuggested: Bool { disposition == "not_suggested" }
-    var isAdded: Bool { disposition == "accepted" }
 
     /// `FAILED Q3 · TESTS A DEFINITION, NOT A SCENARIO`. No action accompanies it.
     var failureLine: String {
@@ -430,8 +444,9 @@ struct CardAcceptResult: Codable, Equatable {
     let replayed: Bool
 }
 
-/// Display formatting for plan numbers. Minutes are the unit everywhere in the
-/// data; hours exist only here.
+/// Hours for the recap's estimated totals, the one place the server does not
+/// pre-render them. Everything else — `capacityLine`, the week `aside`, the
+/// Retrieve note, every forecast — arrives already formatted.
 enum PlanFormat {
     static func hours(_ minutes: Int) -> String {
         let value = Double(minutes) / 60
@@ -439,6 +454,4 @@ enum PlanFormat {
             ? "\(Int(value))h"
             : String(format: "%.1fh", value)
     }
-
-    static func minutes(_ minutes: Int) -> String { "\(minutes) min" }
 }

@@ -24,6 +24,9 @@ final class StudyPlanState: ObservableObject {
     /// to the current phase every time the overview refreshed — including right
     /// after a route set it deliberately.
     private var phaseChosen = false
+    /// Which plan `phaseChosen` refers to. Without it, expanding a phase on one
+    /// plan suppressed the auto-open-the-current-phase default on the next one.
+    private var phaseChosenFor: UUID?
 
     // Drill-down
     @Published var weekLoad: Load = .idle
@@ -36,7 +39,7 @@ final class StudyPlanState: ObservableObject {
     // Decisions
     @Published var proposalLoad: Load = .idle
     @Published var proposal: PlanProposal?
-    @Published var proposalKind = "replan"
+    @Published var proposalKind: ProposalKind = .replan
     @Published var applying = false
     @Published var applyError: String?
 
@@ -75,8 +78,8 @@ final class StudyPlanState: ObservableObject {
 
     init(api: DevmaxAPI = APIConfig.client) {
         self.api = api
-        guideText = GuideDraftStore.read()?.guideText ?? ""
         if let draft = GuideDraftStore.read() {
+            guideText = draft.guideText
             requestedWeeks = draft.requestedWeeks
             weeklyCapacityHours = draft.weeklyCapacityHours
             fixedDeadline = draft.fixedDeadline
@@ -90,6 +93,7 @@ final class StudyPlanState: ObservableObject {
         overviewLoad = overview == nil ? .loading : overviewLoad
         do {
             overview = try await api.planOverview(id)
+            if phaseChosenFor != id { phaseChosen = false }
             if !phaseChosen {
                 openPhase = overview?.phases.first { $0.status == "Current" }?.index
             }
@@ -102,6 +106,7 @@ final class StudyPlanState: ObservableObject {
     /// One at a time. Tapping the open phase closes it.
     func togglePhase(_ index: Int) {
         phaseChosen = true
+        phaseChosenFor = overview?.id
         openPhase = openPhase == index ? nil : index
     }
 
@@ -109,6 +114,7 @@ final class StudyPlanState: ObservableObject {
     /// screen's own load.
     func chooseOpenPhase(_ index: Int?) {
         phaseChosen = true
+        phaseChosenFor = overview?.id
         openPhase = index
     }
 
@@ -152,7 +158,7 @@ final class StudyPlanState: ObservableObject {
 
     func previewReopen() async {
         guard let item else { return }
-        proposalKind = "reopen"
+        proposalKind = .reopen
         proposalLoad = .loading
         do {
             proposal = try await api.previewReopen(item.planId, itemID: item.id)
@@ -216,7 +222,7 @@ final class StudyPlanState: ObservableObject {
 
     func previewCapacity(_ planID: UUID, hours: Int) async {
         guard let revision = overview?.revision else { return }
-        proposalKind = "capacity"
+        proposalKind = .capacity
         proposalLoad = .loading
         do {
             proposal = try await api.updateWeekCapacity(
@@ -231,7 +237,7 @@ final class StudyPlanState: ObservableObject {
     /// What resuming this plan would cost. A short pause usually costs nothing;
     /// a fixed plan past its deadline comes back invalid with the reason.
     func previewResume(_ planID: UUID) async {
-        proposalKind = "resume"
+        proposalKind = .resume
         proposalLoad = .loading
         do {
             proposal = try await api.previewResume(planID)
@@ -243,7 +249,7 @@ final class StudyPlanState: ObservableObject {
 
     func previewReplan(_ planID: UUID) async {
         guard let revision = overview?.revision else { return }
-        proposalKind = "replan"
+        proposalKind = .replan
         proposalLoad = .loading
         do {
             proposal = try await api.previewReplan(
@@ -268,7 +274,7 @@ final class StudyPlanState: ObservableObject {
                 planID,
                 request: ReplanRequest(
                     basePlanRevision: proposal.basePlanRevision,
-                    capacityOverrides: proposalKind == "capacity"
+                    capacityOverrides: proposalKind == .capacity
                         ? [String(capacityWeek): capacityHours * 60] : [:]
                 )
             )

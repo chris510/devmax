@@ -38,7 +38,13 @@ struct PlanWeekScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        .task { await plan.loadWeek(planID, index: index) }
+        // Guarded like the overview: `.task` fires again on every pop back from
+        // Item detail, and the mutating paths refresh the week themselves.
+        .task {
+            if plan.week?.index != index || plan.week?.planId != planID {
+                await plan.loadWeek(planID, index: index)
+            }
+        }
     }
 
     private var header: some View {

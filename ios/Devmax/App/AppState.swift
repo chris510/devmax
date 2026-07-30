@@ -15,7 +15,7 @@ final class AppState: ObservableObject {
         case planOverview(UUID)
         case planWeek(UUID, Int)
         case planItem(UUID, UUID)
-        case planProposal(UUID, String)
+        case planProposal(UUID, ProposalKind)
         case planReopen(UUID, UUID)
         case planCards(UUID, UUID)
         case planUpdates(UUID)
@@ -732,7 +732,7 @@ final class AppState: ObservableObject {
         case "study-plan-replan", "study-plan-replan-invalid", "study-plan-fixed-recovery":
             path.append(.planOverview(planID))
             await waitUntil { plan.overviewLoad == .ready }
-            path.append(.planProposal(planID, "replan"))
+            path.append(.planProposal(planID, .replan))
 
         case "study-plan-reopen", "study-plan-reopen-invalid":
             path.append(.planOverview(planID))

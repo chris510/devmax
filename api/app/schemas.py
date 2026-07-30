@@ -325,6 +325,11 @@ class WeekDetail(BaseModel):
     core_total: int
     planned_minutes: int
     capacity_minutes: int
+    # The two facts under the title, rendered server-side. `due_label` set this
+    # rule — "computed server-side so the client never reimplements date math" —
+    # and the hours rounding is the same kind of thing.
+    core_line: str
+    capacity_line: str
     sections: list[WeekSection]
 
 
@@ -365,7 +370,6 @@ class ItemEdit(BaseModel):
     # is held to, so a hand edit cannot make the displayed hours unreconcilable.
     estimate_minutes: int | None = Field(default=None, gt=0, le=2400)
     notes: str | None = None
-    overview_title: str | None = None
     study_block_label: str | None = None
     study_block_weekday: int | None = Field(default=None, ge=1, le=7)
     study_block_minute_of_day: int | None = Field(default=None, ge=0, le=1439)
@@ -429,7 +433,8 @@ class ProposalOut(BaseModel):
 
 
 class CapacityUpdate(BaseModel):
-    week_index: int = Field(ge=1)
+    # The week comes from the path. A body field for it was accepted and never
+    # read, which reads as contract and is not.
     # Null clears the override and returns the week to the plan default.
     override_capacity_minutes: int | None = Field(default=None, gt=0, le=10080)
     base_plan_revision: int

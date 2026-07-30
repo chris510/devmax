@@ -38,7 +38,9 @@ struct PlanItemScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        .task { await plan.loadItem(planID, itemID: itemID) }
+        .task {
+            if plan.item?.id != itemID { await plan.loadItem(planID, itemID: itemID) }
+        }
         .sheet(isPresented: $editing) {
             if let item = plan.item { PlanItemEditSheet(item: item) }
         }

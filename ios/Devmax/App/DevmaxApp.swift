@@ -68,7 +68,7 @@ struct RootView: View {
                     // makes two reopens of different items distinct entries in
                     // the path — but the screen reads the loaded item from state.
                     case .planReopen(let id, _):
-                        PlanProposalScreen(planID: id, kind: "reopen")
+                        PlanProposalScreen(planID: id, kind: .reopen)
                     case .planCards(let id, let itemID):
                         PlanCardsScreen(planID: id, itemID: itemID)
                     case .planUpdates(let id):

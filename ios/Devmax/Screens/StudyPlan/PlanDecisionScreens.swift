@@ -9,10 +9,9 @@ import SwiftUI
 /// what stays the same, then what Apply will do.
 struct PlanProposalScreen: View {
     let planID: UUID
-    /// `replan`, `reopen`, `capacity`, or `resume`. The proposal these produce
-    /// has the same shape, so they are one screen; only which preview to fetch
-    /// and which verb Apply carries differ.
-    let kind: String
+    /// The proposals these produce have the same shape, so they are one screen;
+    /// only which preview to fetch and which verb Apply carries differ.
+    let kind: ProposalKind
 
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var plan: StudyPlanState
@@ -46,10 +45,12 @@ struct PlanProposalScreen: View {
     }
 
     private func load() async {
+        // Exhaustive. The capacity case was the one the string version lost.
         switch kind {
-        case "reopen": await plan.previewReopen()
-        case "resume": await plan.previewResume(planID)
-        default: await plan.previewReplan(planID)
+        case .reopen: await plan.previewReopen()
+        case .resume: await plan.previewResume(planID)
+        case .capacity: await plan.previewCapacity(planID, hours: plan.capacityHours)
+        case .replan: await plan.previewReplan(planID)
         }
     }
 
@@ -182,12 +183,12 @@ struct PlanProposalScreen: View {
             HStack(spacing: 10) {
                 SecondaryButton(title: "Keep current plan") { state.path.removeLast() }
                 PrimaryButton(
-                    title: plan.applying ? "Applying…" : applyLabel,
+                    title: plan.applying ? "Applying…" : kind.applyLabel,
                     // Native disabled. Nothing focusable carries a fake one.
                     enabled: plan.proposal?.canApply == true && !plan.applying
                 ) {
                     Task {
-                        let ok = kind == "reopen"
+                        let ok = kind == .reopen
                             ? await plan.applyReopen()
                             : await plan.applyProposal(planID)
                         if ok { state.path.removeLast() }
@@ -200,13 +201,7 @@ struct PlanProposalScreen: View {
         .background(Theme.bg)
     }
 
-    private var applyLabel: String {
-        switch kind {
-        case "reopen": return "Reopen"
-        case "resume": return "Apply and resume"
-        default: return "Apply adjustment"
-        }
-    }
+
 }
 
 private struct WeekChangeRow: View {
@@ -258,11 +253,12 @@ struct PlanCapacitySheet: View {
                 )
                 .accessibilityLabel("Weekly capacity for week \(plan.capacityWeek)")
 
+                // Deliberately does not predict the outcome. The scheduler owns
+                // that decision — it preserves completed work in place, which a
+                // planned-vs-capacity comparison here cannot see — so guessing
+                // risks contradicting the proposal two taps later.
                 Text(
-                    plan.capacityHours * 60 < (plan.week?.plannedMinutes ?? 0)
-                        ? "Lowering capacity may need work to carry forward. You'll "
-                            + "review a proposal before anything changes."
-                        : "No work needs to carry forward at this capacity."
+                    "You'll review exactly what moves before anything changes."
                 )
                 .font(WCFont.sans(13.5))
                 .foregroundStyle(Theme.textSecondary)
@@ -280,7 +276,7 @@ struct PlanCapacitySheet: View {
                     state.sheet = nil
                     Task {
                         await plan.previewCapacity(planID, hours: plan.capacityHours)
-                        state.path.append(.planProposal(planID, "capacity"))
+                        state.path.append(.planProposal(planID, .capacity))
                     }
                 }
             }
