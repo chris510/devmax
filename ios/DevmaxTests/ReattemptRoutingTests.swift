@@ -49,6 +49,82 @@ final class ReattemptRoutingTests: XCTestCase {
             throw CancellationError()
         }
         func registerDeviceToken(_ token: String) async throws {}
+
+        // Study Plan. Not exercised by these tests, but the protocol is the
+        // whole client surface — a new endpoint has to be answered here or the
+        // test target stops compiling, which is the point.
+        func activePlan() async throws -> StudyPlanSummary { .none }
+        func plans() async throws -> PlanList { throw CancellationError() }
+        func planOverview(_ id: UUID) async throws -> PlanOverview {
+            throw CancellationError()
+        }
+        func planWeek(_ id: UUID, index: Int) async throws -> WeekDetail {
+            throw CancellationError()
+        }
+        func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
+            throw CancellationError()
+        }
+        func editPlanItem(
+            _ id: UUID, itemID: UUID, edit: PlanItemEdit
+        ) async throws -> PlanItemDetail { throw CancellationError() }
+        func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
+            throw CancellationError()
+        }
+        func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal {
+            throw CancellationError()
+        }
+        func reopenPlanItem(
+            _ id: UUID, itemID: UUID, revision: Int
+        ) async throws -> PlanItemDetail { throw CancellationError() }
+        func previewReplan(_ id: UUID, request: ReplanRequest) async throws -> PlanProposal {
+            throw CancellationError()
+        }
+        func applyReplan(_ id: UUID, request: ReplanRequest) async throws -> PlanProposal {
+            throw CancellationError()
+        }
+        func updateWeekCapacity(
+            _ id: UUID, index: Int, minutes: Int?, revision: Int
+        ) async throws -> PlanProposal { throw CancellationError() }
+        func pausePlan(_ id: UUID) async throws -> PlanOverview { throw CancellationError() }
+        func previewResume(_ id: UUID) async throws -> PlanProposal {
+            throw CancellationError()
+        }
+        func applyResume(_ id: UUID, revision: Int) async throws -> PlanOverview {
+            throw CancellationError()
+        }
+        func activatePlan(_ id: UUID, revision: Int) async throws -> PlanOverview {
+            throw CancellationError()
+        }
+        func completePlan(_ id: UUID) async throws -> PlanOverview { throw CancellationError() }
+        func archivePlan(_ id: UUID) async throws -> PlanOverview { throw CancellationError() }
+        func duplicatePlan(_ id: UUID) async throws -> PlanOverview {
+            throw CancellationError()
+        }
+        func planRevisions(_ id: UUID) async throws -> [PlanRevisionEntry] { [] }
+        func planRecap(_ id: UUID) async throws -> PlanRecap { throw CancellationError() }
+        func previewGuide(_ request: GuidePreviewRequest) async throws -> PlanPreview {
+            throw CancellationError()
+        }
+        func retryPreview(draftID: UUID) async throws -> PlanPreview {
+            throw CancellationError()
+        }
+        func editPreview(draftID: UUID, edit: PreviewEdit) async throws -> PlanPreview {
+            throw CancellationError()
+        }
+        func createPlan(draftID: UUID, activate: Bool) async throws -> PlanOverview {
+            throw CancellationError()
+        }
+        func createCardProposals(
+            _ id: UUID, itemID: UUID
+        ) async throws -> CardProposalList { throw CancellationError() }
+        func cardProposals(_ id: UUID, itemID: UUID) async throws -> CardProposalList {
+            throw CancellationError()
+        }
+        func acceptCardProposals(
+            _ id: UUID, selected: [UUID], idempotencyKey: String, revision: Int,
+            edits: [String: [String: String]]
+        ) async throws -> CardAcceptResult { throw CancellationError() }
+        func resolveDuplicate(_ id: UUID, proposalID: UUID, action: String) async throws {}
     }
 
     @MainActor

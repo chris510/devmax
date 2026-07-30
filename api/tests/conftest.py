@@ -18,7 +18,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
 from app.db import get_session  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Card, Settings  # noqa: E402
+from app.routers import study_plan as study_plan_router  # noqa: E402
 from app.routers.deps import now_in  # noqa: E402
+from app.services import llm  # noqa: E402
 
 API_HEADERS = {"X-API-Key": "test-api-key"}
 CRON_HEADERS = {"X-Cron-Secret": "test-cron-secret"}
@@ -59,8 +61,19 @@ async def db() -> AsyncIterator[AsyncSession]:
     if TEST_ON_POSTGRES:
         engine = create_async_engine(TEST_DATABASE_URL, poolclass=StaticPool)
         async with engine.begin() as conn:
+            # Every table, or a leftover row from the previous test leaks into the
+            # next one. New tables must be added here as well as to models.py.
             await conn.execute(
-                text("TRUNCATE cards, sessions, device_tokens, settings RESTART IDENTITY CASCADE")
+                text(
+                    "TRUNCATE cards, sessions, device_tokens, settings, "
+                    "study_plans, study_plan_phases, study_plan_weeks, "
+                    "study_plan_items, study_plan_item_dependencies, "
+                    "study_plan_revisions, study_plan_guide_drafts, "
+                    "study_plan_card_proposals, "
+                    "study_plan_card_proposal_acceptances, "
+                    "study_plan_card_links, study_plan_duplications "
+                    "RESTART IDENTITY CASCADE"
+                )
             )
     else:
         engine = create_async_engine(
@@ -137,3 +150,137 @@ def pin_clock(monkeypatch, hour: int, minute: int = 0) -> None:
 def in_window(monkeypatch):
     """07:30 local — inside the default 07:10–08:30 morning window."""
     pin_clock(monkeypatch, 7, 30)
+
+
+# --- Study Plan fixtures ----------------------------------------------------
+#
+# Shared by tests/test_study_plan_api.py and tests/test_study_plan_invariants.py.
+# They live here rather than being imported between test modules, which would
+# shadow the fixture name at every use site.
+
+GUIDE = (
+    "Week 1: The request path. Trace a request from DNS through the load balancer "
+    "to the database and back.\n"
+    "Week 2: Storage engines and transactions. B-trees, LSM trees, isolation levels.\n"
+    "Week 3: Relational and NoSQL systems. Postgres, Redis, DynamoDB, Cassandra.\n"
+    "Week 4: Caching, sharding, consistent hashing, and CAP.\n"
+    "Prerequisite: finish consistent hashing before sharding strategies.\n"
+) * 3
+
+
+def _item(key, week, order, **overrides):
+    defaults = {
+        "key": key,
+        "week_index": week,
+        "guide_order": order,
+        "type": "learn",
+        "priority": "core",
+        "full_title": f"Item {key}",
+        "why_it_matters": "It connects the rest of the week together.",
+        "done_when": "You can explain it closed-book in two minutes.",
+        "estimate_minutes": 60,
+        "estimate_source": "imported",
+        "estimate_confidence": "high",
+        "origin": "imported",
+        "source_item_key": None,
+        "source_start": 0,
+        "source_end": 20,
+        "source_excerpt": GUIDE[0:20],
+        "parser_interpretation": "",
+    }
+    return {**defaults, **overrides}
+
+
+def import_payload(**overrides):
+    base = {
+        "subject": "Senior backend interview",
+        "subject_slug": "system-design",
+        "supports_technical_recall_cards": True,
+        "plan_title": "Senior backend interview",
+        "phases": [
+            {
+                "index": 1,
+                "full_title": "Foundations of the request path",
+                "overview_title": "Foundations",
+                "description": "Concepts every later design uses.",
+            },
+            {
+                "index": 2,
+                "full_title": "Concrete technologies",
+                "overview_title": "Technologies",
+                "description": "How systems implement those foundations.",
+            },
+        ],
+        "weeks": [
+            {"index": 1, "phase_index": 1, "full_title": "The request path",
+             "overview_title": "Request path"},
+            {"index": 2, "phase_index": 1, "full_title": "Storage engines",
+             "overview_title": "Storage engines"},
+            {"index": 3, "phase_index": 2, "full_title": "Relational and NoSQL",
+             "overview_title": "Databases"},
+            {"index": 4, "phase_index": 2, "full_title": "Caching and sharding",
+             "overview_title": "Caching"},
+        ],
+        "items": [
+            _item("L1", 1, 1),
+            _item("L2", 2, 2),
+            _item("L3", 3, 3),
+            _item("L4", 4, 4),
+            _item("P4", 4, 5, type="practice", priority="optional", estimate_minutes=30),
+        ],
+        "dependencies": [],
+        "unresolved_estimates": [],
+        "possible_omissions": [],
+    }
+    return {**base, **overrides}
+
+
+@pytest.fixture
+def stub_import(monkeypatch):
+    """Replace the importer wholesale. `response` is mutable per test."""
+
+    class Stub:
+        response = import_payload()
+        error: Exception | None = None
+        calls = 0
+
+    async def fake(**_kwargs):
+        Stub.calls += 1
+        if Stub.error is not None:
+            raise Stub.error
+        return Stub.response
+
+    monkeypatch.setattr(llm, "import_guide", fake)
+    monkeypatch.setattr(study_plan_router.llm, "import_guide", fake)
+    Stub.response = import_payload()
+    Stub.error = None
+    Stub.calls = 0
+    return Stub
+
+
+@pytest.fixture
+def stub_cards(monkeypatch):
+    class Stub:
+        candidates: list = []
+        calls = 0
+
+    async def fake(**_kwargs):
+        Stub.calls += 1
+        return Stub.candidates
+
+    monkeypatch.setattr(llm, "propose_cards", fake)
+    monkeypatch.setattr(study_plan_router.llm, "propose_cards", fake)
+    Stub.candidates = []
+    Stub.calls = 0
+    return Stub
+
+
+def gate(all_passed=True, failing=3):
+    return [
+        {
+            "question_index": n,
+            "passed": all_passed or n != failing,
+            "reason": "Because." if (all_passed or n != failing) else "Tests a definition.",
+        }
+        for n in range(1, 6)
+    ]

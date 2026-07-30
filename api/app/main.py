@@ -7,7 +7,7 @@ from sqlalchemy import text
 from app.auth import AuthMiddleware
 from app.config import get_settings
 from app.db import session_factory
-from app.routers import cards, devices, internal, sessions, settings
+from app.routers import cards, devices, internal, sessions, settings, study_plan
 from app.services.llm import LLMError
 
 _settings = get_settings()
@@ -29,6 +29,7 @@ app.include_router(cards.router)
 app.include_router(sessions.router)
 app.include_router(devices.router)
 app.include_router(settings.router)
+app.include_router(study_plan.router)
 app.include_router(internal.router)
 
 

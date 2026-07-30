@@ -77,9 +77,17 @@ The `cache_control: ephemeral` block is present and correctly shaped, but
 1024/2048-token minimum cacheable prefix. `cache_read_input_tokens` will always be
 zero.
 
-Left as-is. Padding a rubric to 1024 tokens to save a fraction of a cent at ~4
-calls a day would make the prompt worse. The claim in the spec is wrong; the code
-is harmless.
+Left as-is for the three session rubrics. Padding one to 1024 tokens to save a
+fraction of a cent at ~4 calls a day would make the prompt worse. The claim in
+the spec is wrong for those calls; the code is harmless.
+
+**Amended 2026-07-30: caching is now live on exactly one call.** The Study Plan
+guide importer's `IMPORT_RUBRIC` is ~4,000 characters and clears the floor on its
+own, and Opus 5's minimum cacheable prefix is 512 tokens rather than 1024. So
+`_complete` grew a `cache_rubric` flag, `import_guide` sets it, and a measured
+live run reported `cache_read_input_tokens: 3417` — the first non-zero cache read
+in the product. The three session rubrics still pass `cache_rubric=False` and
+still read zero, which is correct for them.
 
 ## 4. `cards.json` did not exist
 
@@ -417,3 +425,136 @@ is opaque and that the six real-transparency files still carry alpha. It runs as
 the `icons` job in `.github/workflows/ci.yml`. It does *not* check the 14
 full-bleed kit squares, which ship RGBA as delivered; stripping their dead alpha
 matters only for what gets copied into the catalog.
+
+
+---
+
+# Study Plan deviations
+
+`docs/STUDY-PLAN-SPEC.md` is authoritative for the feature; the entries below are
+where it diverges from the design handoff in `design_handoff_study_plan/`, and
+why. Nothing here weakens an existing invariant.
+
+## 18. The reopen fixture's arithmetic is not reproducible
+
+**V3.4 §3** says: "Week 4 sits on the 420-min override with 0 spare. Reopening
+L4-01 returns 90 min → 510 against 420."
+
+That contradicts the same section's canonical override, which counts L4-01's 90
+minutes inside the 360 of completed work consumed by the 420-minute budget. If
+completed work consumes capacity — and §3's fully itemised table says it does,
+twice — then converting one completed item back to open cannot raise the week's
+total. 420 stays 420; what changes is that 90 of those minutes become movable.
+
+The only model that satisfies both figures is counting a reopened item twice
+(once as time already spent, once as work to redo). That is arguably true of the
+world, but it makes an item display "90 min" while consuming 180, permanently,
+and nothing else in the design hints at it.
+
+**We implement the consistent model**: completed work consumes capacity, and
+reopening converts pinned minutes into movable ones without adding any. §3's
+canonical table is treated as authoritative because it is the one with every row
+listed and reconciling totals, and it is what `test_study_plan_scheduler.py`
+asserts against.
+
+Every *behaviour* the reopen frames demonstrate is implemented: reopen produces a
+proposal, the proposal can be unresolved, Apply is natively disabled when it is,
+no date moves until confirmation, and cards and SM-2 are untouched. Only the
+illustrative 510 is not reachable, and the app shows the recomputed number.
+
+## 19. `overview_title` is on phases and weeks, not items
+
+V3.5 §8 lists items as gaining the field too. No screen consumes an item's short
+title — Week detail and Item detail both show the full one — so the column would
+be written and never read. Added to phases and weeks only.
+
+## 20. Items reference their week by foreign key
+
+V3.4 §12 models `plan_item.week_index` as a scalar. A real
+`week_id` foreign key means a replan moves one column and cannot leave an item
+pointing at a week that no longer exists. Ordering still comes from
+`StudyPlanWeek.index`.
+
+## 21. Plan→card linkage is a join table
+
+The handoff does not say where the link lives. Putting it on `cards` would mean
+Study Plan writes a column on a card, which is exactly the boundary the feature
+is built around. `study_plan_card_links` makes the boundary structural: deleting
+a plan removes links and leaves every card, score, session, and SM-2 field
+byte-identical, which `test_study_plan_invariants.py` asserts directly.
+
+## 22. A guide-draft table the handoff does not model
+
+`study_plan_guide_drafts` persists the pasted guide, the duration, the capacity,
+the mode, the deadline, the raw model response, and every user edit *before* a
+plan exists. Without it "Retry a failed preview" would mean re-uploading the
+guide and re-making every review decision. The iOS-side `GuideDraftStore` is the
+second copy, for the case where the first preview never reached the server.
+
+## 23. `plan.revision` for optimistic concurrency
+
+V3.4 describes stale-proposal conflict behaviour but models no version anchor.
+`study_plans.revision` is bumped by every material schedule write, every proposal
+carries the `base_plan_revision` it was computed against, and applying a stale
+one is a 409.
+
+## 24. Phase order is a ceiling, not only a floor
+
+Rule 3 says "preserve phase order". Implemented as both bounds: work never drifts
+past the last week of its own phase. Without the ceiling, phase-2 overflow would
+land in phase 4's weeks, the phase structure would be decorative, and the
+scheduler could never report that it had run out of room — which is exactly the
+state V3.4's STATE 6 exists to show.
+
+Consequently "add one plan week" inserts a week **into the phase that needs it**
+and shifts later weeks up, rather than appending to the end of the plan. An
+appended week belongs to the last phase, so phase-2 overflow could not use it and
+the option would never validate.
+
+## 25. Concise titles may be one word
+
+V3.5 §4 rule 2 says "2–5 words", but its own worked-example table is half
+single words: `Databases`, `Coordination`, `Filtration`, `Acid–base`. The
+enforced floor is therefore "not empty"; the real constraint is rule 7, which
+disallows vague fragments. `Databases` passes and `Systems` does not, which is
+the distinction the rule is actually drawing. A 28-character ceiling replaces the
+soft "≤22 where possible".
+
+## 26. Source offsets are recomputed, not validated
+
+The importer is asked for character offsets into the guide. A live run against
+`docs/CURRICULUM.md` returned 31 of 72 items with offsets pointing at the wrong
+span while the excerpts themselves were verbatim — counting characters over a
+ten-thousand-character document is the one part of the task the model is bad at.
+
+Rejecting those would have blocked a good import on the flagship guide. So the
+excerpt is treated as the source of truth and the offsets are recomputed by
+locating it, tolerating whitespace differences. Once located, the excerpt is
+re-read from the guide so the stored quote and the stored span are the same text.
+An excerpt that appears nowhere in the guide is still a real failure — that one
+means the item was invented rather than read.
+
+This is the same principle as §"never trust model arithmetic", applied to the
+other thing the model was asked to compute.
+
+## 27. Subject eligibility matches tokens, not exact slugs
+
+The first implementation used an exact allowlist of subject slugs. The live
+import returned `senior-backend-interview-prep` and was refused — the flagship
+use case, blocked on a slug variant the model had no way to predict. Matching is
+now by token, against a technical vocabulary and a non-technical deny list, with
+the deny list winning outright. Both keys still have to turn: the importer must
+report the subject as supported *and* the slug must pass.
+
+## 28. Dynamic Type does not scale, app-wide
+
+Not a Study Plan deviation but confirmed while verifying one. `WCFont` builds
+`UIFont` directly at a fixed point size and wraps it in `Font(...)`; that path has
+no `UIFontMetrics` and no `relativeTo:`, so **no screen in the app responds to
+Dynamic Type**, including every screen that predates Study Plan. Screenshots at
+`accessibility-medium` are pixel-identical to default.
+
+Study Plan is consistent with the rest of the app, and the density budget it was
+designed against is a default-type budget. Making the app scale is a typography
+change affecting all 29 existing screenshot comparisons and is deliberately not
+bundled into this feature.

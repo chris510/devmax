@@ -216,3 +216,420 @@ class TriggerResult(BaseModel):
 
 def window_to_dict(w: NotificationWindow) -> dict[str, Any]:
     return {"label": w.label, "from": w.from_, "to": w.to, "on": w.on}
+
+
+# ---------------------------------------------------------------------------
+# Study Plan — see docs/STUDY-PLAN-SPEC.md §API
+#
+# These are screen-shaped, not table-shaped. Each one answers the question its
+# level of the hierarchy exists to answer, and none of them carries an internal
+# item id in a user-facing string.
+# ---------------------------------------------------------------------------
+
+PlanMode = Literal["flexible", "fixed"]
+PlanStatus = Literal["active", "paused", "completed", "archived"]
+ItemType = Literal["learn", "practice", "retrieve"]
+ItemPriority = Literal["core", "optional", "recurring"]
+ItemStatus = Literal["pending", "complete", "deferred", "removed"]
+
+
+class ActivePlanSummary(BaseModel):
+    """Today's one line. Kept deliberately thin.
+
+    Today asks "what should I do now?", so this carries position and the next
+    study block and nothing else — no capacity, no progress paragraph, no
+    description. It is also the endpoint that must never slow the due-card
+    fetch, so it resolves from the plan row and one week lookup.
+    """
+
+    active: bool
+    plan_id: uuid.UUID | None = None
+    title: str = ""
+    subject: str = ""
+    week_index: int | None = None
+    week_total: int | None = None
+    # The current phase's concise title. Uppercased by the client's mono style,
+    # not here — casing is a display decision.
+    phase_title: str = ""
+    # e.g. "Next Tue 19:00", or null when no study block is set.
+    next_block_label: str | None = None
+
+
+class PlanWeekRow(BaseModel):
+    index: int
+    display_title: str
+    # The full guide title, always sent. The visual title may be the short one;
+    # the accessible name must not be.
+    full_title: str
+    status: str
+    is_current: bool = False
+
+
+class PlanPhaseRow(BaseModel):
+    index: int
+    display_title: str
+    full_title: str
+    status: str
+    week_range: str
+    # `· Week 4` on the current phase only.
+    current_week_label: str | None = None
+    weeks: list[PlanWeekRow]
+
+
+class PlanOverview(BaseModel):
+    id: uuid.UUID
+    title: str
+    subject: str
+    mode: PlanMode
+    status: PlanStatus
+    week_index: int
+    week_total: int
+    # "Est. completion · week of 19 Oct". Plan-week precision only — there is
+    # deliberately no field here from which a completion day could be derived.
+    forecast_label: str
+    forecast_end_plan_week: int
+    revision: int
+    supports_recall_cards: bool
+    phases: list[PlanPhaseRow]
+    # One quiet line at the bottom of the map.
+    latest_change: str | None = None
+
+
+class WeekItemRow(BaseModel):
+    id: uuid.UUID
+    title: str
+    estimate_minutes: int
+    complete: bool
+    optional: bool
+    # Set when a hard prerequisite is still open, so the row can say so rather
+    # than looking arbitrarily unstartable.
+    blocked_by: str | None = None
+
+
+class WeekSection(BaseModel):
+    type: ItemType
+    label: str
+    aside: str
+    note: str = ""
+    rows: list[WeekItemRow]
+
+
+class WeekDetail(BaseModel):
+    plan_id: uuid.UUID
+    index: int
+    phase_title: str
+    full_title: str
+    display_title: str
+    # The two facts under the title, and nothing else.
+    core_complete: int
+    core_total: int
+    planned_minutes: int
+    capacity_minutes: int
+    # The two facts under the title, rendered server-side. `due_label` set this
+    # rule — "computed server-side so the client never reimplements date math" —
+    # and the hours rounding is the same kind of thing.
+    core_line: str
+    capacity_line: str
+    sections: list[WeekSection]
+
+
+class ItemDetail(BaseModel):
+    id: uuid.UUID
+    plan_id: uuid.UUID
+    full_title: str
+    phase_title: str
+    week_index: int
+    type: ItemType
+    priority: ItemPriority
+    status: ItemStatus
+    why_it_matters: str
+    done_when: str
+    estimate_minutes: int
+    estimate_source: str
+    estimate_confidence: str
+    source_excerpt: str
+    source_label: str
+    notes: str
+    study_block_label: str
+    study_block_weekday: int | None
+    study_block_minute_of_day: int | None
+    study_block_reminder_on: bool
+    completed_at: datetime | None
+    reopened_at: datetime | None
+    # Cards this item has already produced, and whether it may produce more.
+    linked_card_ids: list[uuid.UUID] = []
+    card_proposals_available: bool = False
+    blocked_by: list[str] = []
+
+
+class ItemEdit(BaseModel):
+    full_title: str | None = Field(default=None, min_length=1, max_length=300)
+    why_it_matters: str | None = None
+    done_when: str | None = None
+    # Enforced as a 30-minute multiple by the same CHECK constraint the importer
+    # is held to, so a hand edit cannot make the displayed hours unreconcilable.
+    estimate_minutes: int | None = Field(default=None, gt=0, le=2400)
+    notes: str | None = None
+    study_block_label: str | None = None
+    study_block_weekday: int | None = Field(default=None, ge=1, le=7)
+    study_block_minute_of_day: int | None = Field(default=None, ge=0, le=1439)
+    study_block_reminder_on: bool | None = None
+
+    @model_validator(mode="after")
+    def _estimate_on_the_grid(self) -> "ItemEdit":
+        if self.estimate_minutes is not None and self.estimate_minutes % 30:
+            raise ValueError("estimates are in 30-minute increments")
+        return self
+
+
+class WeekPlacementOut(BaseModel):
+    index: int
+    capacity_minutes: int
+    before_minutes: int
+    after_minutes: int
+    changed: bool
+    over_capacity: bool
+
+
+class ItemMoveOut(BaseModel):
+    title: str
+    from_week: int
+    to_week: int
+    minutes: int
+
+
+class UnresolvedOut(BaseModel):
+    title: str
+    minutes: int
+    reason: Literal["no_room", "does_not_fit", "dependency_cycle"]
+
+
+class ProposalOut(BaseModel):
+    """A decision screen's whole payload.
+
+    Leads with the outcome (`headline`), then the arithmetic. Deliberately
+    wordier than the map screens: length is not the constraint on a screen whose
+    job is informed consent.
+    """
+
+    kind: str
+    base_plan_revision: int
+    headline: str
+    body: str
+    weeks: list[WeekPlacementOut]
+    moves: list[ItemMoveOut]
+    unresolved: list[UnresolvedOut]
+    unresolved_minutes: int
+    displaced_minutes: int
+    forecast_end_plan_week: int
+    forecast_label: str
+    forecast_changed: bool
+    # Native `disabled` on the client. An invalid proposal always carries reasons.
+    can_apply: bool
+    reasons: list[str]
+    # What stays the same. Stated explicitly because the question the screen
+    # answers is "what changes if I approve this", and the answer has two halves.
+    unchanged: list[str]
+
+
+class CapacityUpdate(BaseModel):
+    # The week comes from the path. A body field for it was accepted and never
+    # read, which reads as contract and is not.
+    # Null clears the override and returns the week to the plan default.
+    override_capacity_minutes: int | None = Field(default=None, gt=0, le=10080)
+    base_plan_revision: int
+
+    @model_validator(mode="after")
+    def _on_the_grid(self) -> "CapacityUpdate":
+        if self.override_capacity_minutes and self.override_capacity_minutes % 30:
+            raise ValueError("capacity is set in 30-minute increments")
+        return self
+
+
+class ReplanRequest(BaseModel):
+    base_plan_revision: int
+    capacity_overrides: dict[int, int | None] = {}
+    default_capacity_minutes: int | None = Field(default=None, gt=0, le=10080)
+    deferred_item_ids: list[uuid.UUID] = []
+    extra_weeks: int = Field(default=0, ge=0, le=8)
+    insert_after_phase: int | None = None
+    confirmed_core_removals: list[uuid.UUID] = []
+
+
+class ApplyReplan(ReplanRequest):
+    """Apply carries the same shape as Preview so the two cannot diverge.
+
+    A proposal is only ever applied by recomputing it from these inputs against
+    the current revision — the client never sends a placement, so there is no
+    way for a stale client-side plan to be written.
+    """
+
+
+class PlanCreate(BaseModel):
+    draft_id: uuid.UUID
+    # Making this plan active pauses the current one, which is why it is an
+    # explicit flag rather than a default.
+    activate: bool = True
+
+
+class GuidePreviewIn(BaseModel):
+    guide_text: str = Field(min_length=1, max_length=400_000)
+    requested_weeks: int = Field(ge=2, le=52)
+    weekly_capacity_minutes: int = Field(gt=0, le=10080)
+    mode: PlanMode = "flexible"
+    deadline: date | None = None
+    subject_hint: str = ""
+    title_hint: str = ""
+    start_date: date | None = None
+
+
+class PreviewEdit(BaseModel):
+    """Edits and review decisions applied to a draft, re-validated in place."""
+
+    estimates_reviewed: list[str] | None = None
+    omissions_acknowledged: bool | None = None
+    retrieval_approved: list[str] | None = None
+    retrieval_rejected: list[str] | None = None
+    dependencies_confirmed: list[str] | None = None
+    item_estimates: dict[str, int] = {}
+    overview_titles: dict[str, str] = {}
+
+
+class CheckRow(BaseModel):
+    key: str
+    label: str
+    status: Literal["ok", "needs_review", "blocked"]
+    value: str
+    detail: str = ""
+    # Only exceptions carry a destination, and only rows with a destination get
+    # a disclosure arrow.
+    destination: str | None = None
+
+
+class PreviewPhase(BaseModel):
+    index: int
+    display_title: str
+    full_title: str
+    description: str
+    week_range: str
+
+
+class PreviewOut(BaseModel):
+    draft_id: uuid.UUID
+    status: Literal["pending", "ready", "failed"]
+    title: str
+    subject: str
+    mode: PlanMode
+    weeks: int
+    phases: int
+    weekly_capacity_minutes: int
+    total_minutes: int
+    forecast_label: str
+    supports_recall_cards: bool
+    checks: list[CheckRow]
+    can_create: bool
+    phase_rows: list[PreviewPhase] = []
+    # Populated on a failed import. The guide, duration, capacity, mode, deadline
+    # and every edit are still on the draft, so the retry loses nothing.
+    error: str = ""
+
+
+class PlanListEntry(BaseModel):
+    id: uuid.UUID
+    title: str
+    subject: str
+    status: PlanStatus
+    meta: str
+    created_at: datetime
+
+
+class PlanList(BaseModel):
+    active: list[PlanListEntry]
+    paused: list[PlanListEntry]
+    completed: list[PlanListEntry]
+    archived: list[PlanListEntry]
+
+
+class RevisionOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    summary: str
+    created_at: datetime
+    reversible: bool
+
+
+class PlanRecap(BaseModel):
+    """The completed-plan screen. Plan work only.
+
+    Estimated, not measured — Study Plan does not track actual study time — and
+    global reviews are deliberately absent, because they were never part of this
+    plan's capacity.
+    """
+
+    id: uuid.UUID
+    title: str
+    core_complete: int
+    core_total: int
+    optional_deferred: int
+    estimated_minutes: int
+    learn_practice_minutes: int
+    retrieval_minutes: int
+    retrieval_completed: int
+    practice_completed: int
+    remaining_gaps: list[str]
+
+
+class GateResult(BaseModel):
+    question_index: int
+    question: str
+    passed: bool
+    reason: str
+
+
+class CardProposalOut(BaseModel):
+    id: uuid.UUID
+    revision: int
+    topic: str
+    category: str
+    canonical_question: str
+    reason: str
+    gate: list[GateResult]
+    # `suggested` is the only disposition that is selectable and counted.
+    disposition: Literal[
+        "suggested", "not_suggested", "existing", "possible_overlap", "accepted", "skipped"
+    ]
+    duplicate_check_result: Literal["none", "exact", "possible"]
+    existing_card_id: uuid.UUID | None = None
+    existing_card_context: str = ""
+    # The one failed question, for the NOT SUGGESTED row. Null when all five passed.
+    failed_question_index: int | None = None
+    failed_reason: str = ""
+
+
+class CardProposalList(BaseModel):
+    plan_id: uuid.UUID
+    item_id: uuid.UUID
+    supports_recall_cards: bool
+    suggested_count: int
+    proposals: list[CardProposalOut]
+    note: str
+
+
+class CardAcceptIn(BaseModel):
+    selected_proposal_ids: list[uuid.UUID] = Field(min_length=1)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    proposal_revision: int
+    edits: dict[str, dict[str, str]] = {}
+
+
+class CardAcceptOut(BaseModel):
+    status: Literal["committed"]
+    created_card_ids: list[uuid.UUID]
+    # True when this response replayed an earlier commit rather than creating
+    # anything. The UI shows ADDED either way — both mean the cards exist.
+    replayed: bool = False
+
+
+class DuplicateResolution(BaseModel):
+    proposal_id: uuid.UUID
+    action: Literal["keep_new", "use_existing", "skip"]

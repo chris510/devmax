@@ -15,6 +15,11 @@ from anthropic import AsyncAnthropic
 
 from app.config import get_settings
 
+# The gate is a product rule, not a prompt detail, so it is owned by the domain
+# module and interpolated into the rubric below. One source of truth for the five
+# questions means the prompt and the validator that enforces them cannot drift.
+from app.services.study_plan import GATE_QUESTIONS
+
 log = logging.getLogger(__name__)
 
 # The composite band that earns a second attempt before scoring. `spec.md` says
@@ -31,13 +36,16 @@ FOLLOW_UP_HIGH = 3
 SDK_MAX_RETRIES = 2
 SDK_TIMEOUT_SECONDS = 45.0
 
-# Every rubric below is byte-identical across calls — but none is a prompt-cache
-# breakpoint. The minimum cacheable prefix is 1024 tokens on Sonnet 5 and 4096 on
-# Haiku 4.5; measured via `count_tokens`, SCORING_RUBRIC is ~770, REATTEMPT_RUBRIC
-# ~810 and QUESTION_RUBRIC ~220, so a `cache_control` marker on any would silently
-# no-op (no error, just cache_read=0 forever). Padding to reach the floor would cost
-# more input tokens per call than caching could return at this volume. The cache_*
-# fields in the log line below prove it stays at zero.
+# The three session rubrics below are byte-identical across calls — but none is a
+# prompt-cache breakpoint. The minimum cacheable prefix is 1024 tokens on Sonnet 5
+# and 4096 on Haiku 4.5; measured via `count_tokens`, SCORING_RUBRIC is ~770,
+# REATTEMPT_RUBRIC ~810 and QUESTION_RUBRIC ~220, so a `cache_control` marker on any
+# would silently no-op (no error, just cache_read=0 forever). Padding to reach the
+# floor would cost more input tokens per call than caching could return at this
+# volume. The cache_* fields in the log line below prove it stays at zero.
+#
+# IMPORT_RUBRIC is the exception and *is* cached — it clears 1024 tokens on its own
+# and Opus 5's floor is 512. See docs/DEVIATIONS.md §3.
 
 # Shared by every rubric that grades a spoken answer. Hoisted rather than restated
 # so a change to how transcription artifacts are treated cannot apply to one rubric
@@ -151,6 +159,317 @@ summary is what the next session grades against.
 
 Return only the structured fields. No preamble, no code fences, no commentary.\
 """
+
+IMPORT_RUBRIC = """\
+You are converting a study guide into a structured study plan. The guide may be \
+about anything — distributed systems, anatomy, constitutional law, a certification \
+syllabus, a language. Stay subject-agnostic: never introduce interview-prep framing \
+into a plan that isn't about interviews, and never introduce clinical or legal \
+framing into one that isn't.
+
+Read the guide and produce phases, weeks, and items.
+
+STRUCTURE
+Produce 3-5 phases and exactly the number of weeks the user requested. Weeks are \
+numbered 1..N across the whole plan, not restarted per phase, and each week belongs \
+to exactly one phase. Phases occupy contiguous week ranges in order.
+
+ITEMS
+Every item is `learn` (take in new material), `practice` (produce something), or \
+`retrieve` (recall closed-book). Priority is `core` (the plan fails without it), \
+`optional` (worth doing, safe to defer), or `recurring` (a repeated activity).
+
+Retrieval activities:
+  - If the guide already contains a retrieval activity, import it with \
+origin `imported`.
+  - You may propose additional ones with origin `generated`, each pointing at the \
+Learn or Practice item it retrieves via `source_item_key`. Do NOT generate one when \
+the guide already has an equivalent activity for that material.
+  - Retrieval defaults to `recurring`, not `core`. Only mark it core if the guide \
+explicitly makes progression depend on it.
+
+ESTIMATES
+`estimate_minutes` must be a positive multiple of 30. Use the guide's own figures \
+where it gives them (`estimate_source: imported`); otherwise estimate from the scope \
+of the work (`estimate_source: generated`). Set `estimate_confidence` honestly — \
+`needs_review` whenever you are guessing at scope rather than reading a figure.
+
+Do NOT attempt to make weekly totals fit the user's capacity. Estimate each item on \
+its own merits and let the application do the arithmetic. A plan that does not fit \
+is a real finding the user needs to see, not a problem to hide by shrinking numbers.
+
+DEPENDENCIES
+Record a dependency only where one topic genuinely cannot be understood or produced \
+before another. `kind: hard` blocks ordering; `kind: soft` is a preference. Use \
+source `imported` with confidence `high` only when the guide uses explicit \
+prerequisite language ("before", "prerequisite", "once you have"). Anything you \
+worked out yourself is `inferred`, and its `rationale` must say what in the guide \
+suggested it.
+
+PROVENANCE
+For every item, `source_start` and `source_end` are character offsets into the guide \
+text exactly as given to you, and `source_excerpt` is the substring they delimit. \
+Count characters from 0. If a line of the guide is ambiguous, say how you read it in \
+`parser_interpretation`. If you could not find a source span, use null offsets and an \
+empty excerpt rather than guessing — a wrong offset is worse than a missing one.
+
+OVERVIEW TITLES
+Each phase and week needs a concise `overview_title` of 2-5 words alongside its \
+`full_title`:
+  1. Name the subject of the week, not the activity list.
+  2. One to five words and 28 characters or fewer. One word is ideal when a single \
+word names the subject ("Databases", "Coordination", "Acid-base").
+  3. Never a truncation and never an ellipsis — write a real label instead.
+  4. Keep the guide's own terminology; don't introduce vocabulary the user never wrote.
+  5. Stay subject-agnostic.
+  6. Unique within its phase; qualify the second if two would collide.
+  7. No vague fragments: "Systems", "Advanced", "Part 2" are all disallowed.
+
+SUBJECT
+`subject_slug` is a lowercase hyphenated key for the subject. Set \
+`supports_technical_recall_cards` true only for software and systems engineering \
+subjects that can be graded on mechanism accuracy, trade-off awareness, and \
+failure-mode awareness. Anatomy, law, language learning, and general certification \
+study are false.
+
+FINDINGS
+List every item whose estimate you are unsure of in `unresolved_estimates`, and \
+anything in the guide you could not place in `possible_omissions`. Under-reporting \
+these is worse than over-reporting: the user reviews them before the plan is created.
+
+Return only the structured fields. No preamble, no code fences, no commentary.\
+"""
+
+_NULLABLE_INT: dict[str, Any] = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+_NULLABLE_STR: dict[str, Any] = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+
+IMPORT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "subject": {"type": "string"},
+        "subject_slug": {"type": "string"},
+        "supports_technical_recall_cards": {"type": "boolean"},
+        "plan_title": {"type": "string"},
+        "phases": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "full_title": {"type": "string"},
+                    "overview_title": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "required": ["index", "full_title", "overview_title", "description"],
+                "additionalProperties": False,
+            },
+        },
+        "weeks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "phase_index": {"type": "integer"},
+                    "full_title": {"type": "string"},
+                    "overview_title": {"type": "string"},
+                },
+                "required": ["index", "phase_index", "full_title", "overview_title"],
+                "additionalProperties": False,
+            },
+        },
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "week_index": {"type": "integer"},
+                    "guide_order": {"type": "integer"},
+                    "type": {"type": "string", "enum": ["learn", "practice", "retrieve"]},
+                    "priority": {
+                        "type": "string",
+                        "enum": ["core", "optional", "recurring"],
+                    },
+                    "full_title": {"type": "string"},
+                    "why_it_matters": {"type": "string"},
+                    "done_when": {"type": "string"},
+                    "estimate_minutes": {"type": "integer"},
+                    "estimate_source": {
+                        "type": "string",
+                        "enum": ["imported", "generated", "user_edited"],
+                    },
+                    "estimate_confidence": {
+                        "type": "string",
+                        "enum": ["high", "medium", "needs_review"],
+                    },
+                    "origin": {
+                        "type": "string",
+                        "enum": ["imported", "generated", "manual"],
+                    },
+                    "source_item_key": _NULLABLE_STR,
+                    "source_start": _NULLABLE_INT,
+                    "source_end": _NULLABLE_INT,
+                    "source_excerpt": {"type": "string"},
+                    "parser_interpretation": {"type": "string"},
+                },
+                "required": [
+                    "key",
+                    "week_index",
+                    "guide_order",
+                    "type",
+                    "priority",
+                    "full_title",
+                    "why_it_matters",
+                    "done_when",
+                    "estimate_minutes",
+                    "estimate_source",
+                    "estimate_confidence",
+                    "origin",
+                    "source_item_key",
+                    "source_start",
+                    "source_end",
+                    "source_excerpt",
+                    "parser_interpretation",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "dependencies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "prerequisite_key": {"type": "string"},
+                    "dependent_key": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["hard", "soft"]},
+                    "source": {
+                        "type": "string",
+                        "enum": ["imported", "inferred", "user_added"],
+                    },
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["high", "medium", "needs_review"],
+                    },
+                    "rationale": {"type": "string"},
+                    "source_excerpt": {"type": "string"},
+                },
+                "required": [
+                    "prerequisite_key",
+                    "dependent_key",
+                    "kind",
+                    "source",
+                    "confidence",
+                    "rationale",
+                    "source_excerpt",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "unresolved_estimates": {"type": "array", "items": {"type": "string"}},
+        "possible_omissions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "note": {"type": "string"},
+                    "source_excerpt": {"type": "string"},
+                },
+                "required": ["note", "source_excerpt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": [
+        "subject",
+        "subject_slug",
+        "supports_technical_recall_cards",
+        "plan_title",
+        "phases",
+        "weeks",
+        "items",
+        "dependencies",
+        "unresolved_estimates",
+        "possible_omissions",
+    ],
+    "additionalProperties": False,
+}
+
+# The five gate questions are product rules, so they live in the domain module and
+# are interpolated here. Restating them would let the prompt and the validator that
+# enforces them drift apart, and the drift would look like a model failure.
+_GATE_LIST = "\n".join(
+    f"  {n}. {question}" for n, question in enumerate(GATE_QUESTIONS, start=1)
+)
+
+CARD_PROPOSAL_RUBRIC = f"""\
+You are proposing spaced-repetition recall cards from a study-plan item the \
+engineer has just finished. The review budget is scarce, so most items should \
+produce no card at all.
+
+Every candidate must pass all five of these questions. Answer each one \
+independently and honestly:
+
+{_GATE_LIST}
+
+Failing any single question means the candidate is not suggested. Do not soften an \
+answer to get a card through — a card that fails question 3 will be reviewed dozens \
+of times over the next year and will teach a definition each time.
+
+Propose at most 3 candidates, and propose none at all if you are not confident. \
+Returning an empty list is a good answer and the common one.
+
+For each candidate write:
+  - `topic`: a short noun phrase, the way a card is titled.
+  - `canonical_question`: the question this card will ask at every review, forever. \
+It must force reconstruction of a mechanism rather than recall of a definition, and \
+prefer a concrete scenario. This exact text is stored and reused, so write it as the \
+final version.
+  - `category`: a short subject grouping.
+  - `reason`: one sentence on why this card earns its place.
+  - `gate`: five entries, one per question, each with `question_index` (1-5), \
+`passed`, and a `reason` specific to this candidate.
+
+Return only the structured fields. No preamble, no code fences, no commentary.\
+"""
+
+CARD_PROPOSAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "category": {"type": "string"},
+                    "canonical_question": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "gate": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question_index": {
+                                    "type": "integer",
+                                    "enum": [1, 2, 3, 4, 5],
+                                },
+                                "passed": {"type": "boolean"},
+                                "reason": {"type": "string"},
+                            },
+                            "required": ["question_index", "passed", "reason"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["topic", "category", "canonical_question", "reason", "gate"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["candidates"],
+    "additionalProperties": False,
+}
 
 REATTEMPT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -309,6 +628,8 @@ async def _complete(
     user_content: str,
     schema: dict[str, Any],
     max_tokens: int,
+    cache_rubric: bool = False,
+    stream: bool = False,
 ) -> dict[str, Any]:
     """One structured-output call, with a single retry on a parse failure.
 
@@ -319,11 +640,24 @@ async def _complete(
 
     Transport failures are *not* retried here; the SDK already did that (see
     SDK_MAX_RETRIES) and anything reaching the ``except`` below has exhausted it.
+
+    ``stream`` is required above roughly 16k ``max_tokens``: a non-streaming
+    request that large sits on an idle connection long enough to hit an HTTP
+    timeout, and the SDK refuses it outright. Only the guide importer needs it —
+    a whole 12-week plan does not fit in a scoring call's budget.
+
+    ``cache_rubric`` puts a cache breakpoint on the system block. Only worth
+    setting when the rubric clears the model's minimum cacheable prefix; below it
+    the marker silently does nothing.
     """
+    system_block: dict[str, Any] = {"type": "text", "text": rubric}
+    if cache_rubric:
+        system_block["cache_control"] = {"type": "ephemeral"}
+
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": [{"type": "text", "text": rubric}],
+        "system": [system_block],
         "messages": [{"role": "user", "content": user_content}],
         "output_config": {"format": {"type": "json_schema", "schema": schema}},
     }
@@ -338,7 +672,11 @@ async def _complete(
     for attempt in (1, 2):
         started = time.monotonic()
         try:
-            response = await client.messages.create(**kwargs)
+            if stream:
+                async with client.messages.stream(**kwargs) as streamed:
+                    response = await streamed.get_final_message()
+            else:
+                response = await client.messages.create(**kwargs)
         except Exception as exc:
             raise LLMError(f"{model} call failed: {exc}") from exc
 
@@ -460,6 +798,111 @@ async def score_answer(
         feedback=str(data.get("feedback", "")).strip(),
         mastery_summary=clean_summary(str(data.get("mastery_summary", ""))),
     )
+
+
+async def import_guide(
+    *,
+    guide_text: str,
+    requested_weeks: int,
+    weekly_capacity_minutes: int,
+    mode: str,
+    deadline: str | None,
+    subject_hint: str,
+    title_hint: str,
+) -> dict[str, Any]:
+    """Turn a pasted study guide into structured plan data. Returns raw fields.
+
+    Deliberately returns the parsed dict rather than a domain object: everything
+    the model says is untrusted until `study_plan_import.validate_import` has
+    recomputed the arithmetic and checked the offsets against the guide text.
+    Nothing here can create a plan.
+
+    The guide goes in the *user* turn, after the cached rubric — it is the
+    volatile part of the request and putting it in the system block would
+    invalidate the cache on every call.
+    """
+    settings = get_settings()
+    context = [
+        f"Requested duration: {requested_weeks} weeks",
+        f"Weekly capacity: {weekly_capacity_minutes} minutes",
+        f"Mode: {mode}",
+        f"Hard deadline: {deadline}" if deadline else "No hard deadline.",
+        f"Subject hint: {subject_hint}" if subject_hint else None,
+        f"Title hint: {title_hint}" if title_hint else None,
+        "",
+        "GUIDE TEXT BEGINS. Character offsets are counted from 0 at the G of the",
+        "first line below, over this exact string.",
+        "",
+        guide_text,
+    ]
+
+    return await _complete(
+        model=settings.studyplan_model,
+        effort=settings.studyplan_effort,
+        rubric=IMPORT_RUBRIC,
+        user_content="\n".join(c for c in context if c is not None),
+        schema=IMPORT_SCHEMA,
+        # A 12-week plan runs to ~100 items, each with an excerpt and a rationale.
+        # Sized for the whole structure in one response, because a truncated plan
+        # is worse than a failed one: it validates as "missing content" and the
+        # user cannot tell whether the guide or the importer dropped it.
+        #
+        # This is deliberately large. On Opus 5 thinking is on by default and
+        # `max_tokens` bounds thinking *plus* the response — at effort `high` a
+        # 32000 budget was consumed entirely by thinking and the call returned a
+        # single empty thinking block with `stop_reason: max_tokens`. Measured
+        # against docs/CURRICULUM.md, a successful import spends roughly 20-30k on
+        # thinking and 20-25k on the structure, so this leaves real headroom.
+        max_tokens=96000,
+        # Streaming is not optional at this size — the SDK refuses a non-streaming
+        # request it estimates will outlive the HTTP timeout.
+        stream=True,
+        cache_rubric=True,
+    )
+
+
+async def propose_cards(
+    *,
+    subject: str,
+    item_title: str,
+    why_it_matters: str,
+    done_when: str,
+    source_excerpt: str,
+    existing_weak_topics: list[str],
+) -> list[dict[str, Any]]:
+    """Candidate recall cards for a completed plan item. Proposals only.
+
+    `existing_weak_topics` is what gate question 5 is answered against — without
+    the cards already competing for the same review budget, the model cannot
+    judge whether a new one is a better use of it than an existing weak one.
+    """
+    settings = get_settings()
+    context = [
+        f"Subject: {subject}",
+        f"Completed item: {item_title}",
+        f"Why it matters: {why_it_matters}" if why_it_matters else None,
+        f"Done when: {done_when}" if done_when else None,
+        f"From the guide: {source_excerpt}" if source_excerpt else None,
+    ]
+    if existing_weak_topics:
+        context.append("Existing cards already competing for the same review budget:")
+        context.extend(f"  - {t}" for t in existing_weak_topics)
+    else:
+        context.append("There are no existing weak cards competing for review budget.")
+
+    data = await _complete(
+        model=settings.card_proposal_model,
+        effort=settings.card_proposal_effort,
+        rubric=CARD_PROPOSAL_RUBRIC,
+        user_content="\n".join(c for c in context if c is not None),
+        schema=CARD_PROPOSAL_SCHEMA,
+        # At most three candidates, each a question plus five gate answers.
+        max_tokens=4000,
+    )
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list):
+        raise LLMError(f"card proposal response had no candidate list: {data!r}")
+    return [c for c in candidates if isinstance(c, dict)]
 
 
 async def score_reattempt(

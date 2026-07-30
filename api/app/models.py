@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 # Postgres in production; the variant keeps the SQLite test schema compilable.
-WINDOWS_TYPE = JSONB().with_variant(JSON(), "sqlite")
+JSON_TYPE = JSONB().with_variant(JSON(), "sqlite")
 
 # Every timestamp column is `timestamptz` in migration 0001 and every value written
 # is tz-aware (`_now()` below). A bare `datetime` annotation would map to a naive
@@ -148,6 +148,441 @@ class Settings(SQLModel, table=True):
     reviews_per_day: int = 2
     windows: list[dict[str, Any]] = Field(
         default_factory=lambda: list(DEFAULT_WINDOWS),
-        sa_column=Column(WINDOWS_TYPE, nullable=False),
+        sa_column=Column(JSON_TYPE, nullable=False),
     )
     timezone: str = "America/Los_Angeles"
+
+
+# ---------------------------------------------------------------------------
+# Study Plan — see docs/STUDY-PLAN-SPEC.md
+#
+# Nothing below writes to `cards` or `sessions`. The only link between the two
+# halves of the schema is `study_plan_card_links`, and it is only ever written
+# by a committed card-proposal acceptance.
+# ---------------------------------------------------------------------------
+
+PLAN_ACTIVE = "active"
+PLAN_PAUSED = "paused"
+PLAN_COMPLETED = "completed"
+# Completed is not archived. Both are terminal for scheduling; only one means
+# the work was finished, and the Plans sheet lists them separately.
+PLAN_ARCHIVED = "archived"
+
+MODE_FLEXIBLE = "flexible"
+MODE_FIXED = "fixed"
+
+ITEM_LEARN = "learn"
+ITEM_PRACTICE = "practice"
+ITEM_RETRIEVE = "retrieve"
+
+PRIORITY_CORE = "core"
+PRIORITY_OPTIONAL = "optional"
+PRIORITY_RECURRING = "recurring"
+
+ITEM_PENDING = "pending"
+ITEM_COMPLETE = "complete"
+ITEM_DEFERRED = "deferred"
+# `removed` is out of the plan entirely; `deferred` is out of the schedule but
+# kept for the recap.
+ITEM_REMOVED = "removed"
+
+ORIGIN_IMPORTED = "imported"
+ORIGIN_GENERATED = "generated"
+ORIGIN_MANUAL = "manual"
+
+ESTIMATE_IMPORTED = "imported"
+ESTIMATE_GENERATED = "generated"
+ESTIMATE_USER_EDITED = "user_edited"
+
+CONFIDENCE_HIGH = "high"
+CONFIDENCE_MEDIUM = "medium"
+CONFIDENCE_NEEDS_REVIEW = "needs_review"
+
+DEP_HARD = "hard"
+DEP_SOFT = "soft"
+
+DEP_IMPORTED = "imported"
+DEP_INFERRED = "inferred"
+DEP_USER_ADDED = "user_added"
+
+# Revision kinds. Every material schedule change writes one; display-only edits
+# (an overview title, a note) do not.
+REVISION_CREATED = "created"
+REVISION_CAPACITY = "capacity"
+REVISION_REPLAN = "replan"
+REVISION_REOPEN = "reopen"
+REVISION_RESUME = "resume"
+REVISION_PAUSE = "pause"
+REVISION_ACTIVATE = "activate"
+REVISION_COMPLETE = "complete"
+REVISION_ARCHIVE = "archive"
+REVISION_ITEM_EDIT = "item_edit"
+
+DRAFT_PENDING = "pending"
+DRAFT_READY = "ready"
+DRAFT_FAILED = "failed"
+
+# A candidate is selectable only when all five gate questions passed. Everything
+# else is displayed under NOT SUGGESTED with no action, or resolved by the user.
+DISPOSITION_SUGGESTED = "suggested"
+DISPOSITION_NOT_SUGGESTED = "not_suggested"
+DISPOSITION_EXISTING = "existing"
+DISPOSITION_POSSIBLE_OVERLAP = "possible_overlap"
+DISPOSITION_ACCEPTED = "accepted"
+DISPOSITION_SKIPPED = "skipped"
+
+DUPLICATE_NONE = "none"
+DUPLICATE_EXACT = "exact"
+DUPLICATE_POSSIBLE = "possible"
+
+ACCEPTANCE_PROCESSING = "processing"
+ACCEPTANCE_COMMITTED = "committed"
+ACCEPTANCE_FAILED = "failed"
+
+
+class StudyPlan(SQLModel, table=True):
+    __tablename__ = "study_plans"
+    __table_args__ = (
+        # At most one active plan, enforced by the database rather than by a
+        # read-then-write in Python. Zero active is valid, which is why this is a
+        # partial index and not a one-row table. Both engines honour partial
+        # unique indexes, so the SQLite suite exercises the production rule.
+        Index(
+            "uq_study_plans_one_active",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+        Index("ix_study_plans_status", "status"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    title: str
+    subject: str
+    # Normalised subject key. Card proposals require this to be in the technical
+    # allowlist AND the importer to have said the subject is supported — either
+    # alone is not enough. See services/study_plan.subject_supports_cards.
+    subject_slug: str
+    # Stored verbatim. Source offsets on items index into this exact string, so
+    # it must never be reformatted, trimmed, or normalised after import.
+    guide_text: str
+
+    status: str = PLAN_ACTIVE
+    mode: str = MODE_FLEXIBLE
+    # The latest acceptable completion date on a fixed plan. Finishing earlier is
+    # valid; the deadline is a ceiling, not a target.
+    deadline: date | None = None
+    start_date: date
+
+    default_weekly_capacity_minutes: int
+    # 1-based. The unambiguous progress anchor: plan week N runs from
+    # start_date + 7*(N-1) for seven days, so every "week of <date>" label and
+    # every forecast is derived from these two fields and nothing else.
+    current_week_index: int = 1
+    forecast_end_plan_week: int
+
+    # Optimistic concurrency. Bumped by every material schedule write; every
+    # proposal carries the revision it was computed against, and applying a stale
+    # one is a 409 rather than a silent overwrite.
+    revision: int = 1
+
+    paused_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    completed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    archived_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanPhase(SQLModel, table=True):
+    __tablename__ = "study_plan_phases"
+    __table_args__ = (Index("ix_study_plan_phases_plan", "plan_id", "index"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    index: int
+
+    full_title: str
+    # 2-5 words, generated during Preview, user-editable. Display only: it never
+    # reaches scheduling, dependency, duplicate, card, or scoring logic, and the
+    # accessible name always uses full_title.
+    overview_title: str = ""
+    # Surfaced at plan creation and in supporting detail — deliberately not on the
+    # overview, which V3.5 stripped of curriculum paragraphs.
+    description: str = ""
+
+
+class StudyPlanWeek(SQLModel, table=True):
+    __tablename__ = "study_plan_weeks"
+    __table_args__ = (Index("ix_study_plan_weeks_plan", "plan_id", "index"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    phase_id: uuid.UUID = Field(foreign_key="study_plan_phases.id", ondelete="CASCADE")
+    index: int
+
+    full_title: str
+    overview_title: str = ""
+    # One-week override. Null means the plan default applies — storing the default
+    # here instead would silently pin the week when the plan default later moves.
+    override_capacity_minutes: int | None = None
+    advanced_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanItem(SQLModel, table=True):
+    __tablename__ = "study_plan_items"
+    __table_args__ = (
+        Index("ix_study_plan_items_week", "week_id", "guide_order"),
+        Index("ix_study_plan_items_plan", "plan_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    phase_id: uuid.UUID = Field(foreign_key="study_plan_phases.id", ondelete="CASCADE")
+    # A real foreign key rather than the handoff's bare week_index, so a replan
+    # moves one column and cannot leave an item pointing at a week that no longer
+    # exists. Ordering still comes from StudyPlanWeek.index.
+    week_id: uuid.UUID = Field(foreign_key="study_plan_weeks.id", ondelete="CASCADE")
+    # Original order within the phase, from the guide. Rule 4 of the scheduler
+    # preserves it, so it survives every replan.
+    guide_order: int
+
+    type: str
+    priority: str
+    full_title: str
+    why_it_matters: str = ""
+    done_when: str = ""
+
+    # Integer minutes, 30-minute increments. Hours are display only.
+    estimate_minutes: int
+    estimate_source: str = ESTIMATE_IMPORTED
+    estimate_confidence: str = CONFIDENCE_HIGH
+
+    status: str = ITEM_PENDING
+    origin: str = ORIGIN_IMPORTED
+    # Set on a retrieval activity generated from a Learn or Practice item; the
+    # scheduler places it after its source (rule 6).
+    source_item_id: uuid.UUID | None = Field(
+        default=None, foreign_key="study_plan_items.id", ondelete="SET NULL"
+    )
+    # Character offsets into StudyPlan.guide_text. Validated against the verbatim
+    # text at import; a mismatch is a blocking preview check, not a warning.
+    source_start: int | None = None
+    source_end: int | None = None
+    source_excerpt: str = ""
+    # What the importer understood this line of the guide to mean. Shown in the
+    # estimate and retrieval audits so a wrong reading is correctable.
+    parser_interpretation: str = ""
+    # Generated retrieval only: when the user approved it during Preview. A
+    # generated retrieval item with no approval never reaches a created plan.
+    approved_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+    completed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    reopened_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+    notes: str = ""
+    # Optional local reminder. Deliberately outside every schedule calculation:
+    # it is not capacity, not a dependency, and not a forecast input. Missing one
+    # changes nothing.
+    study_block_label: str = ""
+    study_block_weekday: int | None = None
+    study_block_minute_of_day: int | None = None
+    study_block_reminder_on: bool = False
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanItemDependency(SQLModel, table=True):
+    __tablename__ = "study_plan_item_dependencies"
+    __table_args__ = (Index("ix_study_plan_deps_plan", "plan_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    prerequisite_item_id: uuid.UUID = Field(
+        foreign_key="study_plan_items.id", ondelete="CASCADE"
+    )
+    dependent_item_id: uuid.UUID = Field(foreign_key="study_plan_items.id", ondelete="CASCADE")
+
+    kind: str = DEP_HARD
+    source: str = DEP_IMPORTED
+    confidence: str = CONFIDENCE_HIGH
+    rationale: str = ""
+    source_excerpt: str = ""
+    # Strong imported ordering is accepted automatically and never reaches the
+    # audit, so most rows are confirmed at import. Null means the conservative
+    # ordering is in force and the audit explains why.
+    confirmed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanRevision(SQLModel, table=True):
+    __tablename__ = "study_plan_revisions"
+    __table_args__ = (Index("ix_study_plan_revisions_plan", "plan_id", text("created_at DESC")),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    kind: str
+    # The plan revision this change was computed against. Together with
+    # StudyPlan.revision it is what makes a stale proposal a 409.
+    base_plan_revision: int
+    before: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    after: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    # Only set where an inverse is genuinely derivable from `before`. A capacity
+    # change is reversible; a completion that triggered a carry-forward is not.
+    reversible: bool = False
+    summary: str = ""
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanGuideDraft(SQLModel, table=True):
+    """A pasted guide and its import attempt, before any plan exists.
+
+    Persisted so a failed preview can be retried server-side without re-uploading
+    the guide, and so the user's duration, capacity, mode, deadline, edits, and
+    review choices survive a client crash. Creating a plan from a draft does not
+    delete it — the provenance is what `plan.guide_text` is checked against.
+    """
+
+    __tablename__ = "study_plan_guide_drafts"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    guide_text: str
+    requested_weeks: int
+    weekly_capacity_minutes: int
+    mode: str = MODE_FLEXIBLE
+    deadline: date | None = None
+    start_date: date
+    subject_hint: str = ""
+    title_hint: str = ""
+
+    status: str = DRAFT_PENDING
+    # The importer's validated output plus every user edit applied on top. This is
+    # what POST /study-plans reads; the model is never consulted again.
+    preview: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    # The raw model response, kept for the retry path and for debugging a
+    # validation failure without a second paid call.
+    raw_response: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    checks: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    error: str = ""
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanCardProposal(SQLModel, table=True):
+    """A candidate recall card, generated after its source item was completed.
+
+    Existence is not permission. A proposal is selectable only when all five gate
+    questions passed and the duplicate check is clean; nothing here creates a card.
+    """
+
+    __tablename__ = "study_plan_card_proposals"
+    __table_args__ = (Index("ix_study_plan_card_proposals_item", "source_plan_item_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    source_plan_item_id: uuid.UUID = Field(
+        foreign_key="study_plan_items.id", ondelete="CASCADE"
+    )
+    # Bumped by an edit. A new revision invalidates any acceptance intent built
+    # against the old one, which is what stops an edited card being added twice.
+    revision: int = 1
+
+    topic: str
+    category: str = "Unsorted"
+    # Persisted onto the card as `canonical_question` when accepted, so an
+    # approved question is never regenerated on the first review.
+    canonical_question: str
+    reason: str = ""
+
+    # Five {question, passed, reason} objects, in gate order. All five must pass.
+    gate_results: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    duplicate_check_result: str = DUPLICATE_NONE
+    duplicate_card_id: uuid.UUID | None = Field(
+        default=None, foreign_key="cards.id", ondelete="SET NULL"
+    )
+    disposition: str = DISPOSITION_SUGGESTED
+    # normalize_topic(topic) at proposal time. Recomputed and rechecked inside the
+    # acceptance transaction — this column is a cache, never the authority.
+    normalized_topic: str
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanCardProposalAcceptance(SQLModel, table=True):
+    """One atomic, idempotent attempt to turn selected proposals into cards."""
+
+    __tablename__ = "study_plan_card_proposal_acceptances"
+    __table_args__ = (
+        Index("uq_study_plan_acceptance_key", "idempotency_key", unique=True),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    proposal_id: uuid.UUID = Field(
+        foreign_key="study_plan_card_proposals.id", ondelete="CASCADE"
+    )
+    idempotency_key: str
+    # Hash of selected ids + edits. Same key with a different hash is a conflict,
+    # not a replay — that combination means the client changed its mind mid-retry.
+    request_hash: str
+    proposal_revision: int
+    status: str = ACCEPTANCE_PROCESSING
+    created_card_ids: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    committed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanCardLink(SQLModel, table=True):
+    """The only edge between Study Plan and the review schedule.
+
+    Linkage lives here rather than as a column on `cards` so "Study Plan never
+    modifies an existing card" is structural. Deleting a card removes the link;
+    deleting a plan removes the link and leaves the card, its score, its sessions,
+    and its SM-2 state exactly as they were.
+    """
+
+    __tablename__ = "study_plan_card_links"
+    __table_args__ = (Index("ix_study_plan_card_links_plan", "plan_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    plan_item_id: uuid.UUID = Field(foreign_key="study_plan_items.id", ondelete="CASCADE")
+    card_id: uuid.UUID = Field(foreign_key="cards.id", ondelete="CASCADE")
+    acceptance_id: uuid.UUID = Field(
+        foreign_key="study_plan_card_proposal_acceptances.id", ondelete="CASCADE"
+    )
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPlanDuplication(SQLModel, table=True):
+    __tablename__ = "study_plan_duplications"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    source_plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    duplicated_plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
