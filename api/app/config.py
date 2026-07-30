@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Values that ship in this repo, in .env.example, or in the docs. They are public,
@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     apns_bundle_id: str = ""
     apns_private_key: str = ""
     apns_use_sandbox: bool = True
+
+    # The production API is a single always-on Railway replica. Keeping the dumb
+    # trigger-review poll in that process removes an unreliable external schedule;
+    # the endpoint still owns every notification-time decision. Disabled by
+    # default so a local uvicorn never sends a real push from api/.env.
+    review_poller_enabled: bool = False
+    review_poll_interval_seconds: int = Field(default=15 * 60, ge=60, le=30 * 60)
 
     log_level: str = "INFO"
 

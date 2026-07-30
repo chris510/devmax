@@ -1,4 +1,8 @@
+import asyncio
 import logging
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -9,11 +13,45 @@ from app.config import get_settings
 from app.db import session_factory
 from app.routers import cards, devices, internal, sessions, settings, study_plan
 from app.services.llm import LLMError
+from app.services.review_poller import run_review_poller
 
 _settings = get_settings()
 logging.basicConfig(level=_settings.log_level)
 
-app = FastAPI(title="Devmax API", docs_url=None, redoc_url=None, openapi_url=None)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    poller: asyncio.Task[None] | None = None
+    if _settings.review_poller_enabled:
+        port = os.environ.get("PORT", "8080")
+        poller = asyncio.create_task(
+            run_review_poller(
+                f"http://127.0.0.1:{port}",
+                _settings.cron_secret,
+                interval_seconds=_settings.review_poll_interval_seconds,
+            ),
+            name="review-poller",
+        )
+        logging.getLogger(__name__).info(
+            "review poller enabled interval_seconds=%s",
+            _settings.review_poll_interval_seconds,
+        )
+    try:
+        yield
+    finally:
+        if poller is not None:
+            poller.cancel()
+            with suppress(asyncio.CancelledError):
+                await poller
+
+
+app = FastAPI(
+    title="Devmax API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=lifespan,
+)
 app.add_middleware(AuthMiddleware)
 
 # Not fatal: deploying before the Apple credentials exist is the recommended order.

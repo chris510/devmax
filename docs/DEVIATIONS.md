@@ -19,41 +19,50 @@ spec says it's for.
 - cron: '0 4 * * *'     # 21:00 PT
 ```
 
-**We use** a provider-level `*/15 * * * *` poll that carries no notification
-schedule.
+**We use** a 15-minute in-process poll that carries no notification schedule.
 
-GitHub cron is UTC and does not observe DST; the notification windows are local
-(`America/Los_Angeles`) and do. `14:10` UTC is 07:10 PDT but **06:10 PST**, and
-`04:00` UTC is 21:00 PDT but **20:00 PST**. The windows are `07:10–08:30` and
-`21:00–22:30`, so from November to March both daily fires land outside every window
-and return `{"sent": false, "reason": "outside_window"}` with HTTP 200 — a green
-workflow and no pushes, for four months.
+The original GitHub cron was UTC while the notification windows were local
+(`America/Los_Angeles`). `14:10` UTC is 07:10 PDT but **06:10 PST**, and `04:00`
+UTC is 21:00 PDT but **20:00 PST**. The windows were `07:10–08:30` and
+`21:00–22:30`, so from November to March both daily fires would land outside every
+window and return `{"sent": false, "reason": "outside_window"}` with HTTP 200 — a
+green workflow and no pushes, for four months.
 
 The first fix pinned fixed UTC times inside both windows, later a DST-paired morning
 trigger, and made the workflow fail on `outside_window` so a narrowed window broke
 loudly. All of that was arithmetic in a YAML file trying to *predict* a value the
 database already held, and it had to be redone by hand every time a window moved.
 
-**It is now a 15-minute Railway cron poll — `*/15 * * * *` — and the cron service
-encodes nothing else.** `_active_window` compares the current *local* time against
-the settings row on every call, so DST is not a special case: `ZoneInfo` resolves
-the offset for the wall time being tested. Changing a window in the app takes
-effect on the next poll with no commit and no redeploy, which is the property the
-paired schedule could never have.
+**It is now a 15-minute loop in the single-replica API process, and that loop
+encodes nothing else.** `_active_window_start` compares the current *local* time
+against the settings row on every call, so DST is not a special case: `ZoneInfo`
+resolves the offset for the wall time being tested. Changing a window in the app
+takes effect on the next poll with no commit and no redeploy, which is the property
+the paired schedule could never have.
 
 The first provider for this dumb poll was GitHub Actions. Its own documentation
 says scheduled events may be delayed or dropped, and the first production evening
 proved that caveat was load-bearing rather than theoretical: the `7,37` schedule
 ran at 20:24 and then 23:09, skipping the entire 21:00–22:30 window. Both green
 runs returned `outside_window`; APNs was never called despite four due cards.
-`api/railway.trigger-review.json` now defines a short-lived Railway cron service
-that calls the same endpoint and exits. The GitHub workflow remains
-`workflow_dispatch`-only as an independent manual fallback.
+
+Railway cron was tried next. The image built successfully, but Railway failed at
+container creation before user code started and produced no runtime logs. The exact
+poller command succeeded against production from the same checkout, isolating that
+failure to the second external scheduler rather than the API or credentials.
+Putting the loop in the already-running API removes both failure surfaces. It calls
+the authenticated endpoint over loopback, is disabled by default outside
+production, and its configurable interval cannot exceed the 30-minute minimum
+accepted window.
+`railway.json` pins one replica; increasing that count now requires adding a
+distributed lock first. The GitHub workflow remains `workflow_dispatch`-only as an
+independent manual fallback.
 
 What that costs, and why it is still the right trade:
 
 - `outside_window` is the overwhelmingly common response (~94 of 96 daily runs).
-  The poller does not treat it as an error; a non-2xx is the breakage signal.
+  It is logged at INFO. Exhausted HTTP retries and `no_devices` are logged as
+  errors, but one bad request never kills later polls.
 - Polling inside a window would push repeatedly, so the endpoint gained a
   per-window guard (§17) — the poll had to become idempotent within a window.
 - `SettingsIn` still rejects windows under 30 minutes. The 15-minute poll no
@@ -174,11 +183,10 @@ the fixtures — invented session history and a fake in-progress draft — into 
 study queue.
 
 `check-missed` stays on GitHub Actions because a delayed run is caught by the next
-one and does not gate delivery. The load-bearing `trigger-review` poll moved to a
-short-lived Railway cron after GitHub dropped every scheduled event inside a real
-notification window. Railway cron is also UTC, but §1's provider-level poll
-contains no wall-clock schedule, so UTC is irrelevant; the settings row still
-performs every local-time decision.
+one and does not gate delivery. The load-bearing `trigger-review` poll moved into
+the existing single-replica API after GitHub dropped every scheduled event inside
+a real notification window and Railway cron failed before starting its container.
+The settings row still performs every local-time decision.
 
 ## 9. `alembic` autogenerate is disabled
 
@@ -359,8 +367,8 @@ rejected alternative (a separate coaching mode) and why.
 The frequent poll (§1) breaks two things that a twice-daily cron hid, and both
 fixes live in `/internal/trigger-review`.
 
-**A poll is not a push.** Firing every 30 minutes inside an 80-minute window would
-send three notifications and empty a `reviews_per_day` of 2 before evening opened.
+**A poll is not a push.** Firing every 15 minutes inside an 80-minute window would
+send several notifications and empty a `reviews_per_day` of 2 before evening opened.
 So `_active_window` returns the matched window's local start instead of a bool, and
 the endpoint refuses if any card was pushed at or after it — `already_pushed`. The
 guard is per window rather than per day precisely so the evening window still gets

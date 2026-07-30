@@ -1,10 +1,10 @@
-"""Short-lived poller for the Railway trigger-review cron service."""
+"""HTTP poller used by the API's production review-scheduling loop."""
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
-import sys
+import logging
 import time
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -15,6 +15,10 @@ from urllib.request import Request, urlopen
 DEFAULT_ATTEMPTS = 4
 DEFAULT_RETRY_DELAY_SECONDS = 5
 DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_POLL_INTERVAL_SECONDS = 15 * 60
+STARTUP_DELAY_SECONDS = 5
+
+logger = logging.getLogger(__name__)
 
 
 class Response(Protocol):
@@ -92,25 +96,34 @@ def poll_trigger_review(
     raise AssertionError("unreachable")
 
 
-def main() -> int:
-    try:
-        result = poll_trigger_review(
-            os.environ.get("API_BASE_URL", ""),
-            os.environ.get("CRON_SECRET", ""),
-        )
-    except PollError as exc:
-        print(f"trigger-review poll failed: {exc}", file=sys.stderr)
-        return 1
-
-    print(json.dumps(result, separators=(",", ":"), sort_keys=True))
-    if result.get("reason") == "no_devices":
-        print(
-            "nothing delivered: no registered device token or APNs credentials",
-            file=sys.stderr,
-        )
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+async def run_review_poller(
+    api_base_url: str,
+    cron_secret: str,
+    *,
+    interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    startup_delay_seconds: float = STARTUP_DELAY_SECONDS,
+    poll: Callable[[str, str], dict[str, Any]] = poll_trigger_review,
+) -> None:
+    """Poll forever; one failed request must not kill future notification windows."""
+    await asyncio.sleep(startup_delay_seconds)
+    while True:
+        try:
+            result = await asyncio.to_thread(poll, api_base_url, cron_secret)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("trigger-review poll failed")
+        else:
+            if result.get("reason") == "no_devices":
+                logger.error(
+                    "trigger-review poll found no registered device or APNs credentials"
+                )
+            else:
+                logger.info(
+                    "trigger-review poll sent=%s reason=%s card_id=%s due_count=%s",
+                    result.get("sent"),
+                    result.get("reason"),
+                    result.get("card_id"),
+                    result.get("due_count"),
+                )
+        await asyncio.sleep(interval_seconds)

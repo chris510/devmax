@@ -505,9 +505,9 @@ def capture_push(monkeypatch):
 async def test_a_second_poll_inside_the_same_window_does_not_push_again(
     client, db, in_window, capture_push
 ):
-    """The workflow polls every 30 minutes; the window decides, not the poll.
+    """The runtime polls every 15 minutes; the window decides, not the poll.
 
-    Without a per-window guard an 80-minute window takes three polls, and the
+    Without a per-window guard an 80-minute window takes several polls, and the
     day's whole `reviews_per_day` budget is spent before evening opens.
     """
     db.add(make_card(next_review_at=local_today() - timedelta(days=3)))
@@ -914,7 +914,7 @@ async def test_settings_rejects_out_of_range_reviews_per_day(client):
     ],
 )
 async def test_settings_rejects_a_window_the_poll_could_miss(client, from_, to, why):
-    """The cron polls every 30 minutes, so a shorter window can fall between two polls."""
+    """Keep the shipped 30-minute floor even though the poll now runs twice as often."""
     payload = (await client.get("/settings", headers=API_HEADERS)).json()
     payload["windows"] = [{"label": "Morning", "on": True, "from": from_, "to": to}]
 
@@ -1231,34 +1231,16 @@ async def test_reattempt_expires_once_the_card_is_reviewed_again(
 
 
 async def test_the_minimum_window_is_at_least_the_poll_interval():
-    """The one cross-artifact coupling this design still has, pinned.
+    """The shortest accepted window still gets at least one poll opportunity.
 
     `MIN_WINDOW_MINUTES` exists because a window shorter than the gap between two
-    polls can never be landed in. Nothing but this test stops someone loosening
-    the Railway cron and silently making accepted windows unfireable.
+    polls can never be landed in.
     """
-    import json
-    from pathlib import Path
-
     from app.schemas import MIN_WINDOW_MINUTES
+    from app.services.review_poller import DEFAULT_POLL_INTERVAL_SECONDS
 
-    config = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "railway.trigger-review.json"
-        ).read_text()
-    )
-    schedule = config["deploy"]["cronSchedule"]
-    prefix, hours, day, month, weekday = schedule.split()
-    assert (
-        prefix.startswith("*/")
-        and hours == "*"
-        and day == "*"
-        and month == "*"
-        and weekday == "*"
-    ), "trigger-review must remain a fixed-minute provider-level poll"
-
-    poll_interval = int(prefix.removeprefix("*/"))
-    assert poll_interval <= MIN_WINDOW_MINUTES, (
-        f"cron leaves {poll_interval} minutes between polls, but windows as short as "
+    poll_interval_minutes = DEFAULT_POLL_INTERVAL_SECONDS // 60
+    assert poll_interval_minutes <= MIN_WINDOW_MINUTES, (
+        f"poller leaves {poll_interval_minutes} minutes between polls, but windows as short as "
         f"{MIN_WINDOW_MINUTES} minutes are accepted"
     )

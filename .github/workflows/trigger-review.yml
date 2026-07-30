@@ -1,10 +1,9 @@
 name: Trigger review push
 
 on:
-  # Production polling lives on the short-lived Railway cron service defined by
-  # api/railway.trigger-review.json. Keep this manual path as an independent
-  # fallback, but never schedule both providers or every notification window gets
-  # duplicate poll traffic.
+  # Production polling lives inside the single-replica API process. Keep this
+  # manual path as an independent fallback, but do not restore a schedule here or
+  # every notification window gets duplicate poll traffic.
   workflow_dispatch:
 
 jobs:

@@ -68,9 +68,9 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
 
 @router.post("/trigger-review", response_model=TriggerResult)
 async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResult:
-    """Polled by a short-lived Railway cron service; decides whether to push.
+    """Polled by the production API process; decides whether to push.
 
-    The workflow encodes no schedule beyond "often". Everything about *when* a push
+    The poller encodes no schedule beyond "often". Everything about *when* a push
     goes out — the notification windows, the timezone they are read in, and the
     daily budget — lives in the settings row, so changing a window in the app takes
     effect on the next poll with no commit or redeploy. The cron used to carry a

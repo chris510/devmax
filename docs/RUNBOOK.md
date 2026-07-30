@@ -16,7 +16,7 @@ local Postgres 17, including through a PgBouncer running in `transaction` mode (
 
 | Account | Used for | Notes |
 |---|---|---|
-| Railway | The API, Postgres, and trigger poller | Two persistent services plus one short-lived cron service. |
+| Railway | The API and Postgres | The single API replica also owns the dumb trigger poll. |
 | Anthropic | Question generation + scoring | Set a low monthly spend cap; expect cents at ~4 calls/day. |
 | Apple Developer | Push notifications | **Paid membership required.** A free personal team cannot carry the Push Notifications entitlement. Longest lead time — start here. |
 | GitHub | CI, check-missed, and the manual push fallback | Already have it; two repo secrets to add. |
@@ -37,22 +37,21 @@ openssl rand -base64 32   # CRON_SECRET
 |---|---|---|
 | `DATABASE_URL` | Railway service variable | Reference the Postgres service, don't paste — see §3 |
 | `API_KEY` | Railway | `ios/Config/Secrets.xcconfig`, inside the app binary |
-| `CRON_SECRET` | Railway API service | Railway trigger-review reference + GitHub repo secret. **Never** in the app. |
+| `CRON_SECRET` | Railway API service | GitHub repo secret. **Never** in the app. |
 | `ANTHROPIC_API_KEY` | Railway | — |
 | `APNS_KEY_ID` | Railway | — |
 | `APNS_TEAM_ID` | Railway | — |
 | `APNS_BUNDLE_ID` | Railway | `com.christrinh.devmax` |
 | `APNS_PRIVATE_KEY` | Railway | The `.p8` file, offline |
-| `API_BASE_URL` | Railway trigger-review service + GitHub repo secret | Your Railway public domain |
+| `API_BASE_URL` | GitHub repo secret | Your Railway public domain |
 
 `APNS_USE_SANDBOX` and `LOG_LEVEL` are ordinary Railway variables, not secrets.
 
 ### Rotation
 
-- **`CRON_SECRET`** is owned by the API service. The trigger-review cron service
-  references it as `${{devmax.CRON_SECRET}}`; GitHub holds a copy for the manual
-  fallback and check-missed. Update Railway, then the GitHub secret, within the
-  same minute, then run the fallback workflow manually to confirm.
+- **`CRON_SECRET`** lives in Railway and GitHub. Update Railway, then the GitHub
+  secret within the same minute, then run the fallback workflow manually to
+  confirm.
 - **`API_KEY`** is also inside an installed binary. Rotating it bricks the phone
   until you install a new build. Only rotate alongside a build and install; never
   remotely.
@@ -64,7 +63,7 @@ openssl rand -base64 32   # CRON_SECRET
 Scheduled workflows only fire from the default branch, so the merge is what makes
 `check-missed` live. Until the backend is deployed and the two GitHub secrets exist
 it will fail. `trigger-review.yml` is deliberately manual-only; production delivery
-uses the Railway cron service configured in §3.
+uses the API's own loop configured in §3.
 
 Either do §3 promptly, or disable `check-missed` in the repo's Actions tab and
 re-enable it at the end of §3. CI itself will pass on merge.
@@ -84,28 +83,23 @@ re-enable it at the end of §3. CI itself will pass on merge.
 `api/railway.json` already pins the rest: build from the Dockerfile, `alembic
 upgrade head` as the `preDeployCommand`, and `/health` as the healthcheck.
 
-### Add the trigger-review cron service
+### Enable the trigger-review poll
 
-Create a third service from the same GitHub repository and set:
+On the API service, add:
 
 ```
-Name                 = trigger-review
-Branch               = main
-Root Directory       = api
-Config File Path     = /api/railway.trigger-review.json
-API_BASE_URL         = https://<your-app>.up.railway.app
-CRON_SECRET          = ${{devmax.CRON_SECRET}}
+REVIEW_POLLER_ENABLED = true
 ```
 
-The service-specific config builds the existing Dockerfile, runs
-`python -m app.cron_trigger_review`, polls every 15 minutes, and exits. It
-explicitly removes the API service's migration, healthcheck, and restart settings;
-a cron execution that stays active would suppress every later run.
+`REVIEW_POLL_INTERVAL_SECONDS` defaults to `900` and normally should not be set.
+Configuration rejects values over 1800 seconds because the shortest accepted
+notification window is 30 minutes.
 
-Do not add a public domain or database variables. This process only makes one
-authenticated HTTP request to the API. Normal responses, including
-`outside_window`, exit successfully. A non-2xx response, exhausted network retries,
-invalid JSON, or `no_devices` exits nonzero so the failed execution is visible.
+The poller starts with the API, waits five seconds for Uvicorn to begin accepting
+loopback requests, then calls `/internal/trigger-review` every 15 minutes. It is
+disabled by default so a local server using `api/.env` cannot send a real push.
+`railway.json` pins one replica; do not increase that count without first adding a
+distributed poll lock.
 
 ### Wire the database
 
@@ -376,16 +370,16 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
 6. Dispatch the workflow a second time while still inside that widened window and
    confirm `{"sent": false, "reason": "already_pushed"}`. That one response is what
    keeps a frequent poll from emptying the day's budget in one window.
-7. Confirm an unattended Railway cron fire — approximately `:00`, `:15`, `:30`, or
-   `:45` inside a window. Railway may start a run a few minutes late.
+7. Confirm an unattended API-process poll inside a window. The loop begins five
+   seconds after each deploy and then every 15 minutes; it is not wall-clock aligned.
 
 ---
 
 ## Scheduling
 
-**The cron carries no notification schedule.** A short-lived Railway service polls
-`/internal/trigger-review` every 15 minutes (`*/15 * * * *`). The endpoint decides
-for itself whether to push.
+**The poller carries no notification schedule.** The single-replica API process
+polls `/internal/trigger-review` every 15 minutes. The endpoint decides for itself
+whether to push.
 
 Everything about *when* lives in the settings row: `windows`, `timezone`, and
 `reviews_per_day`. Change a window in the app and the next poll obeys it — no
@@ -410,8 +404,13 @@ The poll originally lived on GitHub Actions. On its first unattended production
 day, GitHub created no run during the entire 21:00–22:30 window: the surrounding
 runs landed at 20:24 and 23:09 and both returned `outside_window`. GitHub documents
 scheduled events as delayable and droppable, so `trigger-review.yml` is now
-`workflow_dispatch`-only. Keep it as a manual fallback, but do not restore its
-`schedule` block while the Railway cron is enabled.
+`workflow_dispatch`-only.
+
+A Railway cron service was tried next. Its Docker image built, but container
+creation failed before the poller started and produced no runtime logs. The exact
+command succeeded against production outside Railway cron, isolating the failure
+to that provider path. Keep the GitHub workflow as a manual fallback, but do not
+restore its `schedule` block while the in-process poller is enabled.
 
 `check-missed` remains a GitHub schedule. A delayed or dropped bookkeeping run is
 caught by the next run and cannot prevent a notification from being delivered.
@@ -422,9 +421,9 @@ caught by the next run and cannot prevent a notification from being delivered.
 
 In order.
 
-1. **Did the Railway cron run?** Open the `trigger-review` service deployments. A
-   completed execution prints the response body; a failed one prints the HTTP or
-   network error. A 500
+1. **Did the API poller run?** Search the `devmax` service logs for
+   `trigger-review poll`. Startup logs must include
+   `review poller enabled interval_seconds=900`. A 500
    means every enabled notification window in `settings` is unparseable — the one
    configuration fault the endpoint refuses to answer quietly, precisely because
    `outside_window` is otherwise indistinguishable from working normally.

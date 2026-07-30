@@ -81,7 +81,7 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **Never call Claude from `/internal/trigger-review`.** Generating a question for a push
   that may never be opened wastes tokens and latency. Question generation happens on
   engagement, in `POST /cards/{id}/sessions`.
-- **The cron carries no schedule — the settings row does.** `trigger-review` is a dumb
+- **The poller carries no schedule — the settings row does.** `trigger-review` is a dumb
   15-minute poll; `windows`, `timezone` and `reviews_per_day` decide everything, so a
   window edited in the app takes effect on the next poll with no redeploy. Consequences
   that are load-bearing: `outside_window` is the *normal* response, at most one push per

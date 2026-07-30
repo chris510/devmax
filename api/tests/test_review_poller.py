@@ -1,3 +1,4 @@
+import asyncio
 import json
 from io import BytesIO
 from urllib.error import HTTPError
@@ -5,7 +6,7 @@ from urllib.request import Request
 
 import pytest
 
-from app.cron_trigger_review import PollError, poll_trigger_review
+from app.services.review_poller import PollError, poll_trigger_review, run_review_poller
 
 
 class FakeResponse:
@@ -110,3 +111,32 @@ def test_poller_does_not_retry_client_errors() -> None:
 def test_poller_rejects_invalid_base_url(base_url: str) -> None:
     with pytest.raises(PollError, match="absolute http"):
         poll_trigger_review(base_url, "cron-secret")
+
+
+async def test_runtime_poller_continues_after_a_failed_poll() -> None:
+    calls = 0
+    second_call = asyncio.Event()
+
+    def poll(_base_url: str, _secret: str) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PollError("temporary failure")
+        second_call.set()
+        return {"sent": False, "reason": "outside_window"}
+
+    task = asyncio.create_task(
+        run_review_poller(
+            "http://127.0.0.1:8080",
+            "cron-secret",
+            interval_seconds=0,
+            startup_delay_seconds=0,
+            poll=poll,
+        )
+    )
+    await asyncio.wait_for(second_call.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert calls >= 2
