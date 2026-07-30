@@ -175,7 +175,10 @@ struct PlanItemScreen: View {
                     .foregroundStyle(Theme.textSecondary)
 
                     if item.isComplete, item.cardProposalsAvailable {
-                        Button { state.path.append(.planCards(planID, item.id)) } label: {
+                        Button {
+                            plan.prepareCardProposals()
+                            state.path.append(.planCards(planID, item.id))
+                        } label: {
                             Text("Suggest recall cards →")
                                 .font(TypeRole.secondaryAction)
                                 .foregroundStyle(Theme.accent)
@@ -221,7 +224,13 @@ struct PlanItemScreen: View {
                 HStack(spacing: 10) {
                     SecondaryButton(title: "Edit", fillsWidth: false) { editing = true }
                     PrimaryButton(title: "Mark complete", enabled: !plan.itemBusy) {
-                        Task { await plan.completeItem() }
+                        Task {
+                            guard await plan.completeItem(),
+                                  plan.item?.cardProposalsAvailable == true
+                            else { return }
+                            plan.prepareCardProposals()
+                            state.path.append(.planCards(planID, item.id))
+                        }
                     }
                 }
                 .padding(.horizontal, Metrics.screenPadding)

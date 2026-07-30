@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
         case planReopen(UUID, UUID)
         case planCards(UUID, UUID)
         case planUpdates(UUID)
+        case planLifecycle(UUID, PlanLifecycleAction, PlanLifecycleOrigin)
         case planRecap(UUID)
         case planAudit(String)
     }

@@ -63,6 +63,7 @@ final class StudyPlanState: ObservableObject {
     @Published var plans: PlanList?
     @Published var revisions: [PlanRevisionEntry] = []
     @Published var recap: PlanRecap?
+    @Published var lifecycleBusy = false
 
     // Cards
     @Published var cardLoad: Load = .idle
@@ -143,17 +144,20 @@ final class StudyPlanState: ObservableObject {
 
     // MARK: - item progress
 
-    func completeItem() async {
-        guard let item else { return }
+    @discardableResult
+    func completeItem() async -> Bool {
+        guard let item else { return false }
         itemBusy = true
         itemError = nil
+        defer { itemBusy = false }
         do {
             self.item = try await api.completePlanItem(item.planId, itemID: item.id)
             await refreshAfterProgress(item.planId)
+            return true
         } catch {
             itemError = "Couldn't mark this complete. Nothing changed."
+            return false
         }
-        itemBusy = false
     }
 
     func previewReopen() async {
@@ -402,32 +406,48 @@ final class StudyPlanState: ObservableObject {
         recap = try? await api.planRecap(planID)
     }
 
-    func lifecycle(_ action: String, planID: UUID) async {
+    @discardableResult
+    func lifecycle(_ action: PlanLifecycleAction, planID: UUID) async -> Bool {
+        guard !lifecycleBusy else { return false }
+        lifecycleBusy = true
+        applyError = nil
+        defer { lifecycleBusy = false }
         do {
             switch action {
-            case "pause":
+            case .pause:
                 overview = try await api.pausePlan(planID)
                 await StudyReminderService.shared.cancelAll(planID: planID)
-            case "complete": overview = try await api.completePlan(planID)
-            case "archive": overview = try await api.archivePlan(planID)
-            case "duplicate": overview = try await api.duplicatePlan(planID)
-            case "activate":
+            case .complete: overview = try await api.completePlan(planID)
+            case .archive: overview = try await api.archivePlan(planID)
+            case .duplicate: overview = try await api.duplicatePlan(planID)
+            case .activate:
+                let target = try await api.planOverview(planID)
                 overview = try await api.activatePlan(
-                    planID, revision: overview?.revision ?? 1
+                    planID, revision: target.revision
                 )
-            case "resume":
-                overview = try await api.applyResume(
-                    planID, revision: overview?.revision ?? 1
-                )
-            default: break
             }
             await loadPlans()
+            return true
         } catch {
             applyError = "Couldn't do that. Nothing changed."
+            return false
         }
     }
 
     // MARK: - cards
+
+    /// Proposal state belongs to one completed item. Reset it before opening a
+    /// different item's gate so the destination generates that item's candidates
+    /// instead of briefly reusing the previous item's response.
+    func prepareCardProposals() {
+        cardLoad = .idle
+        cards = nil
+        selectedProposals = []
+        addedProposals = []
+        cardError = nil
+        expandedGate = nil
+        acceptKey = UUID().uuidString
+    }
 
     func loadCardProposals(generate: Bool) async {
         guard let item else { return }

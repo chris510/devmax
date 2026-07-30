@@ -101,8 +101,8 @@ one, being overdue, wins every push. Retire explicitly:
 `--retire-file archive/cards-legacy-126.json --dry-run`, then `--confirm`. It is a
 hard delete and sessions cascade. RUNBOOK §Retiring a curriculum.
 
-**Seed with `railway ssh`, not `railway run`.** Activate a cohort only after its
-source lessons are complete.
+**Seed with `railway ssh`, not `railway run`.** These are first-deploy bootstrap
+commands, not recurring weekly operations.
 ```sh
 railway ssh --service <api> \
   "python -m app.seed --file cards.json --activate-week 1 --start-date <today>"
@@ -120,7 +120,10 @@ renders a bogus resume banner on a real card.
 
 The Study Plan command is a second, independent seed: 12 weeks, four phases,
 72 plan items, no LLM call, and no card or SM-2 writes. It is idempotent and
-refuses to replace an already-active plan.
+refuses to replace an already-active plan. After bootstrap, completing a supported
+lesson in the app opens its recall-card gate automatically. The user reviews and
+accepts the useful proposals there; no weekly activation script or calendar-driven
+card creation is part of the normal workflow.
 
 **`APNS_USE_SANDBOX` and the app's `aps-environment` must flip together.**
 Development ↔ `true`, production ↔ `false`. A TestFlight build gets a *production*

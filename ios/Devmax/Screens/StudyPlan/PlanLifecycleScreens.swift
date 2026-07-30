@@ -65,7 +65,8 @@ struct PlansSheet: View {
                         state.sheet = nil
                         state.path.append(.planOverview(entry.id))
                     } onAction: { action in
-                        Task { await plan.lifecycle(action, planID: entry.id) }
+                        state.sheet = nil
+                        state.path.append(.planLifecycle(entry.id, action, .plans))
                     }
                 }
                 Hairline()
@@ -77,14 +78,14 @@ struct PlansSheet: View {
 private struct PlanEntryRow: View {
     let entry: PlanListEntry
     let onOpen: () -> Void
-    let onAction: (String) -> Void
+    let onAction: (PlanLifecycleAction) -> Void
 
     /// One action per row, and it is the one that state affords: a paused plan
     /// can be made active, a finished one can be duplicated.
-    private var action: (label: String, key: String)? {
+    private var action: (label: String, key: PlanLifecycleAction)? {
         switch entry.status {
-        case "paused": return ("Make active", "activate")
-        case "completed", "archived": return ("Duplicate", "duplicate")
+        case "paused": return ("Make active", .activate)
+        case "completed", "archived": return ("Duplicate", .duplicate)
         default: return nil
         }
     }
@@ -116,6 +117,7 @@ private struct PlanEntryRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(action.label) · \(entry.title)")
+                .accessibilityHint("Opens a confirmation")
             }
         }
         .padding(.vertical, 11)
@@ -197,17 +199,21 @@ struct PlanUpdatesScreen: View {
             Hairline()
             HStack(spacing: 8) {
                 SecondaryButton(title: "Pause", fillsWidth: false) {
-                    Task { await plan.lifecycle("pause", planID: planID) }
+                    state.path.append(.planLifecycle(planID, .pause, .updates))
                 }
+                .accessibilityHint("Opens a confirmation")
                 SecondaryButton(title: "Complete", fillsWidth: false) {
-                    Task { await plan.lifecycle("complete", planID: planID) }
+                    state.path.append(.planLifecycle(planID, .complete, .updates))
                 }
+                .accessibilityHint("Opens a confirmation")
                 SecondaryButton(title: "Archive", fillsWidth: false) {
-                    Task { await plan.lifecycle("archive", planID: planID) }
+                    state.path.append(.planLifecycle(planID, .archive, .updates))
                 }
+                .accessibilityHint("Opens a confirmation")
                 SecondaryButton(title: "Duplicate", fillsWidth: false) {
-                    Task { await plan.lifecycle("duplicate", planID: planID) }
+                    state.path.append(.planLifecycle(planID, .duplicate, .updates))
                 }
+                .accessibilityHint("Opens a confirmation")
             }
             .padding(.horizontal, Metrics.screenPadding)
         }
@@ -220,6 +226,222 @@ struct PlanUpdatesScreen: View {
         f.dateFormat = "d MMM"
         return f
     }()
+}
+
+/// The one boundary in front of every lifecycle mutation.
+///
+/// These are full screens, not alerts: each action has consequences worth
+/// reading, and the user must be able to answer "what changes?" and "what stays?"
+/// before the API call exists. The treatment follows the existing replan/reopen
+/// decision screens and adds no new motion.
+struct PlanLifecycleConfirmationScreen: View {
+    let planID: UUID
+    let action: PlanLifecycleAction
+    let origin: PlanLifecycleOrigin
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var plan: StudyPlanState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            StatusBar()
+            header
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(action.title)
+                        .font(TypeRole.screenTitle)
+                        .tracking(-0.6)
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.top, 4)
+
+                    Text(action.summary)
+                        .font(WCFont.sans(15))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineSpacing(15 * 1.5 - 15 * 1.2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                        .padding(.bottom, 8)
+
+                    ForEach(Array(action.sections.enumerated()), id: \.offset) { _, section in
+                        Block(label: section.label) {
+                            Text(section.body)
+                                .font(WCFont.sans(14))
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if let error = plan.applyError {
+                        InlineNotice {
+                            Text(error)
+                                .font(WCFont.sans(14))
+                                .foregroundStyle(Theme.text)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.top, 18)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Metrics.screenPadding)
+                .padding(.bottom, 20)
+            }
+
+            bottomBlock
+        }
+        .background(Theme.bg)
+        .navigationBarHidden(true)
+        .onAppear { plan.applyError = nil }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { cancel() } label: {
+                Text(origin == .plans ? "← Plans" : "← Plan updates")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.metaAlt)
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Metrics.screenPadding)
+    }
+
+    private var bottomBlock: some View {
+        VStack(spacing: 10) {
+            Hairline()
+            MetaText(
+                text: action.note,
+                font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
+            )
+            .padding(.horizontal, Metrics.screenPadding)
+
+            HStack(spacing: 10) {
+                SecondaryButton(title: "Cancel") { cancel() }
+                PrimaryButton(
+                    title: plan.lifecycleBusy ? action.busyLabel : action.confirmLabel,
+                    enabled: !plan.lifecycleBusy
+                ) {
+                    Task {
+                        guard await plan.lifecycle(action, planID: planID) else { return }
+                        state.path.removeAll()
+                        state.sheet = .plans
+                    }
+                }
+            }
+            .padding(.horizontal, Metrics.screenPadding)
+        }
+        .padding(.bottom, Metrics.bottomSafeArea)
+        .background(Theme.bg)
+    }
+
+    private func cancel() {
+        state.path.removeLast()
+        if origin == .plans { state.sheet = .plans }
+    }
+}
+
+private extension PlanLifecycleAction {
+    var title: String {
+        switch self {
+        case .pause: return "Pause this plan?"
+        case .complete: return "Complete this plan?"
+        case .archive: return "Archive this plan?"
+        case .duplicate: return "Duplicate this plan?"
+        case .activate: return "Make this plan active?"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .pause:
+            return "Progression and local study reminders stop until you resume it."
+        case .complete:
+            return "Use this when the planned work is finished."
+        case .archive:
+            return "The plan leaves the active list and remains available under Archived."
+        case .duplicate:
+            return "A paused copy is created for you to review before activation."
+        case .activate:
+            return "This plan becomes active. Any currently active plan is paused."
+        }
+    }
+
+    var sections: [(label: String, body: String)] {
+        switch self {
+        case .pause:
+            return [
+                ("PLAN", "The saved schedule, completed work, and edits stay where they are."),
+                ("REMINDERS", "This plan's local study-block reminders stop."),
+                ("UNCHANGED", Self.cardStateUnchanged),
+            ]
+        case .complete:
+            return [
+                ("RESULT", "The plan moves to Completed and keeps its recap and history."),
+                ("OPEN WORK", "Any unfinished items remain recorded exactly as they are."),
+                ("UNCHANGED", Self.cardStateUnchanged),
+            ]
+        case .archive:
+            return [
+                ("RESULT", "The plan moves to Archived and can still be opened or duplicated."),
+                ("HISTORY", "Its phases, items, progress, estimates, and revisions are preserved."),
+                ("UNCHANGED", Self.cardStateUnchanged),
+            ]
+        case .duplicate:
+            return [
+                (
+                    "COPIED",
+                    "Guide provenance, phases, items, dependencies, estimates, and your edits."
+                ),
+                (
+                    "RESET",
+                    "Item progress, dates, and reminder settings. The copy starts paused."
+                ),
+                ("NOT COPIED", "Cards, scores, sessions, mastery, SM-2 state, or plan history."),
+            ]
+        case .activate:
+            return [
+                ("THIS PLAN", "Moves to Active with its saved schedule and progress."),
+                ("CURRENT PLAN", "If another plan is active, it is paused without moving dates."),
+                ("UNCHANGED", Self.cardStateUnchanged),
+            ]
+        }
+    }
+
+    var note: String {
+        switch self {
+        case .pause: return "NOTHING CHANGES UNTIL YOU PAUSE THE PLAN"
+        case .complete: return "NOTHING CHANGES UNTIL YOU COMPLETE THE PLAN"
+        case .archive: return "NOTHING CHANGES UNTIL YOU ARCHIVE THE PLAN"
+        case .duplicate: return "NOTHING CHANGES UNTIL YOU CREATE THE COPY"
+        case .activate: return "NOTHING CHANGES UNTIL YOU MAKE THIS PLAN ACTIVE"
+        }
+    }
+
+    var confirmLabel: String {
+        switch self {
+        case .pause: return "Pause plan"
+        case .complete: return "Complete plan"
+        case .archive: return "Archive plan"
+        case .duplicate: return "Duplicate plan"
+        case .activate: return "Make active"
+        }
+    }
+
+    var busyLabel: String {
+        switch self {
+        case .pause: return "Pausing…"
+        case .complete: return "Completing…"
+        case .archive: return "Archiving…"
+        case .duplicate: return "Duplicating…"
+        case .activate: return "Making active…"
+        }
+    }
+
+    static let cardStateUnchanged =
+        "Cards, scores, sessions, mastery summaries, and review schedules are untouched."
 }
 
 /// The completed-plan recap. Plan work only.

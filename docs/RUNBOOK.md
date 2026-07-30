@@ -214,9 +214,10 @@ has to run *in* the container. First connection prompts once to trust
 `ssh.railway.com`, and `railway ssh` needs a registered key
 (`railway ssh keys add`) before it will connect at all.
 
-`--activate-week` schedules the selected cohort as a fresh week beginning on
-`--start-date`. Use the day its source lessons were completed. Re-running the same
-cohort is idempotent because `seed.py` deduplicates by topic.
+`--activate-week` schedules the selected curated launch cohort as a fresh week
+beginning on `--start-date`. Use the day its source lessons were completed.
+Re-running the same cohort is idempotent because `seed.py` deduplicates by topic.
+This is bootstrap/recovery tooling, not a weekly product workflow.
 
 **Use `--file`, never `--fixtures`.** The fixtures carry invented session history
 and a fake 14-hour-old in-progress draft that would render a bogus resume banner on
@@ -227,17 +228,21 @@ production. Note the guard sits *inside* the `--fixtures` branch
 `--start-date` but the dedupe.
 
 The base manifest contains 54 conversational cards: six in each of nine teaching
-weeks. Activate one week at a time. Coding patterns live in `api/library/` and
-company overlays live in `api/modules/`; neither is part of the automatic base seed.
+weeks. After the launch cohort, progress in the app: completing a supported Study
+Plan lesson opens its recall-card proposal gate automatically, and the user reviews
+and accepts useful cards before any are created. Do not activate later cohorts just
+because their calendar week arrived. Coding patterns live in `api/library/` and
+company overlays live in `api/modules/`; neither is part of the base seed.
 
-The second command creates the separate first-party Study Plan that powers
+The second command bootstraps the separate first-party Study Plan that powers
 Today's plan line and the phase/week timeline. It makes no LLM call and never
 reads or writes cards, sessions, scores, mastery, or SM-2 state. The committed
 manifest is 12 weeks, four phases, 72 plan items, and 12 hours per week. Its
 stable seed key makes the command idempotent. `--activate` refuses to displace
 another active plan; pause that plan in the app first if switching is intentional.
 Use the Monday containing the first practice day so Week 1 aligns with the
-timeline's calendar labels.
+timeline's calendar labels. It is a one-time deployment action; ongoing study and
+card creation happen in the app.
 
 There is no combined wipe-and-seed operation. Card retirement is explicit and
 destructive; Study Plan bootstrap is additive and independent.

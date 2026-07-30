@@ -204,6 +204,18 @@ enum ProposalKind: String, Codable, Hashable {
     }
 }
 
+/// Every plan-status mutation crosses the same explicit confirmation boundary.
+///
+/// Typed for the same reason as `ProposalKind`: adding a lifecycle action must
+/// update navigation, confirmation copy, and API dispatch or fail to compile.
+enum PlanLifecycleAction: String, Hashable {
+    case pause, complete, archive, duplicate, activate
+}
+
+enum PlanLifecycleOrigin: Hashable {
+    case updates, plans
+}
+
 struct PlanWeekPlacement: Codable, Equatable, Identifiable {
     var id: Int { index }
     let index: Int
