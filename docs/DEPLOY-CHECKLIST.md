@@ -106,6 +106,8 @@ source lessons are complete.
 ```sh
 railway ssh --service <api> \
   "python -m app.seed --file cards.json --activate-week 1 --start-date <today>"
+railway ssh --service <api> \
+  "python -m app.seed_study_plan --activate --start-date <monday-of-this-week>"
 ```
 `railway run` executes locally with Railway's variables injected, so `DATABASE_URL`
 points at `postgres.railway.internal` and never connects. `railway ssh` also needs a
@@ -115,6 +117,10 @@ registered key first (`railway ssh keys add`) and prompts once to trust the host
 curriculum week metadata. **Use `--file`, never
 `--fixtures`**: the fixtures carry invented history and a fake 14-hour-old draft that
 renders a bogus resume banner on a real card.
+
+The Study Plan command is a second, independent seed: 12 weeks, four phases,
+72 plan items, no LLM call, and no card or SM-2 writes. It is idempotent and
+refuses to replace an already-active plan.
 
 **`APNS_USE_SANDBOX` and the app's `aps-environment` must flip together.**
 Development ↔ `true`, production ↔ `false`. A TestFlight build gets a *production*

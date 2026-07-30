@@ -42,7 +42,12 @@ after its source lessons are complete:
 
 ```sh
 uv run python -m app.seed --file cards.json --activate-week 1 --start-date 2026-08-03
+uv run python -m app.seed_study_plan --activate --start-date 2026-08-03
 ```
+
+These are intentionally separate. The first activates the Week 1 review-card
+cohort; the second creates the deterministic 12-week phase/week timeline
+without calling an LLM or touching card scheduling.
 
 The 12-week program is documented in `docs/CURRICULUM.md`. The base manifest has
 nine six-card teaching cohorts; weeks 10–12 are reserved for mocks and gap-driven

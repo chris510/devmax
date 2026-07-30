@@ -165,6 +165,24 @@ Do not activate the next week merely because seven calendar days passed.
 `--weeks-through N` remains available for local verification and clean-room bulk
 imports, but it is not the recommended production learning workflow.
 
+### First-party Study Plan timeline
+
+The review-card seed above does not create Study Plan rows. Bootstrap the
+curated phase → week → item timeline separately:
+
+```sh
+cd api
+uv run python -m app.seed_study_plan \
+  --activate \
+  --start-date <monday-of-this-week>
+```
+
+`api/plans/senior-backend-12-week.json` is the deterministic 12-week manifest.
+It is validated through the same gate as a pasted guide, makes no model call,
+and records a stable seed key so rerunning is a no-op. It never touches cards or
+sessions. Card reviews continue in Today and do not advance plan items; Study
+Plan completion remains an explicit plan-only signal.
+
 ## Retirement rule
 
 **Deduplication makes activation safe; it does not make replacement safe.** Seeding
