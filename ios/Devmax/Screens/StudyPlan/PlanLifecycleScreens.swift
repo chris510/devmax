@@ -195,6 +195,15 @@ struct PlanUpdatesScreen: View {
     private var bottomBlock: some View {
         VStack(spacing: 10) {
             Hairline()
+            if let error = plan.applyError {
+                InlineNotice {
+                    Text(error)
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, Metrics.screenPadding)
+            }
             HStack(spacing: 8) {
                 SecondaryButton(title: "Pause", fillsWidth: false) {
                     Task { await plan.lifecycle("pause", planID: planID) }
@@ -203,12 +212,18 @@ struct PlanUpdatesScreen: View {
                     Task { await plan.lifecycle("complete", planID: planID) }
                 }
                 SecondaryButton(title: "Archive", fillsWidth: false) {
-                    Task { await plan.lifecycle("archive", planID: planID) }
+                    Task {
+                        guard await plan.lifecycle("archive", planID: planID) else { return }
+                        state.path.removeAll()
+                        state.sheet = .plans
+                    }
                 }
                 SecondaryButton(title: "Duplicate", fillsWidth: false) {
                     Task { await plan.lifecycle("duplicate", planID: planID) }
                 }
             }
+            .disabled(plan.lifecycleBusy)
+            .opacity(plan.lifecycleBusy ? 0.55 : 1)
             .padding(.horizontal, Metrics.screenPadding)
         }
         .padding(.bottom, Metrics.bottomSafeArea)

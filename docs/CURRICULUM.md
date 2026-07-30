@@ -141,11 +141,23 @@ generic transfer prompts:
 Story-specific cards establish the evidence. Generic prompts later test whether
 the right story can be selected under ambiguity.
 
-## Activation rule
+## Learning-to-review handoff
 
 **A card enters production only after its `activation_prerequisite` is complete.**
 
-Activate one week from the date learning finishes:
+The normal product flow does not require an operator to activate weekly cohorts:
+
+1. Complete a lesson item in Study Plan.
+2. The app opens that item's recall-card gate automatically.
+3. Review the suggestions and explicitly add the useful cards.
+
+Completion remains a plan-only write. Opening the gate may generate proposals,
+but no card exists until the acceptance request commits it. This keeps advancement
+lesson-gated rather than calendar-gated: seven elapsed days never imply that the
+next material was learned.
+
+The curated `cards.json` cohort command is retained for first-deploy bootstrap,
+recovery, and clean-room verification:
 
 ```sh
 cd api
@@ -160,15 +172,16 @@ as a fresh cohort beginning on `--start-date`. The original `target_week`
 remains stored on the card for curriculum-order metadata.
 
 Re-running the same command is safe because seeding deduplicates on `Card.topic`.
-Do not activate the next week merely because seven calendar days passed.
+Do not run it each week during normal study. Study Plan completion and the
+proposal gate are the ongoing workflow.
 
 `--weeks-through N` remains available for local verification and clean-room bulk
 imports, but it is not the recommended production learning workflow.
 
-### First-party Study Plan timeline
+### First-party Study Plan bootstrap
 
-The review-card seed above does not create Study Plan rows. Bootstrap the
-curated phase → week → item timeline separately:
+The review-card seed above does not create Study Plan rows. Bootstrap the curated
+phase → week → item timeline once:
 
 ```sh
 cd api
@@ -180,8 +193,9 @@ uv run python -m app.seed_study_plan \
 `api/plans/senior-backend-12-week.json` is the deterministic 12-week manifest.
 It is validated through the same gate as a pasted guide, makes no model call,
 and records a stable seed key so rerunning is a no-op. It never touches cards or
-sessions. Card reviews continue in Today and do not advance plan items; Study
-Plan completion remains an explicit plan-only signal.
+sessions. After bootstrap, progress happens in the app: card reviews continue
+in Today, item completion remains an explicit plan-only signal, and completing a
+supported lesson opens the proposal gate for the user to approve its cards.
 
 ## Retirement rule
 
