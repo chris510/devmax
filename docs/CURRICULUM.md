@@ -195,8 +195,8 @@ covers `cards.json`, `library/`, and `modules/` together.
 System design:
 
 - delivery framework
-- non-functional requirements and capacity estimation
-- networking and API mechanics
+- non-functional requirements and decision-driven estimation
+- network failure handling, API mechanics, and identity boundaries
 - data modeling and indexing
 - caching, sharding, consistent hashing, and CAP
 
@@ -252,7 +252,7 @@ System design:
 - circuit breakers, retries, and exactly-once effects
 - real-time updates
 - large blobs and long-running jobs
-- rate limiting and observability
+- rate limiting and time-series storage
 
 External practice:
 
@@ -307,7 +307,8 @@ Devmax scores are diagnostic, not readiness gates.
 ### System design
 
 - A complete 45-minute design that follows the delivery framework.
-- Requirements and scale quantified before architecture.
+- Constraints that materially affect architecture quantified before choosing
+  components.
 - At least two defended deep dives.
 - Failure modes and trade-offs handled without technology name-dropping.
 - At least three mocks at the target level.

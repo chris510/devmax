@@ -18,12 +18,12 @@
     "evidence": "official_course"
   },
   {
-    "topic": "Request path: DNS resolution through TCP, TLS, load balancing, and the application",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
     "category": "Core Concept",
     "target_week": 1,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/networking-essentials",
-    "source_section": "Networking Essentials",
-    "activation_prerequisite": "Complete Networking Essentials",
+    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/api-design",
+    "source_section": "Security Considerations",
+    "activation_prerequisite": "Complete API Design",
     "evidence": "official_course"
   },
   {
@@ -45,12 +45,12 @@
     "evidence": "official_course"
   },
   {
-    "topic": "Capacity estimation: deriving QPS, storage, bandwidth, and a latency budget",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
     "category": "Core Concept",
     "target_week": 1,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/numbers-to-know",
-    "source_section": "Numbers to Know",
-    "activation_prerequisite": "Complete Numbers to Know",
+    "source_url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+    "source_section": "Capacity Estimation",
+    "activation_prerequisite": "Complete the Delivery Framework lesson",
     "evidence": "official_course"
   },
   {
@@ -378,7 +378,7 @@
     "evidence": "official_course"
   },
   {
-    "topic": "Optimistic concurrency control: compare-and-swap, version checks, and retry under contention",
+    "topic": "Contention control: choosing a conditional write, pessimistic lock, OCC, or serializable isolation for one invariant",
     "category": "System Design Pattern",
     "target_week": 8,
     "source_url": "https://www.hellointerview.com/learn/system-design/patterns/dealing-with-contention",
@@ -477,12 +477,12 @@
     "evidence": "official_course"
   },
   {
-    "topic": "Observability path: deriving SLIs and joining metrics, logs, and traces during an incident",
+    "topic": "Time-series storage: append-only writes, time partitioning, compression, rollups, and label-cardinality limits",
     "category": "System Design Pattern",
     "target_week": 9,
-    "source_url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/metrics-monitoring",
-    "source_section": "Metrics Monitoring",
-    "activation_prerequisite": "Complete the Metrics Monitoring breakdown",
+    "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/time-series-databases",
+    "source_section": "Time Series Databases",
+    "activation_prerequisite": "Complete Time Series Databases",
     "evidence": "official_course"
   }
 ]
