@@ -3,11 +3,13 @@ import SwiftUI
 /// Answers "what's due and how am I doing" in under two seconds.
 struct TodayScreen: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var plan: StudyPlanState
 
     var body: some View {
         VStack(spacing: 0) {
             StatusBar()
             header
+            planLine
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -31,8 +33,62 @@ struct TodayScreen: View {
             switch sheet {
             case .settings: SettingsSheet()
             case .add: QuickAddSheet()
+            case .plans: PlansSheet()
+            case .planCapacity:
+                if let id = plan.overview?.id ?? state.planSummary?.planId {
+                    PlanCapacitySheet(planID: id)
+                }
             }
         }
+    }
+
+    // MARK: - Study Plan
+    //
+    // One compact line, and one secondary scheduling fact. No description, no
+    // capacity, no progress paragraph — Today asks "what should I do now", and
+    // the plan's answer to that is where you are and when the next block is.
+    //
+    // The accent appears on the caret only.
+
+    private var planLine: some View {
+        Button {
+            if let id = state.planSummary?.planId {
+                state.path.append(.planOverview(id))
+            } else {
+                state.path.append(.planBuild)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                MetaText(
+                    text: planText,
+                    font: WCFont.mono(10.5), tracking: 0.9,
+                    // Slightly stronger than the row metadata below it, so the
+                    // line reads as a destination rather than a caption.
+                    color: state.planSummaryFailed ? Theme.metaFaint : Theme.meta
+                )
+                Spacer(minLength: 0)
+                Text("→")
+                    .font(WCFont.mono(11))
+                    .foregroundStyle(Theme.accent)
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, Metrics.screenPadding)
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: Metrics.minTapTarget)
+        .accessibilityLabel(
+            state.planSummaryFailed
+                ? "Study plan unavailable. Opens the plan."
+                : (state.planSummary?.accessibleLine ?? "Add a study guide.")
+        )
+        .padding(.bottom, 6)
+    }
+
+    private var planText: String {
+        // A Study Plan outage says so and stays tappable. It never blocks or
+        // delays the due cards above it.
+        if state.planSummaryFailed { return "PLAN · UNAVAILABLE" }
+        return (state.planSummary ?? .none).todayLine
     }
 
     // MARK: - Header

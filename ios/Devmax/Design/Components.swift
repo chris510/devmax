@@ -123,18 +123,37 @@ struct CountSegments: View {
 /// "session size" are the same control at the same geometry in the design, so
 /// they are the same component here.
 struct StepperControl: View {
-    let value: Int
+    /// The rendered readout, not the raw number. Study Plan's steppers show
+    /// units ("12 weeks", "7h · 420 min") where the two original call sites show
+    /// a bare count, so the label is the parameter and the Int initializer below
+    /// keeps those two unchanged.
+    let value: String
     let decrement: () -> Void
     let increment: () -> Void
+
+    init(value: String, decrement: @escaping () -> Void, increment: @escaping () -> Void) {
+        self.value = value
+        self.decrement = decrement
+        self.increment = increment
+    }
+
+    init(value: Int, decrement: @escaping () -> Void, increment: @escaping () -> Void) {
+        self.init(value: "\(value)", decrement: decrement, increment: increment)
+    }
 
     var body: some View {
         HStack(spacing: 4) {
             step("−", action: decrement)
-            Text("\(value)")
+            Text(value)
                 .font(WCFont.sans(15, weight: 600))
                 .monospacedDigit()
                 .foregroundStyle(Theme.text)
-                .frame(width: 26)
+                // A minimum rather than a fixed width: the bare-count call sites
+                // keep their geometry and a unit label is not clipped.
+                .frame(minWidth: 26)
+                .padding(.horizontal, 4)
+                // The readout is what changes when a step is tapped.
+                .accessibilityAddTraits(.updatesFrequently)
             step("+", action: increment)
         }
         .padding(4)

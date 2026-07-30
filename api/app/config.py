@@ -49,6 +49,21 @@ class Settings(BaseSettings):
     reattempt_model: str = "claude-sonnet-5"
     reattempt_effort: str | None = "low"
 
+    # Guide import. One call per plan creation, over a whole study guide, producing
+    # a hundred structured items with source offsets — the hardest extraction in
+    # the product and the one where a wrong answer is most expensive, because the
+    # user reviews the result once and then lives inside it for twelve weeks.
+    # Opus 5 at high effort; there is no latency budget here the way there is in a
+    # 90-second review session, and the call happens roughly once a quarter.
+    studyplan_model: str = "claude-opus-5"
+    studyplan_effort: str | None = "high"
+
+    # Card proposals from a completed plan item. Mirrors the scoring model, which
+    # is what will grade the resulting cards — a stronger model here would write
+    # questions the scoring model then marks against a different standard.
+    card_proposal_model: str = "claude-sonnet-5"
+    card_proposal_effort: str | None = "low"
+
     apns_key_id: str = ""
     apns_team_id: str = ""
     apns_bundle_id: str = ""

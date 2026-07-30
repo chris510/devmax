@@ -5,6 +5,7 @@ import UIKit
 struct DevmaxApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var state = AppState()
+    @StateObject private var plan = StudyPlanState()
     @StateObject private var flags = DebugFlags.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -12,12 +13,13 @@ struct DevmaxApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(state)
+                .environmentObject(plan)
                 .environmentObject(flags)
                 .preferredColorScheme(.dark)  // light mode is out of scope
                 .task {
                     delegate.state = state
                     await state.loadToday()
-                    await state.applyDebugRoute()
+                    await state.applyDebugRoute(plan: plan)
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Backgrounding mid-answer must not lose the transcript, and the
@@ -31,6 +33,7 @@ struct DevmaxApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var plan: StudyPlanState
 
     var body: some View {
         NavigationStack(path: $state.path) {
@@ -49,6 +52,31 @@ struct RootView: View {
                         CoverageScreen()
                     case .recap:
                         SessionRecapScreen()
+                    case .planBuild:
+                        PlanBuildScreen()
+                    case .planPreview:
+                        PlanPreviewScreen()
+                    case .planOverview(let id):
+                        PlanOverviewScreen(planID: id)
+                    case .planWeek(let id, let index):
+                        PlanWeekScreen(planID: id, index: index)
+                    case .planItem(let id, let itemID):
+                        PlanItemScreen(planID: id, itemID: itemID)
+                    case .planProposal(let id, let kind):
+                        PlanProposalScreen(planID: id, kind: kind)
+                    // The item id is part of the route's identity — it is what
+                    // makes two reopens of different items distinct entries in
+                    // the path — but the screen reads the loaded item from state.
+                    case .planReopen(let id, _):
+                        PlanProposalScreen(planID: id, kind: "reopen")
+                    case .planCards(let id, let itemID):
+                        PlanCardsScreen(planID: id, itemID: itemID)
+                    case .planUpdates(let id):
+                        PlanUpdatesScreen(planID: id)
+                    case .planRecap(let id):
+                        PlanRecapScreen(planID: id)
+                    case .planAudit(let destination):
+                        PlanAuditScreen(destination: destination)
                     }
                 }
         }

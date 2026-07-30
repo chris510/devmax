@@ -71,6 +71,94 @@ protocol DevmaxAPI {
     func settings() async throws -> AppSettings
     func updateSettings(_ settings: AppSettings) async throws -> AppSettings
     func registerDeviceToken(_ token: String) async throws
+
+    // MARK: Study Plan
+    //
+    // `activePlan()` is the only one Today calls, and it is deliberately the
+    // cheapest: Today loads it alongside `due()` and a failure here must never
+    // stop a due card from appearing.
+    func activePlan() async throws -> StudyPlanSummary
+    func plans() async throws -> PlanList
+    func planOverview(_ id: UUID) async throws -> PlanOverview
+    func planWeek(_ id: UUID, index: Int) async throws -> WeekDetail
+    func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
+    func editPlanItem(_ id: UUID, itemID: UUID, edit: PlanItemEdit) async throws -> PlanItemDetail
+    func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
+    func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal
+    func reopenPlanItem(_ id: UUID, itemID: UUID, revision: Int) async throws -> PlanItemDetail
+    func previewReplan(_ id: UUID, request: ReplanRequest) async throws -> PlanProposal
+    func applyReplan(_ id: UUID, request: ReplanRequest) async throws -> PlanProposal
+    func updateWeekCapacity(
+        _ id: UUID, index: Int, minutes: Int?, revision: Int
+    ) async throws -> PlanProposal
+    func pausePlan(_ id: UUID) async throws -> PlanOverview
+    func previewResume(_ id: UUID) async throws -> PlanProposal
+    func applyResume(_ id: UUID, revision: Int) async throws -> PlanOverview
+    func activatePlan(_ id: UUID, revision: Int) async throws -> PlanOverview
+    func completePlan(_ id: UUID) async throws -> PlanOverview
+    func archivePlan(_ id: UUID) async throws -> PlanOverview
+    func duplicatePlan(_ id: UUID) async throws -> PlanOverview
+    func planRevisions(_ id: UUID) async throws -> [PlanRevisionEntry]
+    func planRecap(_ id: UUID) async throws -> PlanRecap
+    func previewGuide(_ request: GuidePreviewRequest) async throws -> PlanPreview
+    func retryPreview(draftID: UUID) async throws -> PlanPreview
+    func editPreview(draftID: UUID, edit: PreviewEdit) async throws -> PlanPreview
+    func createPlan(draftID: UUID, activate: Bool) async throws -> PlanOverview
+    func createCardProposals(_ id: UUID, itemID: UUID) async throws -> CardProposalList
+    func cardProposals(_ id: UUID, itemID: UUID) async throws -> CardProposalList
+    func acceptCardProposals(
+        _ id: UUID, selected: [UUID], idempotencyKey: String, revision: Int,
+        edits: [String: [String: String]]
+    ) async throws -> CardAcceptResult
+    func resolveDuplicate(_ id: UUID, proposalID: UUID, action: String) async throws
+}
+
+/// Request bodies. Encoded with `.convertToSnakeCase`, so the field names here
+/// are the camelCase spelling of the wire format and nothing restates them.
+struct GuidePreviewRequest: Encodable {
+    var guideText: String
+    var requestedWeeks: Int
+    var weeklyCapacityMinutes: Int
+    var mode: String
+    var deadline: String?
+    var subjectHint: String = ""
+    var titleHint: String = ""
+}
+
+struct PreviewEdit: Encodable {
+    var estimatesReviewed: [String]?
+    var omissionsAcknowledged: Bool?
+    var retrievalApproved: [String]?
+    var retrievalRejected: [String]?
+    var dependenciesConfirmed: [String]?
+    var itemEstimates: [String: Int] = [:]
+    var overviewTitles: [String: String] = [:]
+}
+
+struct PlanItemEdit: Encodable {
+    var fullTitle: String?
+    var whyItMatters: String?
+    var doneWhen: String?
+    var estimateMinutes: Int?
+    var notes: String?
+    var overviewTitle: String?
+    var studyBlockLabel: String?
+    var studyBlockWeekday: Int?
+    var studyBlockMinuteOfDay: Int?
+    var studyBlockReminderOn: Bool?
+}
+
+/// Every replan is described by its *inputs*, never by a placement. The server
+/// recomputes the proposal from these against the current revision, so a stale
+/// client can never write a schedule it computed itself.
+struct ReplanRequest: Encodable {
+    var basePlanRevision: Int
+    var capacityOverrides: [String: Int?] = [:]
+    var defaultCapacityMinutes: Int?
+    var deferredItemIds: [UUID] = []
+    var extraWeeks: Int = 0
+    var insertAfterPhase: Int?
+    var confirmedCoreRemovals: [UUID] = []
 }
 
 struct LiveAPI: DevmaxAPI {
@@ -180,6 +268,191 @@ struct LiveAPI: DevmaxAPI {
     func registerDeviceToken(_ token: String) async throws {
         let body = try Self.encoder.encode(["token": token, "kind": "apns"])
         _ = try await request("POST", "device-tokens", body: body)
+    }
+
+    // MARK: Study Plan
+
+    private func get<T: Decodable>(_ path: String, _ type: T.Type) async throws -> T {
+        try Self.decoder.decode(T.self, from: await request("GET", path))
+    }
+
+    private func post<T: Decodable>(
+        _ path: String, _ type: T.Type, body: Encodable? = nil, query: [URLQueryItem] = []
+    ) async throws -> T {
+        let data = try await request(
+            "POST", path, query: query, body: body.map { try? Self.encoder.encode($0) } ?? nil
+        )
+        return try Self.decoder.decode(T.self, from: data)
+    }
+
+    func activePlan() async throws -> StudyPlanSummary {
+        try await get("study-plans/active/summary", StudyPlanSummary.self)
+    }
+
+    func plans() async throws -> PlanList { try await get("study-plans", PlanList.self) }
+
+    func planOverview(_ id: UUID) async throws -> PlanOverview {
+        try await get("study-plans/\(id)", PlanOverview.self)
+    }
+
+    func planWeek(_ id: UUID, index: Int) async throws -> WeekDetail {
+        try await get("study-plans/\(id)/weeks/\(index)", WeekDetail.self)
+    }
+
+    func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
+        try await get("study-plans/\(id)/items/\(itemID)", PlanItemDetail.self)
+    }
+
+    func editPlanItem(
+        _ id: UUID, itemID: UUID, edit: PlanItemEdit
+    ) async throws -> PlanItemDetail {
+        let data = try await request(
+            "PATCH", "study-plans/\(id)/items/\(itemID)", body: Self.encoder.encode(edit)
+        )
+        return try Self.decoder.decode(PlanItemDetail.self, from: data)
+    }
+
+    func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
+        try await post("study-plans/\(id)/items/\(itemID)/complete", PlanItemDetail.self)
+    }
+
+    func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal {
+        try await post("study-plans/\(id)/items/\(itemID)/reopen/preview", PlanProposal.self)
+    }
+
+    func reopenPlanItem(
+        _ id: UUID, itemID: UUID, revision: Int
+    ) async throws -> PlanItemDetail {
+        try await post(
+            "study-plans/\(id)/items/\(itemID)/reopen", PlanItemDetail.self,
+            query: [URLQueryItem(name: "base_plan_revision", value: String(revision))]
+        )
+    }
+
+    func previewReplan(_ id: UUID, request body: ReplanRequest) async throws -> PlanProposal {
+        try await post("study-plans/\(id)/replans/preview", PlanProposal.self, body: body)
+    }
+
+    func applyReplan(_ id: UUID, request body: ReplanRequest) async throws -> PlanProposal {
+        try await post("study-plans/\(id)/replans/apply", PlanProposal.self, body: body)
+    }
+
+    func updateWeekCapacity(
+        _ id: UUID, index: Int, minutes: Int?, revision: Int
+    ) async throws -> PlanProposal {
+        struct Body: Encodable {
+            let weekIndex: Int
+            let overrideCapacityMinutes: Int?
+            let basePlanRevision: Int
+        }
+        let body = try Self.encoder.encode(
+            Body(weekIndex: index, overrideCapacityMinutes: minutes, basePlanRevision: revision)
+        )
+        let data = try await request(
+            "PATCH", "study-plans/\(id)/weeks/\(index)/capacity", body: body
+        )
+        return try Self.decoder.decode(PlanProposal.self, from: data)
+    }
+
+    func pausePlan(_ id: UUID) async throws -> PlanOverview {
+        try await post("study-plans/\(id)/pause", PlanOverview.self)
+    }
+
+    func previewResume(_ id: UUID) async throws -> PlanProposal {
+        try await post("study-plans/\(id)/resume/preview", PlanProposal.self)
+    }
+
+    func applyResume(_ id: UUID, revision: Int) async throws -> PlanOverview {
+        try await post(
+            "study-plans/\(id)/resume/apply", PlanOverview.self,
+            query: [URLQueryItem(name: "base_plan_revision", value: String(revision))]
+        )
+    }
+
+    func activatePlan(_ id: UUID, revision: Int) async throws -> PlanOverview {
+        try await post(
+            "study-plans/\(id)/activate", PlanOverview.self,
+            query: [URLQueryItem(name: "base_plan_revision", value: String(revision))]
+        )
+    }
+
+    func completePlan(_ id: UUID) async throws -> PlanOverview {
+        try await post("study-plans/\(id)/complete", PlanOverview.self)
+    }
+
+    func archivePlan(_ id: UUID) async throws -> PlanOverview {
+        try await post("study-plans/\(id)/archive", PlanOverview.self)
+    }
+
+    func duplicatePlan(_ id: UUID) async throws -> PlanOverview {
+        try await post("study-plans/\(id)/duplicate", PlanOverview.self)
+    }
+
+    func planRevisions(_ id: UUID) async throws -> [PlanRevisionEntry] {
+        try await get("study-plans/\(id)/revisions", [PlanRevisionEntry].self)
+    }
+
+    func planRecap(_ id: UUID) async throws -> PlanRecap {
+        try await get("study-plans/\(id)/recap", PlanRecap.self)
+    }
+
+    func previewGuide(_ body: GuidePreviewRequest) async throws -> PlanPreview {
+        try await post("study-plans/preview", PlanPreview.self, body: body)
+    }
+
+    func retryPreview(draftID: UUID) async throws -> PlanPreview {
+        try await post("study-plans/preview/\(draftID)/retry", PlanPreview.self)
+    }
+
+    func editPreview(draftID: UUID, edit: PreviewEdit) async throws -> PlanPreview {
+        let data = try await request(
+            "PATCH", "study-plans/preview/\(draftID)", body: Self.encoder.encode(edit)
+        )
+        return try Self.decoder.decode(PlanPreview.self, from: data)
+    }
+
+    func createPlan(draftID: UUID, activate: Bool) async throws -> PlanOverview {
+        struct Body: Encodable { let draftId: UUID; let activate: Bool }
+        return try await post(
+            "study-plans", PlanOverview.self, body: Body(draftId: draftID, activate: activate)
+        )
+    }
+
+    func createCardProposals(_ id: UUID, itemID: UUID) async throws -> CardProposalList {
+        try await post(
+            "study-plans/\(id)/items/\(itemID)/card-proposals", CardProposalList.self
+        )
+    }
+
+    func cardProposals(_ id: UUID, itemID: UUID) async throws -> CardProposalList {
+        try await get("study-plans/\(id)/items/\(itemID)/card-proposals", CardProposalList.self)
+    }
+
+    func acceptCardProposals(
+        _ id: UUID, selected: [UUID], idempotencyKey: String, revision: Int,
+        edits: [String: [String: String]]
+    ) async throws -> CardAcceptResult {
+        struct Body: Encodable {
+            let selectedProposalIds: [UUID]
+            let idempotencyKey: String
+            let proposalRevision: Int
+            let edits: [String: [String: String]]
+        }
+        return try await post(
+            "study-plans/\(id)/card-proposals/accept", CardAcceptResult.self,
+            body: Body(
+                selectedProposalIds: selected, idempotencyKey: idempotencyKey,
+                proposalRevision: revision, edits: edits
+            )
+        )
+    }
+
+    func resolveDuplicate(_ id: UUID, proposalID: UUID, action: String) async throws {
+        struct Body: Encodable { let proposalId: UUID; let action: String }
+        _ = try await request(
+            "POST", "study-plans/\(id)/card-proposals/resolve-duplicate",
+            body: Self.encoder.encode(Body(proposalId: proposalID, action: action))
+        )
     }
 }
 

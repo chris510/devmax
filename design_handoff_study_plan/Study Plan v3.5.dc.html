@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #07080a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  a { color: #57b6c2; text-decoration: none; }
+  a:hover { color: #7fd0da; }
+  button { appearance: none; border: 0; margin: 0; padding: 0; font: inherit; color: inherit; background: transparent; text-align: inherit; }
+  input, textarea { font: inherit; color: inherit; }
+  input[type="radio"] { accent-color: #57b6c2; width: 15px; height: 15px; margin: 0; flex: none; }
+  textarea { background: #0f1214; border: 1px solid #23282c; border-radius: 12px; color: #cfd4d8; resize: none; }
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible,
+  [role="button"]:focus-visible, [role="radio"]:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid #57b6c2; outline-offset: 3px;
+  }
+  @keyframes wcFade { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+  ::-webkit-scrollbar { width: 0; height: 0 }
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #07080a; padding: 56px 60px 90px; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column; gap: 46px;">
+
+  <div style="display: flex; flex-direction: column; gap: 8px; max-width: 680px;">
+    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #4e565b;">DEVMAX · DESIGN EXPLORATION · V3.5 DENSITY</div>
+    <div style="font-size: 26px; font-weight: 600; letter-spacing: -.02em; color: #e8eaec;">Study plan — a map, not a document</div>
+    <div style="font-size: 14px; line-height: 1.5; color: #8b9299; text-wrap: pretty;">Presentation only — V3.4 behaviour is untouched. The whole journey now fits one viewport: two lines per collapsed phase, no curriculum paragraphs, no repeated current-position block, concise overview titles, and no internal IDs. Decision screens stay as explanatory as they were.</div>
+  </div>
+
+  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #4e565b;">{{ r.label }}</div>
+      <div style="display: flex; align-items: flex-start; gap: 44px;">
+        <sc-for list="{{ r.frames }}" as="f" hint-placeholder-count="3">
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 3px; width: 390px;">
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: {{ f.tagColor }};">{{ f.tag }}</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .08em; color: #5e666c;">{{ f.caption }}</div>
+            </div>
+
+            <div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #0d0f11; color: #e8eaec; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(0,0,0,.6);">
+              <div aria-hidden="true" style="height: 44px; flex: none; display: flex; align-items: flex-end; padding: 0 22px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #616870; letter-spacing: .04em;">
+                <span style="white-space: nowrap;">6:42</span>
+              </div>
+
+              <sc-if value="{{ f.isToday }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="padding: 14px 22px 10px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+                    <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+                      <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1;">Today</div>
+                      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #7c848b; letter-spacing: .03em;">MON 17 AUG · 3 CARDS DUE</div>
+                      <div style="display: flex; flex-wrap: wrap; column-gap: 7px; row-gap: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .03em; color: #7c848b;">
+                        <span style="white-space: nowrap;">2 shaky</span>
+                        <span style="white-space: nowrap;">· 1 cold</span>
+                      </div>
+                    </div>
+                    <button type="button" style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .12em; color: #8b9299; border: 1px solid #21262a; border-radius: 999px; padding: 8px 11px; cursor: pointer; white-space: nowrap;" style-hover="border-color: #3a4248; color: #cfd4d8;">SETTINGS</button>
+                  </div>
+                  <div style="padding: 6px 22px 14px;">
+                    <button type="button" aria-label="Study plan. Week 4, Technologies. Next block Tuesday 19:00." style="display: block; width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .06em; color: #6b7378; cursor: pointer; white-space: nowrap; padding: 4px 0;" style-hover="color: #57b6c2">PLAN · WEEK 4 · TECHNOLOGIES · NEXT TUE 19:00 →</button>
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; padding: 0 14px 8px;">
+                    <sc-for list="{{ f.dueRows }}" as="row" hint-placeholder-count="3">
+                      <button type="button" style="display: flex; width: 100%; gap: 14px; align-items: flex-start; padding: 15px 8px 16px; border-top: 1px solid #191d20; cursor: pointer;" style-hover="background: #111417">
+                        <div style="flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+                          <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                            <span style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em; border-bottom: 1px dotted #2c3238;">{{ row.topic }}</span>
+                            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378;">{{ row.category }}</span>
+                          </div>
+                          <div style="font-size: 13.5px; line-height: 1.45; color: #949ba1; text-wrap: pretty;">{{ row.summary }}</div>
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #5e666c; letter-spacing: .04em;">{{ row.dueLabel }}</div>
+                        </div>
+                        <div style="flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 2px; width: 34px;">
+                          <span style="font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ row.scoreColor }};">{{ row.scoreLabel }}</span>
+                          <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 999px; background: {{ row.scoreColor }};"></span>
+                        </div>
+                      </button>
+                    </sc-for>
+                    <div style="border-top: 1px solid #191d20; margin-top: 4px;"></div>
+                    <div style="padding: 16px 8px 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4e565b; letter-spacing: .06em;">TAP A TOPIC NAME FOR ITS HISTORY</div>
+                  </div>
+                  <div style="flex: none; padding: 14px 22px 30px; display: flex; flex-direction: column; gap: 12px; background: #0d0f11;">
+                    <button type="button" style="align-self: flex-start; font-size: 13.5px; color: #8b9299; display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0;" style-hover="color: #cfd4d8">
+                      <span aria-hidden="true" style="font-size: 16px; line-height: 1;">+</span><span>Ask about something else</span>
+                    </button>
+                    <button type="button" style="display: block; width: 100%; text-align: center; padding: 14px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Review sprint</button>
+                    <button type="button" style="display: block; width: 100%; background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">Start — 3 cards</button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isMap }}" hint-placeholder-val="{{ true }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">{{ f.back }}</button>
+                    <sc-if value="{{ f.showSwitcher }}" hint-placeholder-val="{{ true }}">
+                      <button type="button" ref="{{ f.plansTriggerRef }}" onClick="{{ f.openPlans }}" aria-label="Plans. 3 saved plans." style="flex: none; white-space: nowrap; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: {{ f.plansColor }}; border: 1px solid {{ f.plansBorder }}; border-radius: 999px; padding: 8px 11px; cursor: pointer; outline: {{ f.plansRing }}; outline-offset: 3px;" style-hover="border-color: #3a4248; color: #cfd4d8;">PLANS · 3</button>
+                    </sc-if>
+                  </div>
+                  <div style="flex: none; padding: 12px 22px 12px; display: flex; flex-direction: column; gap: 5px;">
+                    <div style="font-size: {{ f.titleSize }}; font-weight: 600; letter-spacing: -.02em; line-height: 1.05;">{{ f.title }}</div>
+                    <div style="font-size: {{ f.subjectSize }}; color: #a8afb5; letter-spacing: -.01em;">{{ f.meta1 }}</div>
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: {{ f.metaSize }}; color: #8b9299; letter-spacing: .05em;">{{ f.meta2 }}</div>
+                    <sc-if value="{{ f.meta3 }}" hint-placeholder-val="{{ true }}">
+                      <div style="font-family: 'IBM Plex Mono', monospace; font-size: {{ f.metaSize }}; color: #5e666c; letter-spacing: .05em;">{{ f.meta3 }}</div>
+                    </sc-if>
+                  </div>
+
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 26px;">
+                    <sc-if value="{{ f.showNow }}" hint-placeholder-val="{{ true }}">
+                      <button type="button" aria-label="Now. Week 4, Technologies. Opens week detail." style="display: flex; width: 100%; border-top: 1px solid #191d20; border-bottom: 1px solid #191d20; padding: 13px 0 14px; flex-direction: column; gap: 5px; cursor: pointer;" style-hover="opacity: .85">
+                        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .1em; color: #57b6c2;">NOW · WEEK 4 · TECHNOLOGIES</span>
+                        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #6b7378;">NEXT BLOCK · TUE 19:00 · 90 MIN →</span>
+                      </button>
+                      <div style="padding: 13px 0 2px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #5e666c;">EACH WEEK · LEARN → PRACTICE → RETRIEVE</div>
+                    </sc-if>
+
+                    <sc-if value="{{ f.showTrust }}" hint-placeholder-val="{{ false }}">
+                      <div style="display: flex; flex-direction: column;">
+                        <div style="padding: 2px 0 10px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">CHECKS</div>
+                        <sc-for list="{{ f.trust }}" as="t" hint-placeholder-count="4">
+                          <div style="border-top: 1px solid #191d20;">
+                            <sc-if value="{{ t.tappable }}" hint-placeholder-val="{{ true }}">
+                              <button type="button" aria-label="{{ t.aria }}" style="display: flex; width: 100%; padding: 12px 0 13px; align-items: baseline; justify-content: space-between; gap: 12px; cursor: pointer;" style-hover="opacity: .9">
+                                <span style="font-size: 14.5px; color: #cfd4d8; text-align: left;">{{ t.label }}</span>
+                                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .06em; color: {{ t.color }}; white-space: nowrap;">{{ t.value }}</span>
+                              </button>
+                            </sc-if>
+                            <sc-if value="{{ t.plain }}" hint-placeholder-val="{{ false }}">
+                              <div style="padding: 12px 0 13px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                                <span style="font-size: 14.5px; color: #a8afb5;">{{ t.label }}</span>
+                                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .06em; color: {{ t.color }}; white-space: nowrap;">{{ t.value }}</span>
+                              </div>
+                            </sc-if>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ f.mapDense }}" hint-placeholder-val="{{ true }}">
+                      <div style="position: relative; padding-top: 14px;">
+                        <div aria-hidden="true" style="position: absolute; left: 5px; top: 20px; bottom: 12px; width: 1px; background: #191d20;"></div>
+                        <sc-for list="{{ f.phases }}" as="p" hint-placeholder-count="4">
+                          <div style="display: flex; gap: 14px; padding: 0 0 {{ f.phaseGap }};">
+                            <div aria-hidden="true" style="flex: none; width: 11px; display: flex; justify-content: center; padding-top: 6px;">
+                              <span style="width: {{ p.dot }}; height: {{ p.dot }}; border-radius: 999px; background: {{ p.dotBg }}; border: 1px solid {{ p.dotBorder }};"></span>
+                            </div>
+                            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+                              <button type="button" aria-expanded="{{ p.expanded }}" aria-controls="{{ p.listId }}" aria-label="{{ p.aria }}" onClick="{{ p.toggle }}" style="display: flex; width: 100%; flex-direction: column; gap: 3px; cursor: pointer; padding: 3px 0; outline: {{ p.focusRing }}; outline-offset: 3px;" style-hover="opacity: .85">
+                                <span style="display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 10px;">
+                                  <span style="font-size: {{ f.phaseNameSize }}; font-weight: 500; letter-spacing: -.01em; color: {{ p.nameColor }}; text-align: left; text-wrap: pretty;">{{ p.name }}</span>
+                                  <span style="font-size: {{ f.phaseStatusSize }}; color: {{ p.statusColor }}; white-space: nowrap;">{{ p.status }}</span>
+                                </span>
+                                <span style="font-family: 'IBM Plex Mono', monospace; font-size: {{ f.phaseMetaSize }}; letter-spacing: .06em; color: #6b7378; text-align: left;">{{ p.weekRange }}</span>
+                              </button>
+                              <sc-if value="{{ p.open }}" hint-placeholder-val="{{ false }}">
+                                <div id="{{ p.listId }}" style="display: flex; flex-direction: column; padding: 2px 0 4px; animation: wcFade .28s ease both;">
+                                  <sc-for list="{{ p.weeks }}" as="w" hint-placeholder-count="3">
+                                    <button type="button" aria-label="{{ w.aria }}" style="display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 12px 0; border-top: 1px solid #191d20; cursor: pointer;" style-hover="opacity: .8">
+                                      <span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: {{ f.phaseMetaSize }}; letter-spacing: .06em; color: #6b7378; white-space: nowrap;">{{ w.label }}</span>
+                                      <span style="flex: 1; font-size: {{ f.weekTitleSize }}; line-height: 1.35; color: {{ w.color }}; text-align: left; text-wrap: pretty;">{{ w.short }}</span>
+                                      <span style="flex: none; font-size: {{ f.phaseStatusSize }}; color: {{ w.statusColor }}; white-space: nowrap;">{{ w.status }}</span>
+                                    </button>
+                                  </sc-for>
+                                </div>
+                              </sc-if>
+                            </div>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ f.mapLegacy }}" hint-placeholder-val="{{ false }}">
+                    <div style="position: relative; padding-top: 16px;">
+                      <div aria-hidden="true" style="position: absolute; left: 5px; top: 22px; bottom: 14px; width: 1px; background: #191d20;"></div>
+                      <sc-for list="{{ f.phases }}" as="p" hint-placeholder-count="4">
+                        <div style="display: flex; gap: 14px; padding: 0 0 15px;">
+                          <div aria-hidden="true" style="flex: none; width: 11px; display: flex; justify-content: center; padding-top: 5px;">
+                            <span style="width: {{ p.dot }}; height: {{ p.dot }}; border-radius: 999px; background: {{ p.dotBg }}; border: 1px solid {{ p.dotBorder }};"></span>
+                          </div>
+                          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
+                            <sc-if value="{{ p.dep }}" hint-placeholder-val="{{ true }}">
+                              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #4e565b;">{{ p.dep }}</div>
+                            </sc-if>
+                            <button type="button" aria-expanded="{{ p.expanded }}" aria-controls="{{ p.listId }}" aria-label="{{ p.aria }}" onClick="{{ p.toggle }}" style="display: flex; width: 100%; flex-direction: column; gap: 4px; cursor: pointer; padding: 4px 0; outline: {{ p.focusRing }}; outline-offset: 3px;" style-hover="opacity: .85">
+                              <span style="display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 10px;">
+                                <span style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em; color: {{ p.nameColor }};">{{ p.name }}</span>
+                                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: {{ p.statusColor }}; white-space: nowrap;">{{ p.status }}</span>
+                              </span>
+                              <span style="font-size: 13.5px; line-height: 1.45; color: #949ba1; text-align: left; text-wrap: pretty;">{{ p.desc }}</span>
+                            </button>
+                            <sc-if value="{{ p.open }}" hint-placeholder-val="{{ false }}">
+                              <div id="{{ p.listId }}" style="display: flex; flex-direction: column; padding-top: 4px; animation: wcFade .28s ease both;">
+                                <sc-for list="{{ p.weeks }}" as="w" hint-placeholder-count="3">
+                                  <button type="button" aria-label="{{ w.aria }}" style="display: flex; width: 100%; align-items: baseline; gap: 12px; padding: 11px 0; border-top: 1px solid #191d20; cursor: pointer;" style-hover="opacity: .8">
+                                    <span style="flex: none; width: 50px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378;">{{ w.label }}</span>
+                                    <span style="flex: 1; font-size: 14.5px; line-height: 1.4; color: {{ w.color }}; text-align: left; text-wrap: pretty;">{{ w.title }}</span>
+                                    <span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: {{ w.statusColor }};">{{ w.status }}</span>
+                                  </button>
+                                </sc-for>
+                              </div>
+                            </sc-if>
+                          </div>
+                        </div>
+                      </sc-for>
+                    </div>
+                    </sc-if>
+
+                    <sc-if value="{{ f.showRevision }}" hint-placeholder-val="{{ true }}">
+                      <button type="button" aria-label="Plan updates. Updated 29 July, 3 items moved." style="display: block; width: 100%; text-align: left; border-top: 1px solid #191d20; padding: 14px 0 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #5e666c; cursor: pointer;" style-hover="color: #57b6c2">UPDATED 29 JUL · 3 ITEMS MOVED →</button>
+                    </sc-if>
+                  </div>
+
+                  <sc-if value="{{ f.showCreate }}" hint-placeholder-val="{{ false }}">
+                    <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 12px; background: #0d0f11; border-top: 1px solid #191d20;">
+                      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6;">{{ f.createNote }}</div>
+                      <button type="button" disabled="{{ f.createBlocked }}" aria-disabled="{{ f.createDisabledAttr }}" style="display: block; width: 100%; background: {{ f.createBg }}; color: {{ f.createColor }}; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: {{ f.createCursor }}; border: 1px solid {{ f.createBorder }};">Create plan</button>
+                      <button type="button" style="display: block; width: 100%; text-align: center; padding: 14px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Edit guide</button>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isWeek }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">← Study plan</button>
+                  </div>
+                  <div style="flex: none; padding: 10px 22px 13px; display: flex; flex-direction: column; gap: 5px;">
+                    <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1;">Week 4</div>
+                    <div style="font-size: 16.5px; color: #a8afb5;">Technologies</div>
+                    <div style="font-size: 14px; color: #57b6c2; padding-top: 5px;">{{ f.coreLine }}</div>
+                    <button type="button" ref="{{ f.capTriggerRef }}" aria-label="{{ f.capAria }}" style="align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; margin: -11px 0 -9px; font-size: 14px; color: #8b9299; cursor: pointer; outline: {{ f.capacityFocusRing }}; outline-offset: 3px;" style-hover="color: #57b6c2">{{ f.capLabel }}</button>
+                  </div>
+
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 26px;">
+                    <sc-for list="{{ f.groups }}" as="g" hint-placeholder-count="3">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 7px; display: flex; flex-direction: column; gap: 3px;">
+                        <div style="display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px;">
+                          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ g.label }}</span>
+                          <sc-if value="{{ g.aside }}" hint-placeholder-val="{{ false }}">
+                            <span style="font-size: 13px; color: #6b7378; text-wrap: pretty;">{{ g.aside }}</span>
+                          </sc-if>
+                        </div>
+                        <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="3">
+                          <button type="button" aria-label="{{ it.aria }}" style="display: flex; width: 100%; gap: 11px; align-items: flex-start; padding: 12px 0; cursor: pointer; outline: {{ it.focusRing }}; outline-offset: 3px;" style-hover="opacity: .85">
+                            <span aria-hidden="true" style="flex: none; width: 15px; height: 15px; margin-top: 3px; border-radius: 4px; border: 1px solid {{ it.boxBorder }}; background: {{ it.boxBg }}; color: #06232a; font-size: 10px; line-height: 14px; text-align: center;">{{ it.mark }}</span>
+                            <span style="flex: 1; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+                              <span style="font-size: 14.5px; line-height: 1.45; color: {{ it.color }}; text-align: left; text-wrap: pretty;">{{ it.text }}</span>
+                              <sc-if value="{{ it.meta }}" hint-placeholder-val="{{ true }}">
+                                <span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .04em; color: {{ it.metaColor }}; white-space: nowrap;">{{ it.meta }}</span>
+                              </sc-if>
+                            </span>
+                          </button>
+                        </sc-for>
+                        <sc-if value="{{ g.note }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-size: 13px; line-height: 1.5; color: #6b7378; padding-top: 8px; text-wrap: pretty;">{{ g.note }}</div>
+                        </sc-if>
+                      </div>
+                    </sc-for>
+
+                    <div style="border-top: 1px solid #191d20; padding: 13px 0 4px; display: flex; flex-direction: column; gap: 10px;">
+                      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">STUDY BLOCKS</div>
+                      <sc-for list="{{ f.blocks }}" as="b" hint-placeholder-count="2">
+                        <div style="display: flex; flex-direction: column; gap: 3px;">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .08em; color: #6b7378;">{{ b.when }}</div>
+                          <div style="font-size: 14px; color: #cfd4d8;">{{ b.what }}</div>
+                        </div>
+                      </sc-for>
+                      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6; padding-top: 2px;">OPTIONAL EXECUTION PLAN · REMINDERS ARE OFF</div>
+                    </div>
+
+                    <div style="border-top: 1px solid #191d20; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">OPEN AN ITEM TO COMPLETE IT · DUE REVIEWS STAY IN TODAY</div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isItem }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">{{ f.back }}</button>
+                    <button type="button" aria-label="{{ f.editAria }}" style="flex: none; font-size: 13px; color: #8b9299; cursor: pointer; padding: 6px 0;" style-hover="color: #57b6c2">{{ f.editLabel }}</button>
+                  </div>
+                  <div style="flex: none; padding: 10px 22px 12px; display: flex; flex-direction: column; gap: 7px;">
+                    <div style="font-size: 25px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; text-wrap: pretty;">{{ f.itemTitle }}</div>
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #7c848b;">{{ f.itemMeta }}</div>
+                    <sc-if value="{{ f.deferredCards }}" hint-placeholder-val="{{ false }}">
+                      <button type="button" aria-label="2 card suggestions. Review them." style="align-self: flex-start; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #57b6c2; border: 1px solid #26343a; background: #10171a; border-radius: 999px; padding: 8px 12px; cursor: pointer; white-space: nowrap;" style-hover="border-color: #3a4248">2 CARD SUGGESTIONS · REVIEW →</button>
+                    </sc-if>
+                  </div>
+
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 20px;">
+                    <sc-for list="{{ f.sections }}" as="s" hint-placeholder-count="5">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 14px; display: flex; flex-direction: column; gap: 7px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ s.label }}</div>
+                        <sc-if value="{{ s.serif }}" hint-placeholder-val="{{ true }}">
+                          <div style="font-family: Newsreader, Georgia, serif; font-size: 17px; line-height: 1.5; color: #dfe3e5; text-wrap: pretty;">{{ s.body }}</div>
+                        </sc-if>
+                        <sc-if value="{{ s.sans }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-size: 14px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">{{ s.body }}</div>
+                        </sc-if>
+                        <sc-for list="{{ s.links }}" as="lk" hint-placeholder-count="1">
+                          <a href="#" style="font-size: 14px; color: #a8afb5; border-bottom: 1px dotted #2c3238; align-self: flex-start; padding-bottom: 2px;" style-hover="color: #57b6c2; border-bottom-color: #57b6c2">{{ lk.text }}</a>
+                        </sc-for>
+                        <sc-if value="{{ s.estimate }}" hint-placeholder-val="{{ false }}">
+                          <button type="button" aria-label="{{ s.estimateAria }}" style="align-self: flex-start; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .08em; color: #6b7378; border: 1px solid #21262a; border-radius: 999px; padding: 8px 11px; cursor: pointer; white-space: nowrap;" style-hover="border-color: #3a4248; color: #cfd4d8">{{ s.estimate }}</button>
+                        </sc-if>
+                        <sc-if value="{{ s.cardLink }}" hint-placeholder-val="{{ false }}">
+                          <button type="button" aria-label="{{ s.cardAria }}" style="font-size: 14px; color: #a8afb5; border-bottom: 1px dotted #2c3238; align-self: flex-start; cursor: pointer; padding-bottom: 2px;" style-hover="color: #57b6c2; border-bottom-color: #57b6c2">{{ s.cardLink }}</button>
+                        </sc-if>
+                        <sc-if value="{{ s.lockLine }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378; border: 1px solid #21262a; border-radius: 999px; padding: 7px 11px; align-self: flex-start;">{{ s.lockLine }}</div>
+                        </sc-if>
+                        <sc-if value="{{ s.note }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6;">{{ s.note }}</div>
+                        </sc-if>
+                      </div>
+                    </sc-for>
+
+                    <div style="border-top: 1px solid #191d20; padding: 13px 0 0; display: flex; flex-direction: column; gap: 8px;">
+                      <label for="{{ f.noteId }}" style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">NOTES</label>
+                      <textarea id="{{ f.noteId }}" rows="3" placeholder="Add a note" defaultValue="{{ f.noteText }}" style="width: 100%; padding: 12px 13px; font-size: 14px; line-height: 1.5;"></textarea>
+                    </div>
+
+                    <sc-if value="{{ f.showReopen }}" hint-placeholder-val="{{ false }}">
+                      <div style="border-top: 1px solid #191d20; margin-top: 14px; padding: 13px 0 0; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">PLAN PROGRESS</div>
+                        <button type="button" aria-label="Reopen item. Opens a confirmation." style="align-self: flex-start; font-size: 14px; color: #cfd4d8; border: 1px solid #3a4248; border-radius: 11px; padding: 12px 16px; cursor: pointer;" style-hover="color: #fff; border-color: #4e565b">Reopen item</button>
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6;">CHANGES STUDY PLAN PROGRESS ONLY · CARDS, SCORES, AND REVIEW SCHEDULES ARE UNTOUCHED</div>
+                      </div>
+                    </sc-if>
+                  </div>
+
+                  <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 10px; background: #0d0f11;">
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6;">{{ f.completeNote }}</div>
+                    <sc-if value="{{ f.completed }}" hint-placeholder-val="{{ false }}">
+                      <div style="text-align: center; padding: 17px; border: 1px solid #21262a; border-radius: 14px; font-size: 15px; color: #8b9299;">{{ f.doneLabel }}</div>
+                    </sc-if>
+                    <sc-if value="{{ f.showPrimary }}" hint-placeholder-val="{{ true }}">
+                      <button type="button" style="display: block; width: 100%; background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">{{ f.primaryLabel }}</button>
+                    </sc-if>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isConfirm }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">← PostgreSQL query and write paths</button>
+                  </div>
+                  <div style="flex: none; padding: 12px 22px 12px; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="font-family: Newsreader, Georgia, serif; font-size: 24px; line-height: 1.25; color: #f2f4f5;">Reopen this item?</div>
+                    <div style="font-size: 14.5px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">This changes Study plan progress only.</div>
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 20px;">
+                    <sc-for list="{{ f.confirmSections }}" as="s" hint-placeholder-count="3">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 14px; display: flex; flex-direction: column; gap: 6px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ s.label }}</div>
+                        <div style="font-size: 14.5px; line-height: 1.5; color: {{ s.color }}; text-wrap: pretty;">{{ s.body }}</div>
+                      </div>
+                    </sc-for>
+                    <div style="border-top: 1px solid #191d20; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">RECORDED AS · ITEM REOPENED · POSTGRESQL QUERY AND WRITE PATHS · REVIEW CARDS UNCHANGED</div>
+                  </div>
+                  <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 10px; background: #0d0f11; border-top: 1px solid #191d20;">
+                    <button type="button" style="display: block; width: 100%; background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">Reopen item</button>
+                    <button type="button" style="display: block; width: 100%; text-align: center; padding: 14px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Cancel</button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isPlan }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">{{ f.back }}</button>
+                  </div>
+                  <div style="flex: none; padding: 10px 22px 12px; display: flex; flex-direction: column; gap: 9px;">
+                    <div style="font-family: Newsreader, Georgia, serif; font-size: 23px; line-height: 1.25; color: #f2f4f5; text-wrap: pretty;">{{ f.pTitle }}</div>
+                    <div style="font-size: 14px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">{{ f.pBody }}</div>
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 20px;">
+                    <sc-for list="{{ f.weekRows }}" as="w" hint-placeholder-count="3">
+                      <div style="border-top: 1px solid #191d20; padding: 11px 0 12px; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+                          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #6b7378; white-space: nowrap;">{{ w.label }}</span>
+                          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .06em; color: {{ w.fitColor }}; white-space: nowrap;">{{ w.fit }}</span>
+                        </div>
+                        <sc-if value="{{ w.detail }}" hint-placeholder-val="{{ true }}">
+                          <div style="font-size: 13px; line-height: 1.45; color: {{ w.detailColor }}; text-wrap: pretty;">{{ w.detail }}</div>
+                        </sc-if>
+                        <sc-if value="{{ w.slotLine }}" hint-placeholder-val="{{ false }}">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .06em; color: #5e666c; line-height: 1.6;">{{ w.slotLine }}</div>
+                        </sc-if>
+                      </div>
+                    </sc-for>
+
+                    <sc-if value="{{ f.summaryLabel }}" hint-placeholder-val="{{ true }}">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 4px; display: flex; flex-direction: column; gap: 5px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ f.summaryLabel }}</div>
+                        <sc-for list="{{ f.summaryLines }}" as="ln" hint-placeholder-count="2">
+                          <div style="font-size: 14.5px; line-height: 1.45; color: {{ ln.color }}; text-wrap: pretty;">{{ ln.text }}</div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ f.hasOptions }}" hint-placeholder-val="{{ false }}">
+                      <div role="radiogroup" aria-label="{{ f.optionsAria }}" style="display: flex; flex-direction: column; gap: 9px; padding-top: 13px; border-top: 1px solid #191d20; margin-top: 13px;">
+                        <sc-for list="{{ f.options }}" as="o" hint-placeholder-count="3">
+                          <label for="{{ o.id }}" style="display: flex; gap: 11px; align-items: flex-start; border: 1px solid {{ o.border }}; background: {{ o.bg }}; border-radius: 12px; padding: 13px 14px; cursor: pointer; outline: {{ o.focusRing }}; outline-offset: 3px;" style-hover="border-color: #3a4248">
+                            <input type="radio" id="{{ o.id }}" name="{{ o.group }}" checked="{{ o.checked }}" onChange="{{ o.select }}" style="margin-top: 3px;" />
+                            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+                              <span style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+                                <span style="font-size: 15px; font-weight: 500; color: {{ o.titleColor }};">{{ o.title }}</span>
+                                <sc-if value="{{ o.tag }}" hint-placeholder-val="{{ false }}">
+                                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #57b6c2; white-space: nowrap;">{{ o.tag }}</span>
+                                </sc-if>
+                              </span>
+                              <span style="font-size: 13.5px; line-height: 1.45; color: #949ba1; text-wrap: pretty;">{{ o.body }}</span>
+                              <sc-for list="{{ o.derive }}" as="d" hint-placeholder-count="0">
+                                <span style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-top: 3px;">
+                                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .08em; color: #5e666c; white-space: nowrap;">{{ d.label }}</span>
+                                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .04em; color: {{ d.color }}; text-align: right;">{{ d.text }}</span>
+                                </span>
+                              </sc-for>
+                            </span>
+                          </label>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+
+                    <div style="padding: 16px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: {{ f.pNoteColor }}; line-height: 1.7;">{{ f.pNote }}</div>
+                  </div>
+                  <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 10px; background: #0d0f11; border-top: 1px solid #191d20;">
+                    <button type="button" disabled="{{ f.primaryBlocked }}" aria-disabled="{{ f.primaryDisabledAttr }}" style="display: block; width: 100%; background: {{ f.primaryBg }}; color: {{ f.primaryColor }}; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: {{ f.primaryCursor }}; border: 1px solid {{ f.primaryBorder }};">{{ f.pPrimary }}</button>
+                    <div style="display: flex; gap: 10px;">
+                      <button type="button" style="flex: 1; text-align: center; padding: 13px; border: 1px solid #21262a; border-radius: 12px; font-size: 14.5px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">{{ f.pSecondaryA }}</button>
+                      <button type="button" style="flex: 1; text-align: center; padding: 13px; border: 1px solid #21262a; border-radius: 12px; font-size: 14.5px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">{{ f.pSecondaryB }}</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isCards }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">← Week 4</button>
+                  </div>
+                  <div style="flex: none; padding: 10px 22px 12px; display: flex; flex-direction: column; gap: 9px;">
+                    <div style="font-family: Newsreader, Georgia, serif; font-size: 23px; line-height: 1.25; color: #f2f4f5; text-wrap: pretty;">{{ f.cardsTitle }}</div>
+                    <div style="font-size: 14px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">{{ f.cardsBody }}</div>
+                    <sc-if value="{{ f.failNote }}" hint-placeholder-val="{{ false }}">
+                      <div role="alert" style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; line-height: 1.45; color: #cfd4d8; text-wrap: pretty; animation: wcFade .25s ease both;">{{ f.failNote }}</div>
+                    </sc-if>
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 20px;">
+                    <sc-for list="{{ f.cards }}" as="c" hint-placeholder-count="2">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 15px; display: flex; flex-direction: column; gap: 7px;">
+                        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+                          <span style="font-size: 16.5px; font-weight: 500; letter-spacing: -.01em; color: {{ c.titleColor }};">{{ c.topic }}</span>
+                          <span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: {{ c.stateColor }}; white-space: nowrap;">{{ c.state }}</span>
+                        </div>
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #6b7378;">{{ c.category }}</div>
+                        <div style="font-family: Newsreader, Georgia, serif; font-size: 16.5px; line-height: 1.5; color: {{ c.qColor }}; text-wrap: pretty;">{{ c.question }}</div>
+                        <div style="font-size: 13px; line-height: 1.45; color: #949ba1; text-wrap: pretty;">{{ c.why }}</div>
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b;">{{ c.source }}</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-top: 3px;">
+                          <sc-for list="{{ c.actions }}" as="a" hint-placeholder-count="3">
+                            <button type="button" aria-label="{{ a.aria }}" style="font-size: 13px; color: {{ a.color }}; background: {{ a.bg }}; padding: 11px 14px; border: 1px solid {{ a.border }}; border-radius: 10px; cursor: pointer; white-space: nowrap;" style-hover="border-color: #3a4248">{{ a.label }}</button>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-for>
+                    <sc-if value="{{ f.emptyLabel }}" hint-placeholder-val="{{ false }}">
+                      <div style="border-top: 1px solid #191d20; padding: 14px 0 0; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ f.emptyLabel }}</div>
+                        <div style="font-size: 14.5px; line-height: 1.5; color: #a8afb5; text-wrap: pretty;">{{ f.emptyBody }}</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ f.hasNotSuggested }}" hint-placeholder-val="{{ false }}">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 6px; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c; padding-bottom: 4px;">NOT SUGGESTED</div>
+                        <sc-for list="{{ f.notSuggested }}" as="ns" hint-placeholder-count="1">
+                          <div style="padding: 8px 0 10px; display: flex; flex-direction: column; gap: 5px;">
+                            <div style="font-size: 15px; font-weight: 500; letter-spacing: -.01em; color: #8b9299; text-wrap: pretty;">{{ ns.topic }}</div>
+                            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .08em; color: #6b7378; line-height: 1.6;">{{ ns.failed }}</div>
+                            <div style="font-size: 13px; line-height: 1.45; color: #7c848b; text-wrap: pretty;">{{ ns.reason }}</div>
+                          </div>
+                        </sc-for>
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6; padding-top: 2px;">NOT SELECTABLE AND NOT COUNTED · WRITE ONE BY HAND FROM ADD CARD IF YOU DISAGREE</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ f.gateLabel }}" hint-placeholder-val="{{ false }}">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 4px; display: flex; flex-direction: column; gap: 7px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ f.gateLabel }}</div>
+                        <sc-for list="{{ f.gateRows }}" as="q" hint-placeholder-count="5">
+                          <div style="display: flex; gap: 10px; align-items: flex-start;">
+                            <span aria-hidden="true" style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #57b6c2; padding-top: 3px;">{{ q.mark }}</span>
+                            <span style="flex: 1; font-size: 13px; line-height: 1.45; color: #949ba1; text-wrap: pretty;">{{ q.text }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <div style="border-top: 1px solid #191d20; margin-top: 14px; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">{{ f.cardsNote }}</div>
+                  </div>
+                  <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 10px; background: #0d0f11; border-top: 1px solid #191d20;">
+                    <sc-if value="{{ f.showAdd }}" hint-placeholder-val="{{ true }}">
+                      <button type="button" style="display: block; width: 100%; background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">{{ f.addLabel }}</button>
+                    </sc-if>
+                    <button type="button" style="display: block; width: 100%; text-align: center; padding: 14px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">{{ f.skipLabel }}</button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isAudit }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">← Review plan</button>
+                  </div>
+                  <div style="flex: none; padding: 10px 22px 13px; display: flex; flex-direction: column; gap: 5px;">
+                    <div style="font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; text-wrap: pretty;">{{ f.auditTitle }}</div>
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .05em; color: #7c848b; line-height: 1.6;">{{ f.auditMeta }}</div>
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 26px;">
+                    <sc-for list="{{ f.auditRows }}" as="r" hint-placeholder-count="2">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 15px; display: flex; flex-direction: column; gap: 9px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: {{ r.kindColor }};">{{ r.kind }}</div>
+                        <sc-if value="{{ r.fromLabel }}" hint-placeholder-val="{{ true }}">
+                          <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #5e666c;">{{ r.fromLabel }}</div>
+                            <div style="font-family: Newsreader, Georgia, serif; font-size: 15.5px; line-height: 1.5; color: #dfe3e5; text-wrap: pretty;">{{ r.fromBody }}</div>
+                          </div>
+                        </sc-if>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #5e666c;">{{ r.toLabel }}</div>
+                          <div style="font-size: 14px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">{{ r.toBody }}</div>
+                        </div>
+                        <sc-if value="{{ r.hasChoices }}" hint-placeholder-val="{{ false }}">
+                          <div role="radiogroup" aria-label="{{ r.choiceAria }}" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            <sc-for list="{{ r.choices }}" as="c" hint-placeholder-count="4">
+                              <label for="{{ r.group }}{{ c.id }}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{ c.color }}; background: {{ c.bg }}; padding: 11px 13px; border: 1px solid {{ c.border }}; border-radius: 10px; cursor: pointer; white-space: nowrap;" style-hover="border-color: #3a4248">
+                                <input type="radio" id="{{ r.group }}{{ c.id }}" name="{{ r.group }}" checked="{{ c.checked }}" onChange="{{ c.select }}" />
+                                <span>{{ c.label }}</span>
+                              </label>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px;">
+                          <sc-for list="{{ r.actions }}" as="a" hint-placeholder-count="3">
+                            <button type="button" aria-label="{{ a.aria }}" style="font-size: 13px; color: {{ a.color }}; background: {{ a.bg }}; padding: 11px 14px; border: 1px solid {{ a.border }}; border-radius: 10px; cursor: pointer; white-space: nowrap;" style-hover="border-color: #3a4248">{{ a.label }}</button>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-for>
+                    <div style="border-top: 1px solid #191d20; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">{{ f.auditNote }}</div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isSheet }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;">
+                  <sc-if value="{{ f.sheetOpen }}" hint-placeholder-val="{{ true }}">
+                    <div aria-hidden="true" style="position: absolute; inset: 0; background: rgba(7,8,10,.72);"></div>
+                  </sc-if>
+                  <div aria-hidden="true" style="position: absolute; top: 0; left: 0; right: 0; padding: 10px 22px 0; opacity: {{ f.bgOpacity }}; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="font-size: 13px; color: #7c848b;">← Today</div>
+                    <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em;">Study plan</div>
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7c848b; letter-spacing: .05em;">{{ f.bgMeta }}</div>
+                  </div>
+                  <sc-if value="{{ f.sheetDismissed }}" hint-placeholder-val="{{ false }}">
+                    <div style="position: absolute; top: 10px; right: 22px; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; width: 300px;">
+                      <button type="button" ref="{{ f.dismissTriggerRef }}" onClick="{{ f.reopenSheet }}" aria-label="Plans. 3 saved plans." style="flex: none; white-space: nowrap; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .12em; color: #cfd4d8; border: 1px solid #3a4248; border-radius: 999px; padding: 8px 11px; cursor: pointer; outline: 2px solid #57b6c2; outline-offset: 3px;">PLANS · 3</button>
+                      <div style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; color: #cfd4d8; text-align: left; text-wrap: pretty;">Escape dismissed the sheet and returned focus here. Enter opens it again.</div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ f.sheetOpen }}" hint-placeholder-val="{{ true }}">
+                  <div role="dialog" aria-modal="true" aria-label="Plans" ref="{{ f.dialogRef }}" onKeyDown="{{ f.onDialogKey }}" style="position: absolute; left: 0; right: 0; bottom: 0; background: #14171a; border-top: 1px solid #21262a; border-radius: 18px 18px 0 0; max-height: calc(100% - 24px); min-height: 0; display: flex; flex-direction: column; animation: wcFade .28s ease both;">
+                    <div style="flex: none; padding: 16px 22px 12px; display: flex; flex-direction: column; gap: 5px;">
+                      <div aria-hidden="true" style="width: 34px; height: 4px; border-radius: 999px; background: #2c3238; align-self: center; margin-bottom: 10px;"></div>
+                      <h2 ref="{{ f.sheetTitleRef }}" tabindex="-1" style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.02em; outline: {{ f.sheetTitleRing }}; outline-offset: 4px;">Plans</h2>
+                    </div>
+                    <div style="flex: 1; overflow-y: auto; padding: 0 22px 6px;">
+                      <sc-for list="{{ f.sheetGroups }}" as="g" hint-placeholder-count="3">
+                        <div style="border-top: 1px solid #1f2427; padding: 12px 0 6px; display: flex; flex-direction: column; gap: 4px;">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c; padding-bottom: 4px;">{{ g.label }}</div>
+                          <sc-for list="{{ g.plans }}" as="p" hint-placeholder-count="1">
+                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 4px 0 10px;">
+                              <button type="button" aria-label="{{ p.aria }}" style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; cursor: pointer; padding: 6px 0;" style-hover="opacity: .85">
+                                <span style="font-size: 16px; font-weight: 500; letter-spacing: -.01em; color: {{ p.titleColor }}; text-align: left; text-wrap: pretty;">{{ p.title }}</span>
+                                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #6b7378; text-align: left;">{{ p.meta }}</span>
+                              </button>
+                              <sc-if value="{{ p.action }}" hint-placeholder-val="{{ true }}">
+                                <button type="button" aria-label="{{ p.actionAria }}" style="flex: none; font-size: 13px; color: #a8afb5; border: 1px solid #21262a; border-radius: 10px; padding: 11px 13px; cursor: pointer; white-space: nowrap;" style-hover="color: #e8eaec; border-color: #3a4248">{{ p.action }}</button>
+                              </sc-if>
+                              <sc-if value="{{ p.tag }}" hint-placeholder-val="{{ false }}">
+                                <span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .1em; color: #57b6c2; padding-top: 8px; white-space: nowrap;">{{ p.tag }}</span>
+                              </sc-if>
+                            </div>
+                          </sc-for>
+                          <sc-if value="{{ g.emptyLine }}" hint-placeholder-val="{{ false }}">
+                            <div style="font-size: 14px; line-height: 1.5; color: #7c848b; padding: 2px 0 8px; text-wrap: pretty;">{{ g.emptyLine }}</div>
+                          </sc-if>
+                        </div>
+                      </sc-for>
+                      <sc-if value="{{ f.confirmTitle }}" hint-placeholder-val="{{ false }}">
+                        <div style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 13px 14px; margin: 12px 0 4px; display: flex; flex-direction: column; gap: 8px; animation: wcFade .25s ease both;">
+                          <div style="font-size: 15.5px; font-weight: 500; letter-spacing: -.01em;">{{ f.confirmTitle }}</div>
+                          <div style="font-size: 13.5px; line-height: 1.5; color: #a8afb5; text-wrap: pretty;">{{ f.confirmBody }}</div>
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.6;">{{ f.confirmNote }}</div>
+                          <div style="display: flex; gap: 9px; padding-top: 4px;">
+                            <button type="button" style="font-size: 13px; font-weight: 500; color: #06232a; background: #57b6c2; padding: 12px 14px; border-radius: 10px; cursor: pointer;" style-hover="background: #6ec6d1">Make active</button>
+                            <button type="button" style="font-size: 13px; color: #a8afb5; padding: 12px 14px; border: 1px solid #21262a; border-radius: 10px; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Cancel</button>
+                          </div>
+                        </div>
+                      </sc-if>
+                      <div style="border-top: 1px solid #1f2427; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">{{ f.sheetNote }}</div>
+                    </div>
+                    <div style="flex: none; padding: 12px 22px 30px;">
+                      <button type="button" style="display: block; width: 100%; text-align: center; padding: 15px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">+ Build another plan</button>
+                    </div>
+                  </div>
+                  </sc-if>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isCapacity }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;">
+                  <sc-if value="{{ f.sheetOpen }}" hint-placeholder-val="{{ true }}">
+                    <div aria-hidden="true" style="position: absolute; inset: 0; background: rgba(7,8,10,.72);"></div>
+                  </sc-if>
+                  <div aria-hidden="true" style="position: absolute; top: 0; left: 0; right: 0; padding: 10px 22px 0; opacity: {{ f.bgOpacity }}; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="font-size: 13px; color: #7c848b;">← Study plan</div>
+                    <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em;">Week 4</div>
+                    <div style="font-size: 16.5px; color: #a8afb5;">Technologies</div>
+                  </div>
+                  <sc-if value="{{ f.sheetDismissed }}" hint-placeholder-val="{{ false }}">
+                    <div style="position: absolute; top: 122px; left: 22px; right: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 14px;">
+                      <button type="button" ref="{{ f.dismissTriggerRef }}" onClick="{{ f.reopenSheet }}" aria-label="This week's capacity: 12 hours this week, plan default 12 hours. Opens the capacity editor." style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #cfd4d8; cursor: pointer; padding: 5px 0 2px; outline: 2px solid #57b6c2; outline-offset: 3px;">CAPACITY · 12H THIS WEEK · PLAN DEFAULT 12H →</button>
+                      <div style="border: 1px solid #26343a; background: #10171a; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; color: #cfd4d8; text-wrap: pretty;">Escape dismissed the sheet and returned focus to the capacity line. Nothing was applied.</div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ f.sheetOpen }}" hint-placeholder-val="{{ true }}">
+                  <div role="dialog" aria-modal="true" aria-label="This week's capacity" ref="{{ f.dialogRef }}" onKeyDown="{{ f.onDialogKey }}" style="position: absolute; left: 0; right: 0; bottom: 0; background: #14171a; border-top: 1px solid #21262a; border-radius: 18px 18px 0 0; max-height: calc(100% - 24px); min-height: 0; display: flex; flex-direction: column; overflow: hidden; animation: wcFade .28s ease both;">
+                    <div style="flex: none; padding: 16px 22px 0; display: flex; flex-direction: column; gap: 5px;">
+                      <div aria-hidden="true" style="width: 34px; height: 4px; border-radius: 999px; background: #2c3238; align-self: center; margin-bottom: 10px;"></div>
+                      <h2 ref="{{ f.sheetTitleRef }}" tabindex="-1" style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.02em; outline: {{ f.sheetTitleRing }}; outline-offset: 4px;">This week's capacity</h2>
+                      <div style="font-size: 14px; line-height: 1.5; color: #a8afb5; text-wrap: pretty;">Week 4 only. The plan default stays where it is unless you edit the plan.</div>
+                    </div>
+                    <div style="flex: 1; overflow-y: auto; padding: 14px 22px 4px; display: flex; flex-direction: column;">
+                      <div style="border-top: 1px solid #1f2427; padding: 13px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                        <div style="display: flex; flex-direction: column; gap: 3px;">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">DEFAULT</div>
+                          <div style="font-size: 15px; color: #a8afb5;">12h a week</div>
+                        </div>
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; white-space: nowrap;">PLAN SETTING</div>
+                      </div>
+                      <div style="border-top: 1px solid #1f2427; padding: 10px 0 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                        <div style="display: flex; flex-direction: column; gap: 3px;">
+                          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #57b6c2;">THIS WEEK</div>
+                          <div style="font-size: 15px; color: #cfd4d8;">{{ f.capHoursLabel }}</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 2px;">
+                          <button type="button" aria-label="Decrease hours" onClick="{{ f.dec }}" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #a8afb5; cursor: pointer; font-size: 17px; outline: {{ f.decRing }}; outline-offset: -2px;" style-hover="color: #fff">
+                            <span aria-hidden="true" style="width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; border: 1px solid #23282c; border-radius: 8px 0 0 8px;">−</span>
+                          </button>
+                          <div aria-live="polite" style="min-width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; border-top: 1px solid #23282c; border-bottom: 1px solid #23282c;">{{ f.capHours }}h</div>
+                          <button type="button" aria-label="Increase hours" onClick="{{ f.inc }}" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #a8afb5; cursor: pointer; font-size: 17px;" style-hover="color: #fff">
+                            <span aria-hidden="true" style="width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; border: 1px solid #23282c; border-radius: 0 8px 8px 0;">+</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div style="border-top: 1px solid #1f2427; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">{{ f.capNote }}</div>
+                    </div>
+                    <div style="flex: none; padding: 14px 22px 30px; display: flex; flex-direction: column; gap: 10px;">
+                      <button type="button" style="display: block; width: 100%; background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">Apply to this week</button>
+                      <button type="button" style="display: block; width: 100%; text-align: center; padding: 14px; border: 1px solid #21262a; border-radius: 12px; font-size: 15px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Reset to default</button>
+                    </div>
+                  </div>
+                  </sc-if>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isComplete }}" hint-placeholder-val="{{ false }}">
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                  <div style="flex: none; padding: 10px 22px 0;">
+                    <button type="button" style="font-size: 13px; color: #7c848b; cursor: pointer; padding: 6px 0;" style-hover="color: #e8eaec">← Today</button>
+                  </div>
+                  <div style="flex: none; padding: 10px 22px 14px; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1;">Plan complete</div>
+                    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .05em; color: #7c848b;">ANATOMY FOUNDATIONS · 10 WEEKS</div>
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; padding: 0 22px 20px;">
+                    <sc-for list="{{ f.stats }}" as="s" hint-placeholder-count="5">
+                      <div style="border-top: 1px solid #191d20; padding: 13px 0 14px; display: flex; flex-direction: column; gap: 5px;">
+                        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .14em; color: #5e666c;">{{ s.label }}</div>
+                        <sc-for list="{{ s.lines }}" as="ln" hint-placeholder-count="2">
+                          <div style="font-size: 15px; line-height: 1.45; color: {{ ln.color }}; text-wrap: pretty;">{{ ln.text }}</div>
+                        </sc-for>
+                      </div>
+                    </sc-for>
+                    <div style="border-top: 1px solid #191d20; padding: 13px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .07em; color: #4e565b; line-height: 1.7;">FINISHING THE PLAN ISN'T THE SAME AS BEING READY · REVIEWS CONTINUE IN TODAY</div>
+                  </div>
+                  <div style="flex: none; padding: 12px 22px 30px; display: flex; flex-direction: column; gap: 10px; background: #0d0f11;">
+                    <button type="button" style="display: block; width: 100%; background: #57b6c2; color: #06232a; text-align: center; padding: 17px; border-radius: 14px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; cursor: pointer;" style-hover="background: #6ec6d1">Archive plan</button>
+                    <div style="display: flex; gap: 10px;">
+                      <button type="button" style="flex: 1; text-align: center; padding: 13px; border: 1px solid #21262a; border-radius: 12px; font-size: 14.5px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Extend plan</button>
+                      <button type="button" style="flex: 1; text-align: center; padding: 13px; border: 1px solid #21262a; border-radius: 12px; font-size: 14.5px; color: #a8afb5; cursor: pointer;" style-hover="color: #e8eaec; border-color: #3a4248">Create another</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1800,&quot;height&quot;:1100}}">
+const ACCENT = "#57b6c2";
+const RING = "2px solid #57b6c2";
+const WARN = "#c2a35a";
+
+const PHASES = [
+  {
+    n: 1, name: "1 · Foundations", short: "Foundations", status: "Complete", state: "done", dep: "BUILDS ON NOTHING",
+    range: "Weeks 1–3", desc: "Build the request, data, and reliability concepts used by every later design.",
+    weeks: [
+      { n: 1, t: "The request path", short: "The request path", s: "Complete" },
+      { n: 2, t: "Storage engines and transactions", short: "Storage engines", s: "Complete" },
+      { n: 3, t: "Caching, sharding, consistent hashing, and CAP", short: "Caching & sharding", s: "Complete" }
+    ]
+  },
+  {
+    n: 2, name: "2 · Technologies", short: "Technologies", status: "Current", state: "current", dep: "BUILDS ON FOUNDATIONS",
+    range: "Weeks 4–6 · Week 4", desc: "See how concrete systems implement and trade off those foundations.",
+    weeks: [
+      { n: 4, t: "Relational and NoSQL systems", short: "Databases", s: "Current" },
+      { n: 5, t: "Streaming, search, and large-object delivery", short: "Streaming & search", s: "Upcoming" },
+      { n: 6, t: "Coordination, stream processing, and approximate structures", short: "Coordination", s: "Upcoming" }
+    ]
+  },
+  {
+    n: 3, name: "3 · Patterns & application", short: "Patterns and application", status: "Next", state: "future", dep: "BUILDS ON TECHNOLOGIES",
+    range: "Weeks 7–9", desc: "Compose technologies into reusable solutions under realistic constraints.",
+    weeks: [
+      { n: 7, t: "Rate limiting, idempotency, and back-pressure", short: "Resilience patterns", s: "Upcoming" },
+      { n: 8, t: "Two complete system designs", short: "Applied design", s: "Upcoming" },
+      { n: 9, t: "Timed coding under interview conditions", short: "Timed coding", s: "Upcoming" }
+    ]
+  },
+  {
+    n: 4, name: "4 · Simulation", short: "Simulation", status: "Later", state: "future", dep: "BUILDS ON PATTERNS & APPLICATION",
+    range: "Weeks 10–12", desc: "Perform complete interviews and turn observed gaps into focused review.",
+    weeks: [
+      { n: 10, t: "Mock interviews and observed gaps", short: "Mocks", s: "Upcoming" },
+      { n: 11, t: "Target-company overlays", short: "Target companies", s: "Upcoming" },
+      { n: 12, t: "Behavioral rehearsal and final gap review", short: "Final pass", s: "Upcoming" }
+    ]
+  }
+];
+
+const ANATOMY = [
+  {
+    n: 1, name: "1 · Cell & tissue", short: "Cell and tissue", status: "Complete", state: "done", dep: "",
+    range: "Weeks 1–2",
+    weeks: [
+      { n: 1, t: "Epithelial and connective tissue classification", short: "Tissue types", s: "Complete" },
+      { n: 2, t: "Membrane transport and resting potential", short: "Membrane transport", s: "Complete" }
+    ]
+  },
+  {
+    n: 2, name: "2 · Cardiovascular", short: "Cardiovascular", status: "Current", state: "current", dep: "",
+    range: "Weeks 3–5 · Week 4",
+    weeks: [
+      { n: 3, t: "Chamber anatomy and the cardiac cycle", short: "Cardiac cycle", s: "Complete" },
+      { n: 4, t: "Cardiovascular electrical conduction and rhythm", short: "Cardiac conduction", s: "Current" },
+      { n: 5, t: "Systemic and pulmonary circulation pressures", short: "Circulation", s: "Upcoming" }
+    ]
+  },
+  {
+    n: 3, name: "3 · Respiratory & renal", short: "Respiratory and renal", status: "Next", state: "future", dep: "",
+    range: "Weeks 6–8",
+    weeks: [
+      { n: 6, t: "Ventilation, perfusion, and gas exchange", short: "Gas exchange", s: "Upcoming" },
+      { n: 7, t: "Glomerular filtration and tubular transport", short: "Filtration", s: "Upcoming" },
+      { n: 8, t: "Acid–base balance and renal compensation", short: "Acid–base", s: "Upcoming" }
+    ]
+  },
+  {
+    n: 4, name: "4 · Integration", short: "Integration", status: "Later", state: "future", dep: "",
+    range: "Weeks 9–10",
+    weeks: [
+      { n: 9, t: "Multi-system compensation under haemorrhage", short: "Compensation", s: "Upcoming" },
+      { n: 10, t: "Whole-body case reconstruction from memory", short: "Case recall", s: "Upcoming" }
+    ]
+  }
+];
+
+const WEEK4 = [
+  {
+    label: "LEARN", aside: "Core · 240 min", items: [
+      { t: "PostgreSQL query and write paths", done: true, meta: "90 min" },
+      { t: "Redis, DynamoDB, and Cassandra", done: true, meta: "90 min" },
+      { t: "API gateway mechanics", done: false, meta: "60 min" }
+    ]
+  },
+  {
+    label: "PRACTICE", aside: "Core · 210 min · Optional · 90 min", items: [
+      { t: "Three timed coding sessions", done: true, meta: "120 min" },
+      { t: "Begin the behavioral story catalog", done: false, meta: "90 min" },
+      { t: "Consistent-hashing explanation", done: false, meta: "30 min · Optional" },
+      { t: "Read one published architecture write-up", done: false, meta: "60 min · Optional" }
+    ]
+  },
+  {
+    label: "RETRIEVE", aside: "2 of 4 done · Doesn't block the week",
+    note: "Reviews continue separately in Today. Retrieval time still counts toward this week's 12 hours.",
+    items: [
+      { t: "Closed-book write-path explanation", done: true, meta: "30 min" },
+      { t: "Cassandra versus DynamoDB", done: true, meta: "30 min" },
+      { t: "Redraw the gateway request flow", done: false, meta: "30 min" },
+      { t: "Weekly closed-book pass on Weeks 1–3", done: false, meta: "30 min" }
+    ]
+  }
+];
+
+const DUE = [
+  { topic: "CONSISTENT HASHING", label: "Consistent hashing", category: "CORE CONCEPT", summary: "solid on ring mechanics, shaky on virtual nodes", dueLabel: "3 days overdue", score: 2 },
+  { topic: "Raft leader election", category: "DISTRIBUTED SYSTEMS", summary: "can describe terms and voting; fuzzy on log-matching safety", dueLabel: "1 day overdue", score: 1 },
+  { topic: "Postgres index types", category: "DATABASES", summary: "confident on B-tree vs GIN; hasn't explained index bloat", dueLabel: "due today", score: 3 }
+];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      openPhase: {},
+      capHours: 7, resumeChoice: 0, overloadChoice: 0, estChoice: "2h", retrievalChoice: "accept",
+      recoveryChoice: 0, reopenChoice: 0, depChoice: "confirm", sheetClosed: { f17: true }
+    };
+    this.refsMap = {};
+  }
+  reg(key) {
+    const self = this;
+    return function (el) { self.refsMap[key] = el; };
+  }
+  dialogKey(key, triggerKey, frameKey) {
+    const self = this;
+    return function (e) {
+      const dialog = self.refsMap[key];
+      if (e.key === "Escape") {
+        e.preventDefault();
+        self.setState(function (s) {
+          const c = Object.assign({}, s.sheetClosed);
+          c[frameKey] = true;
+          return { sheetClosed: c };
+        });
+        setTimeout(function () {
+          const t2 = self.refsMap[frameKey + "-dismiss-trigger"] || self.refsMap[triggerKey];
+          if (t2 && t2.focus) t2.focus();
+        }, 40);
+        return;
+      }
+      if (e.key !== "Tab" || !dialog) return;
+      const nodes = Array.prototype.filter.call(
+        dialog.querySelectorAll('button, [href], input, textarea, [tabindex]:not([tabindex="-1"])'),
+        function (n) { return !n.disabled && n.offsetParent !== null; }
+      );
+      if (!nodes.length) return;
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+  }
+  phases(fid, focus, set, initialOpen) {
+    const st = this.state;
+    const open = st.openPhase[fid] === undefined ? (initialOpen || null) : st.openPhase[fid];
+    return (set || PHASES).map(p => {
+      const current = p.state === "current", done = p.state === "done", isOpen = open === p.n;
+      return {
+        key: fid + "p" + p.n, name: p.name, desc: p.desc, dep: p.dep,
+        listId: fid + "-phase-" + p.n + "-weeks",
+        status: p.status + (isOpen ? " ▲" : " ▼"),
+        weekRange: p.range,
+        aria: (isOpen ? "Collapse " : "Expand ") + p.short + " phase. " + p.range + ". " + p.status + ".",
+        expanded: isOpen ? "true" : "false",
+        focusRing: focus === "phase" && p.n === 2 ? RING : "none",
+        statusColor: current ? ACCENT : done ? "#5e666c" : "#4e565b",
+        nameColor: done ? "#a8afb5" : "#e8eaec",
+        dot: current ? "9px" : "7px",
+        dotBg: current ? ACCENT : done ? "#3f474d" : "#0d0f11",
+        dotBorder: current ? ACCENT : done ? "#3f474d" : "#2c3238",
+        open: isOpen,
+        toggle: () => this.setState(s => {
+          const o = Object.assign({}, s.openPhase);
+          o[fid] = o[fid] === p.n ? null : p.n;
+          return { openPhase: o };
+        }),
+        weeks: p.weeks.map(w => ({
+          key: fid + "w" + w.n, label: "Week " + w.n, title: w.t, short: w.short || w.t, status: w.s,
+          aria: "Week " + w.n + ". " + w.t + ". " + w.s.toLowerCase() + ". Opens week detail.",
+          statusColor: w.s === "Current" ? ACCENT : "#5e666c",
+          color: w.s === "Complete" ? "#a8afb5" : "#cfd4d8"
+        }))
+      };
+    });
+  }
+  base(key, tag, caption) {
+    return {
+      key: key, tag: tag, caption: caption, tagColor: ACCENT,
+      isToday: false, isMap: false, isWeek: false, isItem: false, isPlan: false,
+      isConfirm: false, isCards: false, isAudit: false, isSheet: false, isCapacity: false, isComplete: false
+    };
+  }
+  map(key, tag, caption, o) {
+    const f = this.base(key, tag, caption);
+    f.isMap = true;
+    f.back = o.preview ? "← Edit guide" : "← Today";
+    f.title = o.preview ? "Review plan" : "Study plan";
+    f.meta1 = o.preview ? "SENIOR BACKEND INTERVIEW · INFERRED" : "SENIOR BACKEND INTERVIEW · ACTIVE";
+    f.meta2 = o.preview ? "12 WEEKS · 4 PHASES · 12H/WEEK" : "EST. END 22 OCT · FLEXIBLE · 12H/WEEK";
+    f.showSwitcher = !o.preview;
+    f.showNow = !o.preview && !!o.legacy;
+    f.showTrust = !!o.preview;
+    f.showRevision = !o.preview;
+    f.showCreate = !!o.preview;
+    f.plansTriggerRef = this.reg(key + "-plans-trigger");
+    f.openPlans = () => { };
+    f.plansRing = o.focus === "plans" ? RING : "none";
+    f.plansColor = "#6b7378";
+    f.plansBorder = "#21262a";
+    const sc = o.scale || 1;
+    f.titleSize = Math.round(30 * sc) + "px";
+    f.subjectSize = Math.round(16.5 * sc) + "px";
+    f.metaSize = Math.round(11 * sc) + "px";
+    f.phaseNameSize = Math.round(17 * sc) + "px";
+    f.phaseStatusSize = Math.round(13.5 * sc) + "px";
+    f.phaseMetaSize = Math.round(11 * sc) + "px";
+    f.weekTitleSize = Math.round(15 * sc) + "px";
+    f.phaseGap = Math.round(15 * sc) + "px";
+    f.mapLegacy = !!o.legacy;
+    f.mapDense = !o.legacy;
+    f.meta3 = o.preview ? "" : (o.legacy ? "" : "Est. completion · week of 19 Oct");
+    f.phases = this.phases(key, o.focus, o.set, o.open);
+    const blocked = !!o.blocked;
+    f.trust = [
+      {
+        key: key + "t1", label: "CAPACITY FIT", plain: !blocked, tappable: blocked,
+        value: blocked ? "156H PLANNED · 144H AVAILABLE · 12H OVER CAPACITY →" : "132H PLANNED · 144H AVAILABLE · FITS WITH 12H BUFFER",
+        color: blocked ? WARN : "#8b9299",
+        aria: "Capacity fit: 12 hours over capacity. Opens capacity resolution.",
+        note: blocked ? "Reduce optional scope, raise weekly capacity, or extend the plan by one week." : ""
+      },
+      {
+        key: key + "t2", label: "WORKLOAD ESTIMATES", plain: !blocked, tappable: blocked,
+        value: blocked ? "38 CONFIRMED · 4 NEED REVIEW →" : "42 CONFIRMED · 0 NEED REVIEW",
+        color: blocked ? WARN : "#8b9299",
+        aria: "Workload estimates: 4 need review. Opens the estimate audit.",
+        note: blocked ? "Capacity fit uses confirmed estimates. You can change them later." : ""
+      },
+      {
+        key: key + "t3", label: "SOURCE COVERAGE", plain: !blocked, tappable: blocked,
+        value: blocked ? "39 PLACED · 3 NEED REVIEW · 1 POSSIBLE OMISSION →" : "42 PLACED · 0 NEED REVIEW · 0 OMITTED",
+        color: blocked ? WARN : "#8b9299",
+        aria: "Source coverage: 3 need review, 1 possible omission. Opens source coverage.", note: ""
+      },
+      {
+        key: key + "t4", label: "RETRIEVAL ACTIVITIES", plain: !blocked, tappable: blocked,
+        value: blocked ? "18 PROPOSED · 14 ACCEPTED · 4 NEED REVIEW →" : "18 PROPOSED · 18 ACCEPTED",
+        color: blocked ? WARN : "#8b9299",
+        aria: "Retrieval activities: 4 need review. Opens the retrieval audit.", note: ""
+      }
+    ];
+    f.createNote = blocked
+      ? "CREATE PLAN UNLOCKS WHEN CAPACITY, ESTIMATES, COVERAGE, AND RETRIEVAL ARE RESOLVED"
+      : "CREATES A PLAN · DOESN'T ACTIVATE REVIEW CARDS";
+    f.createBlocked = blocked;
+    f.createDisabledAttr = blocked ? "true" : "false";
+    f.createBg = blocked ? "#14171a" : ACCENT;
+    f.createColor = blocked ? "#545c61" : "#06232a";
+    f.createBorder = blocked ? "#21262a" : ACCENT;
+    f.createCursor = blocked ? "not-allowed" : "pointer";
+    return f;
+  }
+  week(key, tag, caption, o) {
+    const opts = o || {};
+    const f = this.base(key, tag, caption);
+    f.isWeek = true;
+    f.coreLine = "3 of 5 Core complete";
+    f.capLabel = "11h of 12h planned →";
+    f.capAria = "11 of 12 hours planned this week. Opens the capacity editor.";
+    f.capTriggerRef = this.reg(key + "-cap-trigger");
+    f.capacityFocusRing = opts.focus === "capacity" ? RING : "none";
+    f.groups = WEEK4.map((g, gi) => ({
+      key: key + "g" + gi, label: g.label, note: g.note || "", aside: g.aside || "",
+      items: g.items.map((it, i) => ({
+        key: key + "g" + gi + "i" + i, text: it.t, meta: it.meta || "",
+        metaColor: (it.meta || "").indexOf("Optional") >= 0 ? "#6b7378" : "#7c848b",
+        mark: it.done ? "✓" : "",
+        boxBorder: it.done ? ACCENT : "#2c3238",
+        boxBg: it.done ? ACCENT : "transparent",
+        color: it.done ? "#7c848b" : "#cfd4d8",
+        aria: it.t + " — " + (it.done ? "complete" : "not complete") + ". Opens item detail.",
+        focusRing: opts.focus === "item" && gi === 0 && i === 2 ? RING : "none"
+      }))
+    }));
+    f.blocks = [
+      { key: key + "b1", when: "TUE · 19:00 · 90 MIN", what: "PostgreSQL query and write paths" },
+      { key: key + "b2", when: "SAT · 10:00 · 2H", what: "Timed coding session" }
+    ];
+    return f;
+  }
+  item(key, tag, caption, d) {
+    const f = this.base(key, tag, caption);
+    f.isItem = true;
+    f.back = d.back;
+    f.editing = !!d.editing;
+    f.completed = !!d.completed;
+    f.showPrimary = !d.completed;
+    f.showReopen = !!d.showReopen;
+    f.deferredCards = !!d.deferredCards;
+    f.doneLabel = d.doneLabel || "Completed 17 Aug";
+    f.editLabel = d.editing ? "Done editing" : "Edit";
+    f.editAria = d.editing ? "Finish editing this item" : "Edit this item";
+    f.itemTitle = d.title;
+    f.itemMeta = d.meta;
+    f.noteId = key + "-notes";
+    f.noteText = d.noteText || "";
+    f.completeNote = d.completeNote;
+    f.primaryLabel = d.editing ? "Save changes" : "Mark complete";
+    f.sections = d.sections.map((s, i) => ({
+      key: key + "s" + i, label: s.label, body: s.body || "",
+      serif: !!s.serif, sans: !s.serif && !!s.body,
+      estimate: s.estimate || "", estimateAria: s.estimate ? "Edit estimate. Currently " + s.estimate : "",
+      links: (s.links || []).map((t, j) => ({ key: key + "l" + i + j, text: t })),
+      cardLink: s.cardLink || "", cardAria: s.cardAria || "",
+      lockLine: s.lockLine || "", note: s.note || ""
+    }));
+    return f;
+  }
+  planScreen(key, tag, caption, d) {
+    const f = this.base(key, tag, caption);
+    f.isPlan = true;
+    f.back = d.back;
+    f.pTitle = d.title;
+    f.pBody = d.body;
+    f.weekRows = (d.weeks || []).map((w, i) => ({
+      key: key + "w" + i, label: w.label, fit: w.fit,
+      fitColor: w.over ? WARN : "#8b9299",
+      detail: w.detail || "", detailColor: w.over ? WARN : "#949ba1",
+      slotLine: w.slotLine || ""
+    }));
+    f.summaryLabel = d.summaryLabel || "";
+    f.summaryLines = (d.summaryLines || []).map((l, i) => ({ key: key + "sl" + i, text: l.text, color: l.color || "#e8eaec" }));
+    f.hasOptions = !!(d.options && d.options.length);
+    f.optionsAria = d.optionsAria || "Options";
+    f.options = (d.options || []).map((o, i) => ({
+      key: key + "o" + i, id: key + "o" + i, group: key + "-radios",
+      title: o.t, body: o.b, tag: o.tag || "",
+      checked: d.choice === i,
+      focusRing: d.focusIndex === i ? RING : "none",
+      derive: (o.derive || []).map((dv, j) => ({
+        key: key + "o" + i + "d" + j, label: dv[0], text: dv[1],
+        color: dv[2] === "warn" ? WARN : dv[2] === "ok" ? "#8b9299" : "#6b7378"
+      })),
+      titleColor: d.choice === i ? "#e8eaec" : "#cfd4d8",
+      border: d.choice === i ? "#26343a" : "#21262a",
+      bg: d.choice === i ? "#10171a" : "transparent",
+      select: d.onSelect ? () => d.onSelect(i) : () => { }
+    }));
+    f.pNote = d.note;
+    f.pNoteColor = d.noteWarn ? WARN : "#4e565b";
+    f.pPrimary = d.primary;
+    f.pSecondaryA = d.secondaryA;
+    f.pSecondaryB = d.secondaryB;
+    const blocked = !!d.primaryBlocked;
+    f.primaryBlocked = blocked;
+    f.primaryDisabledAttr = blocked ? "true" : "false";
+    f.primaryBg = blocked ? "#14171a" : ACCENT;
+    f.primaryColor = blocked ? "#545c61" : "#06232a";
+    f.primaryBorder = blocked ? "#21262a" : ACCENT;
+    f.primaryCursor = blocked ? "not-allowed" : "pointer";
+    return f;
+  }
+  cards(key, tag, caption, d) {
+    const f = this.base(key, tag, caption);
+    f.isCards = true;
+    f.cardsTitle = d.title;
+    f.cardsBody = d.body;
+    f.failNote = d.failNote || "";
+    f.cards = (d.cards || []).map((c, i) => ({
+      key: key + "c" + i, topic: c.topic, category: c.category, question: c.q, why: c.why, source: c.source,
+      state: c.state || "",
+      stateColor: c.state === "SELECTED" || c.state === "ADDED" ? ACCENT : c.state === "POSSIBLE EXISTING CARD" ? WARN : "#6b7378",
+      titleColor: c.state === "SKIPPED" ? "#7c848b" : "#e8eaec",
+      qColor: c.state === "SKIPPED" ? "#8b9299" : "#dfe3e5",
+      actions: (c.actions || []).map((a, j) => ({
+        key: key + "c" + i + "a" + j, label: a.l, aria: a.l + " · " + c.topic,
+        color: a.primary ? "#06232a" : "#a8afb5",
+        bg: a.primary ? ACCENT : "transparent",
+        border: a.primary ? ACCENT : "#21262a"
+      }))
+    }));
+    f.notSuggested = (d.notSuggested || []).map((ns, i) => ({
+      key: key + "ns" + i, topic: ns.t, failed: ns.q, reason: ns.r
+    }));
+    f.hasNotSuggested = !!(d.notSuggested && d.notSuggested.length);
+    f.gateLabel = d.gateLabel || "";
+    f.gateRows = (d.gateRows || []).map((g, i) => ({ key: key + "g" + i, mark: "✓", text: g }));
+    f.emptyLabel = d.emptyLabel || "";
+    f.emptyBody = d.emptyBody || "";
+    f.cardsNote = d.note;
+    f.showAdd = !!d.addLabel;
+    f.addLabel = d.addLabel || "";
+    f.skipLabel = d.skipLabel;
+    return f;
+  }
+  audit(key, tag, caption, d) {
+    const f = this.base(key, tag, caption);
+    f.isAudit = true;
+    f.auditTitle = d.title;
+    f.auditMeta = d.meta;
+    f.auditNote = d.note;
+    f.auditRows = d.rows.map((r, i) => ({
+      key: key + "r" + i, kind: r.kind, kindColor: r.warn ? WARN : "#5e666c",
+      fromLabel: r.fromLabel || "", fromBody: r.fromBody || "",
+      toLabel: r.toLabel, toBody: r.toBody,
+      hasChoices: !!(r.choices && r.choices.length),
+      choiceAria: r.choiceAria || "", group: key + "-r" + i,
+      choices: (r.choices || []).map((c, j) => ({
+        key: key + "r" + i + "c" + j, id: c, label: c,
+        checked: d.choiceValue === c,
+        color: d.choiceValue === c ? "#e8eaec" : "#a8afb5",
+        bg: d.choiceValue === c ? "#10171a" : "transparent",
+        border: d.choiceValue === c ? "#26343a" : "#21262a",
+        select: d.onChoice ? () => d.onChoice(c) : () => { }
+      })),
+      actions: (r.actions || []).map((a, j) => ({
+        key: key + "r" + i + "a" + j, label: a.l, aria: a.l + " · " + r.toBody.slice(0, 40),
+        color: a.primary ? "#06232a" : "#a8afb5",
+        bg: a.primary ? ACCENT : "transparent",
+        border: a.primary ? ACCENT : "#21262a"
+      }))
+    }));
+    return f;
+  }
+  sheet(key, tag, caption, o) {
+    const f = this.base(key, tag, caption);
+    f.isSheet = true;
+    f.dialogRef = this.reg(key + "-dialog");
+    f.sheetTitleRef = this.reg(key + "-title");
+    f.dismissTriggerRef = this.reg(key + "-dismiss-trigger");
+    f.onDialogKey = this.dialogKey(key + "-dialog", "f1-plans-trigger", key);
+    f.sheetOpen = !this.state.sheetClosed[key];
+    f.sheetDismissed = !!this.state.sheetClosed[key];
+    f.bgOpacity = this.state.sheetClosed[key] ? 1 : 0.3;
+    f.bgMeta = o.bgMeta || "SENIOR BACKEND INTERVIEW · ACTIVE";
+    f.reopenSheet = () => this.setState(s => {
+      const c = Object.assign({}, s.sheetClosed); c[key] = false; return { sheetClosed: c };
+    });
+    f.sheetTitleRing = o.focus === "title" ? RING : "none";
+    f.confirmTitle = o.confirmTitle || "";
+    f.confirmBody = o.confirmBody || "";
+    f.confirmNote = o.confirmNote || "";
+    f.sheetNote = o.note;
+    f.sheetGroups = o.groups.map((g, i) => ({
+      key: key + "g" + i, label: g.label, emptyLine: g.emptyLine || "",
+      plans: (g.plans || []).map((p, j) => ({
+        key: key + "g" + i + "p" + j, title: p.t, meta: p.m,
+        titleColor: g.label === "ARCHIVED" ? "#a8afb5" : "#e8eaec",
+        tag: p.tag || "", action: p.action || "",
+        aria: p.t + ". " + p.m + ". Opens this plan.",
+        actionAria: p.action ? p.action + " · " + p.t : ""
+      }))
+    }));
+    return f;
+  }
+  renderVals() {
+    const st = this.state, V = {};
+
+    const today = this.base("f0", "STATE 1", "TODAY · ONE COMPACT PLAN LINE");
+    today.isToday = true;
+    today.dueRows = DUE.map((r, i) => ({
+      key: "d" + i, topic: r.label || r.topic, category: r.category, summary: r.summary, dueLabel: r.dueLabel,
+      scoreLabel: String(r.score), scoreColor: r.score <= 1 ? "#c0705a" : r.score <= 3 ? WARN : "#6fa77f"
+    }));
+
+    const mkOverview = (key, tag, caption, o) => {
+      const f = this.map(key, tag, caption, o);
+      f.title = "Study plan";
+      f.meta1 = o.subject || "Senior backend interview";
+      f.meta2 = o.position || "Week 4 of 12 · Flexible";
+      return f;
+    };
+
+    const collapsed = mkOverview("f1", "STATE 2", "OVERVIEW · ALL PHASES COLLAPSED, NO SCROLL", {});
+    const currentOpen = mkOverview("f2", "STATE 3", "OVERVIEW · CURRENT PHASE EXPANDED", { open: 2 });
+    const futureOpen = mkOverview("f3", "STATE 4", "OVERVIEW · FUTURE PHASE EXPANDED", { open: 4 });
+    const anatomy = mkOverview("f4", "STATE 9", "SUBJECT-AGNOSTIC · ANATOMY, SAME COMPRESSION", {
+      set: ANATOMY, subject: "Anatomy foundations", position: "Week 4 of 10 · Flexible", open: 2
+    });
+    const bigType = mkOverview("f5", "STATE 10", "DYNAMIC TYPE · REFLOWS AND SCROLLS, NEVER CLIPS", { scale: 1.45 });
+
+    const weekDetail = this.week("f6", "STATE 5", "WEEK DETAIL · TWO FACTS UNDER THE TITLE", {});
+
+    const itemDetail = this.item("f7", "STATE 6", "ITEM DETAIL · FULL TITLE, FULL EXPLANATION", {
+      back: "← Week 4", completed: true, deferredCards: true,
+      title: "PostgreSQL query and write paths",
+      meta: "WEEK 4 · TECHNOLOGIES · CORE · COMPLETE",
+      sections: [
+        { label: "WHY THIS MATTERS", serif: true, body: "Connects indexing, transactions, replication, and write bottlenecks into one system-level model." },
+        { label: "DONE WHEN", serif: true, body: "Explain the read and write paths closed-book in under two minutes, including one scaling limit and one failure mode." },
+        { label: "SOURCE", links: ["Hello Interview · PostgreSQL"] },
+        { label: "STUDY BLOCK", body: "Tue 19:00 · 90 min", estimate: "ESTIMATE · 90 MIN · EDITED BY YOU →", note: "A LOCAL REMINDER · MISSING IT DOESN'T MOVE THE PLAN" },
+        {
+          label: "RETRIEVAL SUPPORT", body: "1 recall card available",
+          cardLink: "PostgreSQL query and write paths →",
+          cardAria: "Open card history for PostgreSQL query and write paths",
+          note: "OPENS ITS CARD HISTORY · ITS REVIEWS RUN IN TODAY"
+        }
+      ],
+      noteText: "Write out the WAL path once — that's the part I lose under pressure.",
+      completeNote: "COMPLETED 17 AUG · CHANGE PLAN PROGRESS FROM EDIT"
+    });
+
+    const preview = this.map("f8", "STATE 7", "REVIEW PLAN · SUMMARY FIRST, EXCEPTIONS ONLY", { preview: true, blocked: true });
+    preview.title = "Review plan";
+    preview.meta1 = "Senior backend interview";
+    preview.meta2 = "12 weeks · 4 phases · 12h per week · Flexible";
+    preview.meta3 = "Est. completion · week of 19 Oct";
+    preview.trust = [
+      { key: "p1", label: "Capacity", plain: true, tappable: false, value: "Fits", color: "#8b9299", aria: "", note: "" },
+      { key: "p2", label: "Workload estimates", plain: false, tappable: true, value: "4 NEED REVIEW →", color: WARN, aria: "Workload estimates: 4 need review. Opens the estimate audit.", note: "" },
+      { key: "p3", label: "Source coverage", plain: false, tappable: true, value: "1 POSSIBLE OMISSION →", color: WARN, aria: "Source coverage: 1 possible omission. Opens source coverage.", note: "" },
+      { key: "p4", label: "Retrieval activities", plain: false, tappable: true, value: "4 NEED REVIEW →", color: WARN, aria: "Retrieval activities: 4 need review. Opens the retrieval audit.", note: "" },
+      { key: "p5", label: "Dependencies", plain: true, tappable: false, value: "Confirmed", color: "#8b9299", aria: "", note: "" }
+    ];
+    preview.createNote = "CREATE PLAN UNLOCKS WHEN THE THREE FLAGGED CHECKS ARE RESOLVED";
+
+    const replan = this.planScreen("f9", "STATE 8", "REPLAN · DECISION COPY DELIBERATELY INTACT", {
+      back: "← 11h of 12h planned",
+      title: "7 hours doesn't fit Week 4.",
+      body: "360 minutes of completed work stays put, leaving 60 of the 420 minutes for work still open. 240 minutes carry forward.",
+      weeks: [
+        { label: "WEEK 4 · WAS 660 / 720", fit: "420 / 420 MIN", detail: "Completed 360 min stays. API gateway mechanics (60 min) is the only open item that fits.", slotLine: "OVERFLOW · 240 MIN · BEHAVIORAL CATALOG 90 · ARCHITECTURE WRITE-UP 60 · CONSISTENT-HASHING 30 · GATEWAY REDRAW 30 · WEEKLY PASS 30" },
+        { label: "WEEK 5 · WAS 660 / 720", fit: "720 / 720 MIN", detail: "Takes the consistent-hashing explanation (30) and the gateway redraw (30).", slotLine: "+60 MIN · NOW FULL" },
+        { label: "WEEK 6 · WAS 480 / 720", fit: "660 / 720 MIN", detail: "Takes the behavioral catalog (90), the architecture write-up (60), and the weekly pass (30).", slotLine: "+180 MIN · 60 MIN SLACK LEFT" },
+        { label: "WEEKS 7–12", fit: "UNCHANGED", detail: "No work reached these weeks." }
+      ],
+      summaryLabel: "FORECAST",
+      summaryLines: [
+        { text: "Est. completion · week of 19 Oct — unchanged", color: "#e8eaec" },
+        { text: "240 min displaced · 60 to Week 5 · 180 to Week 6 · 0 unresolved", color: "#cfd4d8" },
+        { text: "Week 5's first Core item depends on API gateway mechanics, which stays in Week 4, so no phase moves.", color: "#cfd4d8" }
+      ],
+      note: "EVERY AFFECTED WEEK FITS · HARD DEPENDENCIES HOLD · NO CORE WORK REMOVED",
+      primary: "Apply adjustment", secondaryA: "Edit proposal", secondaryB: "Keep current plan"
+    });
+
+    const v34 = mkOverview("fL", "BEFORE · V3.4", "PARAGRAPHS, DEP LABELS, NOW CARD, RHYTHM LINE", { legacy: true, open: 2 });
+    v34.tagColor = "#8b9299";
+    v34.meta1 = "SENIOR BACKEND INTERVIEW · ACTIVE";
+    v34.meta2 = "EST. COMPLETION · WEEK 12 · WEEK OF 19 OCT · FLEXIBLE";
+    v34.showNow = true;
+    const v35 = mkOverview("fA", "AFTER · V3.5", "FOUR PHASES, TWO LINES EACH, ONE FORECAST", {});
+    v35.tagColor = ACCENT;
+
+    V.rows = [
+      { key: "r0", label: "THE MAP · WHOLE JOURNEY BEFORE ANY PART OF IT", frames: [today, collapsed, currentOpen, futureOpen] },
+      { key: "r1", label: "DEEPER LEVELS GET WORDIER, NOT THINNER", frames: [weekDetail, itemDetail, preview, replan] },
+      { key: "r2", label: "SUBJECT-AGNOSTIC AND DYNAMIC TYPE", frames: [anatomy, bigType] },
+      { key: "r3", label: "DENSITY COMPARISON · SAME PLAN, SAME SCROLL POSITION", frames: [v34, v35] }
+    ];
+    return V;
+  }
+}
+
+</script>
+</body>
+</html>

@@ -8,8 +8,24 @@ final class AppState: ObservableObject {
     enum Screen: Hashable {
         case today, conversation(UUID), history(UUID)
         case sprintSetup, coverage, recap
+        // Study Plan: Today → overview → week → item, plus the flows that hang
+        // off them. No new tab, and no second navigation stack.
+        case planBuild
+        case planPreview
+        case planOverview(UUID)
+        case planWeek(UUID, Int)
+        case planItem(UUID, UUID)
+        case planProposal(UUID, String)
+        case planReopen(UUID, UUID)
+        case planCards(UUID, UUID)
+        case planUpdates(UUID)
+        case planRecap(UUID)
+        case planAudit(String)
     }
-    enum Sheet: String, Identifiable { case settings, add; var id: String { rawValue } }
+    enum Sheet: String, Identifiable {
+        case settings, add, plans, planCapacity
+        var id: String { rawValue }
+    }
 
     /// The expanded tier on Coverage. One at a time, across the whole screen.
     struct OpenTier: Equatable {
@@ -20,6 +36,11 @@ final class AppState: ObservableObject {
     // Today
     @Published var load: LoadState = .loading
     @Published var queue: [DueCard] = []
+    /// The active plan's one line. Optional and never awaited on its own: a
+    /// Study Plan outage must not stop a due card from appearing, so this is
+    /// fetched concurrently with the queue and a failure leaves it nil.
+    @Published var planSummary: StudyPlanSummary?
+    @Published var planSummaryFailed = false
     @Published var filter: ScoreStyle.Band?
     @Published var sheet: Sheet?
     @Published var addPending = false
@@ -106,8 +127,16 @@ final class AppState: ObservableObject {
             break
         }
         load = .loading
+        // Concurrent, not sequential. The plan summary is a second network call
+        // and it must not add its latency to the queue's — nor its failure. The
+        // `try?` is the whole safety property: an unreachable Study Plan degrades
+        // one line on Today and leaves the due cards untouched.
+        async let dueCards = api.due()
+        async let summary = try? await api.activePlan()
         do {
-            queue = try await api.due()
+            queue = try await dueCards
+            planSummary = await summary
+            planSummaryFailed = planSummary == nil
             DueCache.record(count: queue.count)
             load = .ready
             // Today's "COMING UP" list and Coverage read the same library, so
@@ -641,9 +670,128 @@ final class AppState: ObservableObject {
 
     /// Applies `WC_ROUTE` after the queue loads, so a single `simctl launch` can
     /// land on any designed state for comparison against its screenshot.
-    func applyDebugRoute() async {
+    /// The Study Plan screenshot routes. Every designed state, including the
+    /// failure paths, reachable without hand navigation.
+    private func applyStudyPlanRoute(_ route: String, plan: StudyPlanState) async {
+        let planID = StudyPlanFixtures.backendPlanID
+        let itemID = StudyPlanFixtures.firstItemID
+
+        switch route {
+        case "study-plan-build":
+            path.append(.planBuild)
+
+        case "study-plan-import-failure":
+            path.append(.planBuild)
+            plan.guideText = String(
+                repeating: "Week 1: The request path. Trace a request end to end. ", count: 6
+            )
+            await plan.runPreview()
+            path.append(.planPreview)
+
+        case "study-plan-preview":
+            plan.guideText = String(
+                repeating: "Week 1: The request path. Trace a request end to end. ", count: 6
+            )
+            await plan.runPreview()
+            path.append(.planPreview)
+
+        case "study-plan-no-active":
+            // Today's zero-plan affordance; nothing to push.
+            break
+
+        case "study-plan-plans":
+            sheet = .plans
+
+        case "study-plan-overview", "study-plan-overview-expanded",
+             "study-plan-overview-future":
+            path.append(.planOverview(planID))
+            await waitUntil { plan.overviewLoad == .ready }
+            switch route {
+            case "study-plan-overview": plan.chooseOpenPhase(nil)
+            case "study-plan-overview-expanded": plan.chooseOpenPhase(2)
+            // The last phase, which is the case the one-viewport budget is
+            // most likely to fail on.
+            default: plan.chooseOpenPhase(plan.overview?.phases.last?.index)
+            }
+
+        case "study-plan-week":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+
+        case "study-plan-item":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+            path.append(.planItem(planID, itemID))
+
+        case "study-plan-capacity":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+            await waitUntil { plan.weekLoad == .ready }
+            sheet = .planCapacity
+
+        case "study-plan-replan", "study-plan-replan-invalid", "study-plan-fixed-recovery":
+            path.append(.planOverview(planID))
+            await waitUntil { plan.overviewLoad == .ready }
+            path.append(.planProposal(planID, "replan"))
+
+        case "study-plan-reopen", "study-plan-reopen-invalid":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+            path.append(.planItem(planID, itemID))
+            await waitUntil { plan.itemLoad == .ready }
+            path.append(.planReopen(planID, itemID))
+
+        case "study-plan-card-proposal", "study-plan-card-failure",
+             "study-plan-card-existing":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+            path.append(.planItem(planID, itemID))
+            await waitUntil { plan.itemLoad == .ready }
+            path.append(.planCards(planID, itemID))
+            await waitUntil { plan.cardLoad == .ready }
+            if route == "study-plan-card-failure" { await plan.addSelectedCards() }
+
+        case "study-plan-retrieval-audit":
+            await pushAudit("retrieval-audit", plan: plan)
+        case "study-plan-estimate-audit":
+            await pushAudit("estimate-audit", plan: plan)
+        case "study-plan-dependency-audit":
+            await pushAudit("dependency-audit", plan: plan)
+
+        case "study-plan-updates":
+            path.append(.planOverview(planID))
+            path.append(.planUpdates(planID))
+
+        case "study-plan-complete":
+            path.append(.planRecap(StudyPlanFixtures.completedPlanID))
+
+        default:
+            // Named but unhandled: land on the overview rather than silently
+            // somewhere else entirely.
+            path.append(.planOverview(planID))
+        }
+    }
+
+    private func pushAudit(_ destination: String, plan: StudyPlanState) async {
+        plan.guideText = String(
+            repeating: "Week 1: The request path. Trace a request end to end. ", count: 6
+        )
+        await plan.runPreview()
+        path.append(.planPreview)
+        path.append(.planAudit(destination))
+    }
+
+    func applyDebugRoute(plan: StudyPlanState? = nil) async {
         let route = DebugFlags.shared.route
         guard !route.isEmpty else { return }
+
+        // Study Plan routes are handled first and return, because the `default`
+        // case below falls through to Conversation — a misspelled plan route
+        // would otherwise open a card and read as a routing bug.
+        if route.hasPrefix("study-plan"), let plan {
+            await applyStudyPlanRoute(route, plan: plan)
+            return
+        }
 
         switch route {
         case "settings": sheet = .settings

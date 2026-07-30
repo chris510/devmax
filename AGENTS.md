@@ -29,8 +29,9 @@ push on a phone.
 |---|---|
 | `spec.md` | The backend: schema, endpoints, SM-2, LLM prompt rules, and an explicit out-of-scope list. It says "build exactly what's described here" — take that literally. |
 | `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 29 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
+| `docs/STUDY-PLAN-SPEC.md` | Study Plan, end to end. Extends `spec.md` rather than amending it; `design_handoff_study_plan/` is its design source (V3.4 owns behaviour, V3.5 owns presentation). |
 
-**Where they disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
+**Where the first two disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
 `ios/Devmax/Services/APIClient.swift` — so no view knows about the mismatch. If you find
 a new one, resolve it there, not in a screen.
@@ -94,6 +95,27 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   curriculum needs an explicit `--retire-file <manifest>`. Retirement is by named
   manifest, never by diffing against the current deck — that is what keeps `library/`,
   `modules/` and gap-driven cards out of reach. It hard-deletes and sessions cascade.
+- **No Study Plan operation touches a card, a score, a session, a mastery summary,
+  or any SM-2 field.** Completion, reopening, replanning, pausing, resuming,
+  duplication, activation, and archiving are all plan-only. The single authorised
+  exception is a committed card-proposal acceptance, which *creates* cards and
+  still modifies none. It is structural rather than disciplinary: nothing is added
+  to `cards`, linkage lives in `study_plan_card_links`, and
+  `tests/test_study_plan_invariants.py` snapshots every column of both tables
+  around every operation.
+- **A Study Plan proposal is never applied from client-supplied placements.** The
+  server recomputes it from the request's inputs against the current
+  `plan.revision`; a stale `base_plan_revision` is a 409. That is what makes "never
+  mutate the saved schedule until the user confirms" true rather than intended.
+- **Global SM-2 review time is not part of plan capacity, and plan-local retrieval
+  is.** Reviews are not owned by the active plan, so an anatomy plan can never be
+  made to reflow by how many cards are due. Retrieval came from the guide, so it
+  consumes capacity — while still not blocking week advancement.
+- **Study Plan forecasts are plan-week precision only.** No response carries a
+  field from which a completion *day* could be derived from weekly capacity.
+- **Today loads the plan summary concurrently with due cards, and swallows its
+  failure.** A Study Plan outage degrades one line to `PLAN · UNAVAILABLE`; it must
+  never delay or block a due card.
 - **Losing a spoken answer is the worst failure mode in the product.** `PATCH /sessions/{id}/draft`
   must stay cheap, idempotent, and never blocked behind anything slow. On the client, disk is
   the source of truth for instant rehydration; the server draft is the durable backup.
@@ -137,16 +159,21 @@ devmax/
 │   ├── prototype/                   # HTML reference (read for exact values, don't lift)
 │   └── screenshots/                 # 29 states; the fidelity bar
 ├── assets/app_icon/                 # Icon kit — `svg/` is the re-export source of truth
+├── design_handoff_study_plan/       # Study Plan design. `legacy/` is superseded — don't implement it
 ├── api/                             # Python 3.12 / FastAPI / SQLModel / Postgres / Railway
 │   ├── app/services/scheduler.py    # SM-2 — pure, the highest-value test surface
-│   ├── app/services/llm.py          # Question gen + scoring (Anthropic)
+│   ├── app/services/study_plan_scheduler.py  # The weekly scheduler — pure, likewise
+│   ├── app/services/study_plan.py            # Lifecycle, revisions, gate, duplicates
+│   ├── app/services/study_plan_import.py     # The gate between the importer and the DB
+│   ├── app/services/llm.py          # Question gen + scoring + guide import (Anthropic)
 │   ├── app/services/cards.py        # due_label, tier classification, turn assembly
-│   ├── app/routers/                 # cards, sessions, devices, settings, internal
+│   ├── app/routers/                 # cards, sessions, devices, settings, study_plan, internal
 │   └── app/seed.py                  # --fixtures (design cards) or --file cards.json
 ├── ios/                             # SwiftUI; `xcodegen generate` makes the gitignored project
 │   ├── Devmax/Design/            # Theme, Typography, Motion, ScoreStyle — tokens live here
-│   ├── Devmax/Services/          # APIClient, MockAPI, Speech, Speaker, DraftStore
-│   └── Devmax/Screens/           # Today, Conversation, History, Sprint (setup/coverage/recap)
+│   ├── Devmax/Services/          # APIClient, MockAPI, Speech, Speaker, DraftStore,
+│   │                             #   StudyPlanMock, GuideDraftStore, StudyReminderService
+│   └── Devmax/Screens/           # Today, Conversation, History, Sprint, StudyPlan
 └── .github/workflows/               # trigger-review + check-missed cron
 ```
 
@@ -193,6 +220,23 @@ walks end to end. `WC_FAILED_MECHANISM` forces a failing mechanism score, which 
 makes the coached re-attempt reachable; the two `reattempt` routes set it themselves, so
 it only needs passing to see a failed mechanism on some *other* route.
 
+Study Plan adds its own routes, all prefixed `study-plan` and dispatched *before*
+the fall-through above, so a misspelled one lands on the plan overview rather than
+silently opening a card: `study-plan-overview` `-overview-expanded`
+`-overview-future` `-week` `-item` `-capacity` `-build` `-preview`
+`-import-failure` `-replan` `-replan-invalid` `-fixed-recovery` `-reopen`
+`-reopen-invalid` `-plans` `-no-active` `-complete` `-updates` `-retrieval-audit`
+`-estimate-audit` `-dependency-audit` `-card-proposal` `-card-failure`
+`-card-existing`. Their flags are `WC_PLAN_NO_ACTIVE` `WC_PLAN_SUMMARY_FAIL`
+`WC_PLAN_FAIL_IMPORT` `WC_PLAN_FAIL_ADD_CARD` `WC_PLAN_REPLAN_INVALID`
+`WC_PLAN_REOPEN_INVALID` `WC_PLAN_FIXED_RECOVERY`, plus `WC_PLAN_VARIANT`
+(`anatomy` | `five-phase`) and `WC_PLAN_CARD_VARIANT` (`none` | `existing` |
+`unsupported`).
+
+The plan routes wait on `== .ready`, not `!= .loading` — the initial state is
+`.idle`, so the obvious guard falls straight through before the first load starts
+and the screenshot catches the wrong expansion state.
+
 `WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
 `WC_BASE_URL` overrides where it points, which is how a device build reaches the Mac
 (`http://<mac-lan-ip>:8083`, set in the Xcode scheme) without a personal address
@@ -208,6 +252,26 @@ Load the `claude-api` skill. Model IDs, structured-output shape, and prompt-cach
 change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
+
+- **Study Plan is built and green, but its importer is verified by one live run.**
+  `docs/CURRICULUM.md` was imported end to end against the real API — 12 weeks, 4
+  phases, 72 items, good concise titles, and a capacity check that correctly
+  reported the real curriculum needs ~15h/week rather than the 12 it was asked
+  for. That run is what surfaced three real bugs (offsets recomputed rather than
+  trusted, token-matched subject eligibility, `max_tokens` sized for thinking
+  *plus* output). **The post-fix re-run did not happen: the Anthropic account ran
+  out of credit.** The fixes are unit-tested; they are not live-tested.
+- **The import takes about 11 minutes** at `effort: high` on a 10k-character
+  guide. Fine for a once-a-quarter action, but the client needs to expect it, and
+  `studyplan_effort` is the lever if that is too slow — `medium` is untested here.
+- **Dynamic Type does not scale anywhere in the app.** `WCFont` builds fixed-size
+  `UIFont`s with no `UIFontMetrics`, so screenshots at `accessibility-medium` are
+  pixel-identical to default. Pre-existing and app-wide; see `docs/DEVIATIONS.md`
+  §28.
+- **Study Plan has no VoiceOver rotor pass.** Accessible names, headings, hints,
+  44px targets, native `disabled`, and status-in-text are all implemented and
+  checked in code; nobody has driven it with the screen reader on.
+
 
 - **The curriculum is lesson-gated.** `api/cards.json` is a 54-card system-design recall
   spine: six cards in each of nine teaching weeks, followed by three weeks of mocks and

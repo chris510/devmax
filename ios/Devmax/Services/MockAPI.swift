@@ -27,6 +27,20 @@ final class DebugFlags: ObservableObject {
     @Published var simulateSpeech: Bool
     @Published var railStyle: RailStyle
 
+    // Study Plan. `planVariant` swaps the whole fixture set (`anatomy` proves the
+    // map is subject-agnostic, `five-phase` checks the upper bound of the
+    // one-viewport budget); the rest are one failure or empty state each.
+    @Published var planNoActive: Bool
+    /// Today must keep working when this endpoint does not.
+    @Published var planSummaryFails: Bool
+    @Published var planFailImport: Bool
+    @Published var planFailAddCard: Bool
+    @Published var planReplanInvalid: Bool
+    @Published var planReopenInvalid: Bool
+    @Published var planFixedRecovery: Bool
+    let planVariant: String
+    let planCardVariant: String
+
     /// Drives the app straight to one designed state at launch, so every
     /// screenshot in the handoff can be reproduced and compared without hand
     /// navigation. Set via `simctl launch --setenv WC_ROUTE=…`.
@@ -62,6 +76,15 @@ final class DebugFlags: ObservableObject {
         emptyQueue = flag("WC_EMPTY")
         textFirst = flag("WC_TEXT_FIRST")
         ttsEnabled = flag("WC_TTS", default: true)
+        planNoActive = flag("WC_PLAN_NO_ACTIVE")
+        planSummaryFails = flag("WC_PLAN_SUMMARY_FAIL")
+        planFailImport = flag("WC_PLAN_FAIL_IMPORT")
+        planFailAddCard = flag("WC_PLAN_FAIL_ADD_CARD")
+        planReplanInvalid = flag("WC_PLAN_REPLAN_INVALID")
+        planReopenInvalid = flag("WC_PLAN_REOPEN_INVALID")
+        planFixedRecovery = flag("WC_PLAN_FIXED_RECOVERY")
+        planVariant = env["WC_PLAN_VARIANT"] ?? ""
+        planCardVariant = env["WC_PLAN_CARD_VARIANT"] ?? ""
         route = env["WC_ROUTE"] ?? ""
     }
 }
@@ -72,6 +95,9 @@ actor MockAPI: DevmaxAPI {
 
     private var submitAttempts = 0
     private var addAttempts = 0
+    /// Alternates so the card-add failure path and the idempotent retry that
+    /// follows it are both reachable in a single walk.
+    var cardAcceptAttempts = 0
     private var completions = 0
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.

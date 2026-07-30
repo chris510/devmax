@@ -626,6 +626,30 @@ Mock all Anthropic and APNs calls in tests. No live API calls in CI.
 
 ---
 
+## Study Plan
+
+Study Plan is a later, separately authorised feature and its authoritative
+specification is **`docs/STUDY-PLAN-SPEC.md`**. It extends this document rather
+than amending it: the schema, endpoints, SM-2 rules, and LLM prompts described
+above are unchanged by it.
+
+Two properties of that extension matter from here:
+
+- **No Study Plan operation modifies a card, a score, a session, a mastery
+  summary, or any SM-2 field.** The only path that creates cards is a separately
+  confirmed, gated, atomic card-proposal acceptance, and no path modifies an
+  existing one. Linkage lives in `study_plan_card_links` — nothing is added to
+  the `cards` table.
+- **A card created that way starts at the same defaults `POST /cards` produces**,
+  with one addition: the approved question is persisted as `canonical_question`,
+  so the first review reuses it rather than generating one.
+
+Where `docs/STUDY-PLAN-SPEC.md` and this file disagree about Study Plan, that
+file wins. Where either disagrees with `AGENTS.md`'s load-bearing invariants,
+`AGENTS.md` wins.
+
+---
+
 ## Out of scope — do not build
 
 - User accounts, registration, login, JWT, OAuth, password reset
@@ -637,3 +661,9 @@ Mock all Anthropic and APNs calls in tests. No live API calls in CI.
 - Speech-to-text — the iOS client transcribes on-device and sends text
 - Retry queues, background workers, or a task queue (Celery, RQ, etc.) —
   everything here is request-scoped
+
+Also out of scope for Study Plan (`docs/STUDY-PLAN-SPEC.md` restates these in
+full): readiness scores or percentages, exact-day completion forecasts derived
+from weekly capacity, calendar integrations, server-side study-block reminders,
+actual study-time tracking, automatic creation of generic cards, automatic
+schedule mutations, and a second review scheduler.
