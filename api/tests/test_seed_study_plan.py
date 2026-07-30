@@ -39,7 +39,15 @@ def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
         loads[item["week_index"]] += item["estimate_minutes"]
 
     assert result.can_create
-    assert manifest["seed_key"] == "devmax.senior-backend-12-week.v1"
+    assert manifest["seed_key"] == "devmax.senior-backend-12-week.v2"
+    assert [
+        phase["overview_title"] for phase in result.preview["phases"]
+    ] == [
+        "Foundations",
+        "Patterns and application",
+        "Technologies",
+        "Simulation",
+    ]
     assert len(result.preview["phases"]) == 4
     assert len(result.preview["weeks"]) == 12
     assert len(result.preview["items"]) == 72
@@ -67,7 +75,7 @@ async def test_the_seed_creates_an_active_week_one_plan_graph(db) -> None:
     assert len(phases) == 4
     assert len(weeks) == 12
     assert len(items) == 72
-    assert revision.after["seed_key"] == "devmax.senior-backend-12-week.v1"
+    assert revision.after["seed_key"] == "devmax.senior-backend-12-week.v2"
 
 
 async def test_rerunning_the_same_seed_is_idempotent(db) -> None:

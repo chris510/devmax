@@ -54,12 +54,12 @@ designs remain external practice and produce focused gap cards afterward.
 | 1 | 6 | 0 | 0 |
 | 2 | 6 | 0 | 0 |
 | 3 | 6 | 0 | 0 |
-| 4 | 4 | 2 | 0 |
-| 5 | 6 | 0 | 0 |
-| 6 | 5 | 1 | 0 |
-| 7 | 6 | 0 | 0 |
-| 8 | 5 | 1 | 0 |
-| 9 | 4 | 2 | 0 |
+| 4 | 6 | 0 | 0 |
+| 5 | 5 | 1 | 0 |
+| 6 | 4 | 2 | 0 |
+| 7 | 4 | 2 | 0 |
+| 8 | 6 | 0 | 0 |
+| 9 | 5 | 1 | 0 |
 | **Total** | **48** | **6** | **0** |
 
 ### Corrections applied
@@ -205,15 +205,15 @@ in this audit.
 - Week 1: content-approved after the estimation and API identity corrections;
   subject to first-question review.
 - Weeks 2–3: content-approved, subject to first-question review.
-- Week 4: content-approved; scrutinize the PostgreSQL and Redis questions.
-- Week 5: content-approved.
-- Week 6: content-approved; scrutinize the Count-Min Sketch / HyperLogLog
-  question.
-- Week 7: content-approved.
-- Week 8: content-approved after the contention correction; scrutinize the
+- Week 4: content-approved.
+- Week 5: content-approved after the contention correction; scrutinize the
   circuit-breaker / bulkhead / retry question.
-- Week 9: content-approved after the time-series correction; scrutinize the
+- Week 6: content-approved; scrutinize the
   real-time protocol question and check large-blob duplication.
+- Week 7: content-approved; scrutinize the PostgreSQL and Redis questions.
+- Week 8: content-approved after the time-series correction.
+- Week 9: content-approved; scrutinize the Count-Min Sketch / HyperLogLog
+  question.
 
 ## Authoritative sources checked
 

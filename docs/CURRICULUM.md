@@ -232,19 +232,18 @@ External coding:
 Use the editor for implementation. Add a Devmax coding card only when a failed
 problem exposes a reusable recognition or invariant gap.
 
-### Weeks 4–6 — technologies
+### Weeks 4–6 — reusable patterns and application
 
 System design:
 
-- PostgreSQL
-- Redis
-- DynamoDB
-- Cassandra
-- API gateways
-- Kafka
-- Elasticsearch
-- blob storage and CDNs
-- Flink, ZooKeeper, approximate structures, proximity search, and vector indexes
+- scaling reads and writes
+- replica lag and fan-out
+- backpressure and queues
+- contention and distributed locks
+- sagas, transactional outboxes, and durable workflows
+- circuit breakers, retries, and exactly-once effects
+- real-time updates
+- large blobs and long-running jobs
 
 External coding:
 
@@ -258,19 +257,20 @@ External coding:
 
 Begin the behavioral story catalog by the end of week 6.
 
-### Weeks 7–9 — reusable patterns and application
+### Weeks 7–9 — technologies and application
 
 System design:
 
-- scaling reads and writes
-- replica lag and fan-out
-- backpressure and queues
-- contention and distributed locks
-- sagas and durable workflows
-- circuit breakers, retries, and exactly-once effects
-- real-time updates
-- large blobs and long-running jobs
+- PostgreSQL
+- Redis
+- DynamoDB
+- Cassandra
+- API gateways
+- Kafka
+- Elasticsearch
+- blob storage and CDNs
 - rate limiting and time-series storage
+- Flink, ZooKeeper, approximate structures, proximity search, and vector indexes
 
 External practice:
 
