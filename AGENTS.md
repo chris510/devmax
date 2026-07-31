@@ -126,7 +126,10 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   Reusing the submit-failure strip here claimed a save that never happened and left a live
   mic over a dead session, which is the one thing the invariant above exists to prevent.
   This lives in `Stage.questionFailed`, not a flag beside `stage`: it answers `acceptsAnswer`
-  and `footer` for itself, so "no session" and "answerable" cannot both be true.
+  and `footer` for itself, so "no session" and "answerable" cannot both be true. Every
+  open or retry also owns a unique load token; both success and failure must still own it
+  before touching conversation state. Task cancellation is only an optimization — an older
+  response must be harmless even when the transport finishes after cancellation.
 
 ## Design fidelity rules
 

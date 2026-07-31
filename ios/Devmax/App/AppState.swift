@@ -86,6 +86,13 @@ final class AppState: ObservableObject {
 
     /// In-flight debounced draft upload; cancelled and replaced on each edit.
     private var draftSync: Task<Void, Never>?
+    /// The question request currently allowed to write conversation state.
+    ///
+    /// Card identity alone is insufficient: two retries for the same card can
+    /// resolve out of order. The token makes the latest attempt the sole owner,
+    /// while the task handle lets normal UI navigation cancel work promptly.
+    private var questionLoadTask: Task<Void, Never>?
+    private var questionLoadID = UUID()
 
     let api: DevmaxAPI
 
@@ -347,7 +354,7 @@ final class AppState: ObservableObject {
         guard let card = cards[safe: index] else { return }
         // A sprint replaces Setup rather than stacking on it, so ✕ lands on Today.
         if replacingPath { path = [.conversation(card.id)] } else { path.append(.conversation(card.id)) }
-        Task { await openCard(card) }
+        launchQuestionLoad(card)
     }
 
     var currentCard: DueCard? { sessionCards[safe: cursor] }
@@ -403,11 +410,53 @@ final class AppState: ObservableObject {
         inputMode = DebugFlags.shared.textFirst ? .text : .voice
     }
 
+    /// Opens a card directly and waits for the attempt to settle. UI entry points
+    /// use `launchQuestionLoad` so they can cancel the task on navigation; this
+    /// form stays available for deterministic state-machine tests.
     func openCard(_ card: DueCard) async {
-        resetForNewCard()
+        let loadID = prepareQuestionLoad()
+        let requestedPractice = practice
+        await loadCard(card, practice: requestedPractice, loadID: loadID)
+    }
 
+    /// Starts a UI-owned load. Preparation is synchronous so the outgoing card is
+    /// cleared in the same turn as navigation, before the new task can be scheduled.
+    @discardableResult
+    private func launchQuestionLoad(_ card: DueCard) -> Task<Void, Never> {
+        let loadID = prepareQuestionLoad()
+        let requestedPractice = practice
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.loadCard(card, practice: requestedPractice, loadID: loadID)
+        }
+        questionLoadTask = task
+        return task
+    }
+
+    /// Cancels the previous UI task and gives this attempt exclusive ownership of
+    /// the state it will eventually populate. A new UUID also invalidates direct
+    /// test calls and any transport that does not cooperate with cancellation.
+    private func prepareQuestionLoad() -> UUID {
+        invalidateQuestionLoad()
+        let loadID = UUID()
+        questionLoadID = loadID
+        resetForNewCard()
+        return loadID
+    }
+
+    private func invalidateQuestionLoad() {
+        questionLoadTask?.cancel()
+        questionLoadTask = nil
+        questionLoadID = UUID()
+    }
+
+    private func loadCard(_ card: DueCard, practice: Bool, loadID: UUID) async {
         do {
             let start = try await api.startSession(cardID: card.id, practice: practice)
+            // Question generation can take long enough to leave this screen and
+            // open another card. A late response must never replace that newer
+            // card's session, even if cancellation did not reach the transport.
+            guard questionLoadID == loadID, currentCard?.id == card.id else { return }
             sessionID = start.sessionId
             // A session resumed mid-probe comes back with the *probe* as `question`,
             // so it has to be tagged as one — otherwise it renders at the opening
@@ -427,6 +476,9 @@ final class AppState: ObservableObject {
             }
             stage = start.isFollowUp ? .followUp : .idle
         } catch {
+            // A superseded request may fail after the replacement has already
+            // loaded. Its error belongs to the old screen and is discarded.
+            guard questionLoadID == loadID, currentCard?.id == card.id else { return }
             // No session, so no question and nothing to answer. Reporting this as
             // the submit-failure strip was wrong twice over: it claimed "your answer
             // is saved" when nothing had been said yet, and its `Try again` called
@@ -442,7 +494,7 @@ final class AppState: ObservableObject {
     /// load — and the only thing the failure's `Retry` may call.
     func retryQuestion() async {
         guard let card = currentCard else { return }
-        await openCard(card)
+        await launchQuestionLoad(card).value
     }
 
     func resumeAnswer() {
@@ -652,10 +704,7 @@ final class AppState: ObservableObject {
         cursor += 1
         guard let card = currentCard else { return }
         path = [.conversation(card.id)]
-        // Before the Task, not inside it: the stage must leave `.result` in the
-        // same turn the path changes.
-        resetForNewCard()
-        Task { await openCard(card) }
+        launchQuestionLoad(card)
     }
 
     var hasMoreCards: Bool { cursor + 1 < sessionCards.count }
@@ -678,6 +727,10 @@ final class AppState: ObservableObject {
     }
 
     func finish() {
+        // Leaving while Claude is generating a question must invalidate both a
+        // late success and a late failure. The server may still finish and retain
+        // a resumable session; reopening the card will retrieve it normally.
+        invalidateQuestionLoad()
         path = []
         Task { await loadToday() }
     }

@@ -19,8 +19,14 @@ final class ReattemptRoutingTests: XCTestCase {
     /// Records which endpoint an answer reached. Only the two submit methods do
     /// anything; the rest satisfy the protocol.
     private final class SpyAPI: DevmaxAPI, @unchecked Sendable {
+        struct StartStub {
+            let delay: Duration
+            let result: Result<SessionStart, APIError>
+        }
+
         var answerCalls: [String] = []
         var reattemptCalls: [String] = []
+        var startStubs: [UUID: [StartStub]] = [:]
 
         func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome {
             answerCalls.append(text)
@@ -41,7 +47,13 @@ final class ReattemptRoutingTests: XCTestCase {
             throw CancellationError()
         }
         func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart {
-            throw CancellationError()
+            guard var stubs = startStubs[cardID], !stubs.isEmpty else {
+                throw CancellationError()
+            }
+            let stub = stubs.removeFirst()
+            startStubs[cardID] = stubs
+            try await Task.sleep(for: stub.delay)
+            return try stub.result.get()
         }
         func saveDraft(sessionID: UUID, text: String) async throws {}
         func settings() async throws -> AppSettings { throw CancellationError() }
@@ -178,6 +190,20 @@ final class ReattemptRoutingTests: XCTestCase {
         resumable: false, missedCount: 0
     )
 
+    private static func card(_ topic: String) -> DueCard {
+        DueCard(
+            id: UUID(), topic: topic, category: "Core Concept", masterySummary: "",
+            lastScore: nil, dueLabel: "due today", resumable: false, missedCount: 0
+        )
+    }
+
+    private static func start(_ id: UUID, question: String) -> SessionStart {
+        SessionStart(
+            sessionId: id, question: question, isFollowUp: false,
+            draftText: "", resumed: false
+        )
+    }
+
     /// The regression from the shipped bug: a failed `startSession` reported
     /// itself as a *submit* failure ("your answer is saved" — nothing was), and
     /// left the previous card's `sessionID` in place. Answering then posted to a
@@ -228,5 +254,158 @@ final class ReattemptRoutingTests: XCTestCase {
         XCTAssertEqual(APIError.scoringUnavailable.loadNote, "QUESTION GENERATION UNAVAILABLE")
         XCTAssertEqual(APIError.status(500).loadNote, "SERVER ERROR 500")
         XCTAssertEqual(CancellationError().loadNote, "SERVER UNREACHABLE")
+    }
+
+    /// Retry is the recovery contract for `.questionFailed`: it must create a new
+    /// owned attempt and make the card answerable when the service comes back.
+    @MainActor
+    func testRetryRecoversAQuestionFailure() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        let card = Self.card("retry")
+        let recoveredSession = UUID()
+        state.sessionCards = [card]
+        api.startStubs[card.id] = [
+            .init(delay: .zero, result: .failure(.scoringUnavailable)),
+            .init(
+                delay: .zero,
+                result: .success(Self.start(recoveredSession, question: "recovered question"))
+            ),
+        ]
+
+        await state.openCard(card)
+        XCTAssertEqual(state.stage, .questionFailed("QUESTION GENERATION UNAVAILABLE"))
+
+        await state.retryQuestion()
+
+        XCTAssertEqual(state.sessionID, recoveredSession)
+        XCTAssertEqual(state.thread.first?.text, "recovered question")
+        XCTAssertEqual(state.stage, .idle)
+    }
+
+    /// Card A can spend tens of seconds generating its canonical question while
+    /// card B already has one and returns immediately. A's late response must not
+    /// replace B's session — otherwise the next answer scores and reschedules A
+    /// while the screen still identifies B.
+    @MainActor
+    func testOlderQuestionSuccessCannotOverwriteTheCurrentCard() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        let slow = Self.card("slow")
+        let fast = Self.card("fast")
+        let slowSession = UUID()
+        let fastSession = UUID()
+        api.startStubs[slow.id] = [
+            .init(
+                delay: .milliseconds(100),
+                result: .success(Self.start(slowSession, question: "slow question"))
+            )
+        ]
+        api.startStubs[fast.id] = [
+            .init(
+                delay: .zero,
+                result: .success(Self.start(fastSession, question: "fast question"))
+            )
+        ]
+
+        state.sessionCards = [slow]
+        let older = Task { await state.openCard(slow) }
+        try? await Task.sleep(for: .milliseconds(10))
+        state.sessionCards = [fast]
+        await state.openCard(fast)
+        await older.value
+
+        XCTAssertEqual(state.currentCard?.id, fast.id)
+        XCTAssertEqual(state.sessionID, fastSession)
+        XCTAssertEqual(state.thread.first?.text, "fast question")
+        XCTAssertEqual(state.stage, .idle)
+    }
+
+    /// Failure is just as stateful as success: an old request cannot turn a newer
+    /// answerable card into a question-failure screen.
+    @MainActor
+    func testOlderQuestionFailureCannotReplaceANewerSuccess() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        let slow = Self.card("slow")
+        let fast = Self.card("fast")
+        let fastSession = UUID()
+        api.startStubs[slow.id] = [
+            .init(delay: .milliseconds(100), result: .failure(.scoringUnavailable))
+        ]
+        api.startStubs[fast.id] = [
+            .init(
+                delay: .zero,
+                result: .success(Self.start(fastSession, question: "fast question"))
+            )
+        ]
+
+        state.sessionCards = [slow]
+        let older = Task { await state.openCard(slow) }
+        try? await Task.sleep(for: .milliseconds(10))
+        state.sessionCards = [fast]
+        await state.openCard(fast)
+        await older.value
+
+        XCTAssertEqual(state.sessionID, fastSession)
+        XCTAssertEqual(state.thread.first?.text, "fast question")
+        XCTAssertEqual(state.stage, .idle)
+    }
+
+    /// Card identity cannot arbitrate two retries of the same card. The attempt
+    /// token must ensure the second tap owns the state even when the first returns
+    /// last.
+    @MainActor
+    func testLatestRetryWinsForTheSameCard() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        let card = Self.card("same card")
+        let oldSession = UUID()
+        let newSession = UUID()
+        state.sessionCards = [card]
+        api.startStubs[card.id] = [
+            .init(
+                delay: .milliseconds(100),
+                result: .success(Self.start(oldSession, question: "old question"))
+            ),
+            .init(
+                delay: .zero,
+                result: .success(Self.start(newSession, question: "new question"))
+            ),
+        ]
+
+        let older = Task { await state.openCard(card) }
+        try? await Task.sleep(for: .milliseconds(10))
+        await state.openCard(card)
+        await older.value
+
+        XCTAssertEqual(state.sessionID, newSession)
+        XCTAssertEqual(state.thread.first?.text, "new question")
+    }
+
+    /// Exiting is itself a newer navigation decision. A request that finishes
+    /// afterward cannot repopulate the hidden conversation state.
+    @MainActor
+    func testLeavingInvalidatesAnInFlightQuestionLoad() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        let card = Self.card("leaving")
+        state.sessionCards = [card]
+        api.startStubs[card.id] = [
+            .init(
+                delay: .milliseconds(100),
+                result: .success(Self.start(UUID(), question: "late question"))
+            )
+        ]
+
+        let load = Task { await state.openCard(card) }
+        try? await Task.sleep(for: .milliseconds(10))
+        state.finish()
+        await load.value
+
+        XCTAssertTrue(state.path.isEmpty)
+        XCTAssertNil(state.sessionID)
+        XCTAssertTrue(state.thread.isEmpty)
+        XCTAssertEqual(state.stage, .loadingQuestion)
     }
 }
