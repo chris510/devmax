@@ -55,6 +55,8 @@ not runtime state.
 ### Devmax does
 
 - Mechanism reconstruction.
+- Coding-pattern recognition, invariants, state transitions, complexity, and
+  failure-mode recall.
 - Trade-off and failure-mode recall.
 - Spaced repetition after a lesson has been learned.
 - Focused prompts created from an observed practice gap.
@@ -104,9 +106,10 @@ such as “fan-out recovery when a publish partially succeeds.”
 
 Seventeen mechanism prompts covering Hello Interview's sixteen coding families
 live in a desk-only reference file (graphs contributes both dependency ordering
-and shortest paths). They are not part of the production seed. Coding happens in
-an editor; a pattern card is seeded only after external practice shows that
-recalling its invariant would help.
+and shortest paths). They are not part of the production seed. Mechanism
+understanding is core Study Plan work; writing code is optional and happens only
+in an editor. A pattern card is seeded when explaining its recognition cue,
+invariant, state transition, complexity, or failure mode would help.
 
 ### Company overlays — `api/modules/company-*.json`
 
@@ -232,7 +235,7 @@ System design:
 - data modeling and indexing
 - caching, sharding, consistent hashing, and CAP
 
-External coding:
+Coding mechanisms:
 
 - two pointers
 - sliding window
@@ -243,8 +246,9 @@ External coding:
 - heaps
 - DFS and BFS
 
-Use the editor for implementation. Add a Devmax coding card only when a failed
-problem exposes a reusable recognition or invariant gap.
+For each family, explain the recognition cue, maintained invariant, state
+transition, complexity, and common failure mode. Representative implementation
+is optional, desk-only work.
 
 ### Weeks 4–6 — reusable patterns and application
 
@@ -259,7 +263,7 @@ System design:
 - real-time updates
 - large blobs and long-running jobs
 
-External coding:
+Coding mechanisms:
 
 - graphs and shortest paths
 - backtracking
@@ -269,7 +273,8 @@ External coding:
 - prefix sums
 - matrices
 
-Begin the behavioral story catalog by the end of week 6.
+Begin the behavioral story catalog by the end of week 6. Representative
+implementation is optional, desk-only work.
 
 ### Weeks 7–9 — technologies and application
 
@@ -289,7 +294,9 @@ System design:
 External practice:
 
 - two complete system designs per week
-- three timed coding sessions per week
+- verbal coding-prompt walkthroughs focused on pattern choice, invariants,
+  complexity, and edge cases
+- up to two optional timed coding sessions per week, desk-only
 - story catalog completed and Big Three drafted
 
 Every external session ends with a gap harvest. Add at most one to three focused
@@ -302,34 +309,47 @@ No automatic generic cards.
 Each week:
 
 - two full system-design mocks
-- three coding mocks
+- three verbal coding-prompt walkthroughs
+- one optional desk-only coding mock
 - two behavioral practices
 - due Devmax reviews
 - company modules selected for actual roles
 - gap cards only
 
-Google-style coding practice must include a plain editor with no execution.
-OpenAI-style practice must include practical, production-shaped implementation
-and testing. Company-specific full designs remain external even when their
-focused mechanisms become cards.
+If optional implementation is chosen, Google-style practice uses a plain editor
+with no execution, while OpenAI-style practice uses practical,
+production-shaped implementation and testing. Company-specific full designs
+remain external even when their focused mechanisms become cards.
 
 ## Weekly time budget
 
-| Phase | Coding | System design | Behavioral | Devmax |
-|---|---:|---:|---:|---:|
-| Weeks 1–3 | 6–7h | 4–5h | 0–1h | 1h |
-| Weeks 4–6 | 6h | 4–5h | 1–2h | 1h |
-| Weeks 7–9 | 5–6h | 4–5h | 1–2h | 1h |
-| Weeks 10–12 | 5h | 5h | 2h | 1h |
+| Phase | Core coding mechanisms | Optional desk implementation | Other plan work |
+|---|---:|---:|---:|
+| Weeks 1–3 | 1.5h | 1.5h | 9h |
+| Week 4 | 2h | 2.5h | 7.5h |
+| Weeks 5–6 | 2h | 2h | 8h |
+| Weeks 7–9 | 1.5h | 2h | 8.5h |
+| Weeks 10–12 | 2.5h | 2h | 7.5h |
 
-If fewer hours are available, reduce breadth. Do not increase passive card
-volume to compensate for missing external practice.
+Optional implementation consumes capacity when chosen but never blocks week
+advancement. If fewer hours are available, drop it first and reduce breadth
+next. Do not increase passive card volume to compensate.
 
 ## Readiness gates
 
 Devmax scores are diagnostic, not readiness gates.
 
-### Coding
+### Coding mechanism fluency
+
+- Identify the likely family from an unfamiliar prompt.
+- State the invariant and how each state transition preserves it.
+- Compare the approach with the naive alternative.
+- Derive time and space complexity.
+- Name the edge case most likely to break the approach.
+
+### Coding execution readiness
+
+This is optional plan work and can be claimed only from external implementation:
 
 - Two unseen problems in 45 minutes.
 - Correct or nearly correct implementation.

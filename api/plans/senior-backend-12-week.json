@@ -1,10 +1,10 @@
 {
-  "seed_key": "devmax.senior-backend-12-week.v2",
-  "version": 2,
+  "seed_key": "devmax.senior-backend-12-week.v3",
+  "version": 3,
   "source_guide_path": "../../docs/CURRICULUM.md",
-  "source_guide_sha256": "506f92bd411b9891885e668342aae39bc60fc715ee15bbaa77f4afa28fff5803",
-  "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Work is ordered by transfer value: delivery and system-design foundations in Weeks 1–3; reusable architecture patterns and full-design application in Weeks 4–6; concrete backend technologies in Weeks 7–9; interview simulation and target-company calibration in Weeks 10–12.\n\nEach week reserves twelve focused hours across system design, coding, behavioral preparation, and plan-local closed-book retrieval. Global Devmax card reviews continue separately in Today and never determine Study Plan progress. Coding execution and full system designs happen outside the conversational review flow. Every external practice session ends with a gap harvest, and readiness is based on observed mock performance rather than card scores.",
-  "guide_sha256": "59d0019c9e2d221f8dc319aea6aa1940d529ccbee1b467cea70b0bcff79dcb2f",
+  "source_guide_sha256": "2210e37a8e9833c73e92443a5e73f1868d97afcc33da7de34de85366668906ce",
+  "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Work is ordered by transfer value: delivery and system-design foundations in Weeks 1–3; reusable architecture patterns and full-design application in Weeks 4–6; concrete backend technologies in Weeks 7–9; interview simulation and target-company calibration in Weeks 10–12.\n\nEach week reserves twelve focused hours across system design, coding-mechanism understanding, behavioral preparation, plan-local closed-book retrieval, and optional desk implementation. Global Devmax card reviews continue separately in Today and never determine Study Plan progress. Coding-pattern recognition, invariants, state transitions, complexity, and failure modes are core; writing code is optional and desk-only. Full system designs happen outside the conversational review flow. Every external practice session ends with a gap harvest, and readiness is based on observed external performance rather than card scores.",
+  "guide_sha256": "e60bcac42125baa9f141b1161bf8f79f131f648968baddf26acd17d961206d11",
   "title": "Senior backend interview preparation",
   "subject": "Senior backend interview preparation",
   "subject_slug": "senior-backend-interview-prep",
@@ -47,7 +47,8 @@
       "items": [
         {"key": "W1-L1", "type": "learn", "priority": "core", "title": "Complete the system design delivery framework lesson", "minutes": 180},
         {"key": "W1-L2", "type": "learn", "priority": "core", "title": "Turn functional and non-functional requirements into design constraints", "minutes": 90},
-        {"key": "W1-P1", "type": "practice", "priority": "core", "title": "Practice two pointers, sliding windows, and intervals", "minutes": 180},
+        {"key": "W1-P1", "type": "learn", "priority": "core", "title": "Understand two-pointer, sliding-window, and interval recognition cues, invariants, complexity, and failure modes", "minutes": 90},
+        {"key": "W1-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve one representative problem from each Week 1 coding family", "minutes": 90},
         {"key": "W1-P2", "type": "practice", "priority": "core", "title": "Deliver one requirements-to-deep-dives system design", "minutes": 150},
         {"key": "W1-P3", "type": "practice", "priority": "core", "title": "Review the design and harvest specific mechanism gaps", "minutes": 90},
         {"key": "W1-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the delivery framework closed-book", "minutes": 30, "source_item_key": "W1-L1"}
@@ -61,7 +62,8 @@
       "items": [
         {"key": "W2-L1", "type": "learn", "priority": "core", "title": "Trace request paths and network failure handling", "minutes": 150},
         {"key": "W2-L2", "type": "learn", "priority": "core", "title": "Study API mechanics, authentication, and authorization boundaries", "minutes": 120},
-        {"key": "W2-P1", "type": "practice", "priority": "core", "title": "Practice stacks, linked lists, and binary search", "minutes": 180},
+        {"key": "W2-P1", "type": "learn", "priority": "core", "title": "Understand stack, linked-list, and binary-search recognition cues, invariants, complexity, and failure modes", "minutes": 90},
+        {"key": "W2-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve one representative problem from each Week 2 coding family", "minutes": 90},
         {"key": "W2-P2", "type": "practice", "priority": "core", "title": "Model entities and access patterns for one backend design", "minutes": 150},
         {"key": "W2-P3", "type": "practice", "priority": "core", "title": "Review failure paths and harvest mechanism gaps", "minutes": 90},
         {"key": "W2-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the request path and trust boundaries closed-book", "minutes": 30, "source_item_key": "W2-L1"}
@@ -75,7 +77,8 @@
       "items": [
         {"key": "W3-L1", "type": "learn", "priority": "core", "title": "Study caching, invalidation, and cache failure modes", "minutes": 120},
         {"key": "W3-L2", "type": "learn", "priority": "core", "title": "Study sharding, consistent hashing, replication, and CAP", "minutes": 150},
-        {"key": "W3-P1", "type": "practice", "priority": "core", "title": "Practice heaps, depth-first search, and breadth-first search", "minutes": 180},
+        {"key": "W3-P1", "type": "learn", "priority": "core", "title": "Understand heap, depth-first-search, and breadth-first-search recognition cues, invariants, complexity, and failure modes", "minutes": 90},
+        {"key": "W3-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve one representative problem from each Week 3 coding family", "minutes": 90},
         {"key": "W3-P2", "type": "practice", "priority": "core", "title": "Design a partitioned and replicated storage path", "minutes": 150},
         {"key": "W3-P3", "type": "practice", "priority": "core", "title": "Review consistency decisions and harvest mechanism gaps", "minutes": 90},
         {"key": "W3-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct partitioning and consistency trade-offs closed-book", "minutes": 30, "source_item_key": "W3-L2"}
@@ -90,7 +93,8 @@
         {"key": "W4-L1", "type": "learn", "priority": "core", "title": "Study read scaling, write scaling, replica lag, fan-out, backpressure, and queues", "minutes": 120},
         {"key": "W4-P1", "type": "practice", "priority": "core", "title": "Complete a read-heavy full system design", "minutes": 120},
         {"key": "W4-P2", "type": "practice", "priority": "core", "title": "Complete a write-heavy full system design", "minutes": 120},
-        {"key": "W4-P3", "type": "practice", "priority": "core", "title": "Practice graphs, topological ordering, and shortest paths", "minutes": 270},
+        {"key": "W4-P3", "type": "learn", "priority": "core", "title": "Understand graph, topological-ordering, and shortest-path recognition cues, invariants, complexity, and failure modes", "minutes": 120},
+        {"key": "W4-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve graph, dependency-ordering, and shortest-path problems", "minutes": 150},
         {"key": "W4-P4", "type": "practice", "priority": "core", "title": "Start the behavioral story catalog with scope and ownership", "minutes": 60},
         {"key": "W4-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct scaling gaps", "minutes": 30, "source_item_key": "W4-L1"}
       ]
@@ -105,7 +109,8 @@
         {"key": "W5-L2", "type": "learn", "priority": "core", "title": "Study sagas, durable workflows, circuit breakers, and exactly-once effects", "minutes": 60},
         {"key": "W5-P1", "type": "practice", "priority": "core", "title": "Complete a workflow-heavy full system design", "minutes": 120},
         {"key": "W5-P2", "type": "practice", "priority": "core", "title": "Complete a failure-heavy full system design", "minutes": 120},
-        {"key": "W5-P3", "type": "practice", "priority": "core", "title": "Practice backtracking, dynamic programming, and greedy algorithms; add ambiguity and perseverance stories", "minutes": 330},
+        {"key": "W5-P3", "type": "learn", "priority": "core", "title": "Understand backtracking, dynamic-programming, and greedy invariants; add ambiguity and perseverance stories", "minutes": 210},
+        {"key": "W5-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve representative backtracking, dynamic-programming, and greedy problems", "minutes": 120},
         {"key": "W5-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct resilience gaps", "minutes": 30, "source_item_key": "W5-L2"}
       ]
     },
@@ -119,7 +124,8 @@
         {"key": "W6-L2", "type": "learn", "priority": "core", "title": "Study transactional outboxes and recovery after interrupted delivery", "minutes": 60},
         {"key": "W6-P1", "type": "practice", "priority": "core", "title": "Complete a realtime full system design", "minutes": 120},
         {"key": "W6-P2", "type": "practice", "priority": "core", "title": "Complete a platform-control-plane full system design", "minutes": 120},
-        {"key": "W6-P3", "type": "practice", "priority": "core", "title": "Practice tries, prefix sums, and matrix problems; complete the behavioral story catalog", "minutes": 330},
+        {"key": "W6-P3", "type": "learn", "priority": "core", "title": "Understand trie, prefix-sum, and matrix-traversal invariants; complete the behavioral story catalog", "minutes": 210},
+        {"key": "W6-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve representative trie, prefix-sum, and matrix problems", "minutes": 120},
         {"key": "W6-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct platform mechanism gaps", "minutes": 30, "source_item_key": "W6-L2"}
       ]
     },
@@ -131,7 +137,8 @@
       "items": [
         {"key": "W7-L1", "type": "learn", "priority": "core", "title": "Study PostgreSQL and Redis mechanics and failure modes", "minutes": 150},
         {"key": "W7-L2", "type": "learn", "priority": "core", "title": "Study DynamoDB and Cassandra data modeling trade-offs", "minutes": 120},
-        {"key": "W7-P1", "type": "practice", "priority": "core", "title": "Complete three timed coding sessions", "minutes": 210},
+        {"key": "W7-P1", "type": "learn", "priority": "core", "title": "Reconstruct coding-pattern choices, invariants, complexity, and edge cases from representative prompts", "minutes": 90},
+        {"key": "W7-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete two timed coding sessions", "minutes": 120},
         {"key": "W7-P2", "type": "practice", "priority": "core", "title": "Choose and defend storage technologies in one full design", "minutes": 120},
         {"key": "W7-P3", "type": "practice", "priority": "core", "title": "Practice the Big Three behavioral answers", "minutes": 90},
         {"key": "W7-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct database selection trade-offs closed-book", "minutes": 30, "source_item_key": "W7-L1"}
@@ -145,7 +152,8 @@
       "items": [
         {"key": "W8-L1", "type": "learn", "priority": "core", "title": "Study Kafka, API gateway, and asynchronous delivery mechanics", "minutes": 150},
         {"key": "W8-L2", "type": "learn", "priority": "core", "title": "Study Elasticsearch, blob storage, CDN, rate limiting, and time-series behavior", "minutes": 120},
-        {"key": "W8-P1", "type": "practice", "priority": "core", "title": "Complete three timed coding sessions", "minutes": 210},
+        {"key": "W8-P1", "type": "learn", "priority": "core", "title": "Compare coding-pattern solution strategies and explain their invariants, complexity, and failure modes", "minutes": 90},
+        {"key": "W8-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete two timed coding sessions", "minutes": 120},
         {"key": "W8-P2", "type": "practice", "priority": "core", "title": "Design a searchable media or document delivery system", "minutes": 120},
         {"key": "W8-P3", "type": "practice", "priority": "core", "title": "Practice the Big Three behavioral answers with follow-ups", "minutes": 90},
         {"key": "W8-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct messaging and search trade-offs closed-book", "minutes": 30, "source_item_key": "W8-L1"}
@@ -159,7 +167,8 @@
       "items": [
         {"key": "W9-L1", "type": "learn", "priority": "core", "title": "Study Flink, ZooKeeper, and coordination guarantees", "minutes": 150},
         {"key": "W9-L2", "type": "learn", "priority": "core", "title": "Study approximate structures, proximity search, and vector indexes", "minutes": 120},
-        {"key": "W9-P1", "type": "practice", "priority": "core", "title": "Complete three timed coding sessions", "minutes": 210},
+        {"key": "W9-P1", "type": "learn", "priority": "core", "title": "Decompose unfamiliar coding prompts into recognition cues, state, invariants, complexity, and edge cases", "minutes": 90},
+        {"key": "W9-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete two timed coding sessions", "minutes": 120},
         {"key": "W9-P2", "type": "practice", "priority": "core", "title": "Design a streaming or proximity-search system", "minutes": 120},
         {"key": "W9-P3", "type": "practice", "priority": "core", "title": "Practice senior-scope behavioral follow-ups", "minutes": 90},
         {"key": "W9-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct coordination and index trade-offs closed-book", "minutes": 30, "source_item_key": "W9-L1"}
@@ -172,7 +181,8 @@
       "overview_title": "Baseline mocks",
       "items": [
         {"key": "W10-P1", "type": "practice", "priority": "core", "title": "Complete two full system design mocks", "minutes": 240},
-        {"key": "W10-P2", "type": "practice", "priority": "core", "title": "Complete three coding mocks", "minutes": 270},
+        {"key": "W10-P2", "type": "practice", "priority": "core", "title": "Walk through three coding prompts verbally: choose the pattern, maintain its invariant, analyze complexity, and test edge cases", "minutes": 150},
+        {"key": "W10-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete one timed coding mock", "minutes": 120},
         {"key": "W10-P3", "type": "practice", "priority": "core", "title": "Complete two behavioral practices with follow-ups", "minutes": 120},
         {"key": "W10-L1", "type": "learn", "priority": "core", "title": "Compare mock performance with the senior readiness gates", "minutes": 30},
         {"key": "W10-P4", "type": "practice", "priority": "core", "title": "Repair the highest-impact observed gap", "minutes": 30},
@@ -186,7 +196,8 @@
       "overview_title": "Target simulations",
       "items": [
         {"key": "W11-P1", "type": "practice", "priority": "core", "title": "Complete two target-shaped system design mocks", "minutes": 240},
-        {"key": "W11-P2", "type": "practice", "priority": "core", "title": "Complete three coding mocks including a plain-editor session", "minutes": 270},
+        {"key": "W11-P2", "type": "practice", "priority": "core", "title": "Walk through three target-shaped coding prompts verbally, including complexity and manual edge-case testing", "minutes": 150},
+        {"key": "W11-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete one plain-editor coding mock", "minutes": 120},
         {"key": "W11-P3", "type": "practice", "priority": "core", "title": "Complete two behavioral practices with senior-scope follow-ups", "minutes": 120},
         {"key": "W11-L1", "type": "learn", "priority": "core", "title": "Review evidence for the active target-company loop", "minutes": 30},
         {"key": "W11-P4", "type": "practice", "priority": "core", "title": "Repair the highest-impact observed gap", "minutes": 30},
@@ -200,7 +211,8 @@
       "overview_title": "Final simulations",
       "items": [
         {"key": "W12-P1", "type": "practice", "priority": "core", "title": "Complete two final full system design mocks", "minutes": 240},
-        {"key": "W12-P2", "type": "practice", "priority": "core", "title": "Complete three final coding mocks", "minutes": 270},
+        {"key": "W12-P2", "type": "practice", "priority": "core", "title": "Walk through three final coding prompts verbally and explain pattern choice, invariants, complexity, and edge cases", "minutes": 150},
+        {"key": "W12-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete one final timed coding mock", "minutes": 120},
         {"key": "W12-P3", "type": "practice", "priority": "core", "title": "Complete two final behavioral practices", "minutes": 120},
         {"key": "W12-L1", "type": "learn", "priority": "core", "title": "Evaluate external performance against every readiness gate", "minutes": 30},
         {"key": "W12-P4", "type": "practice", "priority": "core", "title": "Write the remaining-gap plan for scheduled interviews", "minutes": 30},

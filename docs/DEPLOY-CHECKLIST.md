@@ -119,7 +119,7 @@ curriculum week metadata. **Use `--file`, never
 renders a bogus resume banner on a real card.
 
 The Study Plan command is a second, independent seed: 12 weeks, four phases,
-72 plan items, no LLM call, and no card or SM-2 writes. It is idempotent and
+84 plan items, no LLM call, and no card or SM-2 writes. It is idempotent and
 refuses to replace an already-active plan. After bootstrap, completing a supported
 lesson in the app opens its recall-card gate automatically. The user reviews and
 accepts the useful proposals there; no weekly activation script or calendar-driven

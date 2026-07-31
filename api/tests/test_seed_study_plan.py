@@ -39,7 +39,7 @@ def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
         loads[item["week_index"]] += item["estimate_minutes"]
 
     assert result.can_create
-    assert manifest["seed_key"] == "devmax.senior-backend-12-week.v2"
+    assert manifest["seed_key"] == "devmax.senior-backend-12-week.v3"
     assert [
         phase["overview_title"] for phase in result.preview["phases"]
     ] == [
@@ -50,9 +50,40 @@ def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
     ]
     assert len(result.preview["phases"]) == 4
     assert len(result.preview["weeks"]) == 12
-    assert len(result.preview["items"]) == 72
+    assert len(result.preview["items"]) == 84
     assert loads == {week: 720 for week in range(1, 13)}
     assert {check.status for check in result.checks} == {"ok"}
+
+
+def test_coding_mechanisms_are_core_and_implementation_is_optional() -> None:
+    manifest, result = validate_bundle(DEFAULT_MANIFEST, start_date=START)
+    items = result.preview["items"]
+
+    optional_desk = [
+        item
+        for item in items
+        if item["full_title"].startswith("Optional desk implementation:")
+    ]
+    assert len(optional_desk) == 12
+    assert {item["week_index"] for item in optional_desk} == set(range(1, 13))
+    assert {item["priority"] for item in optional_desk} == {"optional"}
+
+    core_titles = [
+        item["full_title"].lower()
+        for item in items
+        if item["priority"] == "core"
+    ]
+    assert not any("timed coding" in title for title in core_titles)
+    assert not any("coding mock" in title for title in core_titles)
+    assert any("two-pointer" in title and "invariant" in title for title in core_titles)
+    assert any("binary-search" in title and "invariant" in title for title in core_titles)
+
+    raw_items = [item for week in manifest["weeks"] for item in week["items"]]
+    assert all(
+        item["priority"] == "optional"
+        for item in raw_items
+        if item["title"].startswith("Optional desk implementation:")
+    )
 
 
 async def test_the_seed_creates_an_active_week_one_plan_graph(db) -> None:
@@ -74,8 +105,8 @@ async def test_the_seed_creates_an_active_week_one_plan_graph(db) -> None:
     assert plan.forecast_end_plan_week == 12
     assert len(phases) == 4
     assert len(weeks) == 12
-    assert len(items) == 72
-    assert revision.after["seed_key"] == "devmax.senior-backend-12-week.v2"
+    assert len(items) == 84
+    assert revision.after["seed_key"] == "devmax.senior-backend-12-week.v3"
 
 
 async def test_rerunning_the_same_seed_is_idempotent(db) -> None:
