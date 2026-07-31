@@ -115,6 +115,19 @@ the mechanism from memory rather than recite a definition. Prefer concrete scena
 ("explain consistent hashing"). If a mastery summary indicates a specific weak area, \
 target that area. Do not repeat any of the recent questions listed.
 
+Ask about ONE mechanism, and name it. Many topics are written as a heading followed \
+by a list of the things it covers — "Hash sharding: routing a key, adding capacity, \
+and migrating ownership". That list is the card's scope, not the question: pick the \
+single most load-bearing item in it and ask about that one thing. Never ask the \
+engineer to walk through the list, survey the area, or "describe your approach to" \
+the topic as a whole — a question that could be answered by naming the sub-headings \
+is a failure, and so is one that just re-reads the topic back as a prompt.
+
+The engineer answers cold, with nothing on screen but the question and no chance to \
+ask what you meant. So the question must stand alone: state the mechanism or scenario \
+in plain words rather than pointing at the card, and never depend on a previous \
+session, a framework name they may not use, or wording only this card would explain.
+
 The question is read aloud and answered by voice in under two minutes. One question, \
 no multi-part sub-questions, no preamble.\
 """

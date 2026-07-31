@@ -15,6 +15,10 @@ final class DebugFlags: ObservableObject {
     @Published var useMockAPI: Bool
     @Published var loadState: LoadState
     @Published var failSubmit: Bool
+    /// Fails `startSession`, which is the one call that reaches Claude before the
+    /// user has said anything — so it is the state a card lands in when question
+    /// generation is down.
+    @Published var failQuestion: Bool
     /// Forces a failing mechanism score, which is what makes the coached
     /// re-attempt reachable — the affordance only appears below the band.
     @Published var failedMechanism: Bool
@@ -71,6 +75,7 @@ final class DebugFlags: ObservableObject {
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         railStyle = RailStyle(rawValue: env["WC_RAIL_STYLE"] ?? "") ?? .dots
         failSubmit = flag("WC_FAIL_SUBMIT")
+        failQuestion = flag("WC_FAIL_QUESTION")
         failedMechanism = flag("WC_FAILED_MECHANISM")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
@@ -94,6 +99,7 @@ actor MockAPI: DevmaxAPI {
     static let shared = MockAPI()
 
     private var submitAttempts = 0
+    private var questionAttempts = 0
     private var addAttempts = 0
     /// Alternates so the card-add failure path and the idempotent retry that
     /// follows it are both reachable in a single walk.
@@ -285,6 +291,13 @@ actor MockAPI: DevmaxAPI {
 
     func startSession(cardID: UUID, practice: Bool = false) async throws -> SessionStart {
         try await Task.sleep(nanoseconds: 500_000_000)
+        // Alternates like the submit path does, so Retry recovers and the failure
+        // walks end to end. 503 is what the server returns when Claude is down —
+        // the case that actually shipped.
+        questionAttempts += 1
+        if await MainActor.run(body: { DebugFlags.shared.failQuestion }), questionAttempts % 2 == 1 {
+            throw APIError.scoringUnavailable
+        }
         sessionIsPractice = practice
         if cardID == Self.raftID {
             return SessionStart(

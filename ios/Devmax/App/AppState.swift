@@ -57,6 +57,13 @@ final class AppState: ObservableObject {
     @Published var draft = ""
     @Published var inputMode: InputMode = .voice
     @Published var submitError = false
+    /// Set when `openCard` fails, and the mono note naming the cause.
+    ///
+    /// A question that never arrived is a *load* failure, not a submit failure, and
+    /// the two are not interchangeable: there is no session, so there is nothing to
+    /// answer, nothing was saved, and `Try again` has to re-open the card rather
+    /// than re-post an answer.
+    @Published var questionError: String?
     @Published var resumeAvailable = false
     @Published var storedPartial = ""
     @Published var result: SessionResult?
@@ -393,6 +400,11 @@ final class AppState: ObservableObject {
         thread = []
         draft = ""
         submitError = false
+        questionError = nil
+        // Cleared with the rest of the card's state, not left behind. A failed
+        // `startSession` used to leave the *previous* card's id in place, and the
+        // next answer submitted against it scored the wrong card.
+        sessionID = nil
         result = nil
         resumeAvailable = false
         storedPartial = ""
@@ -423,10 +435,38 @@ final class AppState: ObservableObject {
             }
             stage = start.isFollowUp ? .followUp : .idle
         } catch {
-            // Nothing was created, so there's no session to resume — the ✕ is the
-            // only sensible action, and the thread stays empty.
-            stage = .idle
-            submitError = true
+            // No session, so no question and nothing to answer. Reporting this as
+            // the submit-failure strip was wrong twice over: it claimed "your answer
+            // is saved" when nothing had been said yet, and its `Try again` called
+            // `submit`, which returns immediately on a nil `sessionID` — so the
+            // control stayed live over a dead session and every spoken answer went
+            // nowhere. The stage is left where `resetForNewCard` put it —
+            // `.loadingQuestion`, whose `acceptsAnswer` is false, so the control is
+            // dead even if a view somehow still draws it.
+            questionError = Self.loadNote(for: error)
+        }
+    }
+
+    /// Re-open the current card. The only recovery from a question that failed to
+    /// load — and the only thing the failure's `Retry` may call.
+    func retryQuestion() async {
+        guard let card = currentCard else { return }
+        await openCard(card)
+    }
+
+    /// The mono note under a failed question load. This app has one user, who is
+    /// also its operator, so the note names which half broke rather than flattening
+    /// every failure into "offline" — a 503 here means Claude is unreachable and the
+    /// card cannot be scored either, which is a different afternoon than a dropped
+    /// connection. Exhaustive over `APIError` on purpose: a new case should fail the
+    /// build here rather than quietly report itself as unreachable.
+    static func loadNote(for error: Error) -> String {
+        guard let apiError = error as? APIError else { return "SERVER UNREACHABLE" }
+        switch apiError {
+        case .scoringUnavailable: return "QUESTION GENERATION UNAVAILABLE"
+        case .unauthorized: return "API KEY REJECTED"
+        case .status(let code): return "SERVER ERROR \(code)"
+        case .transport: return "SERVER UNREACHABLE"
         }
     }
 
@@ -841,6 +881,9 @@ final class AppState: ObservableObject {
         default:
             // Everything else is a Conversation stage.
             guard let card = queue.first else { return }
+            // Set before the session opens, not in `advance`: this failure happens
+            // inside `openCard`, so forcing the flag afterwards is a turn too late.
+            if route == "question-failure" { DebugFlags.shared.failQuestion = true }
             beginSession(cards: queue)
             _ = card
             await waitForQuestion()
@@ -855,14 +898,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func waitForQuestion() async { await waitUntil { stage != .loadingQuestion } }
+    /// A failed load leaves the stage on `.loadingQuestion` forever, so the obvious
+    /// predicate spins out the full timeout before the route continues.
+    private func waitForQuestion() async {
+        await waitUntil { stage != .loadingQuestion || questionError != nil }
+    }
     private func waitForLibrary() async { await waitUntil { libraryLoad != .loading } }
 
     private func advance(to route: String) async {
         let answer = "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
 
         switch route {
-        case "question":
+        case "question", "question-failure":
+            // `question-failure` needs no steps of its own — `WC_FAIL_QUESTION`
+            // fails the load and the screen is already in the state.
             return
         case "text":
             inputMode = .text

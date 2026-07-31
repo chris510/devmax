@@ -25,7 +25,16 @@ struct ConversationScreen: View {
             chrome
             progressRail
             thread
-            if state.stage != .result { inputArea } else { resultActions }
+            // No question means nothing to answer. The control is hidden rather
+            // than disabled: a live mic over a session that was never created
+            // records an answer the app has nowhere to send.
+            if state.questionError != nil {
+                EmptyView()
+            } else if state.stage != .result {
+                inputArea
+            } else {
+                resultActions
+            }
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
@@ -154,7 +163,9 @@ struct ConversationScreen: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if state.resumeAvailable { resumeBanner }
 
-                    if state.stage == .loadingQuestion {
+                    if let note = state.questionError {
+                        questionFailure(note)
+                    } else if state.stage == .loadingQuestion {
                         questionSkeleton
                     }
 
@@ -247,6 +258,28 @@ struct ConversationScreen: View {
             RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton3).frame(height: 18)
                 .padding(.trailing, 150)
         }
+    }
+
+    /// The question never arrived. Same vocabulary as Today's offline state —
+    /// 15.5px line, mono note, secondary Retry, no red and no icon — because this
+    /// is the same kind of failure, in the one place the design had no state for.
+    ///
+    /// The note is what makes it actionable: "unreachable" and "the model is down"
+    /// have different fixes, and the person reading this owns both.
+    private func questionFailure(_ note: String) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Couldn't load the question.")
+                    .font(TypeRole.bodyLarge)
+                    .foregroundStyle(Theme.textSecondary)
+                MetaText(text: note, font: WCFont.mono(11), tracking: 0.44, color: Theme.metaDim)
+            }
+            SecondaryButton(title: "Retry", fillsWidth: false) {
+                Task { await state.retryQuestion() }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wcFade()
     }
 
     private func liveTranscript(_ text: String) -> some View {

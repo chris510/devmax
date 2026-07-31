@@ -119,6 +119,12 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **Losing a spoken answer is the worst failure mode in the product.** `PATCH /sessions/{id}/draft`
   must stay cheap, idempotent, and never blocked behind anything slow. On the client, disk is
   the source of truth for instant rehydration; the server draft is the durable backup.
+- **A question that failed to load is a *load* failure, never a submit failure.** `openCard`
+  failing means no session was created, so nothing was said and nothing was saved: the answer
+  control must be off, `sessionID` must be cleared — a leftover one posts the next answer
+  against the *previous* card's session — and the only recovery is re-opening the card.
+  Reusing the submit-failure strip here claimed a save that never happened and left a live
+  mic over a dead session, which is the one thing the invariant above exists to prevent.
 
 ## Design fidelity rules
 
@@ -207,16 +213,17 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 `SIMCTL_CHILD_`; the `--setenv` flag it once accepted is gone, and today's
 `simctl` reads it as the device argument and fails with `Invalid device`.
 
-`WC_ROUTE`: `question` `recording` `processing` `text` `followup` `score` `resume`
+`WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup` `score` `resume`
 `submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
 `filter` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded`. An unrecognised
 value falls through to the conversation question state rather than erroring, so check the
 spelling. Also `WC_LOAD` (`auto|loading|error`),
 `WC_RAIL_STYLE` (`dots|chips` — dots ships; chips exists only for the side-by-side) and
-boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
+boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_QUESTION` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
 `WC_SIM_SPEECH` `WC_FAILED_MECHANISM`. Forced failures succeed on the retry, so each path
-walks end to end. `WC_FAILED_MECHANISM` forces a failing mechanism score, which is what
+walks end to end. `WC_FAIL_QUESTION` fails `startSession` — the *load* failure, not the
+submit one; the `question-failure` route sets it itself. `WC_FAILED_MECHANISM` forces a failing mechanism score, which is what
 makes the coached re-attempt reachable; the two `reattempt` routes set it themselves, so
 it only needs passing to see a failed mechanism on some *other* route.
 

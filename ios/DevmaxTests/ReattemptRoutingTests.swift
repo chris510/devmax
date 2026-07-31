@@ -169,4 +169,54 @@ final class ReattemptRoutingTests: XCTestCase {
         XCTAssertEqual(Stage.recordingFollowUp.answeringTwin, .followUp)
         XCTAssertEqual(Stage.recording.answeringTwin, .idle)
     }
+
+    // MARK: - A question that never loaded
+
+    /// Shares `SpyAPI` because its `startSession` already throws and its
+    /// conformance is the whole client surface — a second copy would be a second
+    /// thing to keep in sync for no extra coverage.
+    private static let card = DueCard(
+        id: UUID(), topic: "Consistent hashing", category: "Core Concept",
+        masterySummary: "", lastScore: nil, dueLabel: "due today",
+        resumable: false, missedCount: 0
+    )
+
+    /// The regression from the shipped bug: a failed `startSession` reported
+    /// itself as a *submit* failure ("your answer is saved" — nothing was), and
+    /// left the previous card's `sessionID` in place. Answering then posted to a
+    /// live session belonging to a different card, so the wrong card got scored
+    /// and rescheduled.
+    @MainActor
+    func testFailedQuestionLoadClearsTheSessionAndBlocksAnswering() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        state.sessionCards = [Self.card]
+        // A session left over from the card before this one.
+        state.sessionID = UUID()
+
+        await state.openCard(Self.card)
+
+        XCTAssertNil(state.sessionID, "a stale session would score the previous card")
+        XCTAssertNotNil(state.questionError)
+        XCTAssertFalse(state.submitError, "nothing was submitted, and nothing was saved")
+        XCTAssertTrue(state.thread.isEmpty)
+        XCTAssertEqual(state.stage, .loadingQuestion, "the answer control must stay dead")
+        XCTAssertFalse(state.stage.acceptsAnswer)
+
+        await state.submit("an answer with nowhere to go")
+        XCTAssertTrue(api.answerCalls.isEmpty)
+        XCTAssertTrue(api.reattemptCalls.isEmpty)
+    }
+
+    /// The note is the actionable half — it says which side is down, and a 503
+    /// (Claude unreachable) is a different problem than a dropped connection.
+    @MainActor
+    func testLoadNoteNamesTheCause() {
+        XCTAssertEqual(
+            AppState.loadNote(for: APIError.scoringUnavailable),
+            "QUESTION GENERATION UNAVAILABLE"
+        )
+        XCTAssertEqual(AppState.loadNote(for: APIError.status(500)), "SERVER ERROR 500")
+        XCTAssertEqual(AppState.loadNote(for: CancellationError()), "SERVER UNREACHABLE")
+    }
 }
