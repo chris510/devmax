@@ -335,18 +335,30 @@ struct LoadingList: View {
     }
 }
 
-/// No red, no icon, no banner.
-struct LoadFailure: View {
+/// The app's offline vocabulary — line, mono note, secondary Retry. No red, no
+/// icon, no banner.
+///
+/// Split from `LoadFailure` so Conversation can show the same treatment inside its
+/// already-padded thread without inheriting a list screen's inset and hairline.
+/// Content is the only parameter: a caller wanting different *styling* wants a
+/// different component, not a knob on this one.
+///
+/// Deliberately does not apply `wcFade` — it slides 6px as well as fading, so it
+/// has to wrap whatever chrome the caller adds. Applied here, `LoadFailure`'s
+/// hairline would sit still while the block moved under it.
+struct LoadFailureBody: View {
+    var title = "Couldn't reach the server."
+    var note: String?
     let retry: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("Couldn't reach the server.")
+                Text(title)
                     .font(TypeRole.bodyLarge)
                     .foregroundStyle(Theme.textSecondary)
 
-                if let note = DueCache.note {
+                if let note {
                     MetaText(text: note, font: WCFont.mono(11), tracking: 0.44, color: Theme.metaDim)
                 }
             }
@@ -354,10 +366,20 @@ struct LoadFailure: View {
             SecondaryButton(title: "Retry", fillsWidth: false, action: retry)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Metrics.rowInset)
-        .padding(.top, 28)
-        .overlay(alignment: .top) { Hairline() }
-        .wcFade()
+    }
+}
+
+/// The list-screen offline state: the body above, plus the row inset and hairline
+/// every screen that owns a list draws it with. Nine call sites pass only a retry.
+struct LoadFailure: View {
+    let retry: () -> Void
+
+    var body: some View {
+        LoadFailureBody(note: DueCache.note, retry: retry)
+            .padding(.horizontal, Metrics.rowInset)
+            .padding(.top, 28)
+            .overlay(alignment: .top) { Hairline() }
+            .wcFade()
     }
 }
 

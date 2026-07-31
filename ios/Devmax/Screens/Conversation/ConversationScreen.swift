@@ -25,7 +25,15 @@ struct ConversationScreen: View {
             chrome
             progressRail
             thread
-            if state.stage != .result { inputArea } else { resultActions }
+            // Which footer, asked of the stage. `.hidden` is a stage with no session:
+            // the control is absent rather than merely disabled, because a live mic
+            // over a session that was never created records an answer the app has
+            // nowhere to send.
+            switch state.stage.footer {
+            case .answer: inputArea
+            case .result: resultActions
+            case .hidden: EmptyView()
+            }
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
@@ -154,8 +162,13 @@ struct ConversationScreen: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if state.resumeAvailable { resumeBanner }
 
-                    if state.stage == .loadingQuestion {
-                        questionSkeleton
+                    // Siblings in one switch, so neither can shadow the other —
+                    // as a flag checked before `== .loadingQuestion`, the order of
+                    // the two branches was load-bearing and invisible.
+                    switch state.stage {
+                    case .loadingQuestion: questionSkeleton
+                    case .questionFailed(let note): questionFailure(note)
+                    default: EmptyView()
                     }
 
                     ForEach(state.thread) { entry in
@@ -247,6 +260,16 @@ struct ConversationScreen: View {
             RoundedRectangle(cornerRadius: 3).fill(Theme.skeleton3).frame(height: 18)
                 .padding(.trailing, 150)
         }
+    }
+
+    /// The question never arrived. The app's offline treatment, in the one place
+    /// the design had no state for — only the headline differs, so it is the shared
+    /// body rather than a second copy of the vocabulary.
+    private func questionFailure(_ note: String) -> some View {
+        LoadFailureBody(title: "Couldn't load the question.", note: note) {
+            Task { await state.retryQuestion() }
+        }
+        .wcFade()
     }
 
     private func liveTranscript(_ text: String) -> some View {

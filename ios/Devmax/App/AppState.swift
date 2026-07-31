@@ -393,6 +393,10 @@ final class AppState: ObservableObject {
         thread = []
         draft = ""
         submitError = false
+        // Cleared with the rest of the card's state, not left behind. A failed
+        // `startSession` used to leave the *previous* card's id in place, and the
+        // next answer submitted against it scored the wrong card.
+        sessionID = nil
         result = nil
         resumeAvailable = false
         storedPartial = ""
@@ -423,11 +427,22 @@ final class AppState: ObservableObject {
             }
             stage = start.isFollowUp ? .followUp : .idle
         } catch {
-            // Nothing was created, so there's no session to resume — the ✕ is the
-            // only sensible action, and the thread stays empty.
-            stage = .idle
-            submitError = true
+            // No session, so no question and nothing to answer. Reporting this as
+            // the submit-failure strip was wrong twice over: it claimed "your answer
+            // is saved" when nothing had been said yet, and its `Try again` called
+            // `submit`, which returns immediately on a nil `sessionID` — so the
+            // control stayed live over a dead session and every spoken answer went
+            // nowhere. `.questionFailed` accepts no answer and has no footer, so
+            // that combination is now unrepresentable rather than merely avoided.
+            stage = .questionFailed(error.loadNote)
         }
+    }
+
+    /// Re-open the current card. The only recovery from a question that failed to
+    /// load — and the only thing the failure's `Retry` may call.
+    func retryQuestion() async {
+        guard let card = currentCard else { return }
+        await openCard(card)
     }
 
     func resumeAnswer() {
@@ -862,7 +877,9 @@ final class AppState: ObservableObject {
         let answer = "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
 
         switch route {
-        case "question":
+        case "question", "question-failure":
+            // `question-failure` needs no steps of its own — `WC_FAIL_QUESTION`
+            // fails the load and the screen is already in the state.
             return
         case "text":
             inputMode = .text
@@ -873,9 +890,6 @@ final class AppState: ObservableObject {
             thread.append(ThreadEntry(role: .answer, text: answer))
             stage = .processing
         case "followup", "score", "submit-failure", "reattempt", "reattempt-answered":
-            // The re-attempt routes need a failing mechanism to be reachable at all,
-            // so they force it rather than making the caller remember a second flag.
-            if route.hasPrefix("reattempt") { DebugFlags.shared.failedMechanism = true }
             await submit(answer)
             if route == "followup" { return }
             if route == "submit-failure" {

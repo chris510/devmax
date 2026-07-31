@@ -169,4 +169,64 @@ final class ReattemptRoutingTests: XCTestCase {
         XCTAssertEqual(Stage.recordingFollowUp.answeringTwin, .followUp)
         XCTAssertEqual(Stage.recording.answeringTwin, .idle)
     }
+
+    // MARK: - A question that never loaded
+
+    private static let card = DueCard(
+        id: UUID(), topic: "Consistent hashing", category: "Core Concept",
+        masterySummary: "", lastScore: nil, dueLabel: "due today",
+        resumable: false, missedCount: 0
+    )
+
+    /// The regression from the shipped bug: a failed `startSession` reported
+    /// itself as a *submit* failure ("your answer is saved" — nothing was), and
+    /// left the previous card's `sessionID` in place. Answering then posted to a
+    /// live session belonging to a different card, so the wrong card got scored
+    /// and rescheduled.
+    ///
+    /// Shares `SpyAPI` — its `startSession` already throws, and its conformance is
+    /// the whole client surface, so a second copy would be a second thing to keep
+    /// in sync for no extra coverage.
+    @MainActor
+    func testFailedQuestionLoadClearsTheSessionAndBlocksAnswering() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        state.sessionCards = [Self.card]
+        // A session left over from the card before this one.
+        state.sessionID = UUID()
+
+        await state.openCard(Self.card)
+
+        XCTAssertNil(state.sessionID, "a stale session would score the previous card")
+        XCTAssertEqual(state.stage, .questionFailed("SERVER UNREACHABLE"))
+        XCTAssertFalse(state.submitError, "nothing was submitted, and nothing was saved")
+        XCTAssertTrue(state.thread.isEmpty)
+
+        await state.submit("an answer with nowhere to go")
+        XCTAssertTrue(api.answerCalls.isEmpty)
+        XCTAssertTrue(api.reattemptCalls.isEmpty)
+    }
+
+    /// The dead state must stay dead through every `Stage` helper — the two twins
+    /// fall through to a live answering stage on their `default:` arms, which is
+    /// how a stale stage became answerable in the first place.
+    func testQuestionFailedIsAnsweredByNothing() {
+        let failed = Stage.questionFailed("SERVER UNREACHABLE")
+        XCTAssertFalse(failed.acceptsAnswer)
+        XCTAssertFalse(failed.isRecording)
+        XCTAssertFalse(failed.isReattempt)
+        XCTAssertEqual(failed.recordingTwin, failed)
+        XCTAssertEqual(failed.answeringTwin, failed)
+        XCTAssertEqual(failed.footer, .hidden, "no session means no answer control")
+        XCTAssertEqual(Stage.loadingQuestion.footer, .answer)
+        XCTAssertEqual(Stage.result.footer, .result)
+    }
+
+    /// The note is the actionable half — it says which side is down, and a 503
+    /// (Claude unreachable) is a different problem than a dropped connection.
+    func testLoadNoteNamesTheCause() {
+        XCTAssertEqual(APIError.scoringUnavailable.loadNote, "QUESTION GENERATION UNAVAILABLE")
+        XCTAssertEqual(APIError.status(500).loadNote, "SERVER ERROR 500")
+        XCTAssertEqual(CancellationError().loadNote, "SERVER UNREACHABLE")
+    }
 }
