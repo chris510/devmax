@@ -237,7 +237,7 @@ company overlays live in `api/modules/`; neither is part of the base seed.
 The second command bootstraps the separate first-party Study Plan that powers
 Today's plan line and the phase/week timeline. It makes no LLM call and never
 reads or writes cards, sessions, scores, mastery, or SM-2 state. The committed
-manifest is 12 weeks, four phases, 72 plan items, and 12 hours per week. Its
+manifest is 12 weeks, four phases, 84 plan items, and 12 hours per week. Its
 stable seed key makes the command idempotent. `--activate` refuses to displace
 another active plan; pause that plan in the app first if switching is intentional.
 Use the Monday containing the first practice day so Week 1 aligns with the
