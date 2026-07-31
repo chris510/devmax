@@ -9,6 +9,25 @@ enum APIError: Error {
     case status(Int)
 }
 
+extension Error {
+    /// The mono note under a failure that had nothing to retry — which half broke.
+    ///
+    /// Lives on the error rather than on a screen because it describes `APIError`,
+    /// not any one caller: this app has a single user who is also its operator, and
+    /// a 503 (Claude unreachable, so the card cannot be scored either) is a
+    /// different afternoon from a dropped connection. Exhaustive on purpose — a new
+    /// case should fail the build here rather than quietly report itself offline.
+    var loadNote: String {
+        guard let apiError = self as? APIError else { return "SERVER UNREACHABLE" }
+        switch apiError {
+        case .scoringUnavailable: return "QUESTION GENERATION UNAVAILABLE"
+        case .unauthorized: return "API KEY REJECTED"
+        case .status(let code): return "SERVER ERROR \(code)"
+        case .transport: return "SERVER UNREACHABLE"
+        }
+    }
+}
+
 /// Timestamps as the backend actually sends them.
 ///
 /// `JSONDecoder.DateDecodingStrategy.iso8601` uses `.withInternetDateTime` alone,

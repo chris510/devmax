@@ -25,15 +25,14 @@ struct ConversationScreen: View {
             chrome
             progressRail
             thread
-            // No question means nothing to answer. The control is hidden rather
-            // than disabled: a live mic over a session that was never created
-            // records an answer the app has nowhere to send.
-            if state.questionError != nil {
-                EmptyView()
-            } else if state.stage != .result {
-                inputArea
-            } else {
-                resultActions
+            // Which footer, asked of the stage. `.hidden` is a stage with no session:
+            // the control is absent rather than merely disabled, because a live mic
+            // over a session that was never created records an answer the app has
+            // nowhere to send.
+            switch state.stage.footer {
+            case .answer: inputArea
+            case .result: resultActions
+            case .hidden: EmptyView()
             }
         }
         .background(Theme.bg)
@@ -163,10 +162,13 @@ struct ConversationScreen: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if state.resumeAvailable { resumeBanner }
 
-                    if let note = state.questionError {
-                        questionFailure(note)
-                    } else if state.stage == .loadingQuestion {
-                        questionSkeleton
+                    // Siblings in one switch, so neither can shadow the other —
+                    // as a flag checked before `== .loadingQuestion`, the order of
+                    // the two branches was load-bearing and invisible.
+                    switch state.stage {
+                    case .loadingQuestion: questionSkeleton
+                    case .questionFailed(let note): questionFailure(note)
+                    default: EmptyView()
                     }
 
                     ForEach(state.thread) { entry in
@@ -260,25 +262,13 @@ struct ConversationScreen: View {
         }
     }
 
-    /// The question never arrived. Same vocabulary as Today's offline state —
-    /// 15.5px line, mono note, secondary Retry, no red and no icon — because this
-    /// is the same kind of failure, in the one place the design had no state for.
-    ///
-    /// The note is what makes it actionable: "unreachable" and "the model is down"
-    /// have different fixes, and the person reading this owns both.
+    /// The question never arrived. The app's offline treatment, in the one place
+    /// the design had no state for — only the headline differs, so it is the shared
+    /// body rather than a second copy of the vocabulary.
     private func questionFailure(_ note: String) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Couldn't load the question.")
-                    .font(TypeRole.bodyLarge)
-                    .foregroundStyle(Theme.textSecondary)
-                MetaText(text: note, font: WCFont.mono(11), tracking: 0.44, color: Theme.metaDim)
-            }
-            SecondaryButton(title: "Retry", fillsWidth: false) {
-                Task { await state.retryQuestion() }
-            }
+        LoadFailureBody(title: "Couldn't load the question.", note: note) {
+            Task { await state.retryQuestion() }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .wcFade()
     }
 

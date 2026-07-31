@@ -57,13 +57,6 @@ final class AppState: ObservableObject {
     @Published var draft = ""
     @Published var inputMode: InputMode = .voice
     @Published var submitError = false
-    /// Set when `openCard` fails, and the mono note naming the cause.
-    ///
-    /// A question that never arrived is a *load* failure, not a submit failure, and
-    /// the two are not interchangeable: there is no session, so there is nothing to
-    /// answer, nothing was saved, and `Try again` has to re-open the card rather
-    /// than re-post an answer.
-    @Published var questionError: String?
     @Published var resumeAvailable = false
     @Published var storedPartial = ""
     @Published var result: SessionResult?
@@ -400,7 +393,6 @@ final class AppState: ObservableObject {
         thread = []
         draft = ""
         submitError = false
-        questionError = nil
         // Cleared with the rest of the card's state, not left behind. A failed
         // `startSession` used to leave the *previous* card's id in place, and the
         // next answer submitted against it scored the wrong card.
@@ -440,10 +432,9 @@ final class AppState: ObservableObject {
             // is saved" when nothing had been said yet, and its `Try again` called
             // `submit`, which returns immediately on a nil `sessionID` — so the
             // control stayed live over a dead session and every spoken answer went
-            // nowhere. The stage is left where `resetForNewCard` put it —
-            // `.loadingQuestion`, whose `acceptsAnswer` is false, so the control is
-            // dead even if a view somehow still draws it.
-            questionError = Self.loadNote(for: error)
+            // nowhere. `.questionFailed` accepts no answer and has no footer, so
+            // that combination is now unrepresentable rather than merely avoided.
+            stage = .questionFailed(error.loadNote)
         }
     }
 
@@ -452,22 +443,6 @@ final class AppState: ObservableObject {
     func retryQuestion() async {
         guard let card = currentCard else { return }
         await openCard(card)
-    }
-
-    /// The mono note under a failed question load. This app has one user, who is
-    /// also its operator, so the note names which half broke rather than flattening
-    /// every failure into "offline" — a 503 here means Claude is unreachable and the
-    /// card cannot be scored either, which is a different afternoon than a dropped
-    /// connection. Exhaustive over `APIError` on purpose: a new case should fail the
-    /// build here rather than quietly report itself as unreachable.
-    static func loadNote(for error: Error) -> String {
-        guard let apiError = error as? APIError else { return "SERVER UNREACHABLE" }
-        switch apiError {
-        case .scoringUnavailable: return "QUESTION GENERATION UNAVAILABLE"
-        case .unauthorized: return "API KEY REJECTED"
-        case .status(let code): return "SERVER ERROR \(code)"
-        case .transport: return "SERVER UNREACHABLE"
-        }
     }
 
     func resumeAnswer() {
@@ -881,9 +856,6 @@ final class AppState: ObservableObject {
         default:
             // Everything else is a Conversation stage.
             guard let card = queue.first else { return }
-            // Set before the session opens, not in `advance`: this failure happens
-            // inside `openCard`, so forcing the flag afterwards is a turn too late.
-            if route == "question-failure" { DebugFlags.shared.failQuestion = true }
             beginSession(cards: queue)
             _ = card
             await waitForQuestion()
@@ -898,11 +870,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// A failed load leaves the stage on `.loadingQuestion` forever, so the obvious
-    /// predicate spins out the full timeout before the route continues.
-    private func waitForQuestion() async {
-        await waitUntil { stage != .loadingQuestion || questionError != nil }
-    }
+    private func waitForQuestion() async { await waitUntil { stage != .loadingQuestion } }
     private func waitForLibrary() async { await waitUntil { libraryLoad != .loading } }
 
     private func advance(to route: String) async {
@@ -922,9 +890,6 @@ final class AppState: ObservableObject {
             thread.append(ThreadEntry(role: .answer, text: answer))
             stage = .processing
         case "followup", "score", "submit-failure", "reattempt", "reattempt-answered":
-            // The re-attempt routes need a failing mechanism to be reachable at all,
-            // so they force it rather than making the caller remember a second flag.
-            if route.hasPrefix("reattempt") { DebugFlags.shared.failedMechanism = true }
             await submit(answer)
             if route == "followup" { return }
             if route == "submit-failure" {

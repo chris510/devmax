@@ -39,7 +39,9 @@ SDK_TIMEOUT_SECONDS = 45.0
 # The three session rubrics below are byte-identical across calls — but none is a
 # prompt-cache breakpoint. The minimum cacheable prefix is 1024 tokens on Sonnet 5
 # and 4096 on Haiku 4.5; measured via `count_tokens`, SCORING_RUBRIC is ~770,
-# REATTEMPT_RUBRIC ~810 and QUESTION_RUBRIC ~220, so a `cache_control` marker on any
+# REATTEMPT_RUBRIC ~810 and QUESTION_RUBRIC ~220 — the last has since grown to
+# roughly ~370 with the scope-line rules, estimated rather than re-measured, and is
+# still an order of magnitude under Haiku's floor. So a `cache_control` marker on any
 # would silently no-op (no error, just cache_read=0 forever). Padding to reach the
 # floor would cost more input tokens per call than caching could return at this
 # volume. The cache_* fields in the log line below prove it stays at zero.
@@ -115,18 +117,14 @@ the mechanism from memory rather than recite a definition. Prefer concrete scena
 ("explain consistent hashing"). If a mastery summary indicates a specific weak area, \
 target that area. Do not repeat any of the recent questions listed.
 
-Ask about ONE mechanism, and name it. Many topics are written as a heading followed \
-by a list of the things it covers — "Hash sharding: routing a key, adding capacity, \
-and migrating ownership". That list is the card's scope, not the question: pick the \
-single most load-bearing item in it and ask about that one thing. Never ask the \
-engineer to walk through the list, survey the area, or "describe your approach to" \
-the topic as a whole — a question that could be answered by naming the sub-headings \
-is a failure, and so is one that just re-reads the topic back as a prompt.
+A topic written as a heading plus a list — "Hash sharding: routing a key, adding \
+capacity, and migrating ownership" — states the card's scope, not the question. Pick \
+the single most load-bearing item and ask only about that one thing.
 
-The engineer answers cold, with nothing on screen but the question and no chance to \
-ask what you meant. So the question must stand alone: state the mechanism or scenario \
-in plain words rather than pointing at the card, and never depend on a previous \
-session, a framework name they may not use, or wording only this card would explain.
+The engineer hears the question once, cold, with nothing on screen and no chance to \
+ask what you meant, so it must stand alone: state the mechanism or scenario in plain \
+words rather than pointing at the card, and never lean on a previous session, a \
+framework name they may not use, or wording only this card would explain.
 
 The question is read aloud and answered by voice in under two minutes. One question, \
 no multi-part sub-questions, no preamble.\

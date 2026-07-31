@@ -125,6 +125,8 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   against the *previous* card's session — and the only recovery is re-opening the card.
   Reusing the submit-failure strip here claimed a save that never happened and left a live
   mic over a dead session, which is the one thing the invariant above exists to prevent.
+  This lives in `Stage.questionFailed`, not a flag beside `stage`: it answers `acceptsAnswer`
+  and `footer` for itself, so "no session" and "answerable" cannot both be true.
 
 ## Design fidelity rules
 

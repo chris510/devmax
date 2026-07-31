@@ -181,6 +181,12 @@ enum Stage: Equatable {
     /// already complete and scored by the time this stage exists.
     case reattempt
     case recordingReattempt
+    /// The question never arrived, carrying the note that names why. A state of
+    /// its own rather than `.loadingQuestion` plus a flag: there is no session, so
+    /// every answering path below must be dead, and pairing two variables by
+    /// convention is what let a *load* failure render as a submit failure with a
+    /// live mic over a session that was never created.
+    case questionFailed(String)
 
     /// The three answering stages and their three recording twins are a flat
     /// cross-product, so every consumer used to re-derive the partition itself —
@@ -196,10 +202,16 @@ enum Stage: Equatable {
     }
 
     /// The recording twin of an answering stage; itself if already recording.
+    ///
+    /// `.questionFailed` is listed rather than left to the `default:` arm on
+    /// purpose. Both twins fall through to a *live* answering stage, so a dead
+    /// state that reached either would come back answerable — the exact shape of
+    /// the bug this case exists to make impossible.
     var recordingTwin: Stage {
         switch self {
         case .followUp, .recordingFollowUp: return .recordingFollowUp
         case .reattempt, .recordingReattempt: return .recordingReattempt
+        case .questionFailed: return self
         default: return .recording
         }
     }
@@ -209,12 +221,28 @@ enum Stage: Equatable {
         switch self {
         case .followUp, .recordingFollowUp: return .followUp
         case .reattempt, .recordingReattempt: return .reattempt
+        case .questionFailed: return self
         default: return .idle
         }
     }
 
     /// Turn 3 goes to a different endpoint than turns 1 and 2.
     var isReattempt: Bool { self == .reattempt || self == .recordingReattempt }
+
+    /// `hidden`, not `none` — a case named `none` reads as `Optional.none` at every
+    /// call site, and Swift will happily infer the wrong one.
+    enum Footer { case answer, result, hidden }
+
+    /// Which footer the conversation shows. A stage with no session shows none, and
+    /// the view asks the stage rather than re-deriving it — so a future footer edit
+    /// cannot forget the case where there is nothing to answer.
+    var footer: Footer {
+        switch self {
+        case .questionFailed: return .hidden
+        case .result: return .result
+        default: return .answer
+        }
+    }
 }
 
 struct SessionResult: Equatable {

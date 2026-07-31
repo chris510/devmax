@@ -75,8 +75,15 @@ final class DebugFlags: ObservableObject {
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         railStyle = RailStyle(rawValue: env["WC_RAIL_STYLE"] ?? "") ?? .dots
         failSubmit = flag("WC_FAIL_SUBMIT")
-        failQuestion = flag("WC_FAIL_QUESTION")
-        failedMechanism = flag("WC_FAILED_MECHANISM")
+
+        // A few routes are unreachable without a forced failure, so they set their
+        // own flag rather than making the caller remember a second env var. Derived
+        // here, where `route` is already being read and nothing has run yet, so the
+        // "set it before whatever consumes it" ordering that each route would
+        // otherwise have to get right stops being a consideration at all.
+        let route = env["WC_ROUTE"] ?? ""
+        failQuestion = flag("WC_FAIL_QUESTION") || route == "question-failure"
+        failedMechanism = flag("WC_FAILED_MECHANISM") || route.hasPrefix("reattempt")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
         textFirst = flag("WC_TEXT_FIRST")
@@ -90,7 +97,7 @@ final class DebugFlags: ObservableObject {
         planFixedRecovery = flag("WC_PLAN_FIXED_RECOVERY")
         planVariant = env["WC_PLAN_VARIANT"] ?? ""
         planCardVariant = env["WC_PLAN_CARD_VARIANT"] ?? ""
-        route = env["WC_ROUTE"] ?? ""
+        self.route = route
     }
 }
 
