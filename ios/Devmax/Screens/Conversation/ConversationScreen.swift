@@ -477,6 +477,11 @@ struct ConversationScreen: View {
                 // away — so it has to finalize like a submit does, not discard.
                 // Reading the transcript straight after stop() dropped whatever
                 // was still in flight.
+                //
+                // Only a *live* capture has anything to carry: `finish()` returns
+                // nothing when nothing is recording, so tapping this on a fresh
+                // turn falls through to `state.draft` — which is empty — rather
+                // than to the answer the previous turn already submitted.
                 Task {
                     let spoken = await speech.finish()
                     state.updateDraft(spoken.isEmpty ? state.draft : spoken)

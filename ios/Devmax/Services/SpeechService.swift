@@ -82,7 +82,11 @@ final class SpeechService: ObservableObject {
     /// corrected result asynchronously *after* the audio ends. Reading
     /// synchronously truncated the tail of every spoken answer.
     func finish() async -> String {
-        guard isRecording else { return transcript }
+        // Nothing is recording, so there is nothing to hand back. This used to
+        // return the stored `transcript`, which is the *previous* turn's answer:
+        // "Type instead" finalizes before swapping input modes, so tapping it on a
+        // follow-up opened the text box already filled with the answer just given.
+        guard isRecording else { return "" }
         isRecording = false
 
         simulationTimer?.invalidate()
@@ -91,8 +95,9 @@ final class SpeechService: ObservableObject {
         // No recognizer task means nothing is in flight — the simulated
         // transcript is already whatever the typewriter reached.
         guard task != nil else {
+            let typed = transcript
             teardown()
-            return transcript
+            return typed
         }
 
         stopEngine()
@@ -179,6 +184,12 @@ final class SpeechService: ObservableObject {
         task = nil
         request = nil
         simulationTarget = ""
+        // A capture that has ended owns no text. `AppState.draft` is the one copy
+        // that outlives it — mirrored from every partial — so leaving the
+        // transcript here only gave the next turn something stale to pick up.
+        // Callers that mean to continue an answer say so: `start(continuing:)`
+        // and `restore(_:)`.
+        transcript = ""
         stopEngine()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }

@@ -232,6 +232,12 @@ submit one; the `question-failure` route sets it itself. `WC_FAILED_MECHANISM` f
 makes the coached re-attempt reachable; the two `reattempt` routes set it themselves, so
 it only needs passing to see a failed mechanism on some *other* route.
 
+`WC_SIM_SPEECH` is the one whose default depends on where the build is running: on in
+the simulator, which has no usable microphone, and **off on a phone**, which has one.
+It types a hardcoded model answer into the transcript, so a Debug build on device — the
+build you get from Xcode, and the one `WC_BASE_URL` below exists for — used to submit
+that fixture as the user's own answer. Pass `WC_SIM_SPEECH=1` to force it on device.
+
 Study Plan adds its own routes, all prefixed `study-plan` and dispatched *before*
 the fall-through above, so a misspelled one lands on the plan overview rather than
 silently opening a card: `study-plan-overview` `-overview-expanded`
