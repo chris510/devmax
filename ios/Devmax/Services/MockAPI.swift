@@ -73,17 +73,17 @@ final class DebugFlags: ObservableObject {
             return raw == "1" || raw.lowercased() == "true"
         }
 
-        // The two whose default is `true` need the extra gate: a release build must
-        // never fall back to fixtures or to fake speech. simulateSpeech especially —
-        // it defaults on because the simulator has no usable microphone, so
-        // ungated it typed out a hardcoded paragraph instead of recording the user.
+        // Both need the `isDebug` gate: a release build must never fall back to
+        // fixtures or to fake speech. `simulateSpeech` needs a second one, because
+        // a phone runs the Debug configuration too — that is the documented way to
+        // point the app at the Mac — and a phone has a real microphone. Its default
+        // is the condition it was always describing: no microphone.
         //
-        // `isDebug` alone was not that gate. A phone runs the Debug configuration
-        // too — that is the documented way to point the app at the Mac — and a phone
-        // has a real microphone, so the fake one kept typing the model's own answer
-        // into the transcript and submitting it as the user's. The default is the
-        // condition it was always describing: no microphone. An explicit
-        // `WC_SIM_SPEECH=1` still forces it on, on device included.
+        // `useMockAPI` deliberately keeps the looser gate. Fixture cards announce
+        // themselves — you are reading someone else's curriculum — whereas fake
+        // speech is silent, and swaps the model's own answer in for the user's.
+        // Their defaults also fail in opposite directions: mocks off with no
+        // `WC_BASE_URL` is an app pointing at nothing.
         useMockAPI = Self.isDebug && flag("WC_MOCK", default: true)
         simulateSpeech = Self.isDebug && flag("WC_SIM_SPEECH", default: Self.isSimulator)
 

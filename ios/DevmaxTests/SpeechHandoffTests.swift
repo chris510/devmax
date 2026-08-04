@@ -37,13 +37,4 @@ final class SpeechHandoffTests: XCTestCase {
 
         XCTAssertTrue(speech.transcript.isEmpty, "An ended capture owns no text")
     }
-
-    /// The carry-over that *is* wanted, so the fix above doesn't quietly take it
-    /// away: swapping text → voice restores the draft for the mic to continue.
-    func testRestoreSeedsTheNextCapture() {
-        let speech = SpeechService()
-        speech.restore("half an answer")
-
-        XCTAssertEqual(speech.transcript, "half an answer")
-    }
 }

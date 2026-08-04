@@ -352,9 +352,11 @@ argument as the device and fails with `Invalid device`.
 Today should load real cards, and **Card History must render non-blank** — that's
 the proof for the date-decoding fix.
 
-Then build **Release** to the device: Release is the only configuration where the
-`simulateSpeech` gate is exercised. Tap the mic and confirm it records *your voice*,
-not a fixture paragraph.
+Then build to the device and tap the mic: confirm it records *your voice*, not a
+fixture paragraph. Any configuration proves this now — `simulateSpeech` defaults off
+wherever there is a real microphone, Debug included — so it no longer has to wait for
+a Release build. Still build **Release** before shipping: `useMockAPI` keeps the
+`isDebug`-only gate, so Release remains the only configuration that proves it.
 
 ---
 
