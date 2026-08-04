@@ -27,7 +27,9 @@ final class DebugFlags: ObservableObject {
     @Published var textFirst: Bool
     @Published var ttsEnabled: Bool
     /// Fakes streaming speech-to-text by typing the transcript out, as the
-    /// prototype does — the simulator has no usable microphone.
+    /// prototype does — the simulator has no usable microphone. Defaults on in
+    /// the simulator and *off* everywhere else, including a Debug build on a
+    /// phone, which is the build the app actually gets used from.
     @Published var simulateSpeech: Bool
     @Published var railStyle: RailStyle
 
@@ -56,6 +58,12 @@ final class DebugFlags: ObservableObject {
     private static let isDebug = false
     #endif
 
+    #if targetEnvironment(simulator)
+    private static let isSimulator = true
+    #else
+    private static let isSimulator = false
+    #endif
+
     private init() {
         // Release reads an empty environment, so every flag falls through to its
         // own default and there is no second list of values to keep in sync.
@@ -65,12 +73,19 @@ final class DebugFlags: ObservableObject {
             return raw == "1" || raw.lowercased() == "true"
         }
 
-        // The two whose default is `true` need the extra gate: a release build must
-        // never fall back to fixtures or to fake speech. simulateSpeech especially —
-        // it defaults to true because the simulator has no usable microphone, so
-        // ungated it typed out a hardcoded paragraph instead of recording the user.
+        // Both need the `isDebug` gate: a release build must never fall back to
+        // fixtures or to fake speech. `simulateSpeech` needs a second one, because
+        // a phone runs the Debug configuration too — that is the documented way to
+        // point the app at the Mac — and a phone has a real microphone. Its default
+        // is the condition it was always describing: no microphone.
+        //
+        // `useMockAPI` deliberately keeps the looser gate. Fixture cards announce
+        // themselves — you are reading someone else's curriculum — whereas fake
+        // speech is silent, and swaps the model's own answer in for the user's.
+        // Their defaults also fail in opposite directions: mocks off with no
+        // `WC_BASE_URL` is an app pointing at nothing.
         useMockAPI = Self.isDebug && flag("WC_MOCK", default: true)
-        simulateSpeech = Self.isDebug && flag("WC_SIM_SPEECH", default: true)
+        simulateSpeech = Self.isDebug && flag("WC_SIM_SPEECH", default: Self.isSimulator)
 
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         railStyle = RailStyle(rawValue: env["WC_RAIL_STYLE"] ?? "") ?? .dots

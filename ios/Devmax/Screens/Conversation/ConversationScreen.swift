@@ -45,8 +45,14 @@ struct ConversationScreen: View {
         // backgrounding mid-answer persisted a stale draft and lost everything
         // spoken since the tap — the worst failure mode in the product. Mirror each
         // partial through; updateDraft debounces the writes.
+        //
+        // Asked of the recognizer, not the stage. They disagree in both
+        // directions: "Type instead" finalizes without leaving a recording stage,
+        // so a stage-gated mirror kept running after capture ended — and once
+        // `endCapture` clears the transcript, that mirror wrote the empty string
+        // back over the draft it had just been handed.
         .onChange(of: speech.transcript) { _, text in
-            guard isRecording else { return }
+            guard speech.isRecording else { return }
             state.updateDraft(text)
         }
         .onDisappear { speech.stop(); speaker.stop() }
@@ -476,7 +482,8 @@ struct ConversationScreen: View {
                 // Swapping input mode carries the text across and never navigates
                 // away — so it has to finalize like a submit does, not discard.
                 // Reading the transcript straight after stop() dropped whatever
-                // was still in flight.
+                // was still in flight. On a turn with no live capture `finish()`
+                // returns nothing, so `state.draft` is the value — not a fallback.
                 Task {
                     let spoken = await speech.finish()
                     state.updateDraft(spoken.isEmpty ? state.draft : spoken)

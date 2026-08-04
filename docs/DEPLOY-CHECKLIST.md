@@ -86,8 +86,8 @@ session through the follow-up branch rather than discovering a problem when a pu
 arrives at 07:10.
 
 **6. iOS Release build to the device.** (RUNBOOK §6.) Release is the only
-configuration that exercises the `simulateSpeech` gate — tap the mic and confirm it
-records *your voice*, not the fixture paragraph.
+configuration that exercises the `useMockAPI` gate — and on any build, tap the mic and
+confirm it records *your voice*, not the fixture paragraph.
 
 **7. APNs variables, then the first push.** (RUNBOOK §7.)
 
