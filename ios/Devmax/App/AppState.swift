@@ -15,6 +15,7 @@ final class AppState: ObservableObject {
         case planOverview(UUID)
         case planWeek(UUID, Int)
         case planItem(UUID, UUID)
+        case practiceDebrief(UUID, UUID, Bool)
         case planProposal(UUID, ProposalKind)
         case planReopen(UUID, UUID)
         case planCards(UUID, UUID)
@@ -744,6 +745,7 @@ final class AppState: ObservableObject {
     private func applyStudyPlanRoute(_ route: String, plan: StudyPlanState) async {
         let planID = StudyPlanFixtures.backendPlanID
         let itemID = StudyPlanFixtures.firstItemID
+        let practiceItemID = StudyPlanFixtures.practiceItemID
 
         switch route {
         case "study-plan-build":
@@ -791,6 +793,36 @@ final class AppState: ObservableObject {
             path.append(.planOverview(planID))
             path.append(.planWeek(planID, 4))
             path.append(.planItem(planID, itemID))
+
+        case "study-plan-debrief-offer", "study-plan-debrief-idle",
+             "study-plan-debrief-mic-unavailable", "study-plan-debrief-recording",
+             "study-plan-debrief-text", "study-plan-debrief-resume",
+             "study-plan-debrief-save-failure", "study-plan-debrief-checking",
+             "study-plan-debrief-check-failure":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+            path.append(.planItem(planID, practiceItemID))
+            await waitUntil { plan.itemLoad == .ready }
+            if route == "study-plan-debrief-resume" {
+                PracticeDebriefDraftStore.save(
+                    "I got the request order right, but I froze on retries and drew them outside the timeout.",
+                    for: practiceItemID
+                )
+            }
+            plan.preparePracticeDebrief()
+            path.append(.practiceDebrief(
+                planID, practiceItemID, route == "study-plan-debrief-offer"
+            ))
+
+        case "study-plan-debrief-completed":
+            path.append(.planOverview(planID))
+            path.append(.planWeek(planID, 4))
+            path.append(.planItem(planID, practiceItemID))
+            await waitUntil { plan.itemLoad == .ready }
+            plan.item = StudyPlanFixtures.itemDetail(
+                practiceItemID, planID: planID, complete: true,
+                debrief: StudyPlanFixtures.practiceDebrief(submitted: true, proposalCount: 2)
+            )
 
         case "study-plan-capacity":
             path.append(.planOverview(planID))

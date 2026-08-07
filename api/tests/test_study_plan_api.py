@@ -19,6 +19,7 @@ from app.models import (
     StudyPlanCardProposal,
     StudyPlanCardProposalAcceptance,
     StudyPlanItem,
+    StudyPlanPracticeDebrief,
 )
 from app.services import llm
 from tests.conftest import API_HEADERS, GUIDE, _item, gate, import_payload, make_card
@@ -652,6 +653,116 @@ async def _complete_first_item(client, plan) -> str:
         f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS
     )
     return item_id
+
+
+async def _complete_practice_item(client, plan) -> str:
+    week = (await client.get(f"/study-plans/{plan['id']}/weeks/4", headers=API_HEADERS)).json()
+    practice = next(section for section in week["sections"] if section["type"] == "practice")
+    item_id = practice["rows"][0]["id"]
+    response = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS
+    )
+    assert response.status_code == 200
+    return item_id
+
+
+async def test_practice_completion_offers_debrief_before_card_proposals(
+    client, stub_import, stub_cards
+):
+    plan = await make_plan(client)
+    item_id = await _complete_practice_item(client, plan)
+
+    item = (
+        await client.get(
+            f"/study-plans/{plan['id']}/items/{item_id}", headers=API_HEADERS
+        )
+    ).json()
+    assert item["practice_debrief_eligible"] is True
+    assert item["practice_debrief"] is None
+    assert item["card_proposals_available"] is False
+
+    blocked = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/card-proposals", headers=API_HEADERS
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "practice debrief is required"
+    assert stub_cards.calls == 0
+
+
+async def test_practice_debrief_draft_is_idempotent_and_submit_is_immutable(
+    client, stub_import, db
+):
+    plan = await make_plan(client)
+    item_id = await _complete_practice_item(client, plan)
+    path = f"/study-plans/{plan['id']}/items/{item_id}/practice-debrief"
+    text = "I put the retry loop outside the timeout boundary."
+
+    first = await client.patch(f"{path}/draft", json={"text": text}, headers=API_HEADERS)
+    second = await client.patch(f"{path}/draft", json={"text": text}, headers=API_HEADERS)
+    assert first.status_code == second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    assert len((await db.exec(select(StudyPlanPracticeDebrief))).all()) == 1
+
+    submitted = await client.post(path, json={"text": text}, headers=API_HEADERS)
+    replay = await client.post(path, json={"text": text}, headers=API_HEADERS)
+    changed = await client.post(path, json={"text": text + " Changed."}, headers=API_HEADERS)
+    assert submitted.status_code == replay.status_code == 200
+    assert submitted.json()["text"] == text
+    assert changed.status_code == 409
+
+    item = (
+        await client.get(
+            f"/study-plans/{plan['id']}/items/{item_id}", headers=API_HEADERS
+        )
+    ).json()
+    assert item["card_proposals_available"] is True
+    assert item["practice_debrief"]["summary"] == text
+
+
+async def test_practice_proposals_use_the_gap_but_keep_the_source_as_authority(
+    client, stub_import, stub_cards
+):
+    stub_cards.candidates = []
+    plan = await make_plan(client)
+    item_id = await _complete_practice_item(client, plan)
+    text = "I treated retries and timeouts as unrelated settings."
+    await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/practice-debrief",
+        json={"text": text},
+        headers=API_HEADERS,
+    )
+
+    response = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/card-proposals", headers=API_HEADERS
+    )
+    assert response.status_code == 200
+    assert stub_cards.calls == 1
+    assert stub_cards.last_kwargs["observed_gap"] == text
+    assert stub_cards.last_kwargs["source_excerpt"]
+
+
+async def test_practice_without_a_source_answer_basis_never_offers_debrief(
+    client, stub_import, stub_cards
+):
+    payload = import_payload()
+    payload["items"][-1] = {**payload["items"][-1], "source_excerpt": ""}
+    stub_import.response = payload
+    plan = await make_plan(client)
+    item_id = await _complete_practice_item(client, plan)
+
+    item = (
+        await client.get(
+            f"/study-plans/{plan['id']}/items/{item_id}", headers=API_HEADERS
+        )
+    ).json()
+    assert item["practice_debrief_eligible"] is False
+    save = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/practice-debrief",
+        json={"text": "A gap"},
+        headers=API_HEADERS,
+    )
+    assert save.status_code == 409
+    assert stub_cards.calls == 0
 
 
 async def test_cards_are_only_proposed_after_the_item_is_complete(

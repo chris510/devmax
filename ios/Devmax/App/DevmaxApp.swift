@@ -25,7 +25,10 @@ struct DevmaxApp: App {
                     // Backgrounding mid-answer must not lose the transcript, and the
                     // debounce updateDraft applies is exactly what can't be waited
                     // out here — so flush rather than schedule.
-                    if phase != .active { state.flushDraft() }
+                    if phase != .active {
+                        state.flushDraft()
+                        plan.flushPracticeDebriefDraft()
+                    }
                 }
         }
     }
@@ -62,6 +65,10 @@ struct RootView: View {
                         PlanWeekScreen(planID: id, index: index)
                     case .planItem(let id, let itemID):
                         PlanItemScreen(planID: id, itemID: itemID)
+                    case .practiceDebrief(let id, let itemID, let showOffer):
+                        PracticeDebriefScreen(
+                            planID: id, itemID: itemID, showCompletionOffer: showOffer
+                        )
                     case .planProposal(let id, let kind):
                         PlanProposalScreen(planID: id, kind: kind)
                     // The item id is part of the route's identity — it is what

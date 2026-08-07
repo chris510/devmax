@@ -36,6 +36,12 @@ final class StudyPlanState: ObservableObject {
     @Published var itemBusy = false
     @Published var itemError: String?
 
+    // Practice Debrief. One record per Practice item; it is evidence for card
+    // proposals only and never a score or a plan-progress write.
+    @Published var debrief: PracticeDebrief?
+    @Published var debriefDraft = ""
+    private var debriefDraftSync: Task<Void, Never>?
+
     // Decisions
     @Published var proposalLoad: Load = .idle
     @Published var proposal: PlanProposal?
@@ -69,7 +75,7 @@ final class StudyPlanState: ObservableObject {
     @Published var cardLoad: Load = .idle
     @Published var cards: CardProposalList?
     @Published var selectedProposals: Set<UUID> = []
-    @Published var addedProposals: Set<UUID> = []
+    @Published var addedCardCount = 0
     @Published var addingCards = false
     @Published var cardError: String?
     @Published var expandedGate: UUID?
@@ -158,6 +164,93 @@ final class StudyPlanState: ObservableObject {
             itemError = "Couldn't mark this complete. Nothing changed."
             return false
         }
+    }
+
+    // MARK: - Practice Debrief
+
+    func preparePracticeDebrief() {
+        debrief = nil
+        debriefDraft = ""
+    }
+
+    func loadPracticeDebrief(itemID: UUID) {
+        let server = item?.id == itemID ? item?.practiceDebrief : nil
+        debrief = server
+        // Disk is newer when the app was killed before the debounce reached
+        // the server. A submitted server record is immutable and wins.
+        if server?.isSubmitted == true {
+            debriefDraft = server?.text ?? ""
+            PracticeDebriefDraftStore.clear(for: itemID)
+        } else {
+            debriefDraft = PracticeDebriefDraftStore.read(for: itemID)
+                ?? server?.draftText ?? ""
+        }
+    }
+
+    func updatePracticeDebriefDraft(_ text: String) {
+        guard let item else { return }
+        debriefDraft = text
+        debriefDraftSync?.cancel()
+        debriefDraftSync = Task { [api, planID = item.planId, itemID = item.id] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            PracticeDebriefDraftStore.save(text, for: itemID)
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            _ = try? await api.savePracticeDebriefDraft(planID, itemID: itemID, text: text)
+        }
+    }
+
+    func flushPracticeDebriefDraft() {
+        debriefDraftSync?.cancel()
+        guard let item, debrief?.isSubmitted != true else { return }
+        let text = debriefDraft
+        // Opening the offer and choosing Not now is a true no-op. An explicit
+        // Discard owns clearing an existing draft; a never-started debrief must
+        // not create an empty server row merely because the screen disappeared.
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        PracticeDebriefDraftStore.save(text, for: item.id)
+        Task { [api, planID = item.planId, itemID = item.id] in
+            _ = try? await api.savePracticeDebriefDraft(planID, itemID: itemID, text: text)
+        }
+    }
+
+    func discardPracticeDebriefDraft() {
+        guard let item else { return }
+        debriefDraftSync?.cancel()
+        debriefDraft = ""
+        PracticeDebriefDraftStore.clear(for: item.id)
+        Task { [api, planID = item.planId, itemID = item.id] in
+            _ = try? await api.savePracticeDebriefDraft(planID, itemID: itemID, text: "")
+        }
+    }
+
+    func submitPracticeDebrief() async -> Bool {
+        guard let item, !debriefDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        do {
+            // Submission is the authoritative write. Do not race it with the
+            // best-effort draft PATCH: a late PATCH would correctly hit the
+            // server's immutable-after-submit guard, but it is needless work
+            // and makes the happy path harder to reason about.
+            debriefDraftSync?.cancel()
+            PracticeDebriefDraftStore.save(debriefDraft, for: item.id)
+            debrief = try await api.submitPracticeDebrief(
+                item.planId, itemID: item.id, text: debriefDraft
+            )
+            PracticeDebriefDraftStore.clear(for: item.id)
+            self.item = try await api.planItem(item.planId, itemID: item.id)
+            return true
+        } catch {
+            // Text stays verbatim in both state and the disk store.
+            PracticeDebriefDraftStore.save(debriefDraft, for: item.id)
+            return false
+        }
+    }
+
+    func checkPracticeDebriefCards() async -> Bool {
+        await loadCardProposals(generate: true)
+        return cardLoad == .ready
     }
 
     func previewReopen() async {
@@ -443,7 +536,7 @@ final class StudyPlanState: ObservableObject {
         cardLoad = .idle
         cards = nil
         selectedProposals = []
-        addedProposals = []
+        addedCardCount = 0
         cardError = nil
         expandedGate = nil
         acceptKey = UUID().uuidString
@@ -489,10 +582,12 @@ final class StudyPlanState: ObservableObject {
                 revision: cards.proposals.first?.revision ?? 1,
                 edits: [:]
             )
-            // ADDED only after a committed response, never optimistically.
-            addedProposals.formUnion(selectedProposals)
+            // Confirmation renders only after a committed response, never optimistically.
+            addedCardCount = result.createdCardIds.count
             selectedProposals = []
-            _ = result
+            if let item {
+                self.item = try? await api.planItem(item.planId, itemID: item.id)
+            }
         } catch APIError.status(409) {
             cardError = "One of these already exists as a card. Nothing was created."
             await loadCardProposals(generate: false)

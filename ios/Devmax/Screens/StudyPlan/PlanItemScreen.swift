@@ -162,7 +162,52 @@ struct PlanItemScreen: View {
             .foregroundStyle(Theme.textSecondary)
         }
 
-        if item.cardProposalsAvailable || !item.linkedCardIds.isEmpty {
+        if let debrief = item.practiceDebrief, debrief.isSubmitted {
+            Block(label: "DEBRIEF") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(debrief.summary)
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                    MetaText(
+                        text: debrief.submittedAt.map { "SAVED \($0.formatted(date: .abbreviated, time: .omitted).uppercased())" }
+                            ?? "SAVED",
+                        font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
+                    )
+                    Button {
+                        plan.prepareCardProposals()
+                        state.path.append(.planCards(planID, item.id))
+                    } label: {
+                        let count = max(item.linkedCardIds.count, debrief.proposalCount)
+                        Text(count > 0
+                            ? "\(count) focused card\(count == 1 ? "" : "s") →"
+                            : "Check for focused cards →")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+                }
+            }
+        } else if item.practiceDebriefEligible {
+            Block(label: "RETRIEVAL SUPPORT") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Turn what broke down into focused recall cards.")
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textSecondary)
+                    Button {
+                        plan.preparePracticeDebrief()
+                        state.path.append(.practiceDebrief(planID, item.id, false))
+                    } label: {
+                        Text("Debrief practice →")
+                            .font(TypeRole.secondaryAction)
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+                }
+            }
+        } else if item.cardProposalsAvailable || !item.linkedCardIds.isEmpty {
             Block(label: "RETRIEVAL SUPPORT") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(
@@ -225,11 +270,17 @@ struct PlanItemScreen: View {
                     SecondaryButton(title: "Edit", fillsWidth: false) { editing = true }
                     PrimaryButton(title: "Mark complete", enabled: !plan.itemBusy) {
                         Task {
-                            guard await plan.completeItem(),
-                                  plan.item?.cardProposalsAvailable == true
-                            else { return }
-                            plan.prepareCardProposals()
-                            state.path.append(.planCards(planID, item.id))
+                            guard await plan.completeItem(), let completed = plan.item else { return }
+                            if completed.type == "practice" {
+                                guard completed.practiceDebriefEligible,
+                                      completed.practiceDebrief == nil
+                                else { return }
+                                plan.preparePracticeDebrief()
+                                state.path.append(.practiceDebrief(planID, item.id, true))
+                            } else if completed.cardProposalsAvailable {
+                                plan.prepareCardProposals()
+                                state.path.append(.planCards(planID, item.id))
+                            }
                         }
                     }
                 }

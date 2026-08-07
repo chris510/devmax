@@ -39,8 +39,9 @@ plan progress: a card's review completing is not a plan item completing.
 
 ## Data model
 
-Eleven tables, all prefixed `study_plan`. Migrations `0005` (core) and `0006`
-(card proposals). Handwritten; `alembic revision --autogenerate` stays disabled.
+Twelve tables, all prefixed `study_plan`. Migrations `0005` (core), `0006`
+(card proposals), and `0007` (Practice Debrief). Handwritten;
+`alembic revision --autogenerate` stays disabled.
 
 | Table | Holds |
 |---|---|
@@ -51,6 +52,7 @@ Eleven tables, all prefixed `study_plan`. Migrations `0005` (core) and `0006`
 | `study_plan_item_dependencies` | prerequisite, dependent, kind, source, confidence, rationale, excerpt, `confirmed_at` |
 | `study_plan_revisions` | kind, `base_plan_revision`, before/after JSON, reversible, summary |
 | `study_plan_guide_drafts` | the pasted guide and its import attempt, before any plan exists |
+| `study_plan_practice_debriefs` | one disk-backed, unscored, immutable-on-submit reflection per Practice item |
 | `study_plan_card_proposals` | topic, canonical question, five gate results, duplicate result, disposition, `normalized_topic` |
 | `study_plan_card_proposal_acceptances` | idempotency key, request hash, proposal revision, status, created card ids |
 | `study_plan_card_links` | the only edge between a plan and `cards` |
@@ -278,10 +280,39 @@ never uses SM-2 completion as plan-item completion. **Generated retrieval must b
 approved during Preview** — an unapproved activity has no row built for it in
 `build_plan_rows`, which is the enforcement point.
 
+## Practice Debrief
+
+Practice completion diverges deliberately from Learn completion. Completing an
+eligible Practice item commits plan progress first, then offers one optional,
+unscored debrief: what went wrong, felt shaky, or surprised the user. `Not now`
+returns directly to the completed item. Learn items retain the existing automatic
+source-based proposal check.
+
+A debrief is available only when all four conditions hold:
+
+1. the item is Practice;
+2. the item is complete;
+3. the plan subject passes card eligibility; and
+4. the item has a non-empty trusted source excerpt.
+
+The source excerpt is mandatory because the user's own account can identify a gap
+but can never be the answer authority. Practice proposals receive the debrief as
+an observed gap and the source excerpt as the answer basis. The same five-question
+gate and explicit acceptance then apply.
+
+The client saves every edit to disk first and sends a cheap, idempotent draft
+backup after a debounce. Submission creates one immutable debrief per Practice
+item. An exact submission replay is idempotent; different text after submission is
+a 409. Reopening and re-completing the item preserves the debrief and any accepted
+cards, and does not offer a second debrief. Saving or submitting a debrief touches
+no card, session, score, mastery, SM-2 field, plan status, or plan revision.
+
 ## Card proposals
 
 Generated only after the source item is **completed**, and only for subjects the
-technical rubric can grade.
+technical rubric can grade. Learn items use the completed source item directly.
+Practice items additionally require a submitted Practice Debrief and a trusted
+source excerpt.
 
 ### Subject eligibility — two keys and a veto
 
@@ -362,6 +393,8 @@ internal item ids in user-facing strings.
 | GET | `/study-plans/{id}/items/{item_id}` |
 | PATCH | `/study-plans/{id}/items/{item_id}` |
 | POST | `/study-plans/{id}/items/{item_id}/complete` |
+| GET/POST | `/study-plans/{id}/items/{item_id}/practice-debrief` |
+| PATCH | `/study-plans/{id}/items/{item_id}/practice-debrief/draft` |
 | POST | `/study-plans/{id}/items/{item_id}/reopen/preview` |
 | POST | `/study-plans/{id}/items/{item_id}/reopen` |
 | POST | `/study-plans/{id}/replans/preview` |
@@ -433,11 +466,16 @@ Conversation fall-through:
 `-item` · `-capacity` · `-build` · `-preview` · `-import-failure` · `-replan` ·
 `-replan-invalid` · `-fixed-recovery` · `-reopen` · `-reopen-invalid` · `-plans` ·
 `-no-active` · `-complete` · `-updates` · `-retrieval-audit` · `-estimate-audit` ·
-`-dependency-audit` · `-card-proposal` · `-card-failure` · `-card-existing`
+`-dependency-audit` · `-card-proposal` · `-card-failure` · `-card-existing` ·
+`-debrief-offer` · `-debrief-idle` · `-debrief-mic-unavailable` ·
+`-debrief-recording` · `-debrief-text` · `-debrief-resume` ·
+`-debrief-save-failure` · `-debrief-checking` · `-debrief-check-failure` ·
+`-debrief-completed`
 
 Flags: `WC_PLAN_NO_ACTIVE`, `WC_PLAN_SUMMARY_FAIL`, `WC_PLAN_FAIL_IMPORT`,
 `WC_PLAN_FAIL_ADD_CARD`, `WC_PLAN_REPLAN_INVALID`, `WC_PLAN_REOPEN_INVALID`,
-`WC_PLAN_FIXED_RECOVERY`, `WC_PLAN_VARIANT` (`anatomy` | `five-phase`),
+`WC_PLAN_FIXED_RECOVERY`, `WC_PLAN_FAIL_DEBRIEF_SAVE`,
+`WC_PLAN_FAIL_DEBRIEF_CHECK`, `WC_PLAN_VARIANT` (`anatomy` | `five-phase`),
 `WC_PLAN_CARD_VARIANT` (`none` | `existing` | `unsupported`).
 
 ## Failure and retry
