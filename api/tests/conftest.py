@@ -70,6 +70,7 @@ async def db() -> AsyncIterator[AsyncSession]:
                     "study_plans, study_plan_phases, study_plan_weeks, "
                     "study_plan_items, study_plan_item_dependencies, "
                     "study_plan_revisions, study_plan_guide_drafts, "
+                    "study_plan_practice_debriefs, "
                     "study_plan_card_proposals, "
                     "study_plan_card_proposal_acceptances, "
                     "study_plan_card_links, study_plan_duplications, "
@@ -287,15 +288,18 @@ def stub_cards(monkeypatch):
     class Stub:
         candidates: list = []
         calls = 0
+        last_kwargs: dict = {}
 
-    async def fake(**_kwargs):
+    async def fake(**kwargs):
         Stub.calls += 1
+        Stub.last_kwargs = kwargs
         return Stub.candidates
 
     monkeypatch.setattr(llm, "propose_cards", fake)
     monkeypatch.setattr(study_plan_router.llm, "propose_cards", fake)
     Stub.candidates = []
     Stub.calls = 0
+    Stub.last_kwargs = {}
     return Stub
 
 

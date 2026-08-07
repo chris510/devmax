@@ -1,5 +1,45 @@
 import Foundation
 
+/// File-backed text drafts keyed by a domain UUID.
+///
+/// Callers keep their own semantic API and filename while sharing the exact
+/// disk-first persistence behavior.
+struct UUIDTextDraftStore {
+    private let filename: String
+
+    init(filename: String) {
+        self.filename = filename
+    }
+
+    private func load() -> [String: String] {
+        LocalJSONStore.read([String: String].self, from: filename) ?? [:]
+    }
+
+    private func persist(_ map: [String: String]) {
+        LocalJSONStore.save(map, to: filename)
+    }
+
+    func save(_ text: String, for id: UUID) {
+        var map = load()
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            map.removeValue(forKey: id.uuidString)
+        } else {
+            map[id.uuidString] = text
+        }
+        persist(map)
+    }
+
+    func read(for id: UUID) -> String? {
+        load()[id.uuidString]
+    }
+
+    func clear(for id: UUID) {
+        var map = load()
+        map.removeValue(forKey: id.uuidString)
+        persist(map)
+    }
+}
+
 /// Local persistence for an in-progress answer.
 ///
 /// The server also holds a debounced copy (`PATCH /sessions/{id}/draft`), but
@@ -8,34 +48,18 @@ import Foundation
 /// without waiting on a network round trip. Losing a spoken answer is the worst
 /// failure mode in the product.
 enum DraftStore {
-    private static let filename = "drafts.json"
-
-    private static func load() -> [String: String] {
-        LocalJSONStore.read([String: String].self, from: filename) ?? [:]
-    }
-
-    private static func persist(_ map: [String: String]) {
-        LocalJSONStore.save(map, to: filename)
-    }
+    private static let store = UUIDTextDraftStore(filename: "drafts.json")
 
     static func save(_ text: String, for cardID: UUID) {
-        var map = load()
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            map.removeValue(forKey: cardID.uuidString)
-        } else {
-            map[cardID.uuidString] = text
-        }
-        persist(map)
+        store.save(text, for: cardID)
     }
 
     static func read(for cardID: UUID) -> String? {
-        load()[cardID.uuidString]
+        store.read(for: cardID)
     }
 
     static func clear(for cardID: UUID) {
-        var map = load()
-        map.removeValue(forKey: cardID.uuidString)
-        persist(map)
+        store.clear(for: cardID)
     }
 }
 

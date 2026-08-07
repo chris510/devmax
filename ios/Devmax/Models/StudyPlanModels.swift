@@ -146,6 +146,19 @@ struct WeekDetail: Codable, Equatable {
     let sections: [WeekSection]
 }
 
+struct PracticeDebrief: Codable, Equatable, Identifiable {
+    let id: UUID
+    let planId: UUID
+    let itemId: UUID
+    let draftText: String
+    let text: String
+    let submittedAt: Date?
+    let summary: String
+    let proposalCount: Int
+
+    var isSubmitted: Bool { submittedAt != nil }
+}
+
 struct PlanItemDetail: Codable, Equatable, Identifiable {
     let id: UUID
     let planId: UUID
@@ -171,6 +184,8 @@ struct PlanItemDetail: Codable, Equatable, Identifiable {
     let reopenedAt: Date?
     let linkedCardIds: [UUID]
     let cardProposalsAvailable: Bool
+    let practiceDebriefEligible: Bool
+    let practiceDebrief: PracticeDebrief?
     let blockedBy: [String]
 
     var isComplete: Bool { status == "complete" }

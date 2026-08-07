@@ -125,6 +125,12 @@ protocol DevmaxAPI {
     func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
     func editPlanItem(_ id: UUID, itemID: UUID, edit: PlanItemEdit) async throws -> PlanItemDetail
     func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
+    func savePracticeDebriefDraft(
+        _ id: UUID, itemID: UUID, text: String
+    ) async throws -> PracticeDebrief
+    func submitPracticeDebrief(
+        _ id: UUID, itemID: UUID, text: String
+    ) async throws -> PracticeDebrief
     func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal
     func reopenPlanItem(_ id: UUID, itemID: UUID, revision: Int) async throws -> PlanItemDetail
     func previewReplan(_ id: UUID, request: ReplanRequest) async throws -> PlanProposal
@@ -603,6 +609,27 @@ struct LiveAPI: DevmaxAPI {
         struct Body: Encodable { let draftId: UUID; let activate: Bool }
         return try await post(
             "study-plans", PlanOverview.self, body: Body(draftId: draftID, activate: activate)
+        )
+    }
+
+    func savePracticeDebriefDraft(
+        _ id: UUID, itemID: UUID, text: String
+    ) async throws -> PracticeDebrief {
+        struct Body: Encodable { let text: String }
+        let data = try await request(
+            "PATCH", "study-plans/\(id)/items/\(itemID)/practice-debrief/draft",
+            body: Self.encoder.encode(Body(text: text))
+        )
+        return try Self.decoder.decode(PracticeDebrief.self, from: data)
+    }
+
+    func submitPracticeDebrief(
+        _ id: UUID, itemID: UUID, text: String
+    ) async throws -> PracticeDebrief {
+        struct Body: Encodable { let text: String }
+        return try await post(
+            "study-plans/\(id)/items/\(itemID)/practice-debrief",
+            PracticeDebrief.self, body: Body(text: text)
         )
     }
 

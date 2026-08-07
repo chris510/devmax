@@ -228,9 +228,11 @@ production. Note the guard sits *inside* the `--fixtures` branch
 `--start-date` but the dedupe.
 
 The base manifest contains 54 conversational cards: six in each of nine teaching
-weeks. After the launch cohort, progress in the app: completing a supported Study
-Plan lesson opens its recall-card proposal gate automatically, and the user reviews
-and accepts useful cards before any are created. Do not activate later cohorts just
+weeks. After the launch cohort, progress in the app: completing a supported Learn
+item opens its recall-card proposal gate automatically. Completing an eligible
+Practice item first offers an optional, unscored debrief; only a submitted debrief
+plus the trusted source excerpt can open its proposal gate. The user reviews and
+accepts useful cards before any are created. Do not activate later cohorts just
 because their calendar week arrived. Coding patterns live in `api/library/` and
 company overlays live in `api/modules/`; neither is part of the base seed.
 
@@ -352,9 +354,11 @@ argument as the device and fails with `Invalid device`.
 Today should load real cards, and **Card History must render non-blank** — that's
 the proof for the date-decoding fix.
 
-Then build **Release** to the device: Release is the only configuration where the
-`simulateSpeech` gate is exercised. Tap the mic and confirm it records *your voice*,
-not a fixture paragraph.
+Then build to the device and tap the mic: confirm it records *your voice*, not a
+fixture paragraph. Any configuration proves this now — `simulateSpeech` defaults off
+wherever there is a real microphone, Debug included — so it no longer has to wait for
+a Release build. Still build **Release** before shipping: `useMockAPI` keeps the
+`isDebug`-only gate, so Release remains the only configuration that proves it.
 
 ---
 

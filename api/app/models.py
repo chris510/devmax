@@ -662,6 +662,36 @@ class StudyPlanGuideDraft(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
+class StudyPlanPracticeDebrief(SQLModel, table=True):
+    """One durable, unscored reflection for a completed Practice item.
+
+    The user's words may identify a gap, but never become the answer authority for
+    a card. Card generation still receives the item's trusted source excerpt and
+    the existing five-question gate still decides what may be accepted.
+    """
+
+    __tablename__ = "study_plan_practice_debriefs"
+    __table_args__ = (
+        Index(
+            "uq_study_plan_practice_debriefs_item",
+            "plan_item_id",
+            unique=True,
+        ),
+        Index("ix_study_plan_practice_debriefs_plan", "plan_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
+    plan_item_id: uuid.UUID = Field(foreign_key="study_plan_items.id", ondelete="CASCADE")
+    # Cheap, idempotent server backup for the disk-first iOS draft.
+    draft_text: str = ""
+    # Immutable after submission in v1. Reopening the item does not clear it.
+    text: str = ""
+    submitted_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
 class StudyPlanCardProposal(SQLModel, table=True):
     """A candidate recall card, generated after its source item was completed.
 

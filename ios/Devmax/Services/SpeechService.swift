@@ -81,36 +81,39 @@ final class SpeechService: ObservableObject {
     /// immediately afterwards, while `SFSpeechRecognizer` delivers its last
     /// corrected result asynchronously *after* the audio ends. Reading
     /// synchronously truncated the tail of every spoken answer.
+    ///
+    /// Nothing recording means nothing to hand back — see `endCapture`.
     func finish() async -> String {
-        guard isRecording else { return transcript }
+        guard isRecording else { return "" }
         isRecording = false
 
         simulationTimer?.invalidate()
         simulationTimer = nil
 
         // No recognizer task means nothing is in flight — the simulated
-        // transcript is already whatever the typewriter reached.
-        guard task != nil else {
-            teardown()
-            return transcript
-        }
-
-        stopEngine()
-
-        // endAudio() tells the recognizer no more buffers are coming; it then
-        // emits one last `isFinal` result. Releasing the task or deactivating the
-        // audio session before that lands is what dropped the end of an answer.
-        request?.endAudio()
-
-        let text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
-            finalization = continuation
-            finalizationTimeout = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: Self.finalizationDeadline)
-                self?.completeFinalization()
+        // transcript is already whatever the typewriter reached. Otherwise
+        // endAudio() tells the recognizer no more buffers are coming and it emits
+        // one last `isFinal` result; releasing the task or deactivating the audio
+        // session before that lands is what dropped the end of an answer.
+        //
+        // One exit, so the text is bound before `endCapture` clears it rather than
+        // by an ordering a later tidy-up could quietly reverse.
+        let text: String
+        if task == nil {
+            text = transcript
+        } else {
+            stopEngine()
+            request?.endAudio()
+            text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+                finalization = continuation
+                finalizationTimeout = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: Self.finalizationDeadline)
+                    self?.completeFinalization()
+                }
             }
         }
 
-        teardown()
+        endCapture()
         return text
     }
 
@@ -123,14 +126,10 @@ final class SpeechService: ObservableObject {
         simulationTimer?.invalidate()
         simulationTimer = nil
         task?.cancel()
-        // Unblocks a `finish()` racing with this teardown.
+        // Unblocks a `finish()` racing with this stop. It resumes with the
+        // transcript, so it has to run before `endCapture` clears it.
         completeFinalization()
-        teardown()
-    }
-
-    func reset() {
-        stop()
-        transcript = ""
+        endCapture()
     }
 
     /// Restores text verbatim after a submit failure, or when swapping input modes.
@@ -173,6 +172,22 @@ final class SpeechService: ObservableObject {
         // recognition request, so leaving it installed keeps that request alive
         // long after teardown nils it.
         engine.inputNode.removeTap(onBus: 0)
+    }
+
+    /// Ends a capture: forget the text, then release the recognizer.
+    ///
+    /// A capture that has ended owns no text. `AppState.draft` is the copy that
+    /// outlives it — mirrored from every partial — so a transcript left behind was
+    /// something the *next* turn could pick up: `finish()` handed it to "Type
+    /// instead" on a follow-up, which opened pre-filled with the answer already
+    /// submitted. Continuing an answer is explicit, through `start(continuing:)`.
+    ///
+    /// Separate from `teardown()`, which owns AV resources only. Folding the two
+    /// together made the read-before-clear ordering in `finish()` and `stop()`
+    /// load-bearing but invisible.
+    private func endCapture() {
+        transcript = ""
+        teardown()
     }
 
     private func teardown() {

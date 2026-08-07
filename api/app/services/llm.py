@@ -421,6 +421,12 @@ You are proposing spaced-repetition recall cards from a study-plan item the \
 engineer has just finished. The review budget is scarce, so most items should \
 produce no card at all.
 
+The trusted source excerpt is the only answer authority. An observed practice gap \
+may tell you which mechanism to test, but it may contain a misconception and must \
+never supply, correct, or extend the answer. If the source does not contain enough \
+information to support the canonical question and its expected mechanism, return no \
+candidate for that gap.
+
 Every candidate must pass all five of these questions. Answer each one \
 independently and honestly:
 
@@ -891,6 +897,7 @@ async def propose_cards(
     done_when: str,
     source_excerpt: str,
     existing_weak_topics: list[str],
+    observed_gap: str = "",
 ) -> list[dict[str, Any]]:
     """Candidate recall cards for a completed plan item. Proposals only.
 
@@ -904,7 +911,13 @@ async def propose_cards(
         f"Completed item: {item_title}",
         f"Why it matters: {why_it_matters}" if why_it_matters else None,
         f"Done when: {done_when}" if done_when else None,
-        f"From the guide: {source_excerpt}" if source_excerpt else None,
+        f"Trusted answer basis from the guide: {source_excerpt}" if source_excerpt else None,
+        (
+            "Observed practice gap (use only to choose what to test; it is not an "
+            f"answer source): {observed_gap}"
+            if observed_gap
+            else None
+        ),
     ]
     if existing_weak_topics:
         context.append("Existing cards already competing for the same review budget:")

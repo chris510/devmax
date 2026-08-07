@@ -104,6 +104,12 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   to `cards`, linkage lives in `study_plan_card_links`, and
   `tests/test_study_plan_invariants.py` snapshots every column of both tables
   around every operation.
+- **A Practice Debrief identifies a gap; it never supplies the answer.** It is
+  offered only after an eligible Practice item is complete and has a trusted
+  source excerpt. The debrief is unscored, immutable after its single submission,
+  and preserved across reopen/re-complete. Practice card generation requires both
+  the submitted debrief and the trusted excerpt; only the excerpt is answer
+  authority. Draft and submission writes touch no plan progress or review state.
 - **A Study Plan proposal is never applied from client-supplied placements.** The
   server recomputes it from the request's inputs against the current
   `plan.revision`; a stale `base_plan_revision` is a 409. That is what makes "never
@@ -233,6 +239,11 @@ submit one; the `question-failure` route sets it itself. `WC_FAILED_MECHANISM` f
 makes the coached re-attempt reachable; the two `reattempt` routes set it themselves, so
 it only needs passing to see a failed mechanism on some *other* route.
 
+`WC_SIM_SPEECH` types a hardcoded model answer into the transcript, so its default is
+the environment, not the configuration: on in the simulator, which has no usable
+microphone, and **off on a phone** — including the Debug build you get from Xcode, the
+one `WC_BASE_URL` below exists for. Pass `WC_SIM_SPEECH=1` to force it on device.
+
 Study Plan adds its own routes, all prefixed `study-plan` and dispatched *before*
 the fall-through above, so a misspelled one lands on the plan overview rather than
 silently opening a card: `study-plan-overview` `-overview-expanded`
@@ -240,9 +251,13 @@ silently opening a card: `study-plan-overview` `-overview-expanded`
 `-import-failure` `-replan` `-replan-invalid` `-fixed-recovery` `-reopen`
 `-reopen-invalid` `-plans` `-no-active` `-complete` `-updates` `-retrieval-audit`
 `-estimate-audit` `-dependency-audit` `-card-proposal` `-card-failure`
-`-card-existing`. Their flags are `WC_PLAN_NO_ACTIVE` `WC_PLAN_SUMMARY_FAIL`
+`-card-existing` `-debrief-offer` `-debrief-idle` `-debrief-mic-unavailable`
+`-debrief-recording` `-debrief-text` `-debrief-resume` `-debrief-save-failure`
+`-debrief-checking` `-debrief-check-failure` `-debrief-completed`. Their flags are
+`WC_PLAN_NO_ACTIVE` `WC_PLAN_SUMMARY_FAIL`
 `WC_PLAN_FAIL_IMPORT` `WC_PLAN_FAIL_ADD_CARD` `WC_PLAN_REPLAN_INVALID`
-`WC_PLAN_REOPEN_INVALID` `WC_PLAN_FIXED_RECOVERY`, plus `WC_PLAN_VARIANT`
+`WC_PLAN_REOPEN_INVALID` `WC_PLAN_FIXED_RECOVERY` `WC_PLAN_FAIL_DEBRIEF_SAVE`
+`WC_PLAN_FAIL_DEBRIEF_CHECK`, plus `WC_PLAN_VARIANT`
 (`anatomy` | `five-phase`) and `WC_PLAN_CARD_VARIANT` (`none` | `existing` |
 `unsupported`).
 

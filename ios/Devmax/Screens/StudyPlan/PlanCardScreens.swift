@@ -26,7 +26,11 @@ struct PlanCardsScreen: View {
                     case .error:
                         LoadFailure { Task { await plan.loadCardProposals(generate: true) } }
                     case .ready:
-                        if let cards = plan.cards { content(cards) }
+                        if plan.addedCardCount > 0 {
+                            addedConfirmation
+                        } else if let cards = plan.cards {
+                            content(cards)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,14 +58,25 @@ struct PlanCardsScreen: View {
             .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(plan.cards?.headline ?? "Recall cards")
+                Text(
+                    plan.addedCardCount == 0
+                        ? proposalHeadline
+                        : "\(plan.addedCardCount) card"
+                            + (plan.addedCardCount == 1 ? " added." : "s added.")
+                )
                     .font(WCFont.sans(23, weight: 600))
                     .tracking(-0.4)
                     .foregroundStyle(Theme.text)
                     .accessibilityAddTraits(.isHeader)
-                if let cards = plan.cards {
+                if plan.addedCardCount > 0 {
+                    Text("Added to your spaced-repetition reviews.")
+                        .font(WCFont.sans(14.5))
+                        .foregroundStyle(Theme.textSecondary)
+                } else if let cards = plan.cards {
                     Text(
-                        cards.supportsRecallCards
+                        cards.suggestedCount == 0 && isPracticeDebrief
+                            ? "Your debrief is saved, but nothing here justified spending review time."
+                            : cards.supportsRecallCards
                             ? "Nothing is created until you add it."
                             : cards.note
                     )
@@ -103,7 +118,6 @@ struct PlanCardsScreen: View {
             ProposalCard(
                 proposal: proposal,
                 selected: plan.selectedProposals.contains(proposal.id),
-                added: plan.addedProposals.contains(proposal.id),
                 gateOpen: plan.expandedGate == proposal.id,
                 onToggleSelect: { plan.toggleProposal(proposal.id) },
                 onToggleGate: {
@@ -159,31 +173,63 @@ struct PlanCardsScreen: View {
         }
     }
 
+    private var addedConfirmation: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MetaText(
+                text: "TODAY · SPACED REPETITION", font: WCFont.mono(10),
+                tracking: 0.8, color: Theme.meta
+            )
+            Text("The canonical questions are set. These cards now use the same scoring, history, and schedule as every other review.")
+                .font(WCFont.serif(17))
+                .foregroundStyle(Theme.textSerif)
+                .lineSpacing(8)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 18)
+    }
+
     private var bottomBlock: some View {
         VStack(spacing: 10) {
             Hairline()
-            HStack(spacing: 10) {
-                SecondaryButton(title: "Not now") { state.path.removeLast() }
-                if plan.cards?.supportsRecallCards == true, !plan.selectedProposals.isEmpty {
+            if plan.addedCardCount > 0
+                || (isPracticeDebrief && plan.cards?.suggestedCount == 0) {
+                PrimaryButton(title: "Done") { state.path.removeLast() }
+                    .padding(.horizontal, Metrics.screenPadding)
+            } else {
+                HStack(spacing: 10) {
+                    SecondaryButton(title: "Not now") { state.path.removeLast() }
                     PrimaryButton(
                         title: plan.addingCards ? "Adding…" : plan.addLabel,
-                        enabled: !plan.addingCards
+                        enabled: !plan.addingCards && !plan.selectedProposals.isEmpty
                     ) {
                         Task { await plan.addSelectedCards() }
                     }
                 }
+                .padding(.horizontal, Metrics.screenPadding)
             }
-            .padding(.horizontal, Metrics.screenPadding)
         }
         .padding(.bottom, Metrics.bottomSafeArea)
         .background(Theme.bg)
+    }
+
+    private var isPracticeDebrief: Bool {
+        plan.item?.type == "practice" && plan.item?.practiceDebrief?.isSubmitted == true
+    }
+
+    private var proposalHeadline: String {
+        guard let cards = plan.cards else { return "Recall cards" }
+        guard isPracticeDebrief else { return cards.headline }
+        switch cards.suggestedCount {
+        case 0: return "No focused cards"
+        case 1: return "1 focused card"
+        default: return "\(cards.suggestedCount) focused cards"
+        }
     }
 }
 
 private struct ProposalCard: View {
     let proposal: CardProposal
     let selected: Bool
-    let added: Bool
     let gateOpen: Bool
     let onToggleSelect: () -> Void
     let onToggleGate: () -> Void
@@ -198,14 +244,11 @@ private struct ProposalCard: View {
                         .font(WCFont.sans(16.5, weight: 500))
                         .foregroundStyle(Theme.text)
                     Spacer(minLength: 8)
-                    // ADDED renders only after a committed response.
                     MetaText(
-                        text: added ? "ADDED"
-                            : proposal.isPossibleOverlap ? "POSSIBLE EXISTING CARD"
+                        text: proposal.isPossibleOverlap ? "POSSIBLE EXISTING CARD"
                             : selected ? "SELECTED" : "NOT SELECTED",
                         font: WCFont.mono(10), tracking: 0.6,
-                        color: added ? Theme.scoreHigh
-                            : proposal.isPossibleOverlap ? Theme.scoreMid
+                        color: proposal.isPossibleOverlap ? Theme.scoreMid
                             : selected ? Theme.accentChipNote : Theme.metaFaint
                     )
                 }
@@ -256,9 +299,7 @@ private struct ProposalCard: View {
                     .wcFade(Motion.fadeFast)
                 }
 
-                if added {
-                    EmptyView()
-                } else if proposal.isPossibleOverlap {
+                if proposal.isPossibleOverlap {
                     // Never decided silently. Four choices, all the user's.
                     HStack(spacing: 8) {
                         SecondaryButton(title: "Keep the new one", fillsWidth: false) {
