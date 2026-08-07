@@ -78,9 +78,13 @@ not establish per-axis agreement, false mechanism-pass rates, correction
 factuality, follow-up quality, or reconstruction-versus-parroting behavior on
 the coached re-attempt.
 
-## Authoritative behavior
+## Authoritative behavior and product acceptance
 
-These rules apply to the design and any later implementation.
+This proposal extends [`spec.md`](../spec.md),
+[`STUDY-PLAN-SPEC.md`](STUDY-PLAN-SPEC.md),
+[`CURRICULUM.md`](CURRICULUM.md), and the existing design handoffs. Those
+sources continue to own the established scheduling, Practice Debrief,
+canonical-question, readiness, and design invariants. The new behavior is:
 
 1. A quick capture is a pending inbox item, not a card.
 2. Pending captures are never due, pushed, scored, shown in Sprint, or counted
@@ -89,18 +93,13 @@ These rules apply to the design and any later implementation.
    canonical question.
 4. The answer rubric records the required mechanism, acceptable alternatives,
    one key trade-off, one key failure mode, and a common misconception.
-5. User-written debrief text can select a gap but can never be answer authority.
-6. A canonical question is approved once and reused.
-7. Changing a question after history exists creates a new card and archives the
+5. Changing a question after history exists creates a new card and archives the
    old card; it does not rewrite old history.
-8. Archive is recoverable and removes a card from due, push, Sprint, and active
+6. Archive is recoverable and removes a card from due, push, Sprint, and active
    Coverage without deleting sessions.
-9. Depth repair runs in Practice mode and leaves `ease_factor`,
+7. Depth repair runs in Practice mode and leaves `ease_factor`,
    `interval_days`, `repetitions`, and `next_review_at` unchanged.
-10. Daily scheduling continues to depend only on mechanism accuracy.
-11. Nothing is activated, replaced, archived, or scheduled automatically.
-12. Devmax scores remain diagnostic. External coding, system-design, and
-    behavioral performance determine readiness.
+8. Nothing is activated, replaced, archived, or scheduled automatically.
 
 ## Design storyboard
 
@@ -219,8 +218,10 @@ Names are illustrative; the invariants matter more than the exact schema.
 | `topic` | Fast-captured label |
 | `context` | Optional one-line observed gap |
 | `status` | `pending_source` or `ready_to_review` |
-| `source_url` / `source_label` | Provenance supplied during grounding |
+| `source_url` / `source_section` / `source_label` | Provenance supplied during grounding, mapped to the repository's existing curriculum and Study Plan vocabulary |
 | `answer_basis` | Trusted concise authority, never the user's debrief |
+| `answer_rubric` | Draft rubric edited before activation |
+| `canonical_question` | Draft approved question; generation is idempotent unless the user explicitly regenerates it |
 | timestamps | Inbox ordering and recovery |
 
 A pending capture is not a row in `cards`. That structural separation prevents
@@ -230,16 +231,22 @@ accidental due/push/scheduling participation.
 
 | Field | Purpose |
 |---|---|
-| `source_url` / `source_label` | Auditable provenance |
+| `source_url` / `source_section` / `source_label` | Auditable provenance using existing curriculum and Study Plan concepts |
 | `answer_basis` | Concise trusted source material |
 | `answer_rubric` | Mechanism, alternatives, trade-off, failure mode, misconception |
-| `canonical_question` | One approved retrieval, reused across reviews |
 | `lifecycle_status` | `active` or `archived` |
 | `replaces_card_id` | New card's link to the archived predecessor |
 | `replaced_by_card_id` | Archived card's link to the replacement |
 
-The scoring prompt should receive the answer rubric. The user should not see it
-before answering in a normal session.
+`canonical_question` already exists and remains the one approved retrieval
+reused across reviews. The scoring prompt should receive the answer rubric. The
+user should not see the rubric before answering in a normal session.
+
+Implementation should map `source_url`, `source_section`, `source_excerpt`,
+`source_label`, `activation_prerequisite`, and `evidence` into one provenance
+shape rather than create parallel fields with overlapping meanings. Whether the
+trusted `answer_basis` is authored text, a licensed excerpt, or both remains a
+review decision below.
 
 ### Study Plan source eligibility
 
@@ -254,15 +261,18 @@ technical item can produce a card:
 Do not invent a source excerpt for broad mocks. A broad Practice item may remain
 valuable plan work without being a valid card source.
 
-## Backend work, in order
+## Implementation work, in order
 
 ### Phase 1 — grounding boundary
 
 1. Add a pending-capture table and capture/inbox endpoints.
 2. Add source and answer-rubric fields to cards.
 3. Add lifecycle and replacement linkage.
-4. Make due, push, Sprint, and Coverage query active cards only.
-5. Require an answer basis before converting a capture or proposal into a card.
+4. Define one active-card eligibility predicate and reuse it in due, push,
+   Sprint, and Coverage queries.
+5. Define one atomic activation gate shared by capture conversion and Study Plan
+   proposal acceptance; it requires the source, answer basis, rubric, and
+   approved question before creating a card.
 6. Pass the rubric to question generation, scoring, and re-attempt grading.
 7. Preserve the complete-answer transaction and every existing SM-2 invariant.
 
@@ -308,24 +318,13 @@ Report at least:
 - correction factuality;
 - coached-summary integrity.
 
+Extend or replace the existing sweep runner with bounded concurrency, stable
+result ordering, and per-call token accounting so the larger live evaluation
+does not serialize every independent case.
+
 Complete the currently open `reattempt_effort` sweep as part of this work.
 
 ## Acceptance criteria
-
-### Product behavior
-
-- Capturing a gap never creates an active card.
-- A pending capture cannot appear in due, push, Sprint, Coverage, or history.
-- No activation endpoint can commit without a source, answer basis, rubric, and
-  canonical question.
-- Learn and Practice proposal paths both fail closed without authority.
-- Practice Debrief text never becomes answer authority.
-- Archived cards keep every session and disappear from all active selection.
-- Replacing a question preserves the old card and starts the new card with blank
-  history and default SM-2 state.
-- Depth repair sessions write history/mastery as Practice currently does but
-  leave all four SM-2 fields unchanged.
-- Existing complete-answer and stale-load protections remain intact.
 
 ### Design fidelity
 
@@ -339,8 +338,8 @@ Complete the currently open `reattempt_effort` sweep as part of this work.
 
 ### Content quality
 
-- Every curated canonical question has one scenario and one central mechanism.
-- A strong answer fits comfortably under two minutes.
+- Every curated canonical question passes the six-part
+  [first-question gate](CURRICULUM-AUDIT-2026-07-30.md#first-question-gate).
 - The answer rubric is source-supported and admits valid alternative framing.
 - The correction for every failing evaluation case is factually correct.
 - The six broad topics named by the curriculum audit receive explicit review.
@@ -370,15 +369,15 @@ this audit validates the proposal, not a built client.
 
 ## Explicitly out of scope
 
-- Any SM-2 change or second scheduler.
-- Readiness scores, percentages, or exact-day forecasts.
+The established exclusions in [`spec.md`](../spec.md#out-of-scope--do-not-build),
+[`STUDY-PLAN-SPEC.md`](STUDY-PLAN-SPEC.md#out-of-scope--do-not-build), and
+[`CURRICULUM.md`](CURRICULUM.md#the-modality-boundary) remain in force. This
+proposal additionally excludes:
+
 - Automatic card creation, activation, replacement, or retirement.
 - Letting a debrief or user-authored answer become its own authority.
 - Rewriting a canonical question underneath existing history.
 - Hard deletion as the normal card-maintenance flow.
-- Full coding execution, full system-design interviews, or behavioral story
-  authoring inside the conversational review screen.
-- Analytics, third-party telemetry, gamification, or additional motion.
 - Transfer-check and contrast/interleaving experiments; revisit these only after
   the grounding and evaluation work proves trustworthy.
 
