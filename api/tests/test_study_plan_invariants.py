@@ -19,7 +19,11 @@ from sqlmodel import col, delete, select
 
 from app.models import Card, Session, StudyPlanCardProposal
 from tests.conftest import API_HEADERS, local_today, make_card
-from tests.test_study_plan_api import _one_suggested, make_plan  # noqa: F401
+from tests.test_study_plan_api import (  # noqa: F401
+    _complete_practice_item,
+    _one_suggested,
+    make_plan,
+)
 
 # Every column on both tables. Listed by name rather than derived, so adding a
 # column to `cards` and forgetting it here is a test failure, not a silent gap.
@@ -346,6 +350,24 @@ async def test_generating_card_proposals_creates_no_cards(
 
     assert await snapshot(db) == before
     assert len((await db.exec(select(StudyPlanCardProposal))).all()) == 1
+
+
+async def test_saving_and_submitting_a_practice_debrief_touches_no_review_state(
+    client, db, review_state, stub_import
+):
+    plan = await make_plan(client)
+    item_id = await _complete_practice_item(client, plan)
+    before = await snapshot(db)
+    path = f"/study-plans/{plan['id']}/items/{item_id}/practice-debrief"
+
+    await client.patch(
+        f"{path}/draft", json={"text": "Retries felt shaky."}, headers=API_HEADERS
+    )
+    submitted = await client.post(
+        path, json={"text": "Retries felt shaky."}, headers=API_HEADERS
+    )
+    assert submitted.status_code == 200
+    assert await snapshot(db) == before
 
 
 # --- the one authorised exception -------------------------------------------

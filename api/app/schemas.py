@@ -333,6 +333,26 @@ class WeekDetail(BaseModel):
     sections: list[WeekSection]
 
 
+class PracticeDebriefOut(BaseModel):
+    id: uuid.UUID
+    plan_id: uuid.UUID
+    item_id: uuid.UUID
+    draft_text: str
+    text: str
+    submitted_at: datetime | None
+    summary: str
+    has_proposals: bool = False
+    proposal_count: int = 0
+
+
+class PracticeDebriefDraftIn(BaseModel):
+    text: str = Field(max_length=12_000)
+
+
+class PracticeDebriefSubmitIn(BaseModel):
+    text: str = Field(min_length=1, max_length=12_000)
+
+
 class ItemDetail(BaseModel):
     id: uuid.UUID
     plan_id: uuid.UUID
@@ -359,6 +379,8 @@ class ItemDetail(BaseModel):
     # Cards this item has already produced, and whether it may produce more.
     linked_card_ids: list[uuid.UUID] = []
     card_proposals_available: bool = False
+    practice_debrief_eligible: bool = False
+    practice_debrief: PracticeDebriefOut | None = None
     blocked_by: list[str] = []
 
 

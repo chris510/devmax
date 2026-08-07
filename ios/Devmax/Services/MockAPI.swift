@@ -42,6 +42,8 @@ final class DebugFlags: ObservableObject {
     @Published var planReplanInvalid: Bool
     @Published var planReopenInvalid: Bool
     @Published var planFixedRecovery: Bool
+    @Published var planFailDebriefSave: Bool
+    @Published var planFailDebriefCheck: Bool
     let planVariant: String
     let planCardVariant: String
 
@@ -95,6 +97,10 @@ final class DebugFlags: ObservableObject {
         planReplanInvalid = flag("WC_PLAN_REPLAN_INVALID")
         planReopenInvalid = flag("WC_PLAN_REOPEN_INVALID")
         planFixedRecovery = flag("WC_PLAN_FIXED_RECOVERY")
+        planFailDebriefSave = flag("WC_PLAN_FAIL_DEBRIEF_SAVE")
+            || route == "study-plan-debrief-save-failure"
+        planFailDebriefCheck = flag("WC_PLAN_FAIL_DEBRIEF_CHECK")
+            || route == "study-plan-debrief-check-failure"
         planVariant = env["WC_PLAN_VARIANT"] ?? ""
         planCardVariant = env["WC_PLAN_CARD_VARIANT"] ?? ""
         self.route = route
@@ -111,6 +117,9 @@ actor MockAPI: DevmaxAPI {
     /// Alternates so the card-add failure path and the idempotent retry that
     /// follows it are both reachable in a single walk.
     var cardAcceptAttempts = 0
+    var debriefSubmitAttempts = 0
+    var debriefCheckAttempts = 0
+    var practiceDebriefs: [UUID: PracticeDebrief] = [:]
     private var completions = 0
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.

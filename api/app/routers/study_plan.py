@@ -60,6 +60,7 @@ from app.models import (
     StudyPlanDuplication,
     StudyPlanGuideDraft,
     StudyPlanItem,
+    StudyPlanPracticeDebrief,
     StudyPlanRevision,
     StudyPlanWeek,
 )
@@ -85,6 +86,9 @@ from app.schemas import (
     PlanPhaseRow,
     PlanRecap,
     PlanWeekRow,
+    PracticeDebriefDraftIn,
+    PracticeDebriefOut,
+    PracticeDebriefSubmitIn,
     PreviewEdit,
     PreviewOut,
     PreviewPhase,
@@ -164,6 +168,64 @@ def _block_label(item: StudyPlanItem) -> str | None:
         return None
     hour, minute = divmod(item.study_block_minute_of_day, 60)
     return f"{WEEKDAYS[item.study_block_weekday - 1]} {hour:02d}:{minute:02d}"
+
+
+def _debrief_eligible(graph: sp.PlanGraph, item: StudyPlanItem) -> bool:
+    """Whether this item may collect a gap that can safely become a card.
+
+    A Practice item without a trusted source excerpt can still be completed, but
+    the user's reflection cannot supply its own answer key. In that case the
+    debrief prompt is deliberately absent instead of ending in a predictable
+    no-card result.
+    """
+    return (
+        item.type == ITEM_PRACTICE
+        and item.status == ITEM_COMPLETE
+        and sp.slug_supports_cards(graph.plan.subject_slug)
+        and bool(item.source_excerpt.strip())
+    )
+
+
+async def _debrief_for(
+    db: AsyncSession, item_id: uuid.UUID
+) -> StudyPlanPracticeDebrief | None:
+    return (
+        await db.exec(
+            select(StudyPlanPracticeDebrief).where(
+                col(StudyPlanPracticeDebrief.plan_item_id) == item_id
+            )
+        )
+    ).first()
+
+
+def _debrief_summary(text: str) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= 140:
+        return compact
+    return compact[:137].rstrip() + "…"
+
+
+async def _debrief_out(
+    db: AsyncSession, row: StudyPlanPracticeDebrief
+) -> PracticeDebriefOut:
+    proposals = (
+        await db.exec(
+            select(StudyPlanCardProposal).where(
+                col(StudyPlanCardProposal.source_plan_item_id) == row.plan_item_id
+            )
+        )
+    ).all()
+    return PracticeDebriefOut(
+        id=row.id,
+        plan_id=row.plan_id,
+        item_id=row.plan_item_id,
+        draft_text=row.draft_text,
+        text=row.text,
+        submitted_at=row.submitted_at,
+        summary=_debrief_summary(row.text or row.draft_text),
+        has_proposals=bool(proposals),
+        proposal_count=len(proposals),
+    )
 
 
 # --- Today ------------------------------------------------------------------
@@ -747,6 +809,7 @@ async def get_week(
 async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanItem) -> ItemDetail:
     week = graph.week_by_id.get(item.week_id)
     phase = graph.phase_by_id.get(item.phase_id)
+    debrief = await _debrief_for(db, item.id)
     links = (
         await db.exec(
             select(StudyPlanCardLink).where(col(StudyPlanCardLink.plan_item_id) == item.id)
@@ -779,7 +842,13 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
         card_proposals_available=(
             item.status == ITEM_COMPLETE
             and sp.slug_supports_cards(graph.plan.subject_slug)
+            and (
+                item.type != ITEM_PRACTICE
+                or (debrief is not None and debrief.submitted_at is not None)
+            )
         ),
+        practice_debrief_eligible=_debrief_eligible(graph, item),
+        practice_debrief=(await _debrief_out(db, debrief)) if debrief else None,
         blocked_by=[b.full_title for b in sp.blocking_dependencies(graph, item)],
     )
 
@@ -1075,6 +1144,106 @@ async def complete_item(
     db.add(item)
     await db.commit()
     return await _item_detail(db, graph, item)
+
+
+# --- Practice Debrief -------------------------------------------------------
+
+
+@router.get(
+    "/study-plans/{plan_id}/items/{item_id}/practice-debrief",
+    response_model=PracticeDebriefOut | None,
+)
+async def get_practice_debrief(
+    plan_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> PracticeDebriefOut | None:
+    graph = await _get_graph(db, plan_id)
+    item = graph.item_by_id.get(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    row = await _debrief_for(db, item_id)
+    return await _debrief_out(db, row) if row else None
+
+
+@router.patch(
+    "/study-plans/{plan_id}/items/{item_id}/practice-debrief/draft",
+    response_model=PracticeDebriefOut,
+)
+async def save_practice_debrief_draft(
+    plan_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: PracticeDebriefDraftIn,
+    db: AsyncSession = Depends(get_session),
+) -> PracticeDebriefOut:
+    """Cheap, idempotent backup for the disk-first spoken-text draft."""
+    graph = await _get_graph(db, plan_id)
+    item = graph.item_by_id.get(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not _debrief_eligible(graph, item):
+        raise HTTPException(status_code=409, detail="practice debrief is not available")
+
+    row = await _debrief_for(db, item_id)
+    if row is None:
+        row = StudyPlanPracticeDebrief(
+            plan_id=plan_id,
+            plan_item_id=item_id,
+            draft_text=body.text,
+        )
+    elif row.submitted_at is not None:
+        raise HTTPException(status_code=409, detail="practice debrief is already submitted")
+    else:
+        row.draft_text = body.text
+        row.updated_at = _now()
+    db.add(row)
+    await db.commit()
+    return await _debrief_out(db, row)
+
+
+@router.post(
+    "/study-plans/{plan_id}/items/{item_id}/practice-debrief",
+    response_model=PracticeDebriefOut,
+)
+async def submit_practice_debrief(
+    plan_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: PracticeDebriefSubmitIn,
+    db: AsyncSession = Depends(get_session),
+) -> PracticeDebriefOut:
+    """Commit one unscored debrief. It never touches plan or review state."""
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="debrief text is empty")
+    graph = await _get_graph(db, plan_id)
+    item = graph.item_by_id.get(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not _debrief_eligible(graph, item):
+        raise HTTPException(status_code=409, detail="practice debrief is not available")
+
+    row = await _debrief_for(db, item_id)
+    if row is not None and row.submitted_at is not None:
+        if row.text != body.text:
+            raise HTTPException(status_code=409, detail="practice debrief is already submitted")
+        return await _debrief_out(db, row)
+
+    now = _now()
+    if row is None:
+        row = StudyPlanPracticeDebrief(
+            plan_id=plan_id,
+            plan_item_id=item_id,
+            draft_text=body.text,
+            text=body.text,
+            submitted_at=now,
+        )
+    else:
+        row.draft_text = body.text
+        row.text = body.text
+        row.submitted_at = now
+        row.updated_at = now
+    db.add(row)
+    await db.commit()
+    return await _debrief_out(db, row)
 
 
 @router.post("/study-plans/{plan_id}/items/{item_id}/reopen/preview", response_model=ProposalOut)
@@ -1406,6 +1575,17 @@ async def create_card_proposals(
             ),
         )
 
+    observed_gap = ""
+    if item.type == ITEM_PRACTICE:
+        # A reflection identifies where to look; the trusted source still supplies
+        # the answer basis. Without both, no Practice proposal call is allowed.
+        if not item.source_excerpt.strip():
+            raise HTTPException(status_code=409, detail="practice item has no answer basis")
+        debrief = await _debrief_for(db, item_id)
+        if debrief is None or debrief.submitted_at is None:
+            raise HTTPException(status_code=409, detail="practice debrief is required")
+        observed_gap = debrief.text
+
     existing = (
         await db.exec(
             select(StudyPlanCardProposal).where(
@@ -1429,6 +1609,7 @@ async def create_card_proposals(
             why_it_matters=item.why_it_matters,
             done_when=item.done_when,
             source_excerpt=item.source_excerpt,
+            observed_gap=observed_gap,
             existing_weak_topics=[c.topic for c in weak],
         )
         existing_cards = await sp.normalized_card_index(db)

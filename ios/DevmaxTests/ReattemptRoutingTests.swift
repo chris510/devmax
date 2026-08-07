@@ -82,6 +82,15 @@ final class ReattemptRoutingTests: XCTestCase {
         func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
             throw CancellationError()
         }
+        func practiceDebrief(_ id: UUID, itemID: UUID) async throws -> PracticeDebrief? {
+            nil
+        }
+        func savePracticeDebriefDraft(
+            _ id: UUID, itemID: UUID, text: String
+        ) async throws -> PracticeDebrief { throw CancellationError() }
+        func submitPracticeDebrief(
+            _ id: UUID, itemID: UUID, text: String
+        ) async throws -> PracticeDebrief { throw CancellationError() }
         func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal {
             throw CancellationError()
         }

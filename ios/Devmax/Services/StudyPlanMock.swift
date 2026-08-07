@@ -22,6 +22,8 @@ enum StudyPlanFixtures {
     static let completedPlanID = id(0x03)
     static let archivedPlanID = id(0x04)
     static let draftID = id(0x05)
+    static let practiceItemID = id(0x13)
+    static let practiceDebriefID = id(0x30)
 
     // MARK: - the map
 
@@ -227,7 +229,8 @@ enum StudyPlanFixtures {
     }
 
     static func itemDetail(
-        _ itemID: UUID = firstItemID, planID: UUID = backendPlanID, complete: Bool = true
+        _ itemID: UUID = firstItemID, planID: UUID = backendPlanID, complete: Bool = true,
+        debrief: PracticeDebrief? = nil
     ) -> PlanItemDetail {
         let row = week4Rows.first { id($0.0) == itemID } ?? week4Rows[0]
         return PlanItemDetail(
@@ -248,7 +251,30 @@ enum StudyPlanFixtures {
             studyBlockMinuteOfDay: 1140, studyBlockReminderOn: true,
             completedAt: complete ? Date(timeIntervalSince1970: 1_755_388_800) : nil,
             reopenedAt: nil,
-            linkedCardIds: [], cardProposalsAvailable: complete, blockedBy: []
+            linkedCardIds: [],
+            cardProposalsAvailable: complete && (row.2 != "practice" || debrief?.isSubmitted == true),
+            practiceDebriefEligible: complete && row.2 == "practice",
+            practiceDebrief: debrief,
+            blockedBy: []
+        )
+    }
+
+    static func practiceDebrief(
+        planID: UUID = backendPlanID,
+        itemID: UUID = practiceItemID,
+        draft: String = "",
+        submitted: Bool = false,
+        hasProposals: Bool = false
+    ) -> PracticeDebrief {
+        let text = submitted
+            ? "I drew the retry loop before the timeout and could not explain the upstream timeout path."
+            : ""
+        return PracticeDebrief(
+            id: practiceDebriefID, planId: planID, itemId: itemID,
+            draftText: draft.isEmpty ? text : draft, text: text,
+            submittedAt: submitted ? Date(timeIntervalSince1970: 1_755_388_920) : nil,
+            summary: text, hasProposals: hasProposals,
+            proposalCount: hasProposals ? 2 : 0
         )
     }
 
@@ -691,6 +717,41 @@ extension MockAPI {
         return StudyPlanFixtures.itemDetail(itemID, planID: id, complete: true)
     }
 
+    func practiceDebrief(_ id: UUID, itemID: UUID) async throws -> PracticeDebrief? {
+        await settle(200)
+        return practiceDebriefs[itemID]
+    }
+
+    func savePracticeDebriefDraft(
+        _ id: UUID, itemID: UUID, text: String
+    ) async throws -> PracticeDebrief {
+        await settle(100)
+        let row = PracticeDebrief(
+            id: StudyPlanFixtures.practiceDebriefID, planId: id, itemId: itemID,
+            draftText: text, text: "", submittedAt: nil, summary: text,
+            hasProposals: false, proposalCount: 0
+        )
+        practiceDebriefs[itemID] = row
+        return row
+    }
+
+    func submitPracticeDebrief(
+        _ id: UUID, itemID: UUID, text: String
+    ) async throws -> PracticeDebrief {
+        await settle(500)
+        debriefSubmitAttempts += 1
+        if await flags().planFailDebriefSave, debriefSubmitAttempts % 2 == 1 {
+            throw APIError.status(500)
+        }
+        let row = PracticeDebrief(
+            id: StudyPlanFixtures.practiceDebriefID, planId: id, itemId: itemID,
+            draftText: text, text: text, submittedAt: Date(), summary: text,
+            hasProposals: false, proposalCount: 0
+        )
+        practiceDebriefs[itemID] = row
+        return row
+    }
+
     func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal {
         await settle(400)
         return (await flags()).planReopenInvalid
@@ -794,6 +855,10 @@ extension MockAPI {
 
     func createCardProposals(_ id: UUID, itemID: UUID) async throws -> CardProposalList {
         await settle(900)
+        debriefCheckAttempts += 1
+        if await flags().planFailDebriefCheck, debriefCheckAttempts % 2 == 1 {
+            throw APIError.status(500)
+        }
         return StudyPlanFixtures.proposals(
             planID: id, itemID: itemID, variant: await flags().planCardVariant
         )
