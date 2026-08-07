@@ -30,6 +30,7 @@ from app.models import (
     DUPLICATE_EXACT,
     DUPLICATE_NONE,
     DUPLICATE_POSSIBLE,
+    FOUNDER_USER_ID,
     ITEM_COMPLETE,
     ITEM_PENDING,
     MODE_FIXED,
@@ -155,9 +156,7 @@ def _now() -> datetime:
 # down rather than "all punctuation": hyphens and slashes carry meaning in topic
 # names ("read-your-writes", "CI/CD"), so they are normalised to a single space
 # rather than deleted, and everything else in this set is packaging.
-_STRIP_PUNCTUATION = str.maketrans(
-    {ch: None for ch in "\"'`.,;:!?()[]{}«»‘’“”"}
-)
+_STRIP_PUNCTUATION = str.maketrans({ch: None for ch in "\"'`.,;:!?()[]{}«»‘’“”"})
 _SEPARATORS = re.compile(r"[-–—_/\\|]+")
 _WHITESPACE = re.compile(r"\s+")
 
@@ -178,7 +177,9 @@ def normalize_topic(topic: str) -> str:
     return _WHITESPACE.sub(" ", text).strip()
 
 
-async def normalized_card_index(db: AsyncSession) -> dict[str, Card]:
+async def normalized_card_index(
+    db: AsyncSession, user_id: uuid.UUID = FOUNDER_USER_ID
+) -> dict[str, Card]:
     """Every card keyed by its normalized topic, read once.
 
     Normalization is not expressible in portable SQL, so the comparison happens
@@ -187,7 +188,7 @@ async def normalized_card_index(db: AsyncSession) -> dict[str, Card]:
     already exists.
     """
     index: dict[str, Card] = {}
-    for card in (await db.exec(select(Card))).all():
+    for card in (await db.exec(select(Card).where(Card.user_id == user_id))).all():
         index.setdefault(normalize_topic(card.topic), card)
     return index
 
@@ -278,9 +279,7 @@ def first_failed_gate(
     return next((r for r in gate_results if not r.get("passed")), None)
 
 
-def disposition_for(
-    gate_results: Sequence[Mapping[str, Any]], duplicate_result: str
-) -> str:
+def disposition_for(gate_results: Sequence[Mapping[str, Any]], duplicate_result: str) -> str:
     """What the card-suggestions screen does with this candidate.
 
     Order matters: an exact duplicate is `existing` even if the gate passed,
@@ -402,9 +401,7 @@ class PlanGraph:
         self.item_by_id = {i.id: i for i in items}
 
     def items_in(self, week: StudyPlanWeek) -> list[StudyPlanItem]:
-        return sorted(
-            (i for i in self.items if i.week_id == week.id), key=lambda i: i.guide_order
-        )
+        return sorted((i for i in self.items if i.week_id == week.id), key=lambda i: i.guide_order)
 
     def phase_of_week(self, week: StudyPlanWeek) -> StudyPlanPhase | None:
         return self.phase_by_id.get(week.phase_id)
@@ -419,20 +416,12 @@ class PlanGraph:
 
 
 async def load_plan_graph(db: AsyncSession, plan: StudyPlan) -> PlanGraph:
-    phases = (
-        await db.exec(select(StudyPlanPhase).where(StudyPlanPhase.plan_id == plan.id))
-    ).all()
-    weeks = (
-        await db.exec(select(StudyPlanWeek).where(StudyPlanWeek.plan_id == plan.id))
-    ).all()
-    items = (
-        await db.exec(select(StudyPlanItem).where(StudyPlanItem.plan_id == plan.id))
-    ).all()
+    phases = (await db.exec(select(StudyPlanPhase).where(StudyPlanPhase.plan_id == plan.id))).all()
+    weeks = (await db.exec(select(StudyPlanWeek).where(StudyPlanWeek.plan_id == plan.id))).all()
+    items = (await db.exec(select(StudyPlanItem).where(StudyPlanItem.plan_id == plan.id))).all()
     deps = (
         await db.exec(
-            select(StudyPlanItemDependency).where(
-                StudyPlanItemDependency.plan_id == plan.id
-            )
+            select(StudyPlanItemDependency).where(StudyPlanItemDependency.plan_id == plan.id)
         )
     ).all()
     return PlanGraph(plan, list(phases), list(weeks), list(items), list(deps))
@@ -500,8 +489,11 @@ def plan_snapshot(graph: PlanGraph) -> dict[str, Any]:
             }
             for w in graph.weeks
         ],
-        "placements": {str(i.id): graph.week_by_id[i.week_id].index for i in graph.items
-                       if i.week_id in graph.week_by_id},
+        "placements": {
+            str(i.id): graph.week_by_id[i.week_id].index
+            for i in graph.items
+            if i.week_id in graph.week_by_id
+        },
     }
 
 
@@ -588,10 +580,12 @@ def apply_proposal(
 # --- lifecycle --------------------------------------------------------------
 
 
-async def active_plan(db: AsyncSession) -> StudyPlan | None:
+async def active_plan(db: AsyncSession, user_id: uuid.UUID = FOUNDER_USER_ID) -> StudyPlan | None:
     """Zero active plans is a valid state, not an error."""
     return (
-        await db.exec(select(StudyPlan).where(StudyPlan.status == PLAN_ACTIVE))
+        await db.exec(
+            select(StudyPlan).where(StudyPlan.user_id == user_id, StudyPlan.status == PLAN_ACTIVE)
+        )
     ).first()
 
 
@@ -609,7 +603,7 @@ async def make_active(
     before = plan_snapshot(graph)
     now = _now()
 
-    current = await active_plan(db)
+    current = await active_plan(db, graph.plan.user_id)
     if current is not None and current.id != graph.plan.id:
         current.status = PLAN_PAUSED
         current.paused_at = now
@@ -624,7 +618,11 @@ async def make_active(
     graph.plan.updated_at = now
     db.add(graph.plan)
     return record_revision(
-        db, graph, kind=kind, before=before, after={"status": PLAN_ACTIVE},
+        db,
+        graph,
+        kind=kind,
+        before=before,
+        after={"status": PLAN_ACTIVE},
         summary=summary,
     )
 
@@ -688,6 +686,7 @@ def duplicate_plan(source: StudyPlan, graph: PlanGraph, *, start_date: date) -> 
     """
     now = _now()
     new_plan = StudyPlan(
+        user_id=source.user_id,
         title=f"{source.title} (copy)",
         subject=source.subject,
         subject_slug=source.subject_slug,
@@ -841,9 +840,7 @@ def deadline_fits(plan: StudyPlan, forecast_week: int) -> bool:
     return sched.week_end_date(to_sched_plan(plan), forecast_week) <= plan.deadline
 
 
-def blocking_dependencies(
-    graph: PlanGraph, item: StudyPlanItem
-) -> list[StudyPlanItem]:
+def blocking_dependencies(graph: PlanGraph, item: StudyPlanItem) -> list[StudyPlanItem]:
     """Hard prerequisites of `item` that are not complete yet."""
     prereq_ids = {
         d.prerequisite_item_id
@@ -855,4 +852,3 @@ def blocking_dependencies(
         for pid in prereq_ids
         if pid in graph.item_by_id and graph.item_by_id[pid].status != ITEM_COMPLETE
     ]
-

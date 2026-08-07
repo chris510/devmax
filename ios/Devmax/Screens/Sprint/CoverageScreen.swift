@@ -62,7 +62,7 @@ struct CoverageScreen: View {
         .padding(.horizontal, Metrics.screenPadding)
     }
 
-    /// One mono line: `MECHANISM 4.1 · TRADE-OFFS 2.8 · FAILURE MODES 3.2`.
+    /// One mono line: `ACCURACY 4.1 · DEPTH 2.8 · BOUNDARIES 3.2`.
     ///
     /// No bars, no colour, not tappable. Hidden until something has been scored —
     /// three axes at 0.0 would read as a finding rather than as no data.
@@ -189,4 +189,3 @@ private struct CoverageSection: View {
         return "\(days)D SINCE REVIEW"
     }
 }
-

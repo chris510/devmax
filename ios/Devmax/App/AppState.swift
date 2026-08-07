@@ -22,6 +22,10 @@ final class AppState: ObservableObject {
         case planLifecycle(UUID, PlanLifecycleAction, PlanLifecycleOrigin)
         case planRecap(UUID)
         case planAudit(String)
+        case materialSetup
+        case fullSettings
+        case privacy
+        case deleteAccount
     }
     enum Sheet: String, Identifiable {
         case settings, add, plans, planCapacity
@@ -67,6 +71,9 @@ final class AppState: ObservableObject {
     @Published var practice = false
     /// This session's scored cards, in walk order. Drives the rail and the recap.
     @Published var run: [RunEntry] = []
+    /// Installed only for onboarding's first real review. The ordinary review
+    /// path has no callback and continues to Today exactly as before.
+    var firstReviewCompletion: (() -> Void)?
 
     // Review Sprint / Coverage
     @Published var library: [CardSummary] = []
@@ -317,7 +324,7 @@ final class AppState: ObservableObject {
         libraryLoad.status { "\(library.count) CARDS · \(categories.count) CATEGORIES" }
     }
 
-    /// `MECHANISM 4.1 · TRADE-OFFS 2.8 · FAILURE MODES 3.2`.
+    /// `ACCURACY 4.1 · DEPTH 2.8 · BOUNDARIES 3.2`.
     ///
     /// Scoring runs on three axes internally; this is the only place that
     /// decomposition surfaces, because "which axis is systemically weak" is the
@@ -325,9 +332,9 @@ final class AppState: ObservableObject {
     var axisRollup: [String] {
         guard libraryLoad == .ready else { return [] }
         let axes: [(String, (CardSummary) -> Int?)] = [
-            ("MECHANISM", \.lastMechanismAccuracy),
-            ("TRADE-OFFS", \.lastTradeOffAwareness),
-            ("FAILURE MODES", \.lastFailureModeAwareness),
+            ("ACCURACY", \.lastAccuracy),
+            ("DEPTH", \.lastDepth),
+            ("BOUNDARIES", \.lastBoundaries),
         ]
         let means: [String] = axes.compactMap { name, axis in
             let values = library.compactMap(axis)
@@ -732,6 +739,11 @@ final class AppState: ObservableObject {
         // a resumable session; reopening the card will retrieve it normally.
         invalidateQuestionLoad()
         path = []
+        if let completion = firstReviewCompletion {
+            firstReviewCompletion = nil
+            completion()
+            return
+        }
         Task { await loadToday() }
     }
 

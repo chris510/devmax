@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime, time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DueCard(BaseModel):
@@ -25,9 +25,9 @@ class CardSummary(BaseModel):
     last_score: int | None
     # The three axes behind `last_score`. Coverage's rollup means these across the
     # library; nothing else consumes them.
-    last_mechanism_accuracy: int | None = None
-    last_trade_off_awareness: int | None = None
-    last_failure_mode_awareness: int | None = None
+    last_accuracy: int | None = None
+    last_depth: int | None = None
+    last_boundaries: int | None = None
     ease_factor: float
     interval_days: int
     repetitions: int
@@ -105,7 +105,7 @@ class CompleteOut(BaseModel):
     # unchanged values, and the session-end line says so instead of quoting them.
     practice: bool = False
     # Whether the client should offer the coached re-attempt. Server-computed so the
-    # `mechanism_accuracy <= 2` gate lives in one place and the app never sees a
+    # `accuracy <= 2` gate lives in one place and the app never sees a
     # per-axis score it has nowhere to display.
     reattempt_offered: bool = False
     # The exact prompt to show for turn 3, or null when it isn't offered. Sent by the
@@ -118,7 +118,7 @@ class CompleteOut(BaseModel):
 class ReattemptOut(BaseModel):
     """Deliberately carries no score.
 
-    Turn 3's `mechanism_accuracy` is stored but never returned — the app shows one
+    Turn 3's `accuracy` is stored but never returned — the app shows one
     numeral per session and that numeral is turn 2's composite. Sending a second
     number to a client that has no place to put it invites putting it somewhere.
     """
@@ -129,6 +129,37 @@ class ReattemptOut(BaseModel):
 class DeviceTokenIn(BaseModel):
     token: str = Field(min_length=1)
     kind: str = "apns"
+
+
+class AuthNonceOut(BaseModel):
+    nonce: str
+
+
+class AppleSignInIn(BaseModel):
+    identity_token: str = Field(min_length=1)
+    authorization_code: str = Field(min_length=1)
+    nonce: str = Field(min_length=16)
+    display_name: str | None = Field(default=None, max_length=200)
+
+
+class RefreshTokenIn(BaseModel):
+    refresh_token: str = Field(min_length=1)
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: Literal["bearer"] = "bearer"
+    access_expires_at: datetime
+    refresh_expires_at: datetime
+
+
+class CurrentUserOut(BaseModel):
+    id: uuid.UUID
+    onboarding_completed: bool
+    is_founder: bool
+    display_name: str = ""
+    email: str = ""
 
 
 class NotificationWindow(BaseModel):
@@ -212,6 +243,13 @@ class TriggerResult(BaseModel):
     ) = None
     card_id: uuid.UUID | None = None
     due_count: int | None = None
+
+
+class TriggerBatchResult(BaseModel):
+    sent: bool
+    reason: Literal["batch"] = "batch"
+    processed_users: int
+    sent_count: int
 
 
 def window_to_dict(w: NotificationWindow) -> dict[str, Any]:
@@ -633,3 +671,113 @@ class CardAcceptOut(BaseModel):
 class DuplicateResolution(BaseModel):
     proposal_id: uuid.UUID
     action: Literal["keep_new", "use_existing", "skip"]
+
+
+# Public study material -------------------------------------------------------
+
+
+class MaterialImportIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    source_text: str = Field(min_length=200, max_length=400_000)
+    original_filename: str = Field(default="", max_length=255)
+    mime_type: Literal["text/plain", "text/markdown", "application/pdf"] = "text/plain"
+    import_path: Literal["topics", "plan"] = "topics"
+    intent: Literal["already_studied", "learn"] = "already_studied"
+    requested_weeks: int = Field(default=12, ge=2, le=52)
+    weekly_capacity_minutes: int = Field(default=480, gt=0, le=10080)
+    mode: PlanMode = "flexible"
+    deadline: date | None = None
+    previous_version_id: uuid.UUID | None = None
+
+
+class MaterialTopicOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    position: int
+    section_title: str
+    topic: str
+    answer_anchor: str
+    source_excerpt: str
+    status: Literal["clean", "needs_attention", "excluded", "confirmed"]
+    issue: str
+
+
+class MaterialImportOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    kind: str
+    version: int
+    status: Literal[
+        "draft",
+        "pending",
+        "processing",
+        "ready",
+        "needs_attention",
+        "failed",
+        "confirmed",
+        "superseded",
+    ]
+    import_path: Literal["topics", "plan"]
+    intent: Literal["already_studied", "learn"]
+    original_filename: str
+    character_count: int
+    clean_count: int
+    attention_count: int
+    error: str
+    plan_draft_id: uuid.UUID | None = None
+    comparison: dict[str, int] = Field(default_factory=dict)
+    topics: list[MaterialTopicOut] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MaterialTopicEdit(BaseModel):
+    topic: str | None = Field(default=None, min_length=1, max_length=200)
+    answer_anchor: str | None = Field(default=None, min_length=1, max_length=4000)
+    action: Literal["keep", "exclude", "merge"] = "keep"
+    merge_into_id: uuid.UUID | None = None
+
+
+class MaterialConfirmIn(BaseModel):
+    selected_topic_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class MaterialConfirmOut(BaseModel):
+    source_id: uuid.UUID
+    created_card_ids: list[uuid.UUID]
+
+
+class ManualTopicIn(BaseModel):
+    topic: str = Field(min_length=1, max_length=200)
+    answer_anchor: str = Field(min_length=1, max_length=4000)
+
+
+class ManualMaterialIn(BaseModel):
+    title: str = Field(default="My topics", min_length=1, max_length=200)
+    topics: list[ManualTopicIn] = Field(min_length=1, max_length=50)
+
+
+class CollectionSummary(BaseModel):
+    id: str
+    title: str
+    subtitle: str
+    version: str
+    topic_count: int
+    available: bool = True
+
+
+class CollectionDetail(CollectionSummary):
+    sections: list[str]
+    source_note: str
+    topics: list[ManualTopicIn]
+
+
+class AccountExport(BaseModel):
+    exported_at: datetime
+    account: dict[str, object]
+    settings: dict[str, object]
+    sources: list[dict[str, object]]
+    cards: list[dict[str, object]]
+    sessions: list[dict[str, object]]
+    study_plans: list[dict[str, object]]

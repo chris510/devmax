@@ -17,7 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
 
 from app.db import get_session  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Card, Settings  # noqa: E402
+from app.models import FOUNDER_USER_ID, Card, Settings, User  # noqa: E402
 from app.routers import study_plan as study_plan_router  # noqa: E402
 from app.routers.deps import now_in  # noqa: E402
 from app.services import llm  # noqa: E402
@@ -35,6 +35,7 @@ def local_today() -> date:
     from 00:00 to 07:00 UTC, which is most of a Pacific afternoon.
     """
     return now_in(Settings().timezone).date()
+
 
 # The suite runs on in-memory SQLite by default — fast, hermetic, no services.
 # Point TEST_DATABASE_URL at an already-migrated Postgres database to run the
@@ -71,7 +72,9 @@ async def db() -> AsyncIterator[AsyncSession]:
                     "study_plan_revisions, study_plan_guide_drafts, "
                     "study_plan_card_proposals, "
                     "study_plan_card_proposal_acceptances, "
-                    "study_plan_card_links, study_plan_duplications "
+                    "study_plan_card_links, study_plan_duplications, "
+                    "material_topic_proposals, material_sources, llm_usage, "
+                    "auth_nonces, auth_sessions, apple_identities, users "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -86,7 +89,11 @@ async def db() -> AsyncIterator[AsyncSession]:
 
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
-        session.add(Settings(id=1))
+        session.add(User(id=FOUNDER_USER_ID, is_founder=True, onboarding_completed=True))
+        await session.flush()
+        # Let Postgres advance the sequence. Supplying id=1 explicitly makes the
+        # next public user's settings row collide even after RESTART IDENTITY.
+        session.add(Settings(user_id=FOUNDER_USER_ID))
         await session.commit()
         yield session
 
@@ -105,6 +112,7 @@ async def client(db: AsyncSession) -> AsyncIterator[AsyncClient]:
 def make_card(**overrides) -> Card:
     defaults = dict(
         id=uuid.uuid4(),
+        user_id=FOUNDER_USER_ID,
         topic="Consistent hashing",
         category="Core Concept",
         delivery_mode="conversational",
@@ -212,14 +220,30 @@ def import_payload(**overrides):
             },
         ],
         "weeks": [
-            {"index": 1, "phase_index": 1, "full_title": "The request path",
-             "overview_title": "Request path"},
-            {"index": 2, "phase_index": 1, "full_title": "Storage engines",
-             "overview_title": "Storage engines"},
-            {"index": 3, "phase_index": 2, "full_title": "Relational and NoSQL",
-             "overview_title": "Databases"},
-            {"index": 4, "phase_index": 2, "full_title": "Caching and sharding",
-             "overview_title": "Caching"},
+            {
+                "index": 1,
+                "phase_index": 1,
+                "full_title": "The request path",
+                "overview_title": "Request path",
+            },
+            {
+                "index": 2,
+                "phase_index": 1,
+                "full_title": "Storage engines",
+                "overview_title": "Storage engines",
+            },
+            {
+                "index": 3,
+                "phase_index": 2,
+                "full_title": "Relational and NoSQL",
+                "overview_title": "Databases",
+            },
+            {
+                "index": 4,
+                "phase_index": 2,
+                "full_title": "Caching and sharding",
+                "overview_title": "Caching",
+            },
         ],
         "items": [
             _item("L1", 1, 1),

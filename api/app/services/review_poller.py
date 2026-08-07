@@ -115,9 +115,7 @@ async def run_review_poller(
             logger.exception("trigger-review poll failed")
         else:
             if result.get("reason") == "no_devices":
-                logger.error(
-                    "trigger-review poll found no registered device or APNs credentials"
-                )
+                logger.error("trigger-review poll found no registered device or APNs credentials")
             else:
                 logger.info(
                     "trigger-review poll sent=%s reason=%s card_id=%s due_count=%s",

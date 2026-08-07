@@ -316,10 +316,7 @@ def test_a_wrong_offset_is_recomputed_from_the_excerpt():
     assert stored["source_start"] == 0
     # The invariant that matters: the stored span and the stored quote are the
     # same piece of the guide, so "jump to source" lands on what was shown.
-    assert (
-        GUIDE[stored["source_start"] : stored["source_end"]].strip()
-        == stored["source_excerpt"]
-    )
+    assert GUIDE[stored["source_start"] : stored["source_end"]].strip() == stored["source_excerpt"]
     assert check(result, "coverage").status == CHECK_OK
 
 
@@ -331,10 +328,7 @@ def test_an_offset_past_the_end_of_the_guide_is_recovered_too():
 
     stored = next(i for i in result.preview["items"] if i["key"] == "L1")
     assert stored["source_start"] == 0
-    assert (
-        GUIDE[stored["source_start"] : stored["source_end"]].strip()
-        == stored["source_excerpt"]
-    )
+    assert GUIDE[stored["source_start"] : stored["source_end"]].strip() == stored["source_excerpt"]
 
 
 def test_an_excerpt_that_appears_nowhere_in_the_guide_is_a_real_failure():

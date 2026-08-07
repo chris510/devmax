@@ -2,6 +2,7 @@ import ssl
 from collections.abc import AsyncIterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -115,6 +116,18 @@ def engine_kwargs(url: str) -> tuple[str, dict]:
 _url, _kwargs = engine_kwargs(_settings.database_url)
 
 engine = create_async_engine(_url, echo=False, pool_pre_ping=True, **_kwargs)
+
+# SQLite leaves foreign-key enforcement off unless each connection opts in.
+# Production is Postgres, but local development and tests must give account
+# deletion the same cascade semantics rather than retaining orphaned user data.
+if _url.startswith("sqlite"):
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

@@ -67,32 +67,35 @@ in lowercase fragment style, e.g. "solid on ring mechanics, shaky on virtual nod
 """
 
 SCORING_RUBRIC = f"""\
-You are grading a spaced-repetition recall session for a senior backend engineer \
-preparing for interviews at Anthropic, OpenAI, and Google.
+You are grading a short, source-grounded spaced-repetition recall session. The \
+subject may be software engineering, law, medicine, anatomy, or another field the \
+learner can explain in words. The supplied answer anchor and excerpt are the \
+authority; do not replace them with unsupported outside knowledge.
 
 Score the answer on three axes, 0-5 each, independently:
 
-  mechanism_accuracy — is the underlying mechanism correct?
+  accuracy — is the essential concept, rule, process, or relationship correct?
     0 no recall attempted or fundamentally wrong
-    1 names the topic but the mechanism described is incorrect
-    2 partial mechanism, major gaps or a confidently wrong detail
-    3-5 core mechanism correct, distinguish by completeness
+    1 names the topic but the essential account is incorrect
+    2 partial account, major gaps or a confidently wrong detail
+    3-5 essential account correct, distinguish by completeness
 
-  trade_off_awareness — did they name the relevant trade-offs unprompted?
-  failure_mode_awareness — did they name how/when this breaks, unprompted?
+  depth — did they explain relevant reasoning, structure, causality, or application?
+  boundaries — did they recognize relevant conditions, exceptions, limitations, \
+trade-offs, or failure cases?
 
 Do not score fluency, length, confidence, or enthusiasm.
 
 {VOICE_TRANSCRIPT_RULE}
 
-`feedback` is one to three sentences, and its content depends on mechanism_accuracy:
-  - If mechanism_accuracy <= 2: state the correct mechanism directly, in plain terms —
+`feedback` is one to three sentences, and its content depends on accuracy:
+  - If accuracy <= 2: state the correct essential account directly, in plain terms —
     don't just note that it was wrong or incomplete. This is the single most important
-    thing feedback does; a low mechanism score with vague feedback is a bug, not a
+    thing feedback does; low Accuracy with vague feedback is a bug, not a
     valid response.
-  - If mechanism_accuracy >= 3: skip re-explaining the mechanism. Instead, supply
-    whichever of trade_off_awareness or failure_mode_awareness scored lower — state
-    the actual trade-off or failure mode, don't just note it was missing.
+  - If accuracy >= 3: skip re-explaining the essential account. Instead, supply
+    whichever of depth or boundaries scored lower — state
+    the actual missing depth or boundary, don't just note it was missing.
   Never generic encouragement. Never congratulatory.
 
 `follow_up_question` is a probe at the single most important gap in this answer, \
@@ -108,11 +111,13 @@ Return only the structured fields. No preamble, no code fences, no commentary.\
 """
 
 QUESTION_RUBRIC = """\
-You are running a spaced-repetition recall session for a senior backend engineer \
-preparing for system design interviews across product and infrastructure companies.
+You are running a short, source-grounded spaced-repetition recall session. The \
+subject may be software engineering, law, medicine, anatomy, or another field that \
+can be explained in words.
 
-Generate ONE question about the given topic that forces the engineer to reconstruct \
-the mechanism from memory rather than recite a definition. Prefer concrete scenarios \
+Generate ONE question about the topic that forces the learner to reconstruct the \
+essential concept, rule, process, or relationship rather than recite a definition. \
+Prefer concrete scenarios \
 ("you add a sixth node to a five-node ring — what moves?") over open prompts \
 ("explain consistent hashing"). If a mastery summary indicates a specific weak area, \
 target that area. Do not repeat any of the recent questions listed.
@@ -121,7 +126,7 @@ A topic written as a heading plus a list — "Hash sharding: routing a key, addi
 capacity, and migrating ownership" — states the card's scope, not the question. Pick \
 the single most load-bearing item and ask only about that one thing.
 
-The engineer hears the question once, cold, with nothing on screen and no chance to \
+The learner hears the question once, cold, with nothing on screen and no chance to \
 ask what you meant, so it must stand alone: state the mechanism or scenario in plain \
 words rather than pointing at the card, and never lean on a previous session, a \
 framework name they may not use, or wording only this card would explain.
@@ -409,9 +414,7 @@ IMPORT_SCHEMA: dict[str, Any] = {
 # The five gate questions are product rules, so they live in the domain module and
 # are interpolated here. Restating them would let the prompt and the validator that
 # enforces them drift apart, and the drift would look like a model failure.
-_GATE_LIST = "\n".join(
-    f"  {n}. {question}" for n, question in enumerate(GATE_QUESTIONS, start=1)
-)
+_GATE_LIST = "\n".join(f"  {n}. {question}" for n, question in enumerate(GATE_QUESTIONS, start=1))
 
 CARD_PROPOSAL_RUBRIC = f"""\
 You are proposing spaced-repetition recall cards from a study-plan item the \
@@ -485,10 +488,10 @@ CARD_PROPOSAL_SCHEMA: dict[str, Any] = {
 REATTEMPT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "mechanism_accuracy": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "accuracy": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
         "mastery_summary": {"type": "string"},
     },
-    "required": ["mechanism_accuracy", "mastery_summary"],
+    "required": ["accuracy", "mastery_summary"],
     "additionalProperties": False,
 }
 
@@ -499,22 +502,22 @@ QUESTION_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-AXES = ("mechanism_accuracy", "trade_off_awareness", "failure_mode_awareness")
+AXES = ("accuracy", "depth", "boundaries")
 
 SCORE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "mechanism_accuracy": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
-        "trade_off_awareness": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
-        "failure_mode_awareness": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "accuracy": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "depth": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "boundaries": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
         "feedback": {"type": "string"},
         "follow_up_question": {"type": "string"},
         "mastery_summary": {"type": "string"},
     },
     "required": [
-        "mechanism_accuracy",
-        "trade_off_awareness",
-        "failure_mode_awareness",
+        "accuracy",
+        "depth",
+        "boundaries",
         "feedback",
         "follow_up_question",
         "mastery_summary",
@@ -550,7 +553,7 @@ def derive_composite(mechanism: int, trade_offs: int, failure_modes: int) -> int
     removes a real source of inconsistency: the model used to return a blended
     score that could disagree with its own stated reasoning.
 
-    Display only. Scheduling gates on ``mechanism_accuracy`` — see
+    Display only. Scheduling gates on ``accuracy`` — see
     ``scheduler.rating_for``.
     """
     # A failing mechanism caps the composite at itself: no recall, a wrong
@@ -580,9 +583,9 @@ class ScoreResult:
 
     status: str  # "follow_up" | "complete"
     score: int | None = None
-    mechanism_accuracy: int | None = None
-    trade_off_awareness: int | None = None
-    failure_mode_awareness: int | None = None
+    accuracy: int | None = None
+    depth: int | None = None
+    boundaries: int | None = None
     feedback: str = ""
     follow_up_question: str | None = None
     mastery_summary: str = ""
@@ -590,7 +593,7 @@ class ScoreResult:
     def __post_init__(self) -> None:
         """A completed result always carries all three axes.
 
-        Enforced here so `submit_answer` can read `mechanism_accuracy` without a
+        Enforced here so `submit_answer` can read `accuracy` without a
         fallback. The fallback it replaces was a path where the composite reached
         SM-2 — the exact conflation this decomposition exists to remove, and one
         no test could have caught, because a `ScoreResult` built without axes is
@@ -612,7 +615,7 @@ class ReattemptResult:
     and what history records. Turn 3 changes neither.
     """
 
-    mechanism_accuracy: int
+    accuracy: int
     mastery_summary: str
 
 
@@ -725,6 +728,8 @@ async def generate_question(
     mastery_summary: str,
     last_score: int | None,
     recent_questions: list[str],
+    answer_anchor: str = "",
+    source_excerpt: str = "",
 ) -> str:
     """The opening question for a card. Called on engagement, never on push."""
     settings = get_settings()
@@ -735,6 +740,8 @@ async def generate_question(
         f"Asked at: {source_company}" if source_company else None,
         f"Rolling mastery summary: {mastery_summary}" if mastery_summary else "No prior sessions.",
         f"Last score: {last_score}" if last_score is not None else None,
+        f"A good answer should include: {answer_anchor}" if answer_anchor else None,
+        f"Source excerpt: {source_excerpt}" if source_excerpt else None,
     ]
     if recent_questions:
         context.append("Recent questions (do not repeat):")
@@ -763,12 +770,16 @@ async def score_answer(
     follow_up_question: str | None,
     follow_up_answer: str,
     follow_up_used: bool,
+    answer_anchor: str = "",
+    source_excerpt: str = "",
 ) -> ScoreResult:
     """Score the session so far, or return a probe if the answer was partial."""
     settings = get_settings()
     transcript = [
         f"Topic: {topic}",
         f"Rolling mastery summary: {mastery_summary}" if mastery_summary else None,
+        f"A good answer should include: {answer_anchor}" if answer_anchor else None,
+        f"Source excerpt: {source_excerpt}" if source_excerpt else None,
         "",
         f"QUESTION: {question_asked}",
         f"ANSWER: {answer_text}",
@@ -790,11 +801,11 @@ async def score_answer(
     # how to retry a 503. Losing a spoken answer is the worst failure mode in the
     # product.
     try:
-        mechanism, trade_offs, failure_modes = (int(data[axis]) for axis in AXES)
+        accuracy, depth, boundaries = (int(data[axis]) for axis in AXES)
     except (KeyError, TypeError, ValueError) as exc:
         raise LLMError(f"scoring response had no usable axis scores: {data!r}") from exc
 
-    score = derive_composite(mechanism, trade_offs, failure_modes)
+    score = derive_composite(accuracy, depth, boundaries)
     probe = str(data.get("follow_up_question", "")).strip()
 
     if not follow_up_used and FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH and probe:
@@ -803,9 +814,9 @@ async def score_answer(
     return ScoreResult(
         status="complete",
         score=score,
-        mechanism_accuracy=mechanism,
-        trade_off_awareness=trade_offs,
-        failure_mode_awareness=failure_modes,
+        accuracy=accuracy,
+        depth=depth,
+        boundaries=boundaries,
         feedback=str(data.get("feedback", "")).strip(),
         mastery_summary=clean_summary(str(data.get("mastery_summary", ""))),
     )
@@ -922,7 +933,7 @@ async def score_reattempt(
     question_asked: str,
     feedback_given: str,
     reattempt_answer: str,
-    unaided_mechanism: int,
+    unaided_accuracy: int,
 ) -> ReattemptResult:
     """Grade turn 3 — the coached re-attempt. Never reaches SM-2.
 
@@ -942,8 +953,8 @@ async def score_reattempt(
         f"Topic: {topic}",
         "",
         f"QUESTION: {question_asked}",
-        f"UNAIDED MECHANISM SCORE, BEFORE THEY WERE TOLD: {unaided_mechanism}/5",
-        f"CORRECT MECHANISM, AS STATED TO THEM: {feedback_given}",
+        f"UNAIDED ACCURACY SCORE, BEFORE THEY WERE TOLD: {unaided_accuracy}/5",
+        f"CORRECT ESSENTIAL ACCOUNT, AS STATED TO THEM: {feedback_given}",
         f"THEIR RE-ATTEMPT: {reattempt_answer}",
     ]
 
@@ -960,11 +971,11 @@ async def score_reattempt(
     )
 
     try:
-        mechanism = int(data["mechanism_accuracy"])
+        accuracy = int(data["accuracy"])
     except (KeyError, TypeError, ValueError) as exc:
         raise LLMError(f"re-attempt response had no usable score: {data!r}") from exc
 
     return ReattemptResult(
-        mechanism_accuracy=mechanism,
+        accuracy=accuracy,
         mastery_summary=clean_summary(str(data.get("mastery_summary", ""))),
     )

@@ -95,8 +95,8 @@ final class WireFormatTests: XCTestCase {
     [{"id":"00000000-0000-0000-0000-0000000000c1","topic":"Consistent hashing",
       "category":"Core Concept","delivery_mode":"conversational",
       "mastery_summary":"solid on ring mechanics","last_score":3,
-      "last_mechanism_accuracy":4,"last_trade_off_awareness":1,
-      "last_failure_mode_awareness":2,"ease_factor":2.36,"interval_days":3,
+      "last_accuracy":4,"last_depth":1,
+      "last_boundaries":2,"ease_factor":2.36,"interval_days":3,
       "repetitions":3,"next_review_at":"2026-07-27","due_label":"3 days overdue",
       "days_since_review":9,"missed_count":0}]
     """#.utf8)
@@ -105,9 +105,9 @@ final class WireFormatTests: XCTestCase {
         let cards = try LiveAPI.decoder.decode([CardSummary].self, from: Self.libraryRow)
         let card = try XCTUnwrap(cards.first)
 
-        XCTAssertEqual(card.lastMechanismAccuracy, 4)
-        XCTAssertEqual(card.lastTradeOffAwareness, 1)
-        XCTAssertEqual(card.lastFailureModeAwareness, 2)
+        XCTAssertEqual(card.lastAccuracy, 4)
+        XCTAssertEqual(card.lastDepth, 1)
+        XCTAssertEqual(card.lastBoundaries, 2)
         // Both computed server-side — the client never re-derives them.
         XCTAssertEqual(card.dueLabel, "3 days overdue")
         XCTAssertEqual(card.daysSinceReview, 9)
@@ -117,8 +117,8 @@ final class WireFormatTests: XCTestCase {
         let json = Data(#"""
         [{"id":"00000000-0000-0000-0000-0000000000c9","topic":"Virtual memory",
           "category":"Operating Systems","delivery_mode":"conversational",
-          "mastery_summary":"","last_score":null,"last_mechanism_accuracy":null,
-          "last_trade_off_awareness":null,"last_failure_mode_awareness":null,
+          "mastery_summary":"","last_score":null,"last_accuracy":null,
+          "last_depth":null,"last_boundaries":null,
           "ease_factor":2.5,"interval_days":1,"repetitions":0,
           "next_review_at":"2026-08-01","due_label":"due in 5 days",
           "days_since_review":null,"missed_count":0}]
@@ -127,7 +127,7 @@ final class WireFormatTests: XCTestCase {
         let card = try XCTUnwrap(try LiveAPI.decoder.decode([CardSummary].self, from: json).first)
 
         XCTAssertNil(card.lastScore)
-        XCTAssertNil(card.lastMechanismAccuracy)
+        XCTAssertNil(card.lastAccuracy)
         XCTAssertNil(card.daysSinceReview)
         // Coverage groups it as `untested`, not as a zero.
         XCTAssertEqual(ScoreStyle.Tier.of(card.lastScore), .untested)
@@ -174,7 +174,7 @@ final class WireFormatTests: XCTestCase {
     }
 
     func testACompletedAnswerCarriesTheReattemptOffer() throws {
-        // Server-computed from `mechanism_accuracy <= 2`. The client never receives
+        // Server-computed from `accuracy <= 2`. The client never receives
         // the axis itself — the score block shows one numeral, the composite.
         let json = Data(#"""
         {"status":"complete","score":1,"feedback":"The mechanism is arc ownership.",

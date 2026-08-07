@@ -245,16 +245,13 @@ def _with_extra_weeks(
         ]
         return appended, None
 
-    boundary = max(
-        (w.index for w in weeks if w.phase_index == insert_after_phase), default=None
-    )
+    boundary = max((w.index for w in weeks if w.phase_index == insert_after_phase), default=None)
     if boundary is None:
         return list(weeks), None
 
     result = [w for w in weeks if w.index <= boundary]
     result += [
-        SchedWeek(index=boundary + n, phase_index=insert_after_phase)
-        for n in range(1, extra + 1)
+        SchedWeek(index=boundary + n, phase_index=insert_after_phase) for n in range(1, extra + 1)
     ]
     result += [
         SchedWeek(
@@ -373,8 +370,9 @@ def build_proposal(
             phase_ceiling[w.phase_index] = w.index
 
     scheduled = [
-        i for i in items if i.status != ITEM_REMOVED and i.id not in deferred
-        and i.status != ITEM_DEFERRED
+        i
+        for i in items
+        if i.status != ITEM_REMOVED and i.id not in deferred and i.status != ITEM_DEFERRED
     ]
     by_id = {i.id: i for i in scheduled}
     before_minutes = {idx: 0 for idx in week_order}
@@ -404,9 +402,7 @@ def build_proposal(
             load[idx] += item.estimate_minutes
             room -= item.estimate_minutes
 
-        for item in sorted(
-            (i for i in residents[idx] if i.status != ITEM_COMPLETE), key=_sort_key
-        ):
+        for item in sorted((i for i in residents[idx] if i.status != ITEM_COMPLETE), key=_sort_key):
             if item.estimate_minutes <= room:
                 placements[item.id] = idx
                 load[idx] += item.estimate_minutes
@@ -458,11 +454,7 @@ def build_proposal(
             ceiling = ceiling_for(item)
             eligible = [idx for idx in week_order if floor <= idx <= ceiling]
             target = next(
-                (
-                    idx
-                    for idx in eligible
-                    if capacity[idx] - load[idx] >= item.estimate_minutes
-                ),
+                (idx for idx in eligible if capacity[idx] - load[idx] >= item.estimate_minutes),
                 None,
             )
             if target is None:

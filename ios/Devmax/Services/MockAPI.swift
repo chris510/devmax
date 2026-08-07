@@ -146,7 +146,7 @@ actor MockAPI: DevmaxAPI {
     /// Every card's axis triple derives to its own `lastScore` under the backend's
     /// `derive_composite`, so the fixture can't drift into a state the server
     /// could never produce. Their means are the rollup line in `coverage.png`:
-    /// `MECHANISM 2.7 · TRADE-OFFS 1.4 · FAILURE MODES 2.3`.
+    /// `ACCURACY 2.7 · DEPTH 1.4 · BOUNDARIES 2.3`.
     func cards(sort: String, mode: String) async throws -> [CardSummary] {
         try await Task.sleep(nanoseconds: 350_000_000)
         if await MainActor.run(body: { DebugFlags.shared.loadState == .error }) {
@@ -211,9 +211,9 @@ actor MockAPI: DevmaxAPI {
         CardSummary(
             id: id, topic: topic, category: category, deliveryMode: "conversational",
             masterySummary: mastery, lastScore: score,
-            lastMechanismAccuracy: axes?.0,
-            lastTradeOffAwareness: axes?.1,
-            lastFailureModeAwareness: axes?.2,
+            lastAccuracy: axes?.0,
+            lastDepth: axes?.1,
+            lastBoundaries: axes?.2,
             easeFactor: 2.5, intervalDays: 7, repetitions: score == nil ? 0 : 2,
             nextReviewAt: "2026-07-25", dueLabel: due, daysSinceReview: ago, missedCount: missed
         )
@@ -365,7 +365,7 @@ actor MockAPI: DevmaxAPI {
             nextReviewAt: "2026-07-27",
             intervalDays: 3,
             practice: sessionIsPractice,
-            // The server derives this from `mechanism_accuracy <= 2`. A composite of
+            // The server derives this from `accuracy <= 2`. A composite of
             // 2 or less means exactly that (`derive_composite` caps at the mechanism
             // when it fails), so the mock can key off the score it already has.
             reattemptOffered: score <= 2,

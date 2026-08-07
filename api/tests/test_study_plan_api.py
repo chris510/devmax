@@ -130,17 +130,13 @@ async def test_retrying_a_failed_import_reuses_the_stored_guide(client, stub_imp
     draft_id = first.json()["draft_id"]
 
     stub_import.error = None
-    retried = await client.post(
-        f"/study-plans/preview/{draft_id}/retry", headers=API_HEADERS
-    )
+    retried = await client.post(f"/study-plans/preview/{draft_id}/retry", headers=API_HEADERS)
     assert retried.status_code == 200
     assert retried.json()["status"] == "ready"
     assert retried.json()["can_create"]
 
 
-async def test_an_import_that_needs_review_blocks_creation_until_resolved(
-    client, stub_import
-):
+async def test_an_import_that_needs_review_blocks_creation_until_resolved(client, stub_import):
     stub_import.response = import_payload(
         possible_omissions=[{"note": "A behavioral section", "source_excerpt": "..."}]
     )
@@ -157,9 +153,7 @@ async def test_an_import_that_needs_review_blocks_creation_until_resolved(
     draft_id = preview.json()["draft_id"]
     assert not preview.json()["can_create"]
 
-    blocked = await client.post(
-        "/study-plans", json={"draft_id": draft_id}, headers=API_HEADERS
-    )
+    blocked = await client.post("/study-plans", json={"draft_id": draft_id}, headers=API_HEADERS)
     assert blocked.status_code == 409
 
     resolved = await client.patch(
@@ -169,15 +163,11 @@ async def test_an_import_that_needs_review_blocks_creation_until_resolved(
     )
     assert resolved.json()["can_create"]
 
-    created = await client.post(
-        "/study-plans", json={"draft_id": draft_id}, headers=API_HEADERS
-    )
+    created = await client.post("/study-plans", json={"draft_id": draft_id}, headers=API_HEADERS)
     assert created.status_code == 201
 
 
-async def test_editing_an_estimate_in_the_preview_survives_revalidation(
-    client, stub_import
-):
+async def test_editing_an_estimate_in_the_preview_survives_revalidation(client, stub_import):
     stub_import.response = import_payload()
     stub_import.response["items"][0]["estimate_confidence"] = "needs_review"
     preview = await client.post(
@@ -254,9 +244,7 @@ async def test_at_most_one_plan_is_active_and_zero_is_valid(client, stub_import,
     assert next(p.status for p in plans if str(p.id) == first["id"]) == "paused"
     assert next(p.status for p in plans if str(p.id) == second["id"]) == "active"
 
-    paused = await client.post(
-        f"/study-plans/{second['id']}/pause", headers=API_HEADERS
-    )
+    paused = await client.post(f"/study-plans/{second['id']}/pause", headers=API_HEADERS)
     assert paused.status_code == 200
     summary = await client.get("/study-plans/active/summary", headers=API_HEADERS)
     assert summary.json() == {
@@ -295,9 +283,7 @@ async def test_the_database_refuses_a_second_active_plan(client, stub_import, db
 
 async def test_completed_is_not_archived(client, stub_import):
     plan = await make_plan(client)
-    completed = await client.post(
-        f"/study-plans/{plan['id']}/complete", headers=API_HEADERS
-    )
+    completed = await client.post(f"/study-plans/{plan['id']}/complete", headers=API_HEADERS)
     assert completed.json()["status"] == "completed"
 
     listed = (await client.get("/study-plans", headers=API_HEADERS)).json()
@@ -314,9 +300,7 @@ async def test_duplicating_copies_structure_and_resets_progress(client, stub_imp
     plan = await make_plan(client)
     week = (await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)).json()
     item_id = week["sections"][0]["rows"][0]["id"]
-    await client.post(
-        f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS
-    )
+    await client.post(f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS)
 
     copy = await client.post(f"/study-plans/{plan['id']}/duplicate", headers=API_HEADERS)
     assert copy.status_code == 201
@@ -326,9 +310,7 @@ async def test_duplicating_copies_structure_and_resets_progress(client, stub_imp
     assert body["week_total"] == 4
 
     copied_items = (
-        await db.exec(
-            select(StudyPlanItem).where(StudyPlanItem.plan_id == uuid.UUID(body["id"]))
-        )
+        await db.exec(select(StudyPlanItem).where(StudyPlanItem.plan_id == uuid.UUID(body["id"])))
     ).all()
     assert len(copied_items) == 5
     assert all(i.status == "pending" for i in copied_items)
@@ -344,9 +326,7 @@ async def test_duplicating_copies_structure_and_resets_progress(client, stub_imp
 
 async def test_a_duplicate_is_not_active_until_it_is_made_active(client, stub_import):
     plan = await make_plan(client)
-    copy = (
-        await client.post(f"/study-plans/{plan['id']}/duplicate", headers=API_HEADERS)
-    ).json()
+    copy = (await client.post(f"/study-plans/{plan['id']}/duplicate", headers=API_HEADERS)).json()
 
     activated = await client.post(
         f"/study-plans/{copy['id']}/activate",
@@ -356,9 +336,7 @@ async def test_a_duplicate_is_not_active_until_it_is_made_active(client, stub_im
     assert activated.status_code == 200
     assert activated.json()["status"] == "active"
 
-    original = (
-        await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)
-    ).json()
+    original = (await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)).json()
     assert original["status"] == "paused"
 
 
@@ -367,9 +345,7 @@ async def test_a_duplicate_is_not_active_until_it_is_made_active(client, stub_im
 
 async def test_the_today_summary_is_one_line_of_position(client, stub_import):
     plan = await make_plan(client)
-    summary = (
-        await client.get("/study-plans/active/summary", headers=API_HEADERS)
-    ).json()
+    summary = (await client.get("/study-plans/active/summary", headers=API_HEADERS)).json()
     assert summary["active"] is True
     assert summary["plan_id"] == plan["id"]
     assert summary["week_index"] == 1
@@ -397,9 +373,7 @@ async def test_the_today_summary_names_the_next_study_block(client, stub_import)
         json={"study_block_weekday": 2, "study_block_minute_of_day": 1140},
         headers=API_HEADERS,
     )
-    summary = (
-        await client.get("/study-plans/active/summary", headers=API_HEADERS)
-    ).json()
+    summary = (await client.get("/study-plans/active/summary", headers=API_HEADERS)).json()
     assert summary["next_block_label"] == "Tue 19:00"
 
 
@@ -485,9 +459,7 @@ async def test_a_capacity_change_that_displaces_work_writes_nothing(client, stub
     assert (await db.exec(select(StudyPlan))).one().revision == before
 
 
-async def test_a_capacity_change_that_moves_nothing_applies_immediately(
-    client, stub_import
-):
+async def test_a_capacity_change_that_moves_nothing_applies_immediately(client, stub_import):
     plan = await make_plan(client)
     response = await client.patch(
         f"/study-plans/{plan['id']}/weeks/1/capacity",
@@ -505,9 +477,7 @@ async def test_a_capacity_change_that_moves_nothing_applies_immediately(
     assert week["capacity_minutes"] == 600
 
 
-async def test_a_stale_proposal_is_a_conflict_and_must_be_regenerated(
-    client, stub_import
-):
+async def test_a_stale_proposal_is_a_conflict_and_must_be_regenerated(client, stub_import):
     plan = await make_plan(client)
     stale = plan["revision"] - 1
     response = await client.post(
@@ -648,15 +618,11 @@ async def test_an_estimate_off_the_thirty_minute_grid_is_rejected(client, stub_i
 async def _complete_first_item(client, plan) -> str:
     week = (await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)).json()
     item_id = week["sections"][0]["rows"][0]["id"]
-    await client.post(
-        f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS
-    )
+    await client.post(f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS)
     return item_id
 
 
-async def test_cards_are_only_proposed_after_the_item_is_complete(
-    client, stub_import, stub_cards
-):
+async def test_cards_are_only_proposed_after_the_item_is_complete(client, stub_import, stub_cards):
     plan = await make_plan(client)
     week = (await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)).json()
     item_id = week["sections"][0]["rows"][0]["id"]
@@ -668,9 +634,7 @@ async def test_cards_are_only_proposed_after_the_item_is_complete(
     assert stub_cards.calls == 0
 
 
-async def test_an_unsupported_subject_never_reaches_the_card_model(
-    client, stub_import, stub_cards
-):
+async def test_an_unsupported_subject_never_reaches_the_card_model(client, stub_import, stub_cards):
     stub_import.response = import_payload(
         subject="Human anatomy",
         subject_slug="anatomy",
@@ -724,9 +688,7 @@ async def test_a_candidate_that_fails_the_gate_is_not_suggested_and_not_counted(
     assert "definition" in failed["failed_reason"]
 
 
-async def test_a_missing_gate_answer_counts_as_a_failure(
-    client, stub_import, stub_cards
-):
+async def test_a_missing_gate_answer_counts_as_a_failure(client, stub_import, stub_cards):
     stub_cards.candidates = [
         {
             "topic": "Partial gate",
@@ -747,9 +709,7 @@ async def test_a_missing_gate_answer_counts_as_a_failure(
     assert body["proposals"][0]["disposition"] == "not_suggested"
 
 
-async def test_an_exact_normalized_duplicate_is_never_proposed(
-    client, stub_import, stub_cards, db
-):
+async def test_an_exact_normalized_duplicate_is_never_proposed(client, stub_import, stub_cards, db):
     db.add(make_card(topic="Postgres  Write-Path!"))
     await db.commit()
 
@@ -851,9 +811,7 @@ async def test_a_retry_after_commit_returns_the_original_response(
     assert len((await db.exec(select(Card))).all()) == 1
 
 
-async def test_the_same_key_with_a_different_request_is_a_conflict(
-    client, stub_import, stub_cards
-):
+async def test_the_same_key_with_a_different_request_is_a_conflict(client, stub_import, stub_cards):
     plan = await make_plan(client)
     proposal = await _one_suggested(client, stub_cards, plan)
     key = "key-alpha-0003"
@@ -881,9 +839,7 @@ async def test_the_same_key_with_a_different_request_is_a_conflict(
     assert "different request" in conflict.json()["detail"]
 
 
-async def test_a_retry_after_a_rollback_may_safely_run_again(
-    client, stub_import, stub_cards, db
-):
+async def test_a_retry_after_a_rollback_may_safely_run_again(client, stub_import, stub_cards, db):
     """A processing record with no cards behind it must not block the retry."""
     plan = await make_plan(client)
     proposal = await _one_suggested(client, stub_cards, plan)
@@ -990,9 +946,7 @@ async def test_a_failed_candidate_cannot_be_accepted(client, stub_import, stub_c
     assert "not selectable" in response.json()["detail"]
 
 
-async def test_resolving_a_possible_overlap_is_the_users_call(
-    client, stub_import, stub_cards, db
-):
+async def test_resolving_a_possible_overlap_is_the_users_call(client, stub_import, stub_cards, db):
     plan = await make_plan(client)
     proposal = await _one_suggested(client, stub_cards, plan)
 

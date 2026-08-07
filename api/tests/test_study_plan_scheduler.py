@@ -320,9 +320,7 @@ def test_retrieval_is_never_placed_before_the_item_it_retrieves(override_proposa
 
 
 def test_hard_dependency_order_holds_through_the_replan(override_proposal):
-    assert (
-        override_proposal.placements["L4-02"] <= override_proposal.placements["L4-03"]
-    )
+    assert override_proposal.placements["L4-02"] <= override_proposal.placements["L4-03"]
 
 
 # --- the unresolved variant (V3.4 §3, STATE 6) ------------------------------
@@ -392,9 +390,7 @@ def test_phase_order_is_a_ceiling_as_well_as_a_floor():
     items = [
         i for i in canonical_items(week5=720, week6=720) if not i.id.startswith(("W7", "W8", "W9"))
     ]
-    proposal = build_proposal(
-        _plan(), _weeks(), items, DEPENDENCIES, capacity_overrides={4: 420}
-    )
+    proposal = build_proposal(_plan(), _weeks(), items, DEPENDENCIES, capacity_overrides={4: 420})
     # Weeks 7-9 are completely empty, and phase 2's work still does not go there.
     for move in proposal.moves:
         assert move.to_week <= 6, move
@@ -455,8 +451,7 @@ def test_reopening_an_item_that_still_fits_moves_nothing():
     """Reopen changes plan progress; it does not by itself move a date."""
     items = canonical_items()
     reopened = [
-        SchedItem(**{**i.__dict__, "status": ITEM_PENDING}) if i.id == "L4-01" else i
-        for i in items
+        SchedItem(**{**i.__dict__, "status": ITEM_PENDING}) if i.id == "L4-01" else i for i in items
     ]
     proposal = build_proposal(
         _plan(), _weeks(), reopened, DEPENDENCIES, capacity_overrides={4: 420}
@@ -472,17 +467,18 @@ def test_reopening_a_core_item_can_evict_optional_work_and_need_a_replan():
     plan = _plan(default_weekly_capacity_minutes=120, current_week_index=1)
     weeks = [SchedWeek(index=i, phase_index=1) for i in (1, 2)]
     items = [
-        SchedItem("CORE", 1, 1, 1, estimate_minutes=60, priority=PRIORITY_CORE,
-                  status=ITEM_PENDING),
-        SchedItem("OPT", 1, 1, 2, estimate_minutes=60, priority=PRIORITY_OPTIONAL,
-                  status=ITEM_PENDING),
+        SchedItem(
+            "CORE", 1, 1, 1, estimate_minutes=60, priority=PRIORITY_CORE, status=ITEM_PENDING
+        ),
+        SchedItem(
+            "OPT", 1, 1, 2, estimate_minutes=60, priority=PRIORITY_OPTIONAL, status=ITEM_PENDING
+        ),
     ]
     settled = build_proposal(plan, weeks, items)
     assert settled.moves == ()
 
     reopened = items + [
-        SchedItem("DONE", 1, 1, 0, estimate_minutes=60, priority=PRIORITY_CORE,
-                  status=ITEM_PENDING)
+        SchedItem("DONE", 1, 1, 0, estimate_minutes=60, priority=PRIORITY_CORE, status=ITEM_PENDING)
     ]
     proposal = build_proposal(plan, weeks, reopened)
     assert proposal.placements["OPT"] == 2

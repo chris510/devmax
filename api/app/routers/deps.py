@@ -5,16 +5,18 @@ from fastapi import Depends
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth import current_user_id
 from app.db import get_session
 from app.models import Settings
 
 SessionDep = Depends(get_session)
 
 
-async def get_settings_row(db: AsyncSession) -> Settings:
-    row = (await db.exec(select(Settings).where(Settings.id == 1))).first()
-    if row is None:  # pragma: no cover — seeded by migration 0001
-        row = Settings(id=1)
+async def get_settings_row(db: AsyncSession, user_id=None) -> Settings:
+    owner = user_id or current_user_id()
+    row = (await db.exec(select(Settings).where(Settings.user_id == owner))).first()
+    if row is None:
+        row = Settings(user_id=owner)
         db.add(row)
         await db.commit()
     return row

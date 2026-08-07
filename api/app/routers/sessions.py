@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth import current_user_id
+from app.config import get_settings
 from app.db import get_session
 from app.models import (
     LIVE_STATUSES,
@@ -23,18 +25,18 @@ from app.schemas import (
     ReattemptOut,
     SessionStart,
 )
-from app.services import llm
+from app.services import llm, usage
 from app.services.scheduler import apply_sm2, quality_for
 
 router = APIRouter(tags=["sessions"])
 
 RECENT_QUESTION_LIMIT = 3
 
-# The mechanism band where the rubric states the correct answer outright, and so the
+# The accuracy band where the rubric states the correct answer outright, and so the
 # only band where there is anything to re-attempt. Same threshold the scheduler fails
-# on (`scheduler.MECHANISM_PASS`), but they are independent decisions — one is "was
+# on (`scheduler.ACCURACY_PASS`), but they are independent decisions — one is "was
 # this a retention failure", the other is "is coaching available". Do not collapse.
-REATTEMPT_MAX_MECHANISM = 2
+REATTEMPT_MAX_ACCURACY = 2
 
 # Turn 3 re-asks the card's own question rather than generating a new one: the
 # re-attempt is the same retrieval, now informed. Composed server-side and sent to
@@ -50,10 +52,7 @@ def _reattempt_eligible(session: Session) -> bool:
     the endpoint would 409 is unrepresentable — DEVIATIONS §15 shows this band does
     move, and it must move in both places at once.
     """
-    return (
-        session.mechanism_accuracy is not None
-        and session.mechanism_accuracy <= REATTEMPT_MAX_MECHANISM
-    )
+    return session.accuracy is not None and session.accuracy <= REATTEMPT_MAX_ACCURACY
 
 
 async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
@@ -62,6 +61,22 @@ async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
             select(Session)
             .where(Session.card_id == card_id, col(Session.status).in_(LIVE_STATUSES))
             .order_by(col(Session.started_at).desc())
+        )
+    ).first()
+
+
+async def _owned_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
+    return (
+        await db.exec(select(Card).where(Card.id == card_id, Card.user_id == current_user_id()))
+    ).first()
+
+
+async def _owned_session(db: AsyncSession, session_id: uuid.UUID) -> Session | None:
+    return (
+        await db.exec(
+            select(Session)
+            .join(Card, Card.id == Session.card_id)
+            .where(Session.id == session_id, Card.user_id == current_user_id())
         )
     ).first()
 
@@ -79,7 +94,7 @@ async def start_session(
     most once per card — after the first session the question is reused verbatim,
     so each review is the same retrieval rather than a fresh one.
     """
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -108,6 +123,7 @@ async def start_session(
             )
         ).all()
 
+        await usage.ensure_available(db, current_user_id(), "question", get_settings())
         question = await llm.generate_question(
             topic=card.topic,
             category=card.category,
@@ -116,7 +132,10 @@ async def start_session(
             mastery_summary=card.mastery_summary,
             last_score=card.last_score,
             recent_questions=list(recent),
+            answer_anchor=card.answer_anchor,
+            source_excerpt=card.source_excerpt,
         )
+        usage.record(db, current_user_id(), "question")
         # Persisted before it is returned, so the same question comes back next
         # time. Clearing this column by hand is the way to re-roll a bad one.
         card.canonical_question = question
@@ -148,7 +167,7 @@ async def save_draft(
     deliberately a single indexed UPDATE with no LLM call and no validation
     beyond existence.
     """
-    session = await db.get(Session, session_id)
+    session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     session.draft_text = body.draft_text
@@ -161,13 +180,13 @@ async def save_draft(
 async def submit_answer(
     session_id: uuid.UUID, body: AnswerIn, db: AsyncSession = Depends(get_session)
 ) -> FollowUpOut | CompleteOut:
-    session = await db.get(Session, session_id)
+    session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     if session.status == STATUS_COMPLETE:
         raise HTTPException(status_code=409, detail="session already complete")
 
-    card = await db.get(Card, session.card_id)
+    card = await _owned_card(db, session.card_id)
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -180,6 +199,7 @@ async def submit_answer(
 
     # Score before writing anything, so an LLM failure leaves the session and card
     # untouched rather than half-written. The answer is re-sent on retry.
+    await usage.ensure_available(db, current_user_id(), "score", get_settings())
     result = await llm.score_answer(
         topic=card.topic,
         mastery_summary=card.mastery_summary,
@@ -188,7 +208,10 @@ async def submit_answer(
         follow_up_question=session.follow_up_question,
         follow_up_answer=session.follow_up_answer,
         follow_up_used=session.follow_up_used,
+        answer_anchor=card.answer_anchor,
+        source_excerpt=card.source_excerpt,
     )
+    usage.record(db, current_user_id(), "score")
 
     if result.status == "follow_up":
         session.follow_up_question = result.follow_up_question
@@ -200,9 +223,9 @@ async def submit_answer(
 
     now = datetime.now(UTC)
     session.score = result.score
-    session.mechanism_accuracy = result.mechanism_accuracy
-    session.trade_off_awareness = result.trade_off_awareness
-    session.failure_mode_awareness = result.failure_mode_awareness
+    session.accuracy = result.accuracy
+    session.depth = result.depth
+    session.boundaries = result.boundaries
     session.feedback = result.feedback
     session.status = STATUS_COMPLETE
     session.ended_at = now
@@ -210,9 +233,9 @@ async def submit_answer(
     # Mastery signal, written for practice runs too — the score is real and the
     # card's history shows it. Only the schedule is held back below.
     card.last_score = result.score
-    card.last_mechanism_accuracy = result.mechanism_accuracy
-    card.last_trade_off_awareness = result.trade_off_awareness
-    card.last_failure_mode_awareness = result.failure_mode_awareness
+    card.last_accuracy = result.accuracy
+    card.last_depth = result.depth
+    card.last_boundaries = result.boundaries
     card.last_reviewed_at = now
     if result.mastery_summary:
         card.mastery_summary = result.mastery_summary
@@ -227,7 +250,7 @@ async def submit_answer(
             card.repetitions,
             # Gated on mechanism accuracy alone, from the FINAL session after any
             # follow-up. `ScoreResult` guarantees it is set on a complete result.
-            quality_for(result.mechanism_accuracy or 0),
+            quality_for(result.accuracy or 0),
             today,
         )
         card.ease_factor = ease
@@ -269,7 +292,7 @@ async def submit_reattempt(
     See docs/multi-turn-coaching-design.md §4. Nothing here is load-bearing on the
     LLM behaving: the write set below is the guarantee.
     """
-    session = await db.get(Session, session_id)
+    session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     # A re-attempt only exists after a scored, completed session. Any other status
@@ -286,7 +309,7 @@ async def submit_reattempt(
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="re-attempt text is empty")
 
-    card = await db.get(Card, session.card_id)
+    card = await _owned_card(db, session.card_id)
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -303,17 +326,19 @@ async def submit_reattempt(
     # leaves the row untouched and the client can retry. Unlike `submit_answer`,
     # nothing is at risk either way: the score is already banked and the schedule
     # already applied.
+    await usage.ensure_available(db, current_user_id(), "reattempt", get_settings())
     result = await llm.score_reattempt(
         topic=card.topic,
         question_asked=session.question_asked,
         feedback_given=session.feedback,
         reattempt_answer=body.text,
         # `_reattempt_eligible` guarantees this is set and <= 2.
-        unaided_mechanism=session.mechanism_accuracy or 0,
+        unaided_accuracy=session.accuracy or 0,
     )
+    usage.record(db, current_user_id(), "reattempt")
 
     session.reattempt_answer = body.text
-    session.reattempt_mechanism_accuracy = result.mechanism_accuracy
+    session.reattempt_accuracy = result.accuracy
     session.reattempt_used = True
     session.draft_text = ""
 

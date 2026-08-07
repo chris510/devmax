@@ -8,9 +8,7 @@ from app.config import get_settings
 log = logging.getLogger(__name__)
 
 
-async def send_push(
-    *, tokens: list[str], title: str, body: str, card_id: uuid.UUID
-) -> int:
+async def send_push(*, tokens: list[str], title: str, body: str, card_id: uuid.UUID) -> int:
     """Push one review notification to every registered device.
 
     The payload carries the card id so the client can deep-link straight into

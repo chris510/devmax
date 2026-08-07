@@ -1,5 +1,11 @@
 # Devmax — Backend Build Spec
 
+> **Public-app extension:** `docs/PUBLIC-APP-SPEC.md` is authoritative for
+> accounts, authentication, per-user ownership, onboarding, and guide ingestion.
+> The single-user statements and related out-of-scope bullets below describe the
+> original release and are superseded only in those areas. This file continues to
+> own review, scoring, scheduling, and the existing endpoints.
+
 Handoff spec for scaffolding the Devmax backend. Build exactly what's
 described here. Anything not specified is out of scope — see "Out of
 scope" at the bottom before adding anything.
@@ -13,9 +19,10 @@ or text, gets one follow-up probe if the answer was partial, then gets
 scored 0–5. The score drives an SM-2 schedule that decides when the topic
 comes back.
 
-This backend serves that iOS client and receives a cron webhook. There is
-exactly one user. Design accordingly: no multi-tenancy, no auth system, no
-horizontal scaling concerns.
+This backend serves that iOS client and receives a cron webhook. The original
+release had exactly one user. The public-app extension adds multi-user ownership
+and Sign in with Apple while preserving all scheduler and coaching behaviour
+described here.
 
 ---
 
@@ -87,7 +94,7 @@ LOG_LEVEL                default INFO
 
 ---
 
-## Auth
+## Legacy auth
 
 Two independent shared secrets, both checked in middleware:
 
@@ -95,8 +102,9 @@ Two independent shared secrets, both checked in middleware:
 - `/internal/*` endpoints require header `X-Cron-Secret: <CRON_SECRET>`
 
 Reject with 401 and no body detail on mismatch. Use
-`secrets.compare_digest` for the comparison. No JWT, no OAuth, no user
-table — this is deliberate, not an omission to be "improved."
+`secrets.compare_digest` for the comparison. The shared client key is now a
+migration-only founder compatibility path. New accounts use the bearer-token
+contract in `docs/PUBLIC-APP-SPEC.md`; cron auth remains unchanged.
 
 ---
 
@@ -652,12 +660,10 @@ file wins. Where either disagrees with `AGENTS.md`'s load-bearing invariants,
 
 ## Out of scope — do not build
 
-- User accounts, registration, login, JWT, OAuth, password reset
-- Multi-tenancy or any `user_id` columns
 - Admin dashboard or web UI of any kind
 - Streaks, XP, badges, or any gamification beyond `missed_count`
 - Email, analytics, or third-party telemetry
-- Rate limiting, CORS, or API versioning
+- CORS or API versioning
 - Speech-to-text — the iOS client transcribes on-device and sends text
 - Retry queues, background workers, or a task queue (Celery, RQ, etc.) —
   everything here is request-scoped

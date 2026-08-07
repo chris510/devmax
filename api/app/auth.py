@@ -1,14 +1,23 @@
 import secrets
+import uuid
+from collections.abc import AsyncIterator
+from contextvars import ContextVar
 
-from fastapi import Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import get_settings
+from app.db import get_session
+from app.models import FOUNDER_USER_ID
+from app.services.authentication import user_for_access_token
 
 # Health is the only unauthenticated route (the platform health check hits it).
-PUBLIC_PATHS = {"/health"}
+PUBLIC_PATHS = {"/health", "/auth/nonce", "/auth/apple", "/auth/refresh"}
 DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
+
+_current_user_id: ContextVar[uuid.UUID | None] = ContextVar("devmax_current_user_id", default=None)
 
 
 def _matches(header: str | None, expected: str) -> bool:
@@ -18,7 +27,7 @@ def _matches(header: str | None, expected: str) -> bool:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Two independent shared secrets. No JWT, no user table — deliberate."""
+    """Reject absent credentials before routing; resolve bearer tokens in a dependency."""
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -28,10 +37,50 @@ class AuthMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         if path.startswith("/internal/"):
             ok = _matches(request.headers.get("X-Cron-Secret"), settings.cron_secret)
-        else:
-            ok = _matches(request.headers.get("X-API-Key"), settings.api_key)
+            if not ok:
+                return JSONResponse(status_code=401, content={})
+            return await call_next(request)
+
+        # Migration-only compatibility. The key has exactly one meaning: founder.
+        if _matches(request.headers.get("X-API-Key"), settings.api_key):
+            request.state.user_id = FOUNDER_USER_ID
+            return await call_next(request)
+
+        scheme, _, value = request.headers.get("Authorization", "").partition(" ")
+        ok = scheme.lower() == "bearer" and bool(value.strip())
 
         if not ok:
             # No body detail on mismatch.
             return JSONResponse(status_code=401, content={})
         return await call_next(request)
+
+
+def bearer_token(request: Request) -> str | None:
+    scheme, _, value = request.headers.get("Authorization", "").partition(" ")
+    return value.strip() if scheme.lower() == "bearer" and value.strip() else None
+
+
+async def require_user(
+    request: Request, db: AsyncSession = Depends(get_session)
+) -> AsyncIterator[None]:
+    """Resolve one authenticated user and bind it to this async request context."""
+    user_id = getattr(request.state, "user_id", None)
+    if user_id is None:
+        token = bearer_token(request)
+        user_id = await user_for_access_token(db, token or "")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    request.state.user_id = user_id
+    reset = _current_user_id.set(user_id)
+    try:
+        yield
+    finally:
+        _current_user_id.reset(reset)
+
+
+def current_user_id() -> uuid.UUID:
+    user_id = _current_user_id.get()
+    if user_id is None:  # pragma: no cover - every client router installs require_user
+        raise RuntimeError("authenticated user context is missing")
+    return user_id

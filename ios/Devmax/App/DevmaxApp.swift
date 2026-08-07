@@ -6,20 +6,23 @@ struct DevmaxApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var state = AppState()
     @StateObject private var plan = StudyPlanState()
+    @StateObject private var auth = AuthState()
+    @StateObject private var publicFlow = PublicOnboardingState()
     @StateObject private var flags = DebugFlags.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            AppEntryView()
                 .environmentObject(state)
                 .environmentObject(plan)
+                .environmentObject(auth)
+                .environmentObject(publicFlow)
                 .environmentObject(flags)
                 .preferredColorScheme(.dark)  // light mode is out of scope
                 .task {
                     delegate.state = state
-                    await state.loadToday()
-                    await state.applyDebugRoute(plan: plan)
+                    await auth.bootstrap()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Backgrounding mid-answer must not lose the transcript, and the
@@ -28,6 +31,51 @@ struct DevmaxApp: App {
                     if phase != .active { state.flushDraft() }
                 }
         }
+    }
+}
+
+struct AppEntryView: View {
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var plan: StudyPlanState
+    @EnvironmentObject private var auth: AuthState
+    @EnvironmentObject private var publicFlow: PublicOnboardingState
+    @EnvironmentObject private var flags: DebugFlags
+
+    var body: some View {
+        Group {
+            if flags.route == "settings" {
+                NavigationStack { FullSettingsScreen() }
+            } else if flags.route == "privacy" {
+                NavigationStack { DataPrivacyScreen() }
+            } else if flags.route == "delete-account" {
+                NavigationStack { DeleteAccountScreen() }
+            } else if PublicOnboardingState.handlesDebugRoute(flags.route) {
+                PublicOnboardingView()
+            } else if auth.isAuthenticated, auth.profile?.onboardingCompleted == true {
+                RootView()
+                    .task {
+                        await state.loadToday()
+                        await state.applyDebugRoute(plan: plan)
+                    }
+            } else if auth.status == .checking {
+                Theme.bg.ignoresSafeArea()
+            } else if auth.isAuthenticated && auth.profile == nil {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Couldn't load this account.")
+                        .font(WCFont.serif(28)).foregroundStyle(Theme.textStrong)
+                    Text("Your session is still saved. Retry when the service is reachable.")
+                        .font(WCFont.sans(14)).foregroundStyle(Theme.textMuted)
+                    PrimaryButton(title: "Try again") { Task { await auth.refreshProfile() } }
+                }
+                .padding(.horizontal, Metrics.screenPadding)
+            } else {
+                PublicOnboardingView()
+                    .task {
+                        if auth.isAuthenticated { await publicFlow.restoreImportIfNeeded() }
+                    }
+            }
+        }
+        .background(Theme.bg)
     }
 }
 
@@ -81,6 +129,14 @@ struct RootView: View {
                         PlanRecapScreen(planID: id)
                     case .planAudit(let destination):
                         PlanAuditScreen(destination: destination)
+                    case .materialSetup:
+                        PublicOnboardingView()
+                    case .fullSettings:
+                        FullSettingsScreen()
+                    case .privacy:
+                        DataPrivacyScreen()
+                    case .deleteAccount:
+                        DeleteAccountScreen()
                     }
                 }
         }
@@ -101,8 +157,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // The mock API has no server to register a token with, and the system
         // prompt would sit on top of every screenshot being compared.
         guard !DebugFlags.shared.useMockAPI else { return true }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
+        // Never trigger the system permission sheet on launch. Public onboarding
+        // asks only after a real review and a chosen window. Existing founder
+        // installs that already granted permission still register normally.
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized ||
+                    settings.authorizationStatus == .provisional
+            else { return }
             DispatchQueue.main.async { application.registerForRemoteNotifications() }
         }
         return true

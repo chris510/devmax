@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth import current_user_id
 from app.db import get_session
 from app.models import (
     DELIVERY_CONVERSATIONAL,
@@ -64,11 +65,13 @@ async def list_due(
     limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_session),
 ) -> list[DueCard]:
+    user_id = current_user_id()
     today = await local_today(db)
     cards = (
         await db.exec(
             select(Card)
             .where(
+                Card.user_id == user_id,
                 Card.delivery_mode == DELIVERY_CONVERSATIONAL,
                 col(Card.next_review_at) <= today,
             )
@@ -100,7 +103,7 @@ async def overview(
 ) -> Overview:
     """Mastery classification across all cards — the desk-hour view."""
     today = await local_today(db)
-    statement = select(Card)
+    statement = select(Card).where(Card.user_id == current_user_id())
     if mode != "all":
         statement = statement.where(Card.delivery_mode == mode)
     cards = (await db.exec(statement)).all()
@@ -142,7 +145,7 @@ async def list_cards(
 ) -> list[CardSummary]:
     """The whole library. Backs Review Sprint Setup and Coverage."""
     today, tz = await local_calendar(db)
-    statement = select(Card)
+    statement = select(Card).where(Card.user_id == current_user_id())
     if mode != "all":
         statement = statement.where(Card.delivery_mode == mode)
     if sort == "weakest":
@@ -154,7 +157,9 @@ async def list_cards(
 
 @router.get("/cards/{card_id}", response_model=CardDetail)
 async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> CardDetail:
-    card = await db.get(Card, card_id)
+    card = (
+        await db.exec(select(Card).where(Card.id == card_id, Card.user_id == current_user_id()))
+    ).first()
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -186,6 +191,7 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
 async def create_card(body: CreateCard, db: AsyncSession = Depends(get_session)) -> CardSummary:
     today, tz = await local_calendar(db)
     card = Card(
+        user_id=current_user_id(),
         topic=body.topic.strip(),
         category="Unsorted",
         delivery_mode=DELIVERY_CONVERSATIONAL,

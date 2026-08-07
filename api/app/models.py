@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, text
+from sqlalchemy import JSON, Column, DateTime, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -19,6 +19,13 @@ TZ_DATETIME = DateTime(timezone=True)
 
 DELIVERY_CONVERSATIONAL = "conversational"
 DELIVERY_DESK = "desk"
+
+# Stable migration identity for the existing private installation. The legacy
+# X-API-Key may resolve only to this user; it is never accepted as a user selector.
+FOUNDER_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+USER_ACTIVE = "active"
+USER_DELETING = "deleting"
 
 STATUS_OPEN = "open"
 STATUS_AWAITING_FOLLOW_UP = "awaiting_follow_up"
@@ -38,10 +45,76 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    status: str = USER_ACTIVE
+    is_founder: bool = False
+    onboarding_completed: bool = False
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class AppleIdentity(SQLModel, table=True):
+    __tablename__ = "apple_identities"
+    __table_args__ = (
+        Index("uq_apple_identities_subject", "subject", unique=True),
+        Index("uq_apple_identities_user", "user_id", unique=True),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    # Apple's stable, developer-team-scoped subject is the identity. Email is
+    # profile data and can be a relay address, so it never participates in lookup.
+    subject: str
+    email: str | None = None
+    display_name: str | None = None
+    # Encrypted before storage by services/authentication.py. Needed to revoke
+    # Sign in with Apple when the account is deleted.
+    apple_refresh_token: str | None = None
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class AuthSession(SQLModel, table=True):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        Index("uq_auth_sessions_access_hash", "access_token_hash", unique=True),
+        Index("uq_auth_sessions_refresh_hash", "refresh_token_hash", unique=True),
+        Index("ix_auth_sessions_user", "user_id"),
+        Index("ix_auth_sessions_family", "family_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    family_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    rotated_from_id: uuid.UUID | None = None
+    access_token_hash: str
+    refresh_token_hash: str
+    access_expires_at: datetime = Field(sa_type=TZ_DATETIME)
+    refresh_expires_at: datetime = Field(sa_type=TZ_DATETIME)
+    revoked_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class AuthNonce(SQLModel, table=True):
+    __tablename__ = "auth_nonces"
+    __table_args__ = (Index("uq_auth_nonces_hash", "nonce_hash", unique=True),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    nonce_hash: str
+    expires_at: datetime = Field(sa_type=TZ_DATETIME)
+    used_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
 class Card(SQLModel, table=True):
     __tablename__ = "cards"
     __table_args__ = (
         Index("ix_cards_next_review_at", "next_review_at"),
+        Index("ix_cards_user_next_review", "user_id", "next_review_at"),
         # The hot query: due conversational cards. Desk cards never enter the push loop.
         Index(
             "ix_cards_due_conversational",
@@ -51,6 +124,7 @@ class Card(SQLModel, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE")
     topic: str
     category: str
     pattern: str | None = None
@@ -62,6 +136,13 @@ class Card(SQLModel, table=True):
     # retrieval is the point — a fresh question each time puts every review in the
     # weak-transfer regime. Null until the first session generates one.
     canonical_question: str | None = None
+    # Trusted grounding supplied by an imported guide, reviewed collection, or
+    # the learner. It accompanies the relevant transcript to scoring.
+    answer_anchor: str = ""
+    source_excerpt: str = ""
+    source_id: uuid.UUID | None = Field(
+        default=None, foreign_key="material_sources.id", ondelete="SET NULL"
+    )
 
     ease_factor: float = 2.5
     interval_days: int = 1
@@ -71,9 +152,9 @@ class Card(SQLModel, table=True):
     # The three axes behind `last_score`, denormalised from the latest complete
     # session the same way `last_score` is. Coverage's axis rollup is a mean across
     # cards, so it needs the per-card latest value, not a scan of every session.
-    last_mechanism_accuracy: int | None = None
-    last_trade_off_awareness: int | None = None
-    last_failure_mode_awareness: int | None = None
+    last_accuracy: int | None = None
+    last_depth: int | None = None
+    last_boundaries: int | None = None
     last_reviewed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     mastery_summary: str = ""
     # Compliance signal only — never feeds SM-2.
@@ -107,9 +188,9 @@ class Session(SQLModel, table=True):
     # Null on rows written before the decomposition shipped; those keep their
     # original blended score for history display.
     score: int | None = None
-    mechanism_accuracy: int | None = None
-    trade_off_awareness: int | None = None
-    failure_mode_awareness: int | None = None
+    accuracy: int | None = None
+    depth: int | None = None
+    boundaries: int | None = None
     feedback: str = ""
     follow_up_used: bool = False
 
@@ -118,7 +199,7 @@ class Session(SQLModel, table=True):
     # the mastery summary, and barred from SM-2 and from `score` — it measures
     # coached performance, not recall. See docs/multi-turn-coaching-design.md §4.
     reattempt_answer: str = ""
-    reattempt_mechanism_accuracy: int | None = None
+    reattempt_accuracy: int | None = None
     # Guards replay, and named to mirror `follow_up_used` — the other structural cap
     # in this table. "Used", not "offered": the session completes either way, so
     # nothing here distinguishes an offer declined from one never made.
@@ -134,23 +215,119 @@ class Session(SQLModel, table=True):
 
 class DeviceToken(SQLModel, table=True):
     __tablename__ = "device_tokens"
+    __table_args__ = (Index("ix_device_tokens_user", "user_id"),)
 
     token: str = Field(primary_key=True)
+    user_id: uuid.UUID = Field(default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE")
     kind: str = "apns"
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 class Settings(SQLModel, table=True):
     __tablename__ = "settings"
-    __table_args__ = (CheckConstraint("id = 1", name="ck_settings_singleton"),)
+    __table_args__ = (Index("uq_settings_user", "user_id", unique=True),)
 
-    id: int = Field(default=1, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: uuid.UUID = Field(default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE")
     reviews_per_day: int = 2
     windows: list[dict[str, Any]] = Field(
         default_factory=lambda: list(DEFAULT_WINDOWS),
         sa_column=Column(JSON_TYPE, nullable=False),
     )
     timezone: str = "America/Los_Angeles"
+
+
+# ---------------------------------------------------------------------------
+# Public study material — proposals first, cards only after confirmation.
+# ---------------------------------------------------------------------------
+
+SOURCE_DRAFT = "draft"
+SOURCE_PENDING = "pending"
+SOURCE_PROCESSING = "processing"
+SOURCE_READY = "ready"
+SOURCE_NEEDS_ATTENTION = "needs_attention"
+SOURCE_FAILED = "failed"
+SOURCE_CONFIRMED = "confirmed"
+SOURCE_SUPERSEDED = "superseded"
+
+PROPOSAL_CLEAN = "clean"
+PROPOSAL_NEEDS_ATTENTION = "needs_attention"
+PROPOSAL_EXCLUDED = "excluded"
+PROPOSAL_CONFIRMED = "confirmed"
+
+
+class MaterialSource(SQLModel, table=True):
+    __tablename__ = "material_sources"
+    __table_args__ = (
+        Index("ix_material_sources_user_status", "user_id", "status"),
+        Index(
+            "uq_material_sources_version",
+            "user_id",
+            "lineage_id",
+            "version",
+            unique=True,
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    lineage_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    previous_version_id: uuid.UUID | None = Field(
+        default=None, foreign_key="material_sources.id", ondelete="SET NULL"
+    )
+    version: int = 1
+    kind: str = "guide"
+    title: str
+    # Verbatim. File text is extracted on-device before upload.
+    source_text: str
+    original_filename: str = ""
+    mime_type: str = "text/plain"
+    import_path: str = "topics"
+    intent: str = "already_studied"
+    status: str = SOURCE_DRAFT
+    requested_weeks: int = 12
+    weekly_capacity_minutes: int = 480
+    mode: str = "flexible"
+    deadline: date | None = None
+    plan_draft_id: uuid.UUID | None = Field(
+        default=None, foreign_key="study_plan_guide_drafts.id", ondelete="SET NULL"
+    )
+    result_summary: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    error: str = ""
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class MaterialTopicProposal(SQLModel, table=True):
+    __tablename__ = "material_topic_proposals"
+    __table_args__ = (Index("ix_material_topic_proposals_source", "source_id", "position"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    source_id: uuid.UUID = Field(foreign_key="material_sources.id", ondelete="CASCADE")
+    position: int
+    section_title: str = ""
+    topic: str
+    answer_anchor: str
+    source_excerpt: str = ""
+    status: str = PROPOSAL_CLEAN
+    issue: str = ""
+    merged_into_id: uuid.UUID | None = Field(
+        default=None, foreign_key="material_topic_proposals.id", ondelete="SET NULL"
+    )
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class LLMUsage(SQLModel, table=True):
+    __tablename__ = "llm_usage"
+    __table_args__ = (Index("ix_llm_usage_user_created", "user_id", "created_at"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    operation: str
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 # ---------------------------------------------------------------------------
@@ -249,15 +426,17 @@ class StudyPlan(SQLModel, table=True):
         # unique indexes, so the SQLite suite exercises the production rule.
         Index(
             "uq_study_plans_one_active",
+            "user_id",
             "status",
             unique=True,
             postgresql_where=text("status = 'active'"),
             sqlite_where=text("status = 'active'"),
         ),
-        Index("ix_study_plans_status", "status"),
+        Index("ix_study_plans_status", "user_id", "status"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE")
     title: str
     subject: str
     # Normalised subject key. Card proposals require this to be in the technical
@@ -402,9 +581,7 @@ class StudyPlanItemDependency(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
-    prerequisite_item_id: uuid.UUID = Field(
-        foreign_key="study_plan_items.id", ondelete="CASCADE"
-    )
+    prerequisite_item_id: uuid.UUID = Field(foreign_key="study_plan_items.id", ondelete="CASCADE")
     dependent_item_id: uuid.UUID = Field(foreign_key="study_plan_items.id", ondelete="CASCADE")
 
     kind: str = DEP_HARD
@@ -433,9 +610,7 @@ class StudyPlanRevision(SQLModel, table=True):
     before: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
     )
-    after: dict[str, Any] = Field(
-        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
-    )
+    after: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False))
     # Only set where an inverse is genuinely derivable from `before`. A capacity
     # change is reversible; a completion that triggered a carry-forward is not.
     reversible: bool = False
@@ -454,8 +629,10 @@ class StudyPlanGuideDraft(SQLModel, table=True):
     """
 
     __tablename__ = "study_plan_guide_drafts"
+    __table_args__ = (Index("ix_study_plan_guide_drafts_user", "user_id"),)
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE")
     guide_text: str
     requested_weeks: int
     weekly_capacity_minutes: int
@@ -497,9 +674,7 @@ class StudyPlanCardProposal(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
-    source_plan_item_id: uuid.UUID = Field(
-        foreign_key="study_plan_items.id", ondelete="CASCADE"
-    )
+    source_plan_item_id: uuid.UUID = Field(foreign_key="study_plan_items.id", ondelete="CASCADE")
     # Bumped by an edit. A new revision invalidates any acceptance intent built
     # against the old one, which is what stops an edited card being added twice.
     revision: int = 1
@@ -532,14 +707,10 @@ class StudyPlanCardProposalAcceptance(SQLModel, table=True):
     """One atomic, idempotent attempt to turn selected proposals into cards."""
 
     __tablename__ = "study_plan_card_proposal_acceptances"
-    __table_args__ = (
-        Index("uq_study_plan_acceptance_key", "idempotency_key", unique=True),
-    )
+    __table_args__ = (Index("uq_study_plan_acceptance_key", "idempotency_key", unique=True),)
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    proposal_id: uuid.UUID = Field(
-        foreign_key="study_plan_card_proposals.id", ondelete="CASCADE"
-    )
+    proposal_id: uuid.UUID = Field(foreign_key="study_plan_card_proposals.id", ondelete="CASCADE")
     idempotency_key: str
     # Hash of selected ids + edits. Same key with a different hash is a conflict,
     # not a replay — that combination means the client changed its mind mid-retry.

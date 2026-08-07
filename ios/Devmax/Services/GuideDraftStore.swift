@@ -17,26 +17,16 @@ struct GuideDraft: Codable, Equatable {
 }
 
 enum GuideDraftStore {
-    private static var url: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("study-plan-guide.json")
-    }
+    private static let filename = "study-plan-guide.json"
 
     static func read() -> GuideDraft? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(GuideDraft.self, from: data)
+        LocalJSONStore.read(GuideDraft.self, from: filename)
     }
 
     static func save(_ draft: GuideDraft) {
         guard !draft.guideText.isEmpty else { return clear() }
-        let directory = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true
-        )
-        try? JSONEncoder().encode(draft).write(to: url, options: .atomic)
+        LocalJSONStore.save(draft, to: filename)
     }
 
-    static func clear() {
-        try? FileManager.default.removeItem(at: url)
-    }
+    static func clear() { LocalJSONStore.clear(filename) }
 }

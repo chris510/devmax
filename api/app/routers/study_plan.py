@@ -20,6 +20,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth import current_user_id
+from app.config import get_settings
 from app.db import get_session
 from app.models import (
     ACCEPTANCE_COMMITTED,
@@ -30,7 +32,6 @@ from app.models import (
     DISPOSITION_EXISTING,
     DISPOSITION_SKIPPED,
     DISPOSITION_SUGGESTED,
-    DRAFT_FAILED,
     DRAFT_READY,
     DUPLICATE_EXACT,
     ITEM_COMPLETE,
@@ -52,7 +53,10 @@ from app.models import (
     REVISION_REOPEN,
     REVISION_REPLAN,
     REVISION_RESUME,
+    SOURCE_CONFIRMED,
+    SOURCE_SUPERSEDED,
     Card,
+    MaterialSource,
     StudyPlan,
     StudyPlanCardLink,
     StudyPlanCardProposal,
@@ -97,7 +101,7 @@ from app.schemas import (
     WeekPlacementOut,
     WeekSection,
 )
-from app.services import llm
+from app.services import guide_import, llm, usage
 from app.services import study_plan as sp
 from app.services import study_plan_import as spi
 from app.services import study_plan_scheduler as sched
@@ -109,8 +113,7 @@ WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 # Stated on every card-acceptance screen, in both directions: these cards join
 # the review schedule, and their reviews never come back and change this plan.
 CARD_BOUNDARY_NOTE = (
-    "These cards join Today's review schedule. Their reviews don't change this "
-    "Study Plan."
+    "These cards join Today's review schedule. Their reviews don't change this Study Plan."
 )
 
 
@@ -122,7 +125,14 @@ def _now() -> datetime:
 
 
 async def _get_plan(db: AsyncSession, plan_id: uuid.UUID) -> StudyPlan:
-    plan = (await db.exec(select(StudyPlan).where(col(StudyPlan.id) == plan_id))).first()
+    plan = (
+        await db.exec(
+            select(StudyPlan).where(
+                col(StudyPlan.id) == plan_id,
+                StudyPlan.user_id == current_user_id(),
+            )
+        )
+    ).first()
     if plan is None:
         raise HTTPException(status_code=404, detail="plan not found")
     return plan
@@ -175,7 +185,7 @@ async def active_summary(db: AsyncSession = Depends(get_session)) -> ActivePlanS
 
     Declared before `/study-plans/{plan_id}` so `active` is never read as an id.
     """
-    plan = await sp.active_plan(db)
+    plan = await sp.active_plan(db, current_user_id())
     if plan is None:
         return ActivePlanSummary(active=False)
 
@@ -194,9 +204,7 @@ async def active_summary(db: AsyncSession = Depends(get_session)) -> ActivePlanS
         from app.models import StudyPlanPhase
 
         phase = (
-            await db.exec(
-                select(StudyPlanPhase).where(col(StudyPlanPhase.id) == current.phase_id)
-            )
+            await db.exec(select(StudyPlanPhase).where(col(StudyPlanPhase.id) == current.phase_id))
         ).first()
         if phase is not None:
             phase_title = sp.display_title(phase.full_title, phase.overview_title)
@@ -234,8 +242,9 @@ async def active_summary(db: AsyncSession = Depends(get_session)) -> ActivePlanS
 
 def _preview_response(draft: StudyPlanGuideDraft) -> PreviewOut:
     preview = draft.preview or {}
-    checks = [CheckRow(**{k: v for k, v in c.items() if k != "item_keys"})
-              for c in (draft.checks or [])]
+    checks = [
+        CheckRow(**{k: v for k, v in c.items() if k != "item_keys"}) for c in (draft.checks or [])
+    ]
     weeks = preview.get("weeks", [])
     phases = preview.get("phases", [])
 
@@ -289,52 +298,12 @@ async def _run_import(db: AsyncSession, draft: StudyPlanGuideDraft) -> None:
     the duration, the capacity, the mode, the deadline, and every edit, so Retry
     is one tap and loses nothing the user typed.
     """
-    try:
-        raw = await llm.import_guide(
-            guide_text=draft.guide_text,
-            requested_weeks=draft.requested_weeks,
-            weekly_capacity_minutes=draft.weekly_capacity_minutes,
-            mode=draft.mode,
-            deadline=draft.deadline.isoformat() if draft.deadline else None,
-            subject_hint=draft.subject_hint,
-            title_hint=draft.title_hint,
-        )
-    except llm.LLMError as exc:
-        draft.status = DRAFT_FAILED
-        draft.error = str(exc)
-        draft.updated_at = _now()
-        db.add(draft)
-        return
-
-    draft.raw_response = raw
-    _revalidate(draft)
+    await guide_import.run_plan_draft(db, draft)
 
 
 def _revalidate(draft: StudyPlanGuideDraft) -> None:
     """Re-run the gate over the stored response plus the user's resolutions."""
-    resolutions = dict((draft.preview or {}).get("resolutions", {}))
-    try:
-        result = spi.validate_import(
-            draft.raw_response,
-            guide_text=draft.guide_text,
-            requested_weeks=draft.requested_weeks,
-            weekly_capacity_minutes=draft.weekly_capacity_minutes,
-            mode=draft.mode,
-            deadline=draft.deadline,
-            start_date=draft.start_date,
-            resolutions=resolutions,
-        )
-    except spi.ImportError_ as exc:
-        draft.status = DRAFT_FAILED
-        draft.error = str(exc)
-        draft.updated_at = _now()
-        return
-
-    draft.preview = result.preview
-    draft.checks = [c.as_dict() for c in result.checks]
-    draft.status = DRAFT_READY
-    draft.error = ""
-    draft.updated_at = _now()
+    guide_import.revalidate_plan_draft(draft)
 
 
 @router.post("/study-plans/preview", response_model=PreviewOut, status_code=201)
@@ -354,6 +323,7 @@ async def preview_guide(
         raise HTTPException(status_code=422, detail="; ".join(errors))
 
     draft = StudyPlanGuideDraft(
+        user_id=current_user_id(),
         guide_text=body.guide_text,
         requested_weeks=body.requested_weeks,
         weekly_capacity_minutes=body.weekly_capacity_minutes,
@@ -367,7 +337,10 @@ async def preview_guide(
     db.add(draft)
     await db.commit()
 
+    await usage.ensure_available(db, current_user_id(), "guide_import", get_settings())
+    await db.commit()
     await _run_import(db, draft)
+    usage.record(db, current_user_id(), "guide_import")
     db.add(draft)
     await db.commit()
     await db.refresh(draft)
@@ -377,7 +350,9 @@ async def preview_guide(
 async def _get_draft(db: AsyncSession, draft_id: uuid.UUID) -> StudyPlanGuideDraft:
     draft = (
         await db.exec(
-            select(StudyPlanGuideDraft).where(col(StudyPlanGuideDraft.id) == draft_id)
+            select(StudyPlanGuideDraft)
+            .where(col(StudyPlanGuideDraft.id) == draft_id)
+            .where(StudyPlanGuideDraft.user_id == current_user_id())
         )
     ).first()
     if draft is None:
@@ -385,12 +360,19 @@ async def _get_draft(db: AsyncSession, draft_id: uuid.UUID) -> StudyPlanGuideDra
     return draft
 
 
+@router.get("/study-plans/preview/{draft_id}", response_model=PreviewOut)
+async def get_preview(draft_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PreviewOut:
+    """Return a durable import result without spending another model call."""
+    return _preview_response(await _get_draft(db, draft_id))
+
+
 @router.post("/study-plans/preview/{draft_id}/retry", response_model=PreviewOut)
-async def retry_preview(
-    draft_id: uuid.UUID, db: AsyncSession = Depends(get_session)
-) -> PreviewOut:
+async def retry_preview(draft_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PreviewOut:
     draft = await _get_draft(db, draft_id)
+    await usage.ensure_available(db, current_user_id(), "guide_import", get_settings())
+    await db.commit()
     await _run_import(db, draft)
+    usage.record(db, current_user_id(), "guide_import")
     db.add(draft)
     await db.commit()
     await db.refresh(draft)
@@ -456,9 +438,7 @@ async def edit_preview(
 
 
 @router.post("/study-plans", response_model=PlanOverview, status_code=201)
-async def create_plan(
-    body: PlanCreate, db: AsyncSession = Depends(get_session)
-) -> PlanOverview:
+async def create_plan(body: PlanCreate, db: AsyncSession = Depends(get_session)) -> PlanOverview:
     """Create a plan from a resolved preview. One transaction, no model call."""
     draft = await _get_draft(db, body.draft_id)
     if draft.status != DRAFT_READY:
@@ -468,8 +448,9 @@ async def create_plan(
 
     rows = spi.build_plan_rows(draft.preview, start_date=draft.start_date)
     plan: StudyPlan = rows["plan"]
+    plan.user_id = current_user_id()
 
-    previous_active = await sp.active_plan(db) if body.activate else None
+    previous_active = await sp.active_plan(db, current_user_id()) if body.activate else None
     if body.activate:
         plan.status = PLAN_ACTIVE
         if previous_active is not None:
@@ -497,6 +478,22 @@ async def create_plan(
             summary=f"Plan created from a guide · {len(rows['items'])} items",
         )
     )
+    source = (
+        await db.exec(
+            select(MaterialSource).where(
+                MaterialSource.plan_draft_id == draft.id,
+                MaterialSource.user_id == current_user_id(),
+            )
+        )
+    ).first()
+    if source is not None:
+        source.status = SOURCE_CONFIRMED
+        db.add(source)
+        if source.previous_version_id:
+            previous = await db.get(MaterialSource, source.previous_version_id)
+            if previous is not None and previous.user_id == current_user_id():
+                previous.status = SOURCE_SUPERSEDED
+                db.add(previous)
 
     try:
         await db.commit()
@@ -521,7 +518,11 @@ async def create_plan(
 @router.get("/study-plans", response_model=PlanList)
 async def list_plans(db: AsyncSession = Depends(get_session)) -> PlanList:
     plans = (
-        await db.exec(select(StudyPlan).order_by(col(StudyPlan.created_at).desc()))
+        await db.exec(
+            select(StudyPlan)
+            .where(StudyPlan.user_id == current_user_id())
+            .order_by(col(StudyPlan.created_at).desc())
+        )
     ).all()
     buckets: dict[str, list[PlanListEntry]] = {
         PLAN_ACTIVE: [],
@@ -532,8 +533,17 @@ async def list_plans(db: AsyncSession = Depends(get_session)) -> PlanList:
     # Two queries for the whole list rather than two per plan. The Plans sheet
     # shows every plan the user has ever made, so the per-plan version grew a
     # query every time one was archived instead of deleted.
-    all_weeks = (await db.exec(select(StudyPlanWeek))).all()
-    all_items = (await db.exec(select(StudyPlanItem))).all()
+    plan_ids = [plan.id for plan in plans]
+    all_weeks = (
+        (await db.exec(select(StudyPlanWeek).where(col(StudyPlanWeek.plan_id).in_(plan_ids)))).all()
+        if plan_ids
+        else []
+    )
+    all_items = (
+        (await db.exec(select(StudyPlanItem).where(col(StudyPlanItem.plan_id).in_(plan_ids)))).all()
+        if plan_ids
+        else []
+    )
     week_counts: dict[uuid.UUID, int] = {}
     for week in all_weeks:
         week_counts[week.plan_id] = week_counts.get(week.plan_id, 0) + 1
@@ -551,8 +561,7 @@ async def list_plans(db: AsyncSession = Depends(get_session)) -> PlanList:
         elif plan.status == PLAN_PAUSED:
             when = plan.paused_at.strftime("%-d %b") if plan.paused_at else ""
             meta = (
-                f"Paused {when} · Week {plan.current_week_index} "
-                f"of {week_counts.get(plan.id, 0)}"
+                f"Paused {when} · Week {plan.current_week_index} of {week_counts.get(plan.id, 0)}"
             )
         elif plan.status == PLAN_COMPLETED:
             when = plan.completed_at.strftime("%-d %b") if plan.completed_at else ""
@@ -613,9 +622,7 @@ async def _overview(db: AsyncSession, plan_id: uuid.UUID) -> PlanOverview:
                 full_title=phase.full_title,
                 status=sp.phase_status(phase.index, current_phase_index),
                 week_range=sp.week_range_label(owned),
-                current_week_label=(
-                    f"Week {plan.current_week_index}" if is_current else None
-                ),
+                current_week_label=(f"Week {plan.current_week_index}" if is_current else None),
                 weeks=week_rows,
             )
         )
@@ -646,9 +653,7 @@ async def _overview(db: AsyncSession, plan_id: uuid.UUID) -> PlanOverview:
 
 
 @router.get("/study-plans/{plan_id}", response_model=PlanOverview)
-async def get_overview(
-    plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)
-) -> PlanOverview:
+async def get_overview(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
     return await _overview(db, plan_id)
 
 
@@ -667,9 +672,7 @@ async def get_week(
     # The scheduler owns this arithmetic. Recomputing it here was a second
     # implementation of "what is in this week", and only the scheduler's was
     # covered by tests.
-    workload = sched.summarise_week(
-        sp.to_sched_items(items, graph.weeks, graph.phases)
-    )
+    workload = sched.summarise_week(sp.to_sched_items(items, graph.weeks, graph.phases))
     core_done, core_total = workload.core_complete, workload.core_total
     planned = workload.scheduled_plan_minutes
 
@@ -682,9 +685,7 @@ async def get_week(
         rows_in = [i for i in scheduled if i.type == kind]
         if not rows_in:
             continue
-        section = sched.summarise_week(
-            sp.to_sched_items(rows_in, graph.weeks, graph.phases)
-        )
+        section = sched.summarise_week(sp.to_sched_items(rows_in, graph.weeks, graph.phases))
         core, optional = section.core_minutes, section.optional_minutes
         if kind == ITEM_RETRIEVE:
             aside = (
@@ -737,9 +738,7 @@ async def get_week(
         planned_minutes=planned,
         capacity_minutes=capacity,
         core_line=f"{core_done} of {core_total} Core complete",
-        capacity_line=(
-            f"{sched.format_hours(planned)} of {sched.format_hours(capacity)} planned"
-        ),
+        capacity_line=(f"{sched.format_hours(planned)} of {sched.format_hours(capacity)} planned"),
         sections=sections,
     )
 
@@ -777,8 +776,7 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
         reopened_at=item.reopened_at,
         linked_card_ids=[link.card_id for link in links],
         card_proposals_available=(
-            item.status == ITEM_COMPLETE
-            and sp.slug_supports_cards(graph.plan.subject_slug)
+            item.status == ITEM_COMPLETE and sp.slug_supports_cards(graph.plan.subject_slug)
         ),
         blocked_by=[b.full_title for b in sp.blocking_dependencies(graph, item)],
     )
@@ -820,9 +818,7 @@ async def list_revisions(
 
 
 @router.get("/study-plans/{plan_id}/recap", response_model=PlanRecap)
-async def get_recap(
-    plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)
-) -> PlanRecap:
+async def get_recap(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanRecap:
     graph = await _get_graph(db, plan_id)
     scheduled = [i for i in graph.items if i.status in (ITEM_PENDING, ITEM_COMPLETE)]
     core_done, core_total = sp.core_progress(scheduled)
@@ -834,9 +830,7 @@ async def get_recap(
         core_complete=core_done,
         core_total=core_total,
         optional_deferred=sum(
-            1
-            for i in graph.items
-            if i.priority == PRIORITY_OPTIONAL and i.status == ITEM_DEFERRED
+            1 for i in graph.items if i.priority == PRIORITY_OPTIONAL and i.status == ITEM_DEFERRED
         ),
         estimated_minutes=sum(i.estimate_minutes for i in scheduled),
         learn_practice_minutes=sum(
@@ -892,9 +886,7 @@ def _proposal_out(
             for m in proposal.moves
         ],
         unresolved=[
-            UnresolvedOut(
-                title=titles.get(u.item_id, ""), minutes=u.minutes, reason=u.reason
-            )
+            UnresolvedOut(title=titles.get(u.item_id, ""), minutes=u.minutes, reason=u.reason)
             for u in proposal.unresolved
         ],
         unresolved_minutes=proposal.unresolved_minutes,
@@ -909,8 +901,7 @@ def _proposal_out(
 
 
 UNCHANGED_ALWAYS = [
-    "Your cards, scores, session history, mastery summaries, and review schedule "
-    "are untouched.",
+    "Your cards, scores, session history, mastery summaries, and review schedule are untouched.",
     "Completed work stays in the week you did it.",
 ]
 
@@ -1002,7 +993,11 @@ async def apply_replan(
     )
     await db.commit()
     return _proposal_out(
-        graph, proposal, kind="replan", headline=headline, body=text,
+        graph,
+        proposal,
+        kind="replan",
+        headline=headline,
+        body=text,
         unchanged=UNCHANGED_ALWAYS,
     )
 
@@ -1030,9 +1025,7 @@ async def update_capacity(
     headline, text = _replan_copy(proposal)
 
     if proposal.valid and not proposal.moves:
-        effective = (
-            body.override_capacity_minutes or graph.plan.default_weekly_capacity_minutes
-        )
+        effective = body.override_capacity_minutes or graph.plan.default_weekly_capacity_minutes
         sp.apply_proposal(
             db,
             graph,
@@ -1096,9 +1089,7 @@ async def preview_reopen(
 
     plan, weeks, items, deps = graph.sched_inputs()
     items = [
-        sched.SchedItem(**{**i.__dict__, "status": ITEM_PENDING})
-        if i.id == str(item_id)
-        else i
+        sched.SchedItem(**{**i.__dict__, "status": ITEM_PENDING}) if i.id == str(item_id) else i
         for i in items
     ]
     proposal = sched.build_proposal(plan, weeks, items, deps)
@@ -1107,7 +1098,8 @@ async def preview_reopen(
         graph,
         proposal,
         kind="reopen",
-        headline=headline if proposal.moves or proposal.unresolved
+        headline=headline
+        if proposal.moves or proposal.unresolved
         else "Reopening this changes nothing else.",
         body=text,
         unchanged=[
@@ -1220,9 +1212,7 @@ async def edit_item(
 
 
 @router.post("/study-plans/{plan_id}/pause", response_model=PlanOverview)
-async def pause_plan(
-    plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)
-) -> PlanOverview:
+async def pause_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
     graph = await _get_graph(db, plan_id)
     if graph.plan.status != PLAN_ACTIVE:
         raise HTTPException(status_code=409, detail="plan is not active")
@@ -1298,9 +1288,7 @@ async def activate_plan(
 ) -> PlanOverview:
     graph = await _get_graph(db, plan_id)
     _require_current(graph.plan, base_plan_revision)
-    await sp.make_active(
-        db, graph, kind=REVISION_ACTIVATE, summary="Made this the active plan"
-    )
+    await sp.make_active(db, graph, kind=REVISION_ACTIVATE, summary="Made this the active plan")
     await _commit_activation(db)
     return await _overview(db, plan_id)
 
@@ -1316,9 +1304,7 @@ async def complete_plan(
 
 
 @router.post("/study-plans/{plan_id}/archive", response_model=PlanOverview)
-async def archive_plan(
-    plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)
-) -> PlanOverview:
+async def archive_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
     graph = await _get_graph(db, plan_id)
     sp.archive(db, graph)
     await db.commit()
@@ -1326,18 +1312,14 @@ async def archive_plan(
 
 
 @router.post("/study-plans/{plan_id}/duplicate", response_model=PlanOverview, status_code=201)
-async def duplicate(
-    plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)
-) -> PlanOverview:
+async def duplicate(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
     """Copy the plan's structure and reset its progress. Creates it paused."""
     graph = await _get_graph(db, plan_id)
     rows = sp.duplicate_plan(
         graph.plan, graph, start_date=spi.default_start_date(await local_today(db))
     )
     await sp.insert_plan_rows(db, rows["plan"], rows)
-    db.add(
-        StudyPlanDuplication(source_plan_id=graph.plan.id, duplicated_plan_id=rows["plan"].id)
-    )
+    db.add(StudyPlanDuplication(source_plan_id=graph.plan.id, duplicated_plan_id=rows["plan"].id))
     await db.commit()
     return await _overview(db, rows["plan"].id)
 
@@ -1417,12 +1399,14 @@ async def create_card_proposals(
         weak = (
             await db.exec(
                 select(Card)
+                .where(Card.user_id == current_user_id())
                 .where(col(Card.last_score).is_not(None))
                 .where(col(Card.last_score) <= 3)
                 .order_by(col(Card.last_score))
                 .limit(10)
             )
         ).all()
+        await usage.ensure_available(db, current_user_id(), "card_proposal", get_settings())
         candidates = await llm.propose_cards(
             subject=graph.plan.subject,
             item_title=item.full_title,
@@ -1431,7 +1415,8 @@ async def create_card_proposals(
             source_excerpt=item.source_excerpt,
             existing_weak_topics=[c.topic for c in weak],
         )
-        existing_cards = await sp.normalized_card_index(db)
+        usage.record(db, current_user_id(), "card_proposal")
+        existing_cards = await sp.normalized_card_index(db, current_user_id())
         for candidate in candidates[: sp.MAX_SUGGESTED_CARDS]:
             topic = str(candidate.get("topic", "")).strip()
             if not topic:
@@ -1461,7 +1446,12 @@ async def create_card_proposals(
         context = ""
         if proposal.duplicate_card_id:
             card = (
-                await db.exec(select(Card).where(col(Card.id) == proposal.duplicate_card_id))
+                await db.exec(
+                    select(Card).where(
+                        col(Card.id) == proposal.duplicate_card_id,
+                        Card.user_id == current_user_id(),
+                    )
+                )
             ).first()
             if card is not None:
                 score = card.last_score if card.last_score is not None else "—"
@@ -1529,9 +1519,13 @@ async def accept_card_proposals(
 
     prior = (
         await db.exec(
-            select(StudyPlanCardProposalAcceptance).where(
-                col(StudyPlanCardProposalAcceptance.idempotency_key) == body.idempotency_key
+            select(StudyPlanCardProposalAcceptance)
+            .where(col(StudyPlanCardProposalAcceptance.idempotency_key) == body.idempotency_key)
+            .join(
+                StudyPlanCardProposal,
+                StudyPlanCardProposal.id == StudyPlanCardProposalAcceptance.proposal_id,
             )
+            .where(StudyPlanCardProposal.plan_id == plan_id)
         )
     ).first()
     computed_hash = sp.request_hash(body.selected_proposal_ids, body.edits)
@@ -1577,7 +1571,7 @@ async def accept_card_proposals(
     # needed to report which candidate clashed. Checking first means the abort
     # path never has anything to undo.
     resolved: list[tuple[StudyPlanCardProposal, str, str]] = []
-    existing_cards = await sp.normalized_card_index(db)
+    existing_cards = await sp.normalized_card_index(db, current_user_id())
     for row in proposals:
         edit = body.edits.get(str(row.id), {})
         topic = (edit.get("topic") or row.topic).strip()
@@ -1610,6 +1604,7 @@ async def accept_card_proposals(
     links: list[StudyPlanCardLink] = []
     for row, topic, question in resolved:
         card = Card(
+            user_id=current_user_id(),
             topic=topic,
             category=row.category,
             delivery_mode=DELIVERY_CONVERSATIONAL,
@@ -1650,9 +1645,7 @@ async def accept_card_proposals(
     except IntegrityError as exc:
         await db.rollback()
         acceptance.status = ACCEPTANCE_FAILED
-        raise HTTPException(
-            status_code=409, detail="nothing was created; try again"
-        ) from exc
+        raise HTTPException(status_code=409, detail="nothing was created; try again") from exc
 
     # Card ids are returned only after commit, so ADDED can only render on cards
     # that exist.

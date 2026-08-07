@@ -91,6 +91,28 @@ protocol DevmaxAPI {
     func updateSettings(_ settings: AppSettings) async throws -> AppSettings
     func registerDeviceToken(_ token: String) async throws
 
+    // MARK: Public account and study material
+    func accountProfile() async throws -> AccountProfile
+    func completeOnboarding() async throws -> AccountProfile
+    func materialImports() async throws -> [MaterialImport]
+    func materialImport(_ id: UUID) async throws -> MaterialImport
+    func startMaterialImport(_ request: MaterialImportRequest) async throws -> MaterialImport
+    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport
+    func deleteMaterialImport(_ id: UUID) async throws
+    func editMaterialTopic(
+        _ id: UUID, topic: String?, answerAnchor: String?, action: String,
+        mergeInto: UUID?
+    ) async throws -> MaterialTopic
+    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation
+    func createManualMaterial(title: String, topics: [ManualTopic]) async throws -> MaterialConfirmation
+    func materialCollections() async throws -> [MaterialCollection]
+    func materialCollection(_ id: String) async throws -> MaterialCollectionDetail
+    func addMaterialCollection(_ id: String) async throws -> MaterialConfirmation
+    func savedPlanPreview(_ id: UUID) async throws -> PlanPreview
+    func exportAccount() async throws -> Data
+    func deleteAccount() async throws
+    func logout() async throws
+
     // MARK: Study Plan
     //
     // `activePlan()` is the only one Today calls, and it is deliberately the
@@ -130,6 +152,42 @@ protocol DevmaxAPI {
         edits: [String: [String: String]]
     ) async throws -> CardAcceptResult
     func resolveDuplicate(_ id: UUID, proposalID: UUID, action: String) async throws
+}
+
+/// Existing focused test doubles only model the review loop. Public launch
+/// methods default to a clear unsupported error so those doubles stay narrow;
+/// LiveAPI and MockAPI implement every method used by the app.
+extension DevmaxAPI {
+    func accountProfile() async throws -> AccountProfile { throw APIError.status(501) }
+    func completeOnboarding() async throws -> AccountProfile { throw APIError.status(501) }
+    func materialImports() async throws -> [MaterialImport] { throw APIError.status(501) }
+    func materialImport(_ id: UUID) async throws -> MaterialImport { throw APIError.status(501) }
+    func startMaterialImport(_ request: MaterialImportRequest) async throws -> MaterialImport {
+        throw APIError.status(501)
+    }
+    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport { throw APIError.status(501) }
+    func deleteMaterialImport(_ id: UUID) async throws { throw APIError.status(501) }
+    func editMaterialTopic(
+        _ id: UUID, topic: String?, answerAnchor: String?, action: String,
+        mergeInto: UUID?
+    ) async throws -> MaterialTopic { throw APIError.status(501) }
+    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
+        throw APIError.status(501)
+    }
+    func createManualMaterial(
+        title: String, topics: [ManualTopic]
+    ) async throws -> MaterialConfirmation { throw APIError.status(501) }
+    func materialCollections() async throws -> [MaterialCollection] { throw APIError.status(501) }
+    func materialCollection(_ id: String) async throws -> MaterialCollectionDetail {
+        throw APIError.status(501)
+    }
+    func addMaterialCollection(_ id: String) async throws -> MaterialConfirmation {
+        throw APIError.status(501)
+    }
+    func savedPlanPreview(_ id: UUID) async throws -> PlanPreview { throw APIError.status(501) }
+    func exportAccount() async throws -> Data { throw APIError.status(501) }
+    func deleteAccount() async throws { throw APIError.status(501) }
+    func logout() async throws { throw APIError.status(501) }
 }
 
 /// Request bodies. Encoded with `.convertToSnakeCase`, so the field names here
@@ -184,13 +242,14 @@ struct LiveAPI: DevmaxAPI {
     var baseURL: URL
     var apiKey: String
     var session: URLSession = .shared
+    var tokenStore: AuthTokenStore = .shared
 
     // Not private: DevmaxTests decodes captured server responses through this
     // exact decoder, which is the only wire-format check available without a server.
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
-        d.dateDecodingStrategy = .custom(WireDate.decode)
+        d.dateDecodingStrategy = .custom { try WireDate.decode($0) }
         return d
     }()
 
@@ -201,14 +260,21 @@ struct LiveAPI: DevmaxAPI {
     }()
 
     private func request(
-        _ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil
+        _ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil,
+        mayRefresh: Bool = true
     ) async throws -> Data {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
 
         var req = URLRequest(url: components.url!)
         req.httpMethod = method
-        req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        let accessToken = await tokenStore.accessToken()
+        if let accessToken {
+            req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        } else if !apiKey.isEmpty {
+            // Founder migration only. New accounts never receive this value.
+            req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        }
         if let body {
             req.httpBody = body
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -224,6 +290,20 @@ struct LiveAPI: DevmaxAPI {
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         switch code {
         case 200..<300: return data
+        case 401 where mayRefresh && accessToken != nil:
+            do {
+                _ = try await tokenStore.refresh { refreshToken in
+                    try await AuthClient(
+                        baseURL: baseURL, session: session, store: tokenStore
+                    ).refresh(refreshToken)
+                }
+                return try await request(
+                    method, path, query: query, body: body, mayRefresh: false
+                )
+            } catch {
+                await tokenStore.clear()
+                throw APIError.unauthorized
+            }
         case 401: throw APIError.unauthorized
         case 503: throw APIError.scoringUnavailable
         default: throw APIError.status(code)
@@ -288,6 +368,95 @@ struct LiveAPI: DevmaxAPI {
         let body = try Self.encoder.encode(["token": token, "kind": "apns"])
         _ = try await request("POST", "device-tokens", body: body)
     }
+
+    func accountProfile() async throws -> AccountProfile {
+        try await get("auth/me", AccountProfile.self)
+    }
+
+    func completeOnboarding() async throws -> AccountProfile {
+        try await post("auth/onboarding/complete", AccountProfile.self)
+    }
+
+    func materialImports() async throws -> [MaterialImport] {
+        try await get("materials/imports", [MaterialImport].self)
+    }
+
+    func materialImport(_ id: UUID) async throws -> MaterialImport {
+        try await get("materials/imports/\(id)", MaterialImport.self)
+    }
+
+    func startMaterialImport(_ body: MaterialImportRequest) async throws -> MaterialImport {
+        try await post("materials/imports", MaterialImport.self, body: body)
+    }
+
+    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport {
+        try await post("materials/imports/\(id)/retry", MaterialImport.self)
+    }
+
+    func deleteMaterialImport(_ id: UUID) async throws {
+        _ = try await request("DELETE", "materials/imports/\(id)")
+    }
+
+    func editMaterialTopic(
+        _ id: UUID, topic: String?, answerAnchor: String?, action: String,
+        mergeInto: UUID?
+    ) async throws -> MaterialTopic {
+        struct Body: Encodable {
+            let topic: String?
+            let answerAnchor: String?
+            let action: String
+            let mergeIntoId: UUID?
+        }
+        let data = try await request(
+            "PATCH", "materials/topics/\(id)",
+            body: Self.encoder.encode(
+                Body(
+                    topic: topic, answerAnchor: answerAnchor, action: action,
+                    mergeIntoId: mergeInto
+                )
+            )
+        )
+        return try Self.decoder.decode(MaterialTopic.self, from: data)
+    }
+
+    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
+        struct Body: Encodable { let selectedTopicIds: [UUID] }
+        return try await post(
+            "materials/imports/\(id)/confirm", MaterialConfirmation.self,
+            body: Body(selectedTopicIds: topics)
+        )
+    }
+
+    func createManualMaterial(
+        title: String, topics: [ManualTopic]
+    ) async throws -> MaterialConfirmation {
+        struct Body: Encodable { let title: String; let topics: [ManualTopic] }
+        return try await post(
+            "materials/manual", MaterialConfirmation.self, body: Body(title: title, topics: topics)
+        )
+    }
+
+    func materialCollections() async throws -> [MaterialCollection] {
+        try await get("materials/collections", [MaterialCollection].self)
+    }
+
+    func materialCollection(_ id: String) async throws -> MaterialCollectionDetail {
+        try await get("materials/collections/\(id)", MaterialCollectionDetail.self)
+    }
+
+    func addMaterialCollection(_ id: String) async throws -> MaterialConfirmation {
+        try await post("materials/collections/\(id)", MaterialConfirmation.self)
+    }
+
+    func savedPlanPreview(_ id: UUID) async throws -> PlanPreview {
+        try await get("study-plans/preview/\(id)", PlanPreview.self)
+    }
+
+    func exportAccount() async throws -> Data { try await request("GET", "auth/export") }
+
+    func deleteAccount() async throws { _ = try await request("DELETE", "auth/account") }
+
+    func logout() async throws { _ = try await request("POST", "auth/logout") }
 
     // MARK: Study Plan
 
@@ -477,10 +646,9 @@ struct LiveAPI: DevmaxAPI {
 
 /// Where the app points.
 ///
-/// Both values come from the per-configuration xcconfigs in `ios/Config` via
-/// Info.plist substitution: Debug points at localhost:8083 (the ~/dev port
-/// contract), Release at the Fly deployment. `WC_API_KEY` lives in the gitignored
-/// `Config/Secrets.xcconfig` — see `Config/Secrets.example.xcconfig`.
+/// The endpoint comes from the per-configuration xcconfigs in `ios/Config` via
+/// Info.plist substitution. WC_API_KEY remains only for the founder migration;
+/// public accounts use opaque bearer credentials from `AuthTokenStore`.
 ///
 /// There is deliberately no fallback API key. A default here can only mask a
 /// misconfigured build, and the value it used to fall back to is published in this
@@ -499,7 +667,17 @@ enum APIConfig {
         if DebugFlags.shared.useMockAPI { return MockAPI.shared }
         return LiveAPI(
             baseURL: info("WCBaseURL").flatMap(URL.init(string:)) ?? defaultBaseURL,
-            apiKey: info("WCAPIKey") ?? ""
+            apiKey: info("WCAPIKey") ?? "",
+            tokenStore: .shared
         )
     }
+
+    static var authClient: AuthClient {
+        AuthClient(
+            baseURL: info("WCBaseURL").flatMap(URL.init(string:)) ?? defaultBaseURL,
+            store: .shared
+        )
+    }
+
+    static var hasLegacyKey: Bool { info("WCAPIKey") != nil }
 }

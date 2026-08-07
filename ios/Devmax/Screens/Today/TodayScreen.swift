@@ -17,7 +17,11 @@ struct TodayScreen: View {
                     case .loading: LoadingList()
                     case .error: LoadFailure { Task { await state.loadToday() } }
                     case .ready:
-                        if state.queue.isEmpty { EmptyQueue() } else { rowList }
+                        if state.queue.isEmpty, state.library.isEmpty {
+                            NoMaterialTodayContent()
+                        } else if state.queue.isEmpty {
+                            EmptyQueue()
+                        } else { rowList }
                     }
                 }
                 .padding(.horizontal, Metrics.listContainerPadding)
@@ -169,6 +173,10 @@ struct TodayScreen: View {
     // MARK: - Bottom
 
     private var bottomBlock: some View {
+        if state.load == .ready, state.queue.isEmpty, state.library.isEmpty {
+            return AnyView(EmptyView())
+        }
+        return AnyView(
         VStack(alignment: .leading, spacing: 12) {
             // Quick-add stays visible in every state, including empty and error.
             Button { state.sheet = .add } label: {
@@ -210,6 +218,33 @@ struct TodayScreen: View {
         .padding(.top, Metrics.listContainerPadding)
         .padding(.bottom, Metrics.bottomSafeArea)
         .background(Theme.bg)
+        )
+    }
+}
+
+struct NoMaterialTodayContent: View {
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var flow: PublicOnboardingState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Add something you want to understand.")
+                .font(TypeRole.emptyQueue).foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            PrimaryButton(title: "Add study material") { open(.material) }
+            SecondaryButton(title: "Add a few topics") { open(.manual) }
+            Button("Browse Devmax collections") { open(.collections) }
+                .buttonStyle(.plain).font(TypeRole.secondaryAction).foregroundStyle(Theme.meta)
+                .frame(minHeight: Metrics.minTapTarget)
+        }
+        .padding(.horizontal, Metrics.rowInset).padding(.top, 28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func open(_ step: PublicOnboardingState.Step) {
+        flow.step = step
+        state.path.append(.materialSetup)
+        if step == .collections { Task { await flow.loadCollections() } }
     }
 }
 

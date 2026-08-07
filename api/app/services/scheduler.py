@@ -14,10 +14,9 @@ PASS_QUALITY = 3
 
 RATING_AGAIN = "again"
 RATING_GOOD = "good"
-# Scheduling gates on mechanism accuracy alone. Not knowing the trade-offs is a
-# depth gap; getting the mechanism wrong is a retention failure, and only the
-# second one means the card is due again tomorrow.
-MECHANISM_PASS = 3
+# Scheduling gates on Accuracy alone. Missing depth or boundaries is a coaching
+# gap; getting the essential concept wrong is a retention failure.
+ACCURACY_PASS = 3
 # Two buckets, not six. The composite score is a display concern and no longer
 # reaches this module — feeding its full 0-5 range into the ease-factor delta
 # would let "knew it, didn't volunteer the failure modes" move the interval.
@@ -26,14 +25,14 @@ MECHANISM_PASS = 3
 RATING_QUALITY = {RATING_AGAIN: 2, RATING_GOOD: 4}
 
 
-def rating_for(mechanism_accuracy: int) -> str:
+def rating_for(accuracy: int) -> str:
     """The scheduler's view of a session: did they reconstruct the mechanism?"""
-    return RATING_GOOD if mechanism_accuracy >= MECHANISM_PASS else RATING_AGAIN
+    return RATING_GOOD if accuracy >= ACCURACY_PASS else RATING_AGAIN
 
 
-def quality_for(mechanism_accuracy: int) -> int:
-    """SM-2 quality for a session, gated on mechanism accuracy alone."""
-    return RATING_QUALITY[rating_for(mechanism_accuracy)]
+def quality_for(accuracy: int) -> int:
+    """SM-2 quality for a session, gated on Accuracy alone."""
+    return RATING_QUALITY[rating_for(accuracy)]
 
 
 def apply_sm2(
@@ -46,7 +45,7 @@ def apply_sm2(
     """Returns (new_ease_factor, new_interval_days, new_repetitions, next_review_at).
 
     ``quality`` comes from ``quality_for``, which derives it from the FINAL
-    session's ``mechanism_accuracy`` after any follow-up. It is not the composite
+    session's ``accuracy`` after any follow-up. It is not the composite
     score the app displays — see the RATING_QUALITY note above.
 
     ``missed_count`` deliberately never reaches this function. Missing a review is
