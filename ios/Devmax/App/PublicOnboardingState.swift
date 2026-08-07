@@ -27,6 +27,7 @@ final class PublicOnboardingState: ObservableObject {
 
     let api: DevmaxAPI
     private var pollTask: Task<Void, Never>?
+    private var persistTask: Task<Void, Never>?
     private var pendingAfterSignIn: PendingAfterSignIn = .guide
 
     init(api: DevmaxAPI = APIConfig.client) {
@@ -35,7 +36,10 @@ final class PublicOnboardingState: ObservableObject {
         step = Self.debugStep(DebugFlags.shared.route) ?? .welcome
     }
 
-    deinit { pollTask?.cancel() }
+    deinit {
+        pollTask?.cancel()
+        persistTask?.cancel()
+    }
 
     var guideIsValid: Bool {
         draft.guideText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 200
@@ -61,7 +65,20 @@ final class PublicOnboardingState: ObservableObject {
         }
     }
 
-    func persist() { PublicSetupStore.save(draft) }
+    func persist() {
+        persistTask?.cancel()
+        PublicSetupStore.save(draft)
+    }
+
+    func schedulePersist() {
+        persistTask?.cancel()
+        persistTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            guard let self else { return }
+            PublicSetupStore.save(self.draft)
+        }
+    }
 
     func prepareGuideImport(authenticated: Bool) {
         persist()
@@ -152,8 +169,11 @@ final class PublicOnboardingState: ObservableObject {
     private func beginPolling(_ id: UUID) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
+            let intervals = [2.0, 4.0, 8.0, 15.0]
+            var intervalIndex = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
+                do { try await Task.sleep(for: .seconds(intervals[intervalIndex])) }
+                catch { return }
                 guard let self else { return }
                 do {
                     self.job = try await self.api.materialImport(id)
@@ -164,6 +184,7 @@ final class PublicOnboardingState: ObservableObject {
                 } catch {
                     // The job is durable; a transient poll failure is not an import failure.
                 }
+                intervalIndex = min(intervalIndex + 1, intervals.count - 1)
             }
         }
     }

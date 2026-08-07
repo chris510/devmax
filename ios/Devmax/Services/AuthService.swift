@@ -127,18 +127,12 @@ struct AuthClient {
     var session: URLSession = .shared
     var store: AuthTokenStore = .shared
 
-    private static let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        return encoder
-    }()
-
     private func post<Response: Decodable, Body: Encodable>(
         _ path: String, body: Body
     ) async throws -> Response {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = "POST"
-        request.httpBody = try Self.encoder.encode(body)
+        request.httpBody = try LiveAPI.encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (data, response): (Data, URLResponse)
         do {

@@ -28,7 +28,10 @@ struct DevmaxApp: App {
                     // Backgrounding mid-answer must not lose the transcript, and the
                     // debounce updateDraft applies is exactly what can't be waited
                     // out here — so flush rather than schedule.
-                    if phase != .active { state.flushDraft() }
+                    if phase != .active {
+                        state.flushDraft()
+                        publicFlow.persist()
+                    }
                 }
         }
     }

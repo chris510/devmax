@@ -253,7 +253,7 @@ struct LiveAPI: DevmaxAPI {
         return d
     }()
 
-    private static let encoder: JSONEncoder = {
+    static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.keyEncodingStrategy = .convertToSnakeCase
         return e

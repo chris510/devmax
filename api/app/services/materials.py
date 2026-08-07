@@ -15,11 +15,13 @@ from app.models import (
     ITEM_PRACTICE,
     PROPOSAL_CLEAN,
     PROPOSAL_NEEDS_ATTENTION,
+    SOURCE_CONFIRMED,
     SOURCE_FAILED,
     SOURCE_NEEDS_ATTENTION,
     SOURCE_PENDING,
     SOURCE_PROCESSING,
     SOURCE_READY,
+    SOURCE_SUPERSEDED,
     MaterialSource,
     MaterialTopicProposal,
     Settings,
@@ -100,7 +102,7 @@ async def _process_plan(db, source: MaterialSource) -> None:
         db.add(source)
         await db.commit()
 
-    await guide_import.run_plan_draft(db, draft)
+    await guide_import.run_plan_draft(draft)
     db.add(draft)
     source.error = draft.error
     if draft.status == DRAFT_FAILED:
@@ -127,24 +129,15 @@ async def _process_plan(db, source: MaterialSource) -> None:
 
 
 async def _process_topics(db, source: MaterialSource) -> None:
-    raw = await llm.import_guide(
-        guide_text=source.source_text,
-        requested_weeks=source.requested_weeks,
-        weekly_capacity_minutes=source.weekly_capacity_minutes,
-        mode=source.mode,
-        deadline=source.deadline.isoformat() if source.deadline else None,
-        subject_hint="",
-        title_hint=source.title,
-    )
-    validated = study_plan_import.validate_import(
-        raw,
+    _, validated = await guide_import.import_and_validate(
         guide_text=source.source_text,
         requested_weeks=source.requested_weeks,
         weekly_capacity_minutes=source.weekly_capacity_minutes,
         mode=source.mode,
         deadline=source.deadline,
         start_date=await _start_date(db, source.user_id),
-        resolutions={},
+        subject_hint="",
+        title_hint=source.title,
     )
     preview = validated.preview
     clean, attention, comparison = await _store_topic_proposals(db, source, preview)
@@ -155,6 +148,17 @@ async def _process_topics(db, source: MaterialSource) -> None:
         "subject": preview.get("subject", "Study material"),
         "comparison": comparison,
     }
+
+
+async def confirm_source_version(db, source: MaterialSource, user_id: uuid.UUID) -> None:
+    """Confirm one source and supersede its owned predecessor, if any."""
+    source.status = SOURCE_CONFIRMED
+    db.add(source)
+    if source.previous_version_id:
+        previous = await db.get(MaterialSource, source.previous_version_id)
+        if previous is not None and previous.user_id == user_id:
+            previous.status = SOURCE_SUPERSEDED
+            db.add(previous)
 
 
 async def _store_topic_proposals(

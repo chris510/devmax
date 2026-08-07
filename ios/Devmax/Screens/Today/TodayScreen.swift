@@ -172,53 +172,53 @@ struct TodayScreen: View {
 
     // MARK: - Bottom
 
+    @ViewBuilder
     private var bottomBlock: some View {
         if state.load == .ready, state.queue.isEmpty, state.library.isEmpty {
-            return AnyView(EmptyView())
-        }
-        return AnyView(
-        VStack(alignment: .leading, spacing: 12) {
-            // Quick-add stays visible in every state, including empty and error.
-            Button { state.sheet = .add } label: {
-                HStack(spacing: 8) {
-                    Text("+").font(WCFont.sans(16))
-                    Text("Ask about something else").font(TypeRole.rowSummary)
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                // Quick-add stays visible in every state, including empty and error.
+                Button { state.sheet = .add } label: {
+                    HStack(spacing: 8) {
+                        Text("+").font(WCFont.sans(16))
+                        Text("Ask about something else").font(TypeRole.rowSummary)
+                    }
+                    .foregroundStyle(Theme.meta)
+                    .padding(.vertical, 4)
                 }
-                .foregroundStyle(Theme.meta)
-                .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            // Always visible, including when the queue is empty or the fetch
-            // failed — a sprint draws from the whole library, not from what's due.
-            // Deliberately lower weight than Start, which stays the dominant
-            // daily action.
-            Button { state.enterSprintSetup() } label: {
-                Text("Review sprint")
-                    .font(WCFont.sans(15))
-                    .foregroundStyle(Theme.textMuted)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
+                // Always visible, including when the queue is empty or the fetch
+                // failed — a sprint draws from the whole library, not from what's due.
+                // Deliberately lower weight than Start, which stays the dominant
+                // daily action.
+                Button { state.enterSprintSetup() } label: {
+                    Text("Review sprint")
+                        .font(WCFont.sans(15))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
 
-            // Start appears only when more than one card is due.
-            if state.visibleQueue.count > 1 {
-                PrimaryButton(title: "Start — \(state.visibleQueue.count) cards") {
-                    state.beginSession(cards: state.visibleQueue)
+                // Start appears only when more than one card is due.
+                if state.visibleQueue.count > 1 {
+                    PrimaryButton(title: "Start — \(state.visibleQueue.count) cards") {
+                        state.beginSession(cards: state.visibleQueue)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.top, Metrics.listContainerPadding)
+            .padding(.bottom, Metrics.bottomSafeArea)
+            .background(Theme.bg)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Metrics.screenPadding)
-        .padding(.top, Metrics.listContainerPadding)
-        .padding(.bottom, Metrics.bottomSafeArea)
-        .background(Theme.bg)
-        )
     }
 }
 

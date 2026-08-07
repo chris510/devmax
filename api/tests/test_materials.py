@@ -60,6 +60,14 @@ async def test_topics_are_proposals_until_the_user_confirms(client, db, stub_imp
     db.add(source)
     await db.commit()
 
+    listing = (await client.get("/materials/imports", headers=API_HEADERS)).json()[0]
+    detail = (await client.get(f"/materials/imports/{source.id}", headers=API_HEADERS)).json()
+    assert listing["character_count"] == len(GUIDE)
+    assert listing["clean_count"] == 4
+    assert listing["attention_count"] == 1
+    assert len(listing["topics"]) == 5
+    assert len(detail["topics"]) == 5
+
     proposals = (
         await db.exec(
             select(MaterialTopicProposal)

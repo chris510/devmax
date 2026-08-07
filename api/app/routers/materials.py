@@ -3,6 +3,8 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from sqlalchemy import func
+from sqlalchemy.orm import defer
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -16,7 +18,6 @@ from app.models import (
     PROPOSAL_NEEDS_ATTENTION,
     SOURCE_CONFIRMED,
     SOURCE_PENDING,
-    SOURCE_SUPERSEDED,
     Card,
     MaterialSource,
     MaterialTopicProposal,
@@ -112,8 +113,12 @@ async def _owned_source(db: AsyncSession, source_id: uuid.UUID) -> MaterialSourc
 
 
 def _response_from_topics(
-    source: MaterialSource, topics: list[MaterialTopicProposal]
+    source: MaterialSource,
+    topics: list[MaterialTopicProposal],
+    *,
+    character_count: int | None = None,
 ) -> MaterialImportOut:
+    summary = source.result_summary
     return MaterialImportOut(
         id=source.id,
         title=source.title,
@@ -123,15 +128,12 @@ def _response_from_topics(
         import_path=source.import_path,
         intent=source.intent,
         original_filename=source.original_filename,
-        character_count=len(source.source_text),
+        character_count=character_count if character_count is not None else len(source.source_text),
         clean_count=sum(row.status == PROPOSAL_CLEAN for row in topics),
         attention_count=sum(row.status == PROPOSAL_NEEDS_ATTENTION for row in topics),
         error=source.error,
         plan_draft_id=source.plan_draft_id,
-        comparison={
-            key: int(value)
-            for key, value in (source.result_summary.get("comparison") or {}).items()
-        },
+        comparison={key: int(value) for key, value in (summary.get("comparison") or {}).items()},
         topics=[MaterialTopicOut.model_validate(row) for row in topics],
         created_at=source.created_at,
         updated_at=source.updated_at,
@@ -184,26 +186,34 @@ async def start_import(
 
 @router.get("/imports", response_model=list[MaterialImportOut])
 async def list_imports(db: AsyncSession = Depends(get_session)) -> list[MaterialImportOut]:
-    sources = (
+    rows = (
         await db.exec(
-            select(MaterialSource)
+            select(MaterialSource, func.length(MaterialSource.source_text))
+            .options(defer(MaterialSource.source_text))
             .where(MaterialSource.user_id == current_user_id())
             .order_by(col(MaterialSource.updated_at).desc())
         )
     ).all()
-    if not sources:
+    if not rows:
         return []
     topics = (
         await db.exec(
             select(MaterialTopicProposal)
-            .where(col(MaterialTopicProposal.source_id).in_([source.id for source in sources]))
+            .where(col(MaterialTopicProposal.source_id).in_([source.id for source, _ in rows]))
             .order_by(MaterialTopicProposal.source_id, MaterialTopicProposal.position)
         )
     ).all()
     by_source: dict[uuid.UUID, list[MaterialTopicProposal]] = {}
     for topic in topics:
         by_source.setdefault(topic.source_id, []).append(topic)
-    return [_response_from_topics(source, by_source.get(source.id, [])) for source in sources]
+    return [
+        _response_from_topics(
+            source,
+            by_source.get(source.id, []),
+            character_count=character_count or 0,
+        )
+        for source, character_count in rows
+    ]
 
 
 @router.get("/imports/{source_id}", response_model=MaterialImportOut)
@@ -331,13 +341,7 @@ async def confirm_topics(
     for row in unselected:
         row.status = PROPOSAL_EXCLUDED
         db.add(row)
-    source.status = SOURCE_CONFIRMED
-    if source.previous_version_id:
-        previous = await db.get(MaterialSource, source.previous_version_id)
-        if previous and previous.user_id == current_user_id():
-            previous.status = SOURCE_SUPERSEDED
-            db.add(previous)
-    db.add(source)
+    await materials.confirm_source_version(db, source, current_user_id())
     await db.commit()
     return MaterialConfirmOut(source_id=source.id, created_card_ids=[card.id for card in cards])
 

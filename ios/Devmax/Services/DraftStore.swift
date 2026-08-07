@@ -8,22 +8,14 @@ import Foundation
 /// without waiting on a network round trip. Losing a spoken answer is the worst
 /// failure mode in the product.
 enum DraftStore {
-    private static var url: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("drafts.json")
-    }
+    private static let filename = "drafts.json"
 
     private static func load() -> [String: String] {
-        guard let data = try? Data(contentsOf: url),
-              let map = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return map
+        LocalJSONStore.read([String: String].self, from: filename) ?? [:]
     }
 
     private static func persist(_ map: [String: String]) {
-        let directory = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? JSONEncoder().encode(map).write(to: url, options: .atomic)
+        LocalJSONStore.save(map, to: filename)
     }
 
     static func save(_ text: String, for cardID: UUID) {

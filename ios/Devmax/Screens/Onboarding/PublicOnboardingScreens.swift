@@ -139,7 +139,7 @@ struct PublicOnboardingView: View {
                 .padding(11)
                 .background(Theme.inputFill, in: RoundedRectangle(cornerRadius: Metrics.inputRadius))
                 .overlay(RoundedRectangle(cornerRadius: Metrics.inputRadius).stroke(Theme.border))
-                .onChange(of: flow.draft.guideText) { _, _ in flow.persist() }
+                .onChange(of: flow.draft.guideText) { _, _ in flow.schedulePersist() }
             HStack {
                 MetaText(text: "\(flow.draft.guideText.count) CHARACTERS", font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint)
                 Spacer()

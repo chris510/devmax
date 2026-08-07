@@ -53,8 +53,6 @@ from app.models import (
     REVISION_REOPEN,
     REVISION_REPLAN,
     REVISION_RESUME,
-    SOURCE_CONFIRMED,
-    SOURCE_SUPERSEDED,
     Card,
     MaterialSource,
     StudyPlan,
@@ -101,7 +99,7 @@ from app.schemas import (
     WeekPlacementOut,
     WeekSection,
 )
-from app.services import guide_import, llm, usage
+from app.services import guide_import, llm, materials, usage
 from app.services import study_plan as sp
 from app.services import study_plan_import as spi
 from app.services import study_plan_scheduler as sched
@@ -291,14 +289,14 @@ def _preview_response(draft: StudyPlanGuideDraft) -> PreviewOut:
     )
 
 
-async def _run_import(db: AsyncSession, draft: StudyPlanGuideDraft) -> None:
+async def _run_import(draft: StudyPlanGuideDraft) -> None:
     """Import, validate, and store — or store the failure with the guide intact.
 
     A failed import never raises past this point. The draft keeps the guide text,
     the duration, the capacity, the mode, the deadline, and every edit, so Retry
     is one tap and loses nothing the user typed.
     """
-    await guide_import.run_plan_draft(db, draft)
+    await guide_import.run_plan_draft(draft)
 
 
 def _revalidate(draft: StudyPlanGuideDraft) -> None:
@@ -339,7 +337,7 @@ async def preview_guide(
 
     await usage.ensure_available(db, current_user_id(), "guide_import", get_settings())
     await db.commit()
-    await _run_import(db, draft)
+    await _run_import(draft)
     usage.record(db, current_user_id(), "guide_import")
     db.add(draft)
     await db.commit()
@@ -371,7 +369,7 @@ async def retry_preview(draft_id: uuid.UUID, db: AsyncSession = Depends(get_sess
     draft = await _get_draft(db, draft_id)
     await usage.ensure_available(db, current_user_id(), "guide_import", get_settings())
     await db.commit()
-    await _run_import(db, draft)
+    await _run_import(draft)
     usage.record(db, current_user_id(), "guide_import")
     db.add(draft)
     await db.commit()
@@ -487,13 +485,7 @@ async def create_plan(body: PlanCreate, db: AsyncSession = Depends(get_session))
         )
     ).first()
     if source is not None:
-        source.status = SOURCE_CONFIRMED
-        db.add(source)
-        if source.previous_version_id:
-            previous = await db.get(MaterialSource, source.previous_version_id)
-            if previous is not None and previous.user_id == current_user_id():
-                previous.status = SOURCE_SUPERSEDED
-                db.add(previous)
+        await materials.confirm_source_version(db, source, current_user_id())
 
     try:
         await db.commit()
