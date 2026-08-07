@@ -1,6 +1,6 @@
 # Devmax study-quality improvements
 
-Status: **audited product direction and design proposal; not approved for implementation**
+Status: **approved and implemented in a draft PR; curriculum grounding and live model evaluation remain review gates**
 
 Claude Design artifact: [Study Quality Improvements v1](https://claude.ai/design/p/25258e0c-5891-401c-9690-88790421a788?file=Study+Quality+Improvements+v1.dc.html)
 
@@ -261,22 +261,37 @@ technical item can produce a card:
 Do not invent a source excerpt for broad mocks. A broad Practice item may remain
 valuable plan work without being a valid card source.
 
-## Implementation work, in order
+## Implementation record
 
-### Phase 1 — grounding boundary
+The application now implements the structural and product changes below:
 
-1. Add a pending-capture table and capture/inbox endpoints.
-2. Add source and answer-rubric fields to cards.
-3. Add lifecycle and replacement linkage.
-4. Define one active-card eligibility predicate and reuse it in due, push,
-   Sprint, and Coverage queries.
-5. Define one atomic activation gate shared by capture conversion and Study Plan
-   proposal acceptance; it requires the source, answer basis, rubric, and
-   approved question before creating a card.
-6. Pass the rubric to question generation, scoring, and re-attempt grading.
-7. Preserve the complete-answer transaction and every existing SM-2 invariant.
+- pending capture storage, inbox APIs, fail-closed activation, and replay safety;
+- trusted answer bases and five-field rubrics passed through generation, scoring,
+  correction, and coached re-attempt grading;
+- recoverable archive/restore and question replacement with preserved lineage;
+- one active-card predicate across due, push, missed checks, library, Coverage,
+  and Study Plan weak-card context;
+- per-item Study Plan recall eligibility and grounded atomic proposal acceptance;
+- iOS Quick Capture, Card Inbox, source/rubric/question review, missing-basis stop,
+  maintenance, weakest-axis Depth repair, and run-local removal;
+- a concurrent, stable-order model evaluation runner with per-call token usage
+  and axis/false-mechanism-pass reporting.
 
-### Phase 2 — first-party content
+The migration intentionally preserves existing cards and history. It does not
+pretend that an old ungrounded card acquired authority during deployment.
+
+### Remaining content and live-evaluation gates
+
+- The 54-card curriculum manifest still needs human-reviewed answer bases,
+  rubrics, and canonical questions derived from its licensed source lessons.
+  Topic names and URLs are not enough to manufacture trusted corrections.
+- The first-party Study Plan remains `recall_supported = false` until each item
+  has a real excerpt and an explicit eligibility review.
+- The 60–100-case source-grounded evaluation set and the paid live scoring and
+  re-attempt sweeps must run after those answer authorities are reviewed. The
+  runner is ready; no paid calls were made by this implementation.
+
+## Remaining content order
 
 1. Add real source links and explicit recall eligibility to the 84-item manifest.
 2. Add reviewed answer bases only to eligible items.
@@ -285,13 +300,6 @@ valuable plan work without being a valid card source.
    not by calendar week.
 5. Update only production cards without history; replacements preserve any
    existing history.
-
-### Phase 3 — safe practice and maintenance
-
-1. Add axis-aware practice-set selection without changing scoring or SM-2.
-2. Add run-local Sprint removal.
-3. Add archive, restore, and replace-question operations.
-4. Add iOS states from the storyboard and screenshot-check them at 390×844.
 
 ## Evaluation work
 
@@ -318,18 +326,18 @@ Report at least:
 - correction factuality;
 - coached-summary integrity.
 
-Extend or replace the existing sweep runner with bounded concurrency, stable
-result ordering, and per-call token accounting so the larger live evaluation
-does not serialize every independent case.
-
-Complete the currently open `reattempt_effort` sweep as part of this work.
+The sweep runners now provide bounded concurrency, stable result ordering,
+per-call token accounting, axis metrics, and a separate coached re-attempt case
+set. Complete the paid scoring and `reattempt_effort` sweeps only after the
+source-grounded cases have been reviewed.
 
 ## Acceptance criteria
 
 ### Design fidelity
 
 - Every state is rendered at 390×844.
-- Dynamic Type is addressed before implementation is called accessible.
+- The existing app-wide Dynamic Type gap remains explicitly tracked and blocks
+  calling this flow fully accessible.
 - Accent remains restricted to its approved uses.
 - Score is never communicated by colour alone.
 - No new animation is introduced.
@@ -364,8 +372,9 @@ The final rendered artifact was checked for:
 - recoverable-archive copy present;
 - no readiness-score or gamification copy in the design canvas.
 
-Implementation still requires the repository's normal SwiftUI screenshot pass;
-this audit validates the proposal, not a built client.
+The built SwiftUI flow was also rendered at 390×844 for Capture, Inbox, Source,
+Question, and Depth repair states. The Claude audit validates the design source;
+the simulator pass validates the implemented states.
 
 ## Explicitly out of scope
 
@@ -381,18 +390,13 @@ proposal additionally excludes:
 - Transfer-check and contrast/interleaving experiments; revisit these only after
   the grounding and evaluation work proves trustworthy.
 
-## Review questions
+## Remaining review questions
 
-The PR is intentionally a decision artifact. Before implementation, resolve:
+Resolve these before grounding first-party content or changing the scoring
+model:
 
 1. Should answer bases be concise authored text, licensed source excerpts, or
    both?
 2. Which first-party Study Plan items are truly eligible for recall proposals?
-3. Should pending captures sync to the server immediately, or use the same
-   disk-first then cheap-backup pattern as spoken drafts?
-4. Should archive/restore live only in Card History, or also be reachable from
-   Coverage after the first version?
-5. Is `Now / Next review` still the right activation choice, or should every
-   newly grounded card enter the next-review path by default?
-6. What false mechanism-pass threshold is acceptable before a scoring-model
+3. What false mechanism-pass threshold is acceptable before a scoring-model
    change is blocked?

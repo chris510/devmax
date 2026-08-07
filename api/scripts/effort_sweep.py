@@ -1,25 +1,18 @@
 #!/usr/bin/env python
-"""Compare scoring quality and token spend across `effort` levels.
+"""Compare scoring quality and token spend across ``effort`` levels.
 
-Not a test — this makes live Anthropic calls and costs real money (roughly
-$0.013 per case per level at Sonnet 5 intro pricing). It exists to answer one
-question: does `scoring_effort="low"` grade the same as `"medium"`? Thinking
-tokens are billed as output and dominate the bill, so that setting is the only
-meaningful cost lever in the app.
+This is a live, paid evaluation tool rather than a test. Independent cases run
+with bounded concurrency, results print in source-file order, and every result
+owns its own input/output/cache usage even when calls overlap.
 
     uv run python scripts/effort_sweep.py scripts/effort_cases.json
-    uv run python scripts/effort_sweep.py cases.json --levels low medium high
-
-Token counts are read off the `log.info` line that `_complete` already emits,
-so measurement needs no production code change.
+    uv run python scripts/effort_sweep.py cases.json --levels low medium --concurrency 4
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
-import logging
 import statistics
 import sys
 from dataclasses import dataclass
@@ -27,138 +20,175 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from effort_sweep_support import (  # noqa: E402
+    Usage,
+    UsageTap,
+    capture_usage,
+    case_key,
+    load_cases,
+    run_bounded,
+)
+
 from app.config import get_settings  # noqa: E402
 from app.services import llm  # noqa: E402
 
 DEFAULT_LEVELS = ("low", "medium")
-
-
-class _UsageTap(logging.Handler):
-    """Accumulates output tokens from `llm`'s own "llm model=..." log record.
-
-    Coupled to the argument order in `_complete`'s log.info call
-    (model, attempt, ms, in, out, cache_read, cache_write). If that line
-    changes, this breaks loudly rather than reporting silently wrong numbers.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.output_tokens = 0
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if not record.getMessage().startswith("llm model="):
-            return
-        args = record.args
-        if not isinstance(args, tuple) or len(args) < 5:
-            raise RuntimeError(f"unexpected llm log shape: {args!r} — update _UsageTap")
-        self.output_tokens += int(args[4])
-
-
 @dataclass
 class Result:
+    index: int
     case: str
-    expected: int | None
+    expected_score: int | None
     score: int
-    output_tokens: int
+    expected_axes: tuple[int | None, int | None, int | None]
+    axes: tuple[int, int, int]
+    usage: Usage
     feedback: str = ""
 
 
-async def run_case(case: dict, tap: _UsageTap) -> Result:
-    tap.output_tokens = 0
-    result = await llm.score_answer(
-        topic=case["topic"],
-        mastery_summary=case.get("mastery_summary", ""),
-        question_asked=case["question"],
-        answer_text=case["answer"],
-        follow_up_question=None,
-        follow_up_answer="",
-        # Forced True so every case returns a score rather than a probe — we are
-        # measuring grading, and a 2 or 3 would otherwise short-circuit to a
-        # follow-up and never produce a comparable number.
-        follow_up_used=True,
+def _expected_axes(case: dict) -> tuple[int | None, int | None, int | None]:
+    return (
+        case.get("expected_mechanism_accuracy"),
+        case.get("expected_trade_off_awareness"),
+        case.get("expected_failure_mode_awareness"),
     )
+
+
+async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
+    key = f"{level}:{index}"
+    tap.start(key)
+    token = case_key.set(key)
+    try:
+        result = await llm.score_answer(
+            topic=case["topic"],
+            mastery_summary=case.get("mastery_summary", ""),
+            question_asked=case["question"],
+            answer_text=case["answer"],
+            follow_up_question=case.get("follow_up_question"),
+            follow_up_answer=case.get("follow_up_answer", ""),
+            # Every case must return a comparable final grade. Follow-up-band
+            # agreement is derived from the axes/composite below.
+            follow_up_used=True,
+            answer_basis=case.get("answer_basis", ""),
+            answer_rubric=case.get("answer_rubric"),
+        )
+    finally:
+        case_key.reset(token)
+
+    assert result.mechanism_accuracy is not None
+    assert result.trade_off_awareness is not None
+    assert result.failure_mode_awareness is not None
     return Result(
+        index=index,
         case=case.get("name", case["topic"]),
-        expected=case.get("expected_score"),
+        expected_score=case.get("expected_score"),
         score=result.score if result.score is not None else -1,
-        output_tokens=tap.output_tokens,
+        expected_axes=_expected_axes(case),
+        axes=(
+            result.mechanism_accuracy,
+            result.trade_off_awareness,
+            result.failure_mode_awareness,
+        ),
+        usage=tap.usage_for(key),
         feedback=result.feedback,
     )
+
+
+def _axis_metrics(results: list[Result], index: int) -> tuple[int, int, int]:
+    pairs = [
+        (result.axes[index], result.expected_axes[index])
+        for result in results
+        if result.expected_axes[index] is not None
+    ]
+    exact = sum(actual == expected for actual, expected in pairs)
+    within_one = sum(abs(actual - expected) <= 1 for actual, expected in pairs)
+    return exact, within_one, len(pairs)
+
+
+def _mechanism_errors(results: list[Result]) -> tuple[int, int]:
+    labeled = [r for r in results if r.expected_axes[0] is not None]
+    false_pass = sum(r.expected_axes[0] <= 2 and r.axes[0] >= 3 for r in labeled)
+    false_fail = sum(r.expected_axes[0] >= 3 and r.axes[0] <= 2 for r in labeled)
+    return false_pass, false_fail
+
+
+def print_summary(by_level: dict[str, list[Result]]) -> None:
+    print("\n=== summary ===")
+    print(f"  {'level':<10} {'in tok':>9} {'out tok':>9} {'mean dev':>9} {'exact':>8}")
+    for level, results in by_level.items():
+        deviations = [
+            abs(r.score - r.expected_score)
+            for r in results
+            if r.expected_score is not None
+        ]
+        mean_dev = f"{statistics.mean(deviations):.2f}" if deviations else "—"
+        exact = (
+            f"{sum(d == 0 for d in deviations)}/{len(deviations)}" if deviations else "—"
+        )
+        print(
+            f"  {level:<10} {sum(r.usage.input_tokens for r in results):>9} "
+            f"{sum(r.usage.output_tokens for r in results):>9} {mean_dev:>9} {exact:>8}"
+        )
+
+        false_pass, false_fail = _mechanism_errors(results)
+        print(f"    mechanism false pass={false_pass} false fail={false_fail}")
+        for name, index in (("mechanism", 0), ("trade-offs", 1), ("failure modes", 2)):
+            axis_exact, within_one, total = _axis_metrics(results, index)
+            if total:
+                print(
+                    f"    {name:<13} exact={axis_exact}/{total} "
+                    f"within-one={within_one}/{total}"
+                )
 
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cases", type=Path, help="JSON file: a list of case objects")
     parser.add_argument("--levels", nargs="+", default=list(DEFAULT_LEVELS))
+    parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--verbose", action="store_true", help="print feedback per case")
     args = parser.parse_args()
+    if args.concurrency < 1:
+        parser.error("--concurrency must be at least 1")
 
-    # Python block-buffers stdout when piped, which hides per-case progress for
-    # the several minutes a full sweep takes. Line buffering makes it watchable.
     sys.stdout.reconfigure(line_buffering=True)
-
     settings = get_settings()
     if not settings.anthropic_api_key:
         print("ANTHROPIC_API_KEY is unset — this script makes live calls.", file=sys.stderr)
         return 1
 
-    cases = json.loads(args.cases.read_text())
-    tap = _UsageTap()
-    logging.getLogger("app.services.llm").addHandler(tap)
-    logging.getLogger("app.services.llm").setLevel(logging.INFO)
+    cases = load_cases(args.cases, parser)
 
     original_effort = settings.scoring_effort
     by_level: dict[str, list[Result]] = {}
     try:
-        for level in args.levels:
-            settings.scoring_effort = level
-            results = by_level.setdefault(level, [])
-            print(f"\n=== effort={level} (model={settings.scoring_model}) ===")
-            for case in cases:
-                result = await run_case(case, tap)
-                results.append(result)
-                expected = "—" if result.expected is None else str(result.expected)
-                flag = ""
-                if result.expected is not None and result.score != result.expected:
-                    flag = f"  <-- off by {abs(result.score - result.expected)}"
+        with capture_usage() as tap:
+            for level in args.levels:
+                settings.scoring_effort = level
                 print(
-                    f"  {result.case[:44]:<44} "
-                    f"score={result.score} expected={expected} "
-                    f"out={result.output_tokens:>5}{flag}"
+                    f"\n=== effort={level} (model={settings.scoring_model}, "
+                    f"concurrency={args.concurrency}) ==="
                 )
-                if args.verbose:
-                    print(f"      {result.feedback}")
+                results = await run_bounded(
+                    cases, args.concurrency,
+                    lambda index, case, effort=level: run_case(index, case, effort, tap),
+                )
+                by_level[level] = results
+                for result in results:
+                    expected = "—" if result.expected_score is None else str(result.expected_score)
+                    flag = ""
+                    if result.expected_score is not None and result.score != result.expected_score:
+                        flag = f"  <-- off by {abs(result.score - result.expected_score)}"
+                    print(
+                        f"  {result.case[:40]:<40} score={result.score} expected={expected} "
+                        f"axes={result.axes} in={result.usage.input_tokens:>5} "
+                        f"out={result.usage.output_tokens:>5}{flag}"
+                    )
+                    if args.verbose:
+                        print(f"      {result.feedback}")
     finally:
         settings.scoring_effort = original_effort
-        logging.getLogger("app.services.llm").removeHandler(tap)
 
-    def deviations(results: list[Result]) -> list[int]:
-        return [abs(r.score - r.expected) for r in results if r.expected is not None]
-
-    def total_output(results: list[Result]) -> int:
-        return sum(r.output_tokens for r in results)
-
-    print("\n=== summary ===")
-    print(f"  {'level':<10} {'out tok':>9} {'mean dev':>9} {'max dev':>8} {'exact':>8}")
-    for level, results in by_level.items():
-        devs = deviations(results)
-        mean_dev = f"{statistics.mean(devs):.2f}" if devs else "—"
-        max_dev = str(max(devs)) if devs else "—"
-        exact = f"{sum(1 for d in devs if d == 0)}/{len(devs)}" if devs else "—"
-        print(f"  {level:<10} {total_output(results):>9} {mean_dev:>9} {max_dev:>8} {exact:>8}")
-
-    if len(by_level) > 1:
-        (base_level, base_results), *rest = by_level.items()
-        base_total = total_output(base_results)
-        print(
-            f"\n  baseline: {base_level}. Adopt a cheaper level only if its deviation "
-            f"column matches and it saves real tokens."
-        )
-        for level, results in rest:
-            if base_total:
-                delta = (total_output(results) - base_total) / base_total * 100
-                print(f"    {level}: {delta:+.0f}% output tokens vs {base_level}")
-
+    print_summary(by_level)
     return 0
 
 

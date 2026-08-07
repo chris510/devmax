@@ -213,7 +213,7 @@ uv run python -m app.seed --retire-file archive/cards-legacy-126.json --confirm
 The manifest passed to `--retire-file` *is* the delete list. Retirement never
 computes a difference against the current deck, so reference material in
 `api/library/`, company overlays in `api/modules/`, and gap-driven cards created
-through `POST /cards` cannot be caught by it.
+through Capture activation cannot be caught by it.
 
 This is a hard delete and the cards' session history cascades with them. A card
 retired by mistake cannot be restored with its scores; only re-seeded blank.

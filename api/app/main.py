@@ -11,7 +11,7 @@ from sqlalchemy import text
 from app.auth import AuthMiddleware
 from app.config import get_settings
 from app.db import session_factory
-from app.routers import cards, devices, internal, sessions, settings, study_plan
+from app.routers import captures, cards, devices, internal, sessions, settings, study_plan
 from app.services.llm import LLMError
 from app.services.review_poller import run_review_poller
 
@@ -64,6 +64,7 @@ if not _settings.apns_private_key:
     )
 
 app.include_router(cards.router)
+app.include_router(captures.router)
 app.include_router(sessions.router)
 app.include_router(devices.router)
 app.include_router(settings.router)

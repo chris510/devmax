@@ -503,6 +503,9 @@ def _read_items(
                 "source_start": start,
                 "source_end": end,
                 "source_excerpt": quoted,
+                # The importer makes an explicit per-item decision, but an empty
+                # authority always fails closed regardless of that claim.
+                "recall_supported": bool(entry.get("recall_supported")) and bool(quoted),
                 "source_offsets_ok": offsets_ok,
                 "parser_interpretation": str(entry.get("parser_interpretation", "")).strip(),
             }
@@ -891,6 +894,7 @@ def build_plan_rows(preview: Mapping[str, Any], *, start_date: date) -> dict[str
             source_start=entry["source_start"],
             source_end=entry["source_end"],
             source_excerpt=entry["source_excerpt"],
+            recall_supported=entry["recall_supported"],
             parser_interpretation=entry["parser_interpretation"],
             approved_at=now_approved if entry["origin"] == ORIGIN_GENERATED else None,
         )

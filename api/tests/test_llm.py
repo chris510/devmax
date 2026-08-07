@@ -13,7 +13,9 @@ from typing import Any
 
 import pytest
 
+from app.schemas import AnswerRubric
 from app.services import llm
+from app.services.card_lifecycle import RUBRIC_FIELDS
 
 SCORE_ARGS = dict(
     topic="Consistent hashing",
@@ -35,6 +37,14 @@ AXES_FOR_COMPOSITE = {
     4: (4, 3, 0),  # + trade-offs, failure modes still thin
     5: (5, 3, 3),  # all three
 }
+
+
+def test_proposal_schema_and_activation_share_the_rubric_fields():
+    assert tuple(AnswerRubric.model_fields) == RUBRIC_FIELDS
+    schema = llm.CARD_PROPOSAL_SCHEMA["properties"]["candidates"]["items"]
+    rubric = schema["properties"]["answer_rubric"]
+    assert tuple(rubric["properties"]) == RUBRIC_FIELDS
+    assert tuple(rubric["required"]) == RUBRIC_FIELDS
 
 
 def scored(score: Any, probe: str | None = "probe?") -> dict[str, Any]:

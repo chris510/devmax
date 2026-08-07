@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # UNSWEPT. `scoring_effort`'s "low" was chosen from a live sweep; this one is
     # inherited, not measured. The task is narrower than scoring (one axis, no
     # composite, no probe), so "low" is the right prior — but run
-    # scripts/effort_sweep.py against this prompt before treating it as settled.
+    # scripts/reattempt_effort_sweep.py against this prompt before treating it as settled.
     reattempt_model: str = "claude-sonnet-5"
     reattempt_effort: str | None = "low"
 

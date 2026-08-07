@@ -175,6 +175,7 @@ struct PlanItemDetail: Codable, Equatable, Identifiable {
     let estimateConfidence: String
     let sourceExcerpt: String
     let sourceLabel: String
+    let recallSupported: Bool
     let notes: String
     let studyBlockLabel: String
     let studyBlockWeekday: Int?

@@ -28,6 +28,17 @@ final class AppState: ObservableObject {
         case settings, add, plans, planCapacity
         var id: String { rawValue }
     }
+    enum CaptureRoute: Identifiable, Equatable {
+        case inbox
+        case review(UUID)
+
+        var id: String {
+            switch self {
+            case .inbox: return "inbox"
+            case .review(let id): return "review-\(id)"
+            }
+        }
+    }
 
     /// The expanded tier on Coverage. One at a time, across the whole screen.
     struct OpenTier: Equatable {
@@ -47,6 +58,9 @@ final class AppState: ObservableObject {
     @Published var sheet: Sheet?
     @Published var addPending = false
     @Published var addError = false
+    @Published var captures: [CaptureSummary] = []
+    @Published var savedCapture: PendingCapture?
+    @Published var captureRoute: CaptureRoute?
     @Published var settings: AppSettings = .placeholder
 
     // Navigation
@@ -77,6 +91,8 @@ final class AppState: ObservableObject {
     @Published var setupSize = 6
     /// Bumped by Shuffle; the only input that re-rolls the suggested set.
     @Published var seed = 1
+    @Published var sprintKind: SprintKind = .review
+    @Published var sprintExcluded: Set<UUID> = []
     @Published var covOpen: OpenTier?
     @Published var recapOpen: UUID?
 
@@ -84,6 +100,19 @@ final class AppState: ObservableObject {
 
     static let minSessionSize = 4
     static let maxSessionSize = 10
+
+    enum DepthAxis: String { case tradeOff, failureMode }
+    enum SprintKind: Equatable { case review, depth(DepthAxis) }
+
+    struct AxisRollupItem: Identifiable {
+        let id: String
+        let label: String
+        let value: Double
+        let depthAxis: DepthAxis?
+        let isActionable: Bool
+
+        var text: String { label + " " + String(format: "%.1f", value) }
+    }
 
     /// In-flight debounced draft upload; cancelled and replaced on each edit.
     private var draftSync: Task<Void, Never>?
@@ -142,9 +171,11 @@ final class AppState: ObservableObject {
         // one line on Today and leaves the due cards untouched.
         async let dueCards = api.due()
         async let summary = try? await api.activePlan()
+        async let captured = try? await api.captures()
         do {
             queue = try await dueCards
             planSummary = await summary
+            captures = await captured ?? captures
             planSummaryFailed = planSummary == nil
             DueCache.record(count: queue.count)
             load = .ready
@@ -157,20 +188,32 @@ final class AppState: ObservableObject {
         }
     }
 
-    func addCard(topic: String, schedule: String) async {
+    func saveCapture(topic: String, context: String) async {
         addPending = true
         addError = false
         do {
-            _ = try await api.createCard(topic: topic, schedule: schedule)
+            let capture = try await api.createCapture(topic: topic, context: context)
+            savedCapture = capture
+            captures.removeAll { $0.id == capture.id }
+            captures.insert(capture.summary, at: 0)
             addPending = false
-            sheet = nil
-            queue = (try? await api.due()) ?? queue
-            load = .ready
         } catch {
-            // The sheet stays open and the typed topic stays put.
             addPending = false
             addError = true
         }
+    }
+
+    func refreshCaptures() async {
+        if let value = try? await api.captures() { captures = value }
+    }
+
+    func openCapture(_ id: UUID) {
+        sheet = nil
+        captureRoute = .review(id)
+    }
+
+    func closeCaptureFlow() {
+        captureRoute = nil
     }
 
     func saveSettings(_ new: AppSettings) {
@@ -207,6 +250,8 @@ final class AppState: ObservableObject {
     }
 
     func enterSprintSetup() {
+        sprintKind = .review
+        sprintExcluded = []
         covOpen = nil
         path.append(.sprintSetup)
         Task { await loadLibrary() }
@@ -225,15 +270,36 @@ final class AppState: ObservableObject {
     /// alphabetically after it, so a new category still appears without a code
     /// change rather than being silently dropped.
     var categories: [String] {
-        let present = Set(library.map(\.category))
+        orderedCategories(in: library)
+    }
+
+    var sprintCategories: [String] {
+        orderedCategories(in: sprintBase)
+    }
+
+    private func orderedCategories(in cards: [CardSummary]) -> [String] {
+        let present = Set(cards.map(\.category))
         let known = Self.categoryOrder.filter(present.contains)
         return known + present.subtracting(Self.categoryOrder).sorted()
+    }
+
+    private var sprintBase: [CardSummary] {
+        switch sprintKind {
+        case .review:
+            return library
+        case .depth(let axis):
+            let scored = library.filter { depthValue($0, axis: axis) != nil }
+            let thin = scored.filter { (depthValue($0, axis: axis) ?? 5) <= 2 }
+            return thin.count >= Self.minSessionSize ? thin : scored
+        }
     }
 
     /// The cards a sprint would draw from: the whole library, or just the
     /// selected categories. An empty selection means everything.
     var sprintPool: [CardSummary] {
-        setupCats.isEmpty ? library : library.filter { setupCats.contains($0.category) }
+        let filtered = setupCats.isEmpty
+            ? sprintBase : sprintBase.filter { setupCats.contains($0.category) }
+        return filtered
     }
 
     /// The suggested set, ranked weakest-first then least-recently-reviewed,
@@ -244,7 +310,14 @@ final class AppState: ObservableObject {
     /// to run a sprint at all.
     var sprintSet: [CardSummary] {
         let ranked = sprintPool.sorted { a, b in
-            let (wa, wb) = (a.lastScore ?? -1, b.lastScore ?? -1)
+            let wa: Int
+            let wb: Int
+            switch sprintKind {
+            case .review:
+                (wa, wb) = (a.lastScore ?? -1, b.lastScore ?? -1)
+            case .depth(let axis):
+                (wa, wb) = (depthValue(a, axis: axis) ?? 5, depthValue(b, axis: axis) ?? 5)
+            }
             if wa != wb { return wa < wb }
             return (a.daysSinceReview ?? 0) > (b.daysSinceReview ?? 0)
         }
@@ -253,11 +326,15 @@ final class AppState: ObservableObject {
         // what puts the walk back into rank order.
         var rng = SeededGenerator(seed: seed)
         let chosen = Set(ranked.prefix(setupSize + 4).shuffled(using: &rng).prefix(setupSize).map(\.id))
-        return ranked.filter { chosen.contains($0.id) }
+        return ranked.filter { chosen.contains($0.id) && !sprintExcluded.contains($0.id) }
     }
 
     var setupStatus: String {
         libraryLoad.status {
+            if case .depth = sprintKind {
+                let n = sprintPool.count
+                return "\(n) CARD\(n == 1 ? "" : "S") WITH DEPTH SIGNAL"
+            }
             guard !setupCats.isEmpty else { return "\(library.count) CARDS IN LIBRARY" }
             let n = sprintPool.count
             return "\(n) CARD\(n == 1 ? "" : "S") IN FILTER"
@@ -266,10 +343,14 @@ final class AppState: ObservableObject {
 
     /// The filtered pool holds at least a session's minimum. When the library has
     /// loaded and this is false, the pool is too narrow and Setup says so.
-    var setupReady: Bool { libraryLoad == .ready && sprintPool.count >= Self.minSessionSize }
+    var setupReady: Bool { libraryLoad == .ready && sprintSet.count >= Self.minSessionSize }
 
     /// The category chip's second line: its most urgent count, in priority order.
     func chipNote(for category: String) -> String {
+        if case .depth = sprintKind {
+            let count = sprintBase.filter { $0.category == category }.count
+            return "\(count) depth gap\(count == 1 ? "" : "s")"
+        }
         let cards = library.filter { $0.category == category }
         let weak = Self.tally(cards, [.cold, .shaky])
         if weak > 0 { return "\(weak) shaky" }
@@ -280,7 +361,28 @@ final class AppState: ObservableObject {
     }
 
     func toggleCategory(_ name: String) {
+        sprintExcluded = []
         if setupCats.contains(name) { setupCats.remove(name) } else { setupCats.insert(name) }
+    }
+
+    func removeFromSprint(_ id: UUID) {
+        sprintExcluded.insert(id)
+    }
+
+    func enterDepthRepair(_ axis: DepthAxis) {
+        sprintKind = .depth(axis)
+        sprintExcluded = []
+        setupCats = []
+        seed += 1
+        covOpen = nil
+        if path.last == .coverage { path.removeLast() }
+    }
+
+    private func depthValue(_ card: CardSummary, axis: DepthAxis) -> Int? {
+        switch axis {
+        case .tradeOff: return card.lastTradeOffAwareness
+        case .failureMode: return card.lastFailureModeAwareness
+        }
     }
 
     func startSprint() {
@@ -323,20 +425,29 @@ final class AppState: ObservableObject {
     /// Scoring runs on three axes internally; this is the only place that
     /// decomposition surfaces, because "which axis is systemically weak" is the
     /// question Coverage exists to answer. Empty until something has been scored.
-    var axisRollup: [String] {
+    var axisRollup: [AxisRollupItem] {
         guard libraryLoad == .ready else { return [] }
-        let axes: [(String, (CardSummary) -> Int?)] = [
-            ("MECHANISM", \.lastMechanismAccuracy),
-            ("TRADE-OFFS", \.lastTradeOffAwareness),
-            ("FAILURE MODES", \.lastFailureModeAwareness),
+        let axes: [(String, DepthAxis?, (CardSummary) -> Int?)] = [
+            ("MECHANISM", nil, \.lastMechanismAccuracy),
+            ("TRADE-OFFS", .tradeOff, \.lastTradeOffAwareness),
+            ("FAILURE MODES", .failureMode, \.lastFailureModeAwareness),
         ]
-        let means: [String] = axes.compactMap { name, axis in
-            let values = library.compactMap(axis)
+        let means: [(String, DepthAxis?, Double)] = axes.compactMap { name, depthAxis, value in
+            let values = library.compactMap(value)
             guard !values.isEmpty else { return nil }
             let mean = Double(values.reduce(0, +)) / Double(values.count)
-            return name + " " + String(format: "%.1f", mean)
+            return (name, depthAxis, mean)
         }
-        return means.count == axes.count ? means : []
+        guard means.count == axes.count else { return [] }
+        let weakestDepth = means
+            .filter { $0.1 != nil }
+            .min { $0.2 < $1.2 }?.1
+        return means.map { name, depthAxis, value in
+            AxisRollupItem(
+                id: name, label: name, value: value, depthAxis: depthAxis,
+                isActionable: depthAxis == weakestDepth
+            )
+        }
     }
 
     // MARK: - Conversation
@@ -897,11 +1008,22 @@ final class AppState: ObservableObject {
         switch route {
         case "settings": sheet = .settings
         case "add": sheet = .add
+        case "capture-inbox": captureRoute = .inbox
+        case "capture-source":
+            if let capture = captures.first(where: { $0.status == "pending_source" }) {
+                captureRoute = .review(capture.id)
+            }
+        case "capture-question":
+            if let capture = captures.first(where: { $0.status == "ready_to_review" }) {
+                captureRoute = .review(capture.id)
+            }
         case "filter": filter = .shaky
         case "history":
             if let card = queue.first { path.append(.history(card.id)) }
         case "history-empty":
-            _ = try? await api.createCard(topic: "Write-ahead logging", schedule: "now")
+            if let capture = captures.first(where: { $0.status == "ready_to_review" }) {
+                _ = try? await api.activateCapture(capture.id, schedule: "now")
+            }
             queue = (try? await api.due()) ?? queue
             if let card = queue.first { path.append(.history(card.id)) }
         case "resume":
@@ -919,6 +1041,12 @@ final class AppState: ObservableObject {
                    Self.tally(section.cards, [tier]) > 0
                }) {
                 covOpen = OpenTier(category: section.category, tier: tier)
+            }
+        case "depth-repair":
+            enterSprintSetup()
+            await waitForLibrary()
+            if let axis = axisRollup.first(where: \.isActionable)?.depthAxis {
+                enterDepthRepair(axis)
             }
         case "recap", "recap-expanded":
             enterSprintSetup()

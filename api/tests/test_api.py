@@ -984,32 +984,14 @@ async def test_device_token_reregistration_updates_kind(client, db):
     assert row.created_at == created  # first-seen, not last-seen
 
 
-# --- quick add --------------------------------------------------------------
+# --- capture boundary -------------------------------------------------------
 
 
-async def test_create_card_schedule_now_is_due_today(client):
-    body = (await client.post("/cards", headers=API_HEADERS, json={"topic": "  Raft  "})).json()
+async def test_direct_card_creation_is_closed(client):
+    resp = await client.post("/cards", headers=API_HEADERS, json={"topic": "Raft"})
 
-    assert body["topic"] == "Raft"  # whitespace stripped
-    assert body["category"] == "Unsorted"
-    assert body["delivery_mode"] == "conversational"
-    assert body["due_label"] == "due today"
-    assert body["days_since_review"] is None
-    assert body["repetitions"] == 0
-
-
-async def test_create_card_schedule_next_is_due_tomorrow(client):
-    resp = await client.post(
-        "/cards", headers=API_HEADERS, json={"topic": "Raft", "schedule": "next"}
-    )
-
-    assert resp.status_code == 201
-    assert resp.json()["due_label"] == "due tomorrow"
-
-
-async def test_create_card_rejects_empty_topic(client):
-    resp = await client.post("/cards", headers=API_HEADERS, json={"topic": ""})
-    assert resp.status_code == 422
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "direct card creation requires grounding; use /captures"
 
 
 # --- health -----------------------------------------------------------------
