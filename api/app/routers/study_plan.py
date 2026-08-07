@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -170,7 +171,7 @@ def _block_label(item: StudyPlanItem) -> str | None:
     return f"{WEEKDAYS[item.study_block_weekday - 1]} {hour:02d}:{minute:02d}"
 
 
-def _debrief_eligible(graph: sp.PlanGraph, item: StudyPlanItem) -> bool:
+def _debrief_eligible(subject_slug: str, item: StudyPlanItem) -> bool:
     """Whether this item may collect a gap that can safely become a card.
 
     A Practice item without a trusted source excerpt can still be completed, but
@@ -181,9 +182,25 @@ def _debrief_eligible(graph: sp.PlanGraph, item: StudyPlanItem) -> bool:
     return (
         item.type == ITEM_PRACTICE
         and item.status == ITEM_COMPLETE
-        and sp.slug_supports_cards(graph.plan.subject_slug)
+        and sp.slug_supports_cards(subject_slug)
         and bool(item.source_excerpt.strip())
     )
+
+
+async def _debrief_context(
+    db: AsyncSession, plan_id: uuid.UUID, item_id: uuid.UUID
+) -> tuple[StudyPlan, StudyPlanItem]:
+    plan = await _get_plan(db, plan_id)
+    item = (
+        await db.exec(
+            select(StudyPlanItem)
+            .where(col(StudyPlanItem.id) == item_id)
+            .where(col(StudyPlanItem.plan_id) == plan_id)
+        )
+    ).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    return plan, item
 
 
 async def _debrief_for(
@@ -205,16 +222,9 @@ def _debrief_summary(text: str) -> str:
     return compact[:137].rstrip() + "…"
 
 
-async def _debrief_out(
-    db: AsyncSession, row: StudyPlanPracticeDebrief
+def _debrief_response(
+    row: StudyPlanPracticeDebrief, proposal_count: int = 0
 ) -> PracticeDebriefOut:
-    proposals = (
-        await db.exec(
-            select(StudyPlanCardProposal).where(
-                col(StudyPlanCardProposal.source_plan_item_id) == row.plan_item_id
-            )
-        )
-    ).all()
     return PracticeDebriefOut(
         id=row.id,
         plan_id=row.plan_id,
@@ -223,9 +233,22 @@ async def _debrief_out(
         text=row.text,
         submitted_at=row.submitted_at,
         summary=_debrief_summary(row.text or row.draft_text),
-        has_proposals=bool(proposals),
-        proposal_count=len(proposals),
+        has_proposals=proposal_count > 0,
+        proposal_count=proposal_count,
     )
+
+
+async def _debrief_out(
+    db: AsyncSession, row: StudyPlanPracticeDebrief
+) -> PracticeDebriefOut:
+    proposal_count = (
+        await db.exec(
+            select(func.count(StudyPlanCardProposal.id)).where(
+                col(StudyPlanCardProposal.source_plan_item_id) == row.plan_item_id
+            )
+        )
+    ).one()
+    return _debrief_response(row, proposal_count)
 
 
 # --- Today ------------------------------------------------------------------
@@ -847,7 +870,7 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
                 or (debrief is not None and debrief.submitted_at is not None)
             )
         ),
-        practice_debrief_eligible=_debrief_eligible(graph, item),
+        practice_debrief_eligible=_debrief_eligible(graph.plan.subject_slug, item),
         practice_debrief=(await _debrief_out(db, debrief)) if debrief else None,
         blocked_by=[b.full_title for b in sp.blocking_dependencies(graph, item)],
     )
@@ -1158,10 +1181,7 @@ async def get_practice_debrief(
     item_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
 ) -> PracticeDebriefOut | None:
-    graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    await _debrief_context(db, plan_id, item_id)
     row = await _debrief_for(db, item_id)
     return await _debrief_out(db, row) if row else None
 
@@ -1177,11 +1197,8 @@ async def save_practice_debrief_draft(
     db: AsyncSession = Depends(get_session),
 ) -> PracticeDebriefOut:
     """Cheap, idempotent backup for the disk-first spoken-text draft."""
-    graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    if not _debrief_eligible(graph, item):
+    plan, item = await _debrief_context(db, plan_id, item_id)
+    if not _debrief_eligible(plan.subject_slug, item):
         raise HTTPException(status_code=409, detail="practice debrief is not available")
 
     row = await _debrief_for(db, item_id)
@@ -1198,7 +1215,7 @@ async def save_practice_debrief_draft(
         row.updated_at = _now()
     db.add(row)
     await db.commit()
-    return await _debrief_out(db, row)
+    return _debrief_response(row)
 
 
 @router.post(
@@ -1214,11 +1231,8 @@ async def submit_practice_debrief(
     """Commit one unscored debrief. It never touches plan or review state."""
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="debrief text is empty")
-    graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
-    if not _debrief_eligible(graph, item):
+    plan, item = await _debrief_context(db, plan_id, item_id)
+    if not _debrief_eligible(plan.subject_slug, item):
         raise HTTPException(status_code=409, detail="practice debrief is not available")
 
     row = await _debrief_for(db, item_id)
@@ -1243,7 +1257,7 @@ async def submit_practice_debrief(
         row.updated_at = now
     db.add(row)
     await db.commit()
-    return await _debrief_out(db, row)
+    return _debrief_response(row)
 
 
 @router.post("/study-plans/{plan_id}/items/{item_id}/reopen/preview", response_model=ProposalOut)

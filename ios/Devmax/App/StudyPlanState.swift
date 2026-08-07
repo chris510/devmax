@@ -38,12 +38,8 @@ final class StudyPlanState: ObservableObject {
 
     // Practice Debrief. One record per Practice item; it is evidence for card
     // proposals only and never a score or a plan-progress write.
-    @Published var debriefLoad: Load = .idle
     @Published var debrief: PracticeDebrief?
     @Published var debriefDraft = ""
-    @Published var debriefSaving = false
-    @Published var debriefSaveError = false
-    @Published var debriefCheckError = false
     private var debriefDraftSync: Task<Void, Never>?
 
     // Decisions
@@ -79,7 +75,7 @@ final class StudyPlanState: ObservableObject {
     @Published var cardLoad: Load = .idle
     @Published var cards: CardProposalList?
     @Published var selectedProposals: Set<UUID> = []
-    @Published var addedProposals: Set<UUID> = []
+    @Published var addedCardCount = 0
     @Published var addingCards = false
     @Published var cardError: String?
     @Published var expandedGate: UUID?
@@ -173,34 +169,21 @@ final class StudyPlanState: ObservableObject {
     // MARK: - Practice Debrief
 
     func preparePracticeDebrief() {
-        debriefLoad = .idle
         debrief = nil
         debriefDraft = ""
-        debriefSaving = false
-        debriefSaveError = false
-        debriefCheckError = false
     }
 
-    func loadPracticeDebrief(_ planID: UUID, itemID: UUID) async {
-        debriefLoad = .loading
-        do {
-            let server = try await api.practiceDebrief(planID, itemID: itemID)
-            debrief = server
-            // Disk is newer when the app was killed before the debounce reached
-            // the server. A submitted server record is immutable and wins.
-            if server?.isSubmitted == true {
-                debriefDraft = server?.text ?? ""
-                PracticeDebriefDraftStore.clear(for: itemID)
-            } else {
-                debriefDraft = PracticeDebriefDraftStore.read(for: itemID)
-                    ?? server?.draftText ?? ""
-            }
-            debriefLoad = .ready
-        } catch {
-            // A local draft still makes the screen usable while the durable copy
-            // is unreachable. Submission will surface the real failure later.
-            debriefDraft = PracticeDebriefDraftStore.read(for: itemID) ?? ""
-            debriefLoad = .ready
+    func loadPracticeDebrief(itemID: UUID) {
+        let server = item?.id == itemID ? item?.practiceDebrief : nil
+        debrief = server
+        // Disk is newer when the app was killed before the debounce reached
+        // the server. A submitted server record is immutable and wins.
+        if server?.isSubmitted == true {
+            debriefDraft = server?.text ?? ""
+            PracticeDebriefDraftStore.clear(for: itemID)
+        } else {
+            debriefDraft = PracticeDebriefDraftStore.read(for: itemID)
+                ?? server?.draftText ?? ""
         }
     }
 
@@ -245,9 +228,6 @@ final class StudyPlanState: ObservableObject {
     func submitPracticeDebrief() async -> Bool {
         guard let item, !debriefDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return false }
-        debriefSaving = true
-        debriefSaveError = false
-        defer { debriefSaving = false }
         do {
             // Submission is the authoritative write. Do not race it with the
             // best-effort draft PATCH: a late PATCH would correctly hit the
@@ -264,17 +244,13 @@ final class StudyPlanState: ObservableObject {
         } catch {
             // Text stays verbatim in both state and the disk store.
             PracticeDebriefDraftStore.save(debriefDraft, for: item.id)
-            debriefSaveError = true
             return false
         }
     }
 
     func checkPracticeDebriefCards() async -> Bool {
-        debriefCheckError = false
         await loadCardProposals(generate: true)
-        if cardLoad == .ready { return true }
-        debriefCheckError = true
-        return false
+        return cardLoad == .ready
     }
 
     func previewReopen() async {
@@ -560,7 +536,7 @@ final class StudyPlanState: ObservableObject {
         cardLoad = .idle
         cards = nil
         selectedProposals = []
-        addedProposals = []
+        addedCardCount = 0
         cardError = nil
         expandedGate = nil
         acceptKey = UUID().uuidString
@@ -606,13 +582,12 @@ final class StudyPlanState: ObservableObject {
                 revision: cards.proposals.first?.revision ?? 1,
                 edits: [:]
             )
-            // ADDED only after a committed response, never optimistically.
-            addedProposals.formUnion(selectedProposals)
+            // Confirmation renders only after a committed response, never optimistically.
+            addedCardCount = result.createdCardIds.count
             selectedProposals = []
             if let item {
                 self.item = try? await api.planItem(item.planId, itemID: item.id)
             }
-            _ = result
         } catch APIError.status(409) {
             cardError = "One of these already exists as a card. Nothing was created."
             await loadCardProposals(generate: false)

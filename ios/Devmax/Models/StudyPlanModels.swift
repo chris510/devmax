@@ -154,7 +154,6 @@ struct PracticeDebrief: Codable, Equatable, Identifiable {
     let text: String
     let submittedAt: Date?
     let summary: String
-    let hasProposals: Bool
     let proposalCount: Int
 
     var isSubmitted: Bool { submittedAt != nil }

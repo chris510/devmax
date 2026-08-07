@@ -821,7 +821,7 @@ final class AppState: ObservableObject {
             await waitUntil { plan.itemLoad == .ready }
             plan.item = StudyPlanFixtures.itemDetail(
                 practiceItemID, planID: planID, complete: true,
-                debrief: StudyPlanFixtures.practiceDebrief(submitted: true, hasProposals: true)
+                debrief: StudyPlanFixtures.practiceDebrief(submitted: true, proposalCount: 2)
             )
 
         case "study-plan-capacity":

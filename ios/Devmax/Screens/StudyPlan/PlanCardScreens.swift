@@ -26,7 +26,7 @@ struct PlanCardsScreen: View {
                     case .error:
                         LoadFailure { Task { await plan.loadCardProposals(generate: true) } }
                     case .ready:
-                        if !plan.addedProposals.isEmpty {
+                        if plan.addedCardCount > 0 {
                             addedConfirmation
                         } else if let cards = plan.cards {
                             content(cards)
@@ -59,16 +59,16 @@ struct PlanCardsScreen: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(
-                    plan.addedProposals.isEmpty
+                    plan.addedCardCount == 0
                         ? proposalHeadline
-                        : "\(plan.addedProposals.count) card"
-                            + (plan.addedProposals.count == 1 ? " added." : "s added.")
+                        : "\(plan.addedCardCount) card"
+                            + (plan.addedCardCount == 1 ? " added." : "s added.")
                 )
                     .font(WCFont.sans(23, weight: 600))
                     .tracking(-0.4)
                     .foregroundStyle(Theme.text)
                     .accessibilityAddTraits(.isHeader)
-                if !plan.addedProposals.isEmpty {
+                if plan.addedCardCount > 0 {
                     Text("Added to your spaced-repetition reviews.")
                         .font(WCFont.sans(14.5))
                         .foregroundStyle(Theme.textSecondary)
@@ -118,7 +118,6 @@ struct PlanCardsScreen: View {
             ProposalCard(
                 proposal: proposal,
                 selected: plan.selectedProposals.contains(proposal.id),
-                added: plan.addedProposals.contains(proposal.id),
                 gateOpen: plan.expandedGate == proposal.id,
                 onToggleSelect: { plan.toggleProposal(proposal.id) },
                 onToggleGate: {
@@ -192,7 +191,7 @@ struct PlanCardsScreen: View {
     private var bottomBlock: some View {
         VStack(spacing: 10) {
             Hairline()
-            if !plan.addedProposals.isEmpty
+            if plan.addedCardCount > 0
                 || (isPracticeDebrief && plan.cards?.suggestedCount == 0) {
                 PrimaryButton(title: "Done") { state.path.removeLast() }
                     .padding(.horizontal, Metrics.screenPadding)
@@ -231,7 +230,6 @@ struct PlanCardsScreen: View {
 private struct ProposalCard: View {
     let proposal: CardProposal
     let selected: Bool
-    let added: Bool
     let gateOpen: Bool
     let onToggleSelect: () -> Void
     let onToggleGate: () -> Void
@@ -246,14 +244,11 @@ private struct ProposalCard: View {
                         .font(WCFont.sans(16.5, weight: 500))
                         .foregroundStyle(Theme.text)
                     Spacer(minLength: 8)
-                    // ADDED renders only after a committed response.
                     MetaText(
-                        text: added ? "ADDED"
-                            : proposal.isPossibleOverlap ? "POSSIBLE EXISTING CARD"
+                        text: proposal.isPossibleOverlap ? "POSSIBLE EXISTING CARD"
                             : selected ? "SELECTED" : "NOT SELECTED",
                         font: WCFont.mono(10), tracking: 0.6,
-                        color: added ? Theme.scoreHigh
-                            : proposal.isPossibleOverlap ? Theme.scoreMid
+                        color: proposal.isPossibleOverlap ? Theme.scoreMid
                             : selected ? Theme.accentChipNote : Theme.metaFaint
                     )
                 }
@@ -304,9 +299,7 @@ private struct ProposalCard: View {
                     .wcFade(Motion.fadeFast)
                 }
 
-                if added {
-                    EmptyView()
-                } else if proposal.isPossibleOverlap {
+                if proposal.isPossibleOverlap {
                     // Never decided silently. Four choices, all the user's.
                     HStack(spacing: 8) {
                         SecondaryButton(title: "Keep the new one", fillsWidth: false) {

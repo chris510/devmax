@@ -264,7 +264,7 @@ enum StudyPlanFixtures {
         itemID: UUID = practiceItemID,
         draft: String = "",
         submitted: Bool = false,
-        hasProposals: Bool = false
+        proposalCount: Int = 0
     ) -> PracticeDebrief {
         let text = submitted
             ? "I drew the retry loop before the timeout and could not explain the upstream timeout path."
@@ -273,8 +273,7 @@ enum StudyPlanFixtures {
             id: practiceDebriefID, planId: planID, itemId: itemID,
             draftText: draft.isEmpty ? text : draft, text: text,
             submittedAt: submitted ? Date(timeIntervalSince1970: 1_755_388_920) : nil,
-            summary: text, hasProposals: hasProposals,
-            proposalCount: hasProposals ? 2 : 0
+            summary: text, proposalCount: proposalCount
         )
     }
 
@@ -717,11 +716,6 @@ extension MockAPI {
         return StudyPlanFixtures.itemDetail(itemID, planID: id, complete: true)
     }
 
-    func practiceDebrief(_ id: UUID, itemID: UUID) async throws -> PracticeDebrief? {
-        await settle(200)
-        return practiceDebriefs[itemID]
-    }
-
     func savePracticeDebriefDraft(
         _ id: UUID, itemID: UUID, text: String
     ) async throws -> PracticeDebrief {
@@ -729,7 +723,7 @@ extension MockAPI {
         let row = PracticeDebrief(
             id: StudyPlanFixtures.practiceDebriefID, planId: id, itemId: itemID,
             draftText: text, text: "", submittedAt: nil, summary: text,
-            hasProposals: false, proposalCount: 0
+            proposalCount: 0
         )
         practiceDebriefs[itemID] = row
         return row
@@ -746,7 +740,7 @@ extension MockAPI {
         let row = PracticeDebrief(
             id: StudyPlanFixtures.practiceDebriefID, planId: id, itemId: itemID,
             draftText: text, text: text, submittedAt: Date(), summary: text,
-            hasProposals: false, proposalCount: 0
+            proposalCount: 0
         )
         practiceDebriefs[itemID] = row
         return row

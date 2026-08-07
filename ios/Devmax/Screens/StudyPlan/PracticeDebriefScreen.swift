@@ -56,7 +56,7 @@ struct PracticeDebriefScreen: View {
         .navigationBarHidden(true)
         .task {
             if plan.item?.id != itemID { await plan.loadItem(planID, itemID: itemID) }
-            await plan.loadPracticeDebrief(planID, itemID: itemID)
+            plan.loadPracticeDebrief(itemID: itemID)
             if !showCompletionOffer, plan.debrief?.isSubmitted != true,
                !plan.debriefDraft.isEmpty {
                 stage = .resume

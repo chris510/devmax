@@ -103,7 +103,6 @@ protocol DevmaxAPI {
     func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
     func editPlanItem(_ id: UUID, itemID: UUID, edit: PlanItemEdit) async throws -> PlanItemDetail
     func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
-    func practiceDebrief(_ id: UUID, itemID: UUID) async throws -> PracticeDebrief?
     func savePracticeDebriefDraft(
         _ id: UUID, itemID: UUID, text: String
     ) async throws -> PracticeDebrief
@@ -441,13 +440,6 @@ struct LiveAPI: DevmaxAPI {
         struct Body: Encodable { let draftId: UUID; let activate: Bool }
         return try await post(
             "study-plans", PlanOverview.self, body: Body(draftId: draftID, activate: activate)
-        )
-    }
-
-    func practiceDebrief(_ id: UUID, itemID: UUID) async throws -> PracticeDebrief? {
-        try await get(
-            "study-plans/\(id)/items/\(itemID)/practice-debrief",
-            Optional<PracticeDebrief>.self
         )
     }
 
