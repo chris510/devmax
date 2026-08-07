@@ -2,7 +2,7 @@
   "seed_key": "devmax.senior-backend-12-week.v3",
   "version": 3,
   "source_guide_path": "../../docs/CURRICULUM.md",
-  "source_guide_sha256": "2210e37a8e9833c73e92443a5e73f1868d97afcc33da7de34de85366668906ce",
+  "source_guide_sha256": "bee8d445876700928de6b17efa890a248f1345dd3bdffa5b5a22e861cf1dc2ec",
   "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Work is ordered by transfer value: delivery and system-design foundations in Weeks 1–3; reusable architecture patterns and full-design application in Weeks 4–6; concrete backend technologies in Weeks 7–9; interview simulation and target-company calibration in Weeks 10–12.\n\nEach week reserves twelve focused hours across system design, coding-mechanism understanding, behavioral preparation, plan-local closed-book retrieval, and optional desk implementation. Global Devmax card reviews continue separately in Today and never determine Study Plan progress. Coding-pattern recognition, invariants, state transitions, complexity, and failure modes are core; writing code is optional and desk-only. Full system designs happen outside the conversational review flow. Every external practice session ends with a gap harvest, and readiness is based on observed external performance rather than card scores.",
   "guide_sha256": "e60bcac42125baa9f141b1161bf8f79f131f648968baddf26acd17d961206d11",
   "title": "Senior backend interview preparation",
