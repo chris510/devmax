@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from app.services.llm import derive_composite
+from app.services.llm import ReattemptResult, ScoreResult, derive_composite
+from scripts import effort_sweep, reattempt_effort_sweep
 from scripts.effort_sweep_support import hydrate_grounding
 
 API = Path(__file__).resolve().parent.parent
@@ -70,9 +71,9 @@ def test_week_one_scoring_pack_has_three_consistent_labels_per_card() -> None:
     assert set(Counter(case["topic"] for case in cases).values()) == {3}
     for case in cases:
         axes = (
-            case["expected_mechanism_accuracy"],
-            case["expected_trade_off_awareness"],
-            case["expected_failure_mode_awareness"],
+            case["expected_accuracy"],
+            case["expected_depth"],
+            case["expected_boundaries"],
         )
         assert case["expected_score"] == derive_composite(*axes)
         assert not {"question", "answer_basis", "answer_rubric"} & case.keys()
@@ -85,3 +86,57 @@ def test_week_one_reattempt_pack_has_two_authority_free_cases_per_card() -> None
     assert set(Counter(case["topic"] for case in cases).values()) == {2}
     for case in cases:
         assert not {"question", "answer_basis", "answer_rubric"} & case.keys()
+
+
+@pytest.mark.anyio
+async def test_scoring_sweep_reads_the_current_axis_contract(monkeypatch) -> None:
+    async def score_answer(**_kwargs) -> ScoreResult:
+        return ScoreResult(
+            status="complete", score=5, accuracy=5, depth=4, boundaries=5
+        )
+
+    monkeypatch.setattr(effort_sweep.llm, "score_answer", score_answer)
+    result = await effort_sweep.run_case(
+        0,
+        {
+            "name": "current scoring contract",
+            "topic": "Topic",
+            "question": "Question?",
+            "answer": "Answer.",
+            "expected_score": 5,
+            "expected_accuracy": 5,
+            "expected_depth": 4,
+            "expected_boundaries": 5,
+        },
+        "low",
+        effort_sweep.UsageTap(),
+    )
+
+    assert result.axes == (5, 4, 5)
+    assert result.expected_axes == (5, 4, 5)
+
+
+@pytest.mark.anyio
+async def test_reattempt_sweep_reads_the_current_accuracy_contract(monkeypatch) -> None:
+    async def score_reattempt(**kwargs) -> ReattemptResult:
+        assert kwargs["unaided_accuracy"] == 1
+        return ReattemptResult(accuracy=5, mastery_summary="Reconstructed it.")
+
+    monkeypatch.setattr(reattempt_effort_sweep.llm, "score_reattempt", score_reattempt)
+    result = await reattempt_effort_sweep.run_case(
+        0,
+        {
+            "name": "current reattempt contract",
+            "topic": "Topic",
+            "question": "Question?",
+            "feedback": "Feedback.",
+            "reattempt_answer": "Answer.",
+            "unaided_accuracy": 1,
+            "expected_accuracy": 5,
+        },
+        "low",
+        reattempt_effort_sweep.UsageTap(),
+    )
+
+    assert result.actual == 5
+    assert result.expected == 5

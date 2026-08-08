@@ -1,12 +1,12 @@
 # Week 1 curriculum grounding review
 
-Status: **machine-drafted on 2026-08-07; awaiting human approval**
+Status: **human-approved on 2026-08-07; paid evaluation blocked by Anthropic credits**
 
-This tranche adds answer authority and fixed canonical questions for the six
-Week 1 conversational cards. It does not approve or activate them. Every entry
-in `api/cards.json` remains `grounding_status: "draft_review"`, and the seed and
-live-evaluation paths fail closed until a reviewer changes that status to
-`approved` after checking the source, answer frame, and question.
+This tranche adds reviewed answer authority and fixed canonical questions for
+the six Week 1 conversational cards. It does not activate them; activation is
+still an explicit seed operation. Every Week 1 entry in `api/cards.json` is now
+`grounding_status: "approved"` after a human reviewed the source, answer frame,
+question, and all five evaluation cases for that card.
 
 The answer bases are concise authored paraphrases, not licensed excerpts. The
 source lessons remain the authority:
@@ -15,7 +15,7 @@ source lessons remain the authority:
 - [API Design](https://www.hellointerview.com/learn/system-design/core-concepts/api-design)
 - [Networking Essentials](https://www.hellointerview.com/learn/system-design/core-concepts/networking-essentials)
 
-## What was drafted
+## What was approved
 
 Each card now has:
 
@@ -24,7 +24,8 @@ Each card now has:
 - a five-field rubric covering mechanism, acceptable alternative, trade-off,
   failure mode, and misconception;
 - one canonical question that will be reused across reviews;
-- an explicit draft-review state that cannot cross the activation boundary.
+- an explicit approved state that may cross the activation boundary only when
+  the Week 1 cohort is deliberately seeded.
 
 The seed loader validates the entire selected cohort before opening a database
 transaction: every conversational entry needs `grounding_status: "approved"`,
@@ -43,9 +44,9 @@ outside scoring and does not require the rubric.
 
 ## First-question audit
 
-The draft was checked against the six-part
+Each question was checked against the six-part
 [first-question gate](CURRICULUM-AUDIT-2026-07-30.md#first-question-gate). These
-are author checks, not human approval.
+checks were confirmed during human approval.
 
 | Card | Atomicity | Voice budget | Source fidelity | Senior signal | Neutrality | Stability |
 |---|---|---|---|---|---|---|
@@ -76,26 +77,59 @@ The Week 1 packs are only the first 30 cases toward the planned 60–100-case
 release evaluation. They intentionally do not claim enough topical coverage to
 approve a scoring-model or effort change.
 
+## Human approval record
+
+All six cards were reviewed individually on 2026-08-07. The review made these
+corrections before approval:
+
+| Card | Approval correction |
+|---|---|
+| Delivery sequence | Raised the mechanism-only Accuracy label from 4 to 5; the mechanism was complete even though depth remained thin. |
+| Non-functional requirements | Raised the mechanism-only Accuracy label from 4 to 5 for the same separation of mechanism from depth. |
+| API identity boundary | Replaced a loosely sourced gateway trade-off with the source-supported JWT versus database-session trade-off. |
+| Timeout, retry, idempotency | Named the exact source section and replaced the unsupported key-lifetime claim with the server-state/backoff trade-off. |
+| Cursor pagination | Narrowed the claim to insertions and removed deletion, backward-navigation, and composite-key details not taught by the source. |
+| Decision-driven estimation | Removed extra memory-accounting and partial-merge mechanics, retaining the lesson's topic-count decision between one min-heap and sharding. |
+
 ## Human approval checklist
 
 For each of the six entries in `api/cards.json`:
 
-- [ ] Open the cited lesson and verify every sentence in `answer_basis`.
-- [ ] Confirm all five rubric fields are source-supported and mutually
+- [x] Open the cited lesson and verify every sentence in `answer_basis`.
+- [x] Confirm all five rubric fields are source-supported and mutually
   consistent.
-- [ ] Add any valid alternative framing the current rubric would score too
+- [x] Add any valid alternative framing the current rubric would score too
   harshly.
-- [ ] Reject any correction that depends on an unstated product assumption.
-- [ ] Speak a strong answer aloud and confirm it fits comfortably under two
+- [x] Reject any correction that depends on an unstated product assumption.
+- [x] Speak a strong answer aloud and confirm it fits comfortably under two
   minutes.
-- [ ] Confirm the question has one central retrieval target and does not reveal
+- [x] Confirm the question has one central retrieval target and does not reveal
   the answer.
-- [ ] Compare the 18 scoring answers and 12 re-attempt answers with their labels.
-- [ ] Only then change that entry's `grounding_status` from `draft_review` to
+- [x] Compare the 18 scoring answers and 12 re-attempt answers with their labels.
+- [x] Only then change that entry's `grounding_status` from `draft_review` to
   `approved`.
 
-After all six entries are approved, run the offline suite first, then explicitly
-start the paid sweeps:
+## Evaluation audit
+
+The post-approval offline gate passed on 2026-08-07:
+
+- 434 tests passed on SQLite;
+- 434 tests passed against a freshly migrated Postgres 17 database;
+- Ruff passed across the full API tree;
+- all three grounding JSON files parsed successfully.
+
+The first live scoring attempt exposed that the sweep scripts still referenced
+the pre-accounts scoring field names. The production contract now calls the
+axes Accuracy, Depth, and Boundaries. Both scoring runners, all evaluation case
+labels, and regression tests were updated to that contract before another live
+attempt.
+
+The retry reached `claude-sonnet-5` at low effort, but Anthropic rejected the
+batch because the account credit balance was too low. It produced no usable
+case results, and the coached re-attempt sweep was not started. No production
+prompt, model, effort setting, or scheduler behavior changed as a result.
+
+Once credits are restored, rerun:
 
 ```sh
 cd api

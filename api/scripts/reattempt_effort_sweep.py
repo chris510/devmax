@@ -17,7 +17,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from effort_sweep_support import (  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.services import llm  # noqa: E402
+from scripts.effort_sweep_support import (  # noqa: E402
     Usage,
     UsageTap,
     capture_usage,
@@ -26,9 +28,6 @@ from effort_sweep_support import (  # noqa: E402
     load_cases,
     run_bounded,
 )
-
-from app.config import get_settings  # noqa: E402
-from app.services import llm  # noqa: E402
 
 
 @dataclass
@@ -51,7 +50,7 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
             question_asked=case["question"],
             feedback_given=case["feedback"],
             reattempt_answer=case["reattempt_answer"],
-            unaided_mechanism=case["unaided_mechanism"],
+            unaided_accuracy=case["unaided_accuracy"],
             answer_basis=case.get("answer_basis", ""),
             answer_rubric=case.get("answer_rubric"),
         )
@@ -60,8 +59,8 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
     return Result(
         index=index,
         name=case.get("name", case["topic"]),
-        expected=case["expected_mechanism_accuracy"],
-        actual=result.mechanism_accuracy,
+        expected=case["expected_accuracy"],
+        actual=result.accuracy,
         summary=result.mastery_summary,
         usage=tap.usage_for(key),
     )
@@ -102,7 +101,7 @@ async def main() -> int:
                 for result in results:
                     flag = "" if result.actual == result.expected else "  <-- mismatch"
                     print(
-                        f"  {result.name[:42]:<42} mechanism={result.actual} "
+                        f"  {result.name[:42]:<42} accuracy={result.actual} "
                         f"expected={result.expected} out={result.usage.output_tokens:>5}{flag}"
                     )
                 print(

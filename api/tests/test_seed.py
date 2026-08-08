@@ -211,15 +211,15 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     )
 
 
-def test_the_week_one_grounding_pack_stays_draft_until_human_review() -> None:
+def test_the_week_one_grounding_pack_is_approved_and_complete() -> None:
     entries = study_plan()
-    drafts = [entry for entry in entries if entry.get("grounding_status") == "draft_review"]
+    approved = [entry for entry in entries if entry.get("grounding_status") == "approved"]
+    remaining = [entry for entry in entries if entry.get("grounding_status") != "approved"]
 
-    assert len(drafts) == 6
-    assert {entry["target_week"] for entry in drafts} == {1}
-    for entry in drafts:
-        with pytest.raises(SeedGroundingError, match="draft_review"):
-            _validated_grounding(entry)
+    assert len(approved) == 6
+    assert {entry["target_week"] for entry in approved} == {1}
+    assert all(_validated_grounding(entry) is not None for entry in approved)
+    assert all("grounding_status" not in entry for entry in remaining)
 
 
 def test_an_approved_conversational_seed_still_requires_every_grounding_field() -> None:
