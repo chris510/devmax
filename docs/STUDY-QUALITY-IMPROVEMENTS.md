@@ -1,6 +1,6 @@
 # Devmax study-quality improvements
 
-Status: **approved and implemented in a draft PR; curriculum grounding and live model evaluation remain review gates**
+Status: **structural implementation merged; Week 1 grounding and evaluation packs drafted for human review**
 
 Claude Design artifact: [Study Quality Improvements v1](https://claude.ai/design/p/25258e0c-5891-401c-9690-88790421a788?file=Study+Quality+Improvements+v1.dc.html)
 
@@ -282,14 +282,17 @@ pretend that an old ungrounded card acquired authority during deployment.
 
 ### Remaining content and live-evaluation gates
 
-- The 54-card curriculum manifest still needs human-reviewed answer bases,
-  rubrics, and canonical questions derived from its licensed source lessons.
-  Topic names and URLs are not enough to manufacture trusted corrections.
+- The first six Week 1 cards now have machine-drafted answer bases, rubrics, and
+  canonical questions. They remain `draft_review`, cannot be seeded, and are
+  tracked in [the Week 1 grounding review](CURRICULUM-GROUNDING-WEEK-1.md).
+- The other 48 curriculum cards still need source-grounded drafts and human
+  review. Topic names and URLs are not enough to manufacture trusted
+  corrections.
 - The first-party Study Plan remains `recall_supported = false` until each item
   has a real excerpt and an explicit eligibility review.
-- The 60–100-case source-grounded evaluation set and the paid live scoring and
-  re-attempt sweeps must run after those answer authorities are reviewed. The
-  runner is ready; no paid calls were made by this implementation.
+- Week 1 contributes 18 scoring and 12 coached re-attempt cases toward the
+  planned 60–100-case source-grounded evaluation. Paid sweeps remain blocked
+  until its answer authorities are human-approved; no paid calls were made.
 
 ## Remaining content order
 

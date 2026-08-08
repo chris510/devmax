@@ -55,6 +55,7 @@ from app.models import (
     Session,
 )
 from app.routers.deps import get_settings_row, local_today, now_in
+from app.services.card_lifecycle import Grounding, GroundingError
 
 # Coding problems need a keyboard and an hour, not a two-minute voice session.
 DESK_CATEGORIES = {"Coding Warmup", "Coding Pattern", "Tier 2 Practical Build"}
@@ -65,6 +66,44 @@ def delivery_mode_for(category: str) -> str:
 
 
 DAYS_PER_WEEK = 7
+GROUNDING_APPROVED = "approved"
+
+
+class SeedGroundingError(ValueError):
+    """A conversational manifest entry is not safe to activate."""
+
+
+def _validated_grounding(entry: dict) -> Grounding | None:
+    """Return approved grounding for a conversational card, or fail closed.
+
+    Desk material never enters scoring, so its existing manifest format remains
+    valid. A conversational seed is an activation path and must cross the same
+    authority boundary as Capture and Study Plan proposal acceptance.
+    """
+    category = entry.get("category", "Unsorted")
+    if delivery_mode_for(category) == DELIVERY_DESK:
+        return None
+    if entry.get("grounding_status") != GROUNDING_APPROVED:
+        status = entry.get("grounding_status", "missing")
+        raise SeedGroundingError(
+            f"{entry.get('topic', '<untitled>')}: grounding status is {status!r}, "
+            f"expected {GROUNDING_APPROVED!r}"
+        )
+    grounding = Grounding(
+        source_url=entry.get("source_url", ""),
+        source_section=entry.get("source_section", ""),
+        source_label=entry.get("source_label", ""),
+        answer_basis=entry.get("answer_basis", ""),
+        answer_rubric=entry.get("answer_rubric"),
+        canonical_question=entry.get("canonical_question", ""),
+    )
+    try:
+        return grounding.require_complete()
+    except GroundingError as exc:
+        raise SeedGroundingError(
+            f"{entry.get('topic', '<untitled>')}: incomplete approved grounding "
+            f"({', '.join(exc.missing)})"
+        ) from exc
 
 
 @asynccontextmanager
@@ -140,6 +179,7 @@ async def load_from_file(
     db: AsyncSession | None = None,
 ) -> int:
     entries = _selected_entries(json.loads(path.read_text()), weeks_through, activate_week)
+    grounding = [_validated_grounding(entry) for entry in entries]
     added = 0
     async with _session(db) as db:
         settings = await get_settings_row(db)
@@ -149,7 +189,7 @@ async def load_from_file(
         # Coverage can explain curriculum order, but schedule it as a fresh week 1.
         schedule_entries = _schedule_entries(entries, activate_week)
         due_dates = _schedule(schedule_entries, begin, settings.reviews_per_day)
-        for entry, due in zip(entries, due_dates, strict=True):
+        for entry, due, authority in zip(entries, due_dates, grounding, strict=True):
             existing = (await db.exec(select(Card).where(Card.topic == entry["topic"]))).first()
             if existing is not None:
                 continue
@@ -162,6 +202,12 @@ async def load_from_file(
                     source_company=entry.get("source_company"),
                     target_week=entry.get("target_week"),
                     delivery_mode=delivery_mode_for(category),
+                    canonical_question=(authority.canonical_question if authority else None),
+                    source_url=authority.source_url if authority else "",
+                    source_section=authority.source_section if authority else "",
+                    source_label=authority.source_label if authority else "",
+                    answer_basis=authority.answer_basis if authority else "",
+                    answer_rubric=(authority.answer_rubric or {}) if authority else {},
                     next_review_at=due,
                 )
             )

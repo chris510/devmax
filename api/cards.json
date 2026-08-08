@@ -6,7 +6,18 @@
     "source_url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
     "source_section": "Delivery Framework",
     "activation_prerequisite": "Complete the Delivery Framework lesson",
-    "evidence": "official_course"
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "source_label": "Hello Interview · Delivery Framework",
+    "answer_basis": "Use a linear interview scaffold: agree on a small prioritized set of functional and contextual non-functional requirements, identify the core entities, define the external API or system interface, build the simplest end-to-end high-level design that satisfies those contracts, and only then use the remaining time to harden bottlenecks, edge cases, and non-functional requirements in deep dives. Optional data-flow detail belongs only where a processing sequence materially clarifies the design.",
+    "answer_rubric": {
+      "mechanism": "Moves from prioritized requirements to entities, interface, a complete endpoint-driven high-level design, and then targeted deep dives.",
+      "acceptable_alternative": "Requirements → contracts and data → simplest complete architecture → hardening is an equivalent framing.",
+      "trade_off": "Deferring complexity protects time for a complete system, but leaves less early detail and requires deliberate deep-dive prioritization.",
+      "failure_mode": "Starting with a favorite technology or deep dive can consume the interview before any complete design satisfies the agreed requirements.",
+      "misconception": "The framework is not a rigid diagram template; data flow is optional and each stage should adapt to the problem and interviewer probes."
+    },
+    "canonical_question": "You're eight minutes into a design interview and the requirements are agreed. What sequence gets you to a working design before the deep dives, and why?"
   },
   {
     "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
@@ -15,7 +26,18 @@
     "source_url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
     "source_section": "Requirements",
     "activation_prerequisite": "Complete the Delivery Framework lesson",
-    "evidence": "official_course"
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "source_label": "Hello Interview · Requirements",
+    "answer_basis": "Choose only the few system qualities that materially constrain this design, put each in the context of a specific operation or user need, and quantify it where possible. For a social feed, useful requirements might bound feed-read latency, name the expected scale and read/write shape, and state the availability-versus-consistency preference. These constraints should later justify architectural choices; generic statements such as 'fast, scalable, and reliable' do not.",
+    "answer_rubric": {
+      "mechanism": "Prioritizes roughly three to five contextual, preferably quantified non-functional constraints that can drive architecture.",
+      "acceptable_alternative": "Expressing the same constraints as operation-specific SLOs, workload bounds, and consistency or durability requirements is valid.",
+      "trade_off": "Tighter latency, availability, durability, or consistency targets usually require more cost and complexity, so only material targets should be elevated.",
+      "failure_mode": "A long generic checklist gives no basis for choosing storage, replication, caching, or failure behavior and can create conflicting goals.",
+      "misconception": "Every system does not need every quality maximized; partition tolerance is assumed and the important priorities depend on the product."
+    },
+    "canonical_question": "An interviewer asks for a social feed that is 'fast and reliable.' How do you turn that into the few non-functional requirements that should actually drive the architecture?"
   },
   {
     "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
@@ -24,7 +46,18 @@
     "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/api-design",
     "source_section": "Security Considerations",
     "activation_prerequisite": "Complete API Design",
-    "evidence": "official_course"
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "source_label": "Hello Interview · API Design · Security Considerations",
+    "answer_basis": "Authentication establishes who made the request from trusted credentials such as a verified session or signed token; authorization then checks whether that principal may perform the requested action on the target resource. A user or owner identifier supplied in a path or request body identifies the resource or requested subject, but it must not override the authenticated principal. For a booking cancellation, load the booking and authorize the verified caller as its owner or an allowed administrative role.",
+    "answer_rubric": {
+      "mechanism": "Derives the caller from verified authentication context, then authorizes that principal against the requested resource and action.",
+      "acceptable_alternative": "A trusted gateway may verify credentials and forward signed identity context, provided downstream authorization does not trust client-controlled identity fields.",
+      "trade_off": "Central gateway verification reduces duplicated auth work, while downstream verification or signed context limits trust in the internal hop.",
+      "failure_mode": "Trusting a body or path user ID enables an authenticated caller to act on another user's resource, an insecure direct-object-reference failure.",
+      "misconception": "Authentication alone is not authorization; knowing the caller's identity does not prove permission for this booking or action."
+    },
+    "canonical_question": "A cancellation request includes both a bearer token and a user ID in the body. How should the service decide who is acting and whether that booking may be cancelled?"
   },
   {
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
@@ -33,7 +66,18 @@
     "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/networking-essentials",
     "source_section": "Networking Essentials",
     "activation_prerequisite": "Complete Networking Essentials",
-    "evidence": "official_course"
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "source_label": "Hello Interview · Networking Essentials · Handling Failures",
+    "answer_basis": "A timeout means the caller stopped waiting; it does not prove that the remote operation failed. Bound the call with a timeout, make side-effecting requests replay-safe with a stable operation-scoped idempotency key whose result is recorded or shared while in flight, and retry only transient failures with bounded exponential backoff and jitter. This avoids duplicate effects while preventing synchronized retries from amplifying an unhealthy dependency.",
+    "answer_rubric": {
+      "mechanism": "Treats the outcome as unknown, retries with the same idempotency key, and has the server return or await the one recorded operation result.",
+      "acceptable_alternative": "A durable deduplication token or unique operation ID with atomic first-writer ownership is equivalent to an idempotency-key record.",
+      "trade_off": "Replay safety requires retaining operation state and defining a key lifetime, while timeouts and bounded backoff trade faster recovery for lower retry pressure.",
+      "failure_mode": "A fresh key can duplicate the charge; immediate unbounded retries can create a thundering herd and prolong the dependency failure.",
+      "misconception": "A client timeout does not mean the server rolled back or never received the request."
+    },
+    "canonical_question": "A payment request times out after the server may already have charged the card. What should the client and server do on retry, and what must they not assume?"
   },
   {
     "topic": "Cursor pagination: preserving stable traversal while rows are inserted or deleted",
@@ -42,7 +86,18 @@
     "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/api-design",
     "source_section": "API Design",
     "activation_prerequisite": "Complete API Design",
-    "evidence": "official_course"
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "source_label": "Hello Interview · API Design · Cursor-based Pagination",
+    "answer_basis": "Cursor pagination carries an encoded reference to the last record or stable sort position returned, then asks for the next records after that boundary. Unlike an offset, that boundary does not shift when newer rows are inserted ahead of it, so traversal is more stable for changing or high-volume data. The ordering and cursor value must be stable enough to resume unambiguously. The cost is additional implementation complexity and no natural jump to an arbitrary numbered page.",
+    "answer_rubric": {
+      "mechanism": "Encodes the last stable sort position and queries strictly after it rather than recounting a moving offset.",
+      "acceptable_alternative": "Keyset pagination using the final row's ordered key or timestamp-plus-ID boundary is equivalent.",
+      "trade_off": "It provides stable and efficient continuation but makes arbitrary page-number jumps and some backward navigation harder.",
+      "failure_mode": "A mutable or non-unique ordering key can still duplicate or skip records; an offset shifts when rows are inserted or removed ahead of it.",
+      "misconception": "A cursor is not an encoded page number; it represents a position in a defined ordering."
+    },
+    "canonical_question": "A feed inserts new rows between a client's first and second page. How does a cursor keep traversal stable, and what must the cursor represent?"
   },
   {
     "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
@@ -51,7 +106,18 @@
     "source_url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
     "source_section": "Capacity Estimation",
     "activation_prerequisite": "Complete the Delivery Framework lesson",
-    "evidence": "official_course"
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "source_label": "Hello Interview · Delivery Framework · Capacity Estimation",
+    "answer_basis": "Do capacity math when a bound can change an architectural choice, not as a ritual before designing. State the competing designs, estimate the smallest quantity that distinguishes them, compare it with the relevant resource limit, and use the result. For a Top-K service, estimated distinct-topic count multiplied by per-entry state can decide whether one in-memory structure fits or the aggregation must be partitioned and merged.",
+    "answer_rubric": {
+      "mechanism": "Identifies a pending architectural decision, estimates the discriminating bound, compares it with a limit, and selects or rejects a design.",
+      "acceptable_alternative": "Any calculation tied to a concrete branch—such as storage fit, shard throughput, bandwidth, or latency budget—is valid if its result changes the design.",
+      "trade_off": "Deferring irrelevant arithmetic saves interview time, but the candidate must notice and quantify bounds when the design approaches a real limit.",
+      "failure_mode": "Computing DAU, QPS, storage, and bandwidth without connecting them to a decision consumes time and leaves the architecture unchanged.",
+      "misconception": "Capacity estimation is not a mandatory up-front checklist and 'the system is large' is not a useful conclusion."
+    },
+    "canonical_question": "A candidate says a trending-topics service needs distributed aggregation. What is the smallest estimate that could prove or disprove that choice, and how would you use it?"
   },
   {
     "topic": "Data modeling from access patterns: deriving entities, relationships, and query shapes",

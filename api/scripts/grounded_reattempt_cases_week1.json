@@ -1,0 +1,98 @@
+[
+  {
+    "name": "delivery sequence — reconstructed",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "feedback": "After requirements, establish the entities and external interface, make the simplest complete design satisfy that interface, then spend remaining time on targeted deep dives.",
+    "reattempt_answer": "I first name the data the system owns, then define the user-facing calls. I trace those calls through a complete minimal architecture before hardening the few scale or failure points that matter. That way the interview has a working answer even if a deep dive runs long.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 5
+  },
+  {
+    "name": "delivery sequence — parrots correction",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "feedback": "Use entities, interface, a complete high-level design, then targeted deep dives.",
+    "reattempt_answer": "Entities, interface, complete high-level design, targeted deep dives.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 2
+  },
+  {
+    "name": "non-functional requirements — reconstructed",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "feedback": "Replace generic qualities with a few operation-specific, preferably quantified constraints that will justify architecture choices.",
+    "reattempt_answer": "For this feed I would bound read latency at a percentile and expected read load, then state whether stale results are acceptable during a failure. Those constraints tell me whether I need aggressive caching and whether availability may win over freshness, instead of merely saying fast and reliable.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 5
+  },
+  {
+    "name": "non-functional requirements — still generic",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "feedback": "Choose contextual, quantified constraints rather than a generic checklist.",
+    "reattempt_answer": "The contextual constraints are scalability, availability, consistency, and performance.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 1
+  },
+  {
+    "name": "identity boundary — reconstructed",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "feedback": "Derive the principal from verified authentication context, then authorize that principal against the booking; do not trust a client-controlled user ID.",
+    "reattempt_answer": "I verify the token to get caller 42, load the booking named in the request, and allow cancellation only if caller 42 owns it or has the required role. Even if the body says user 99, that field cannot change who is acting.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 5
+  },
+  {
+    "name": "identity boundary — parrots auth words",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "feedback": "Use verified identity first, then authorize it against the resource.",
+    "reattempt_answer": "Verified identity first, then authorize it against the resource.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 2
+  },
+  {
+    "name": "timeout retry — reconstructed",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "feedback": "The outcome is unknown. Retry the same logical operation with the same idempotency key so the server returns or completes one recorded result.",
+    "reattempt_answer": "I keep the original payment operation ID when retrying. The server atomically associates that ID with the first charge and either waits for it or returns its stored outcome, so losing the response cannot create another charge. I also back off rather than hammering the dependency.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 5
+  },
+  {
+    "name": "timeout retry — changes the key",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "feedback": "Reuse the same operation-scoped idempotency key because a timeout does not prove failure.",
+    "reattempt_answer": "I retry with a new idempotency key so the server knows this is a new attempt and does not confuse it with the timed-out request.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 1
+  },
+  {
+    "name": "cursor pagination — reconstructed",
+    "topic": "Cursor pagination: preserving stable traversal while rows are inserted or deleted",
+    "feedback": "The cursor represents the last stable ordered position, and the next query resumes strictly after that position in the same ordering.",
+    "reattempt_answer": "If the feed sorts by created_at then ID, I carry both values from the last row. The next query applies the same tuple order and a strict after boundary, so an insert before that tuple does not move my continuation and ties remain unambiguous.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 5
+  },
+  {
+    "name": "cursor pagination — adjacent jargon",
+    "topic": "Cursor pagination: preserving stable traversal while rows are inserted or deleted",
+    "feedback": "Resume after the last row's stable ordered key; the cursor is not a page number.",
+    "reattempt_answer": "Cursors are faster because they are opaque base64 strings that users cannot edit.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 1
+  },
+  {
+    "name": "decision-driven estimation — reconstructed",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "feedback": "Name the architectural branch, estimate the smallest quantity that distinguishes it, compare with the relevant limit, and use the result.",
+    "reattempt_answer": "The question is whether one machine can hold the Top-K working set. I multiply distinct topics by state per topic and compare that with available memory plus headroom. A fit keeps the design simple; a miss is evidence to partition and merge.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 5
+  },
+  {
+    "name": "decision-driven estimation — ritual repeated",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "feedback": "Calculate only a bound that decides between concrete designs.",
+    "reattempt_answer": "I would calculate all the standard numbers first because every system design interview requires capacity estimation.",
+    "unaided_mechanism": 1,
+    "expected_mechanism_accuracy": 1
+  }
+]
