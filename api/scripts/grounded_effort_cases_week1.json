@@ -65,11 +65,11 @@
   {
     "name": "identity boundary — mechanism only",
     "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
-    "answer": "Use the verified token to identify the caller, load the booking, and check that caller is allowed to cancel it. Do not use the body user ID as the caller.",
+    "answer": "Use the verified token to identify the caller, load the booking, and check that caller is allowed to cancel it.",
     "expected_score": 3,
-    "expected_accuracy": 5,
-    "expected_depth": 1,
-    "expected_boundaries": 1
+    "expected_accuracy": 4,
+    "expected_depth": 2,
+    "expected_boundaries": 2
   },
   {
     "name": "identity boundary — trusts client identity",

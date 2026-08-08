@@ -115,7 +115,10 @@ def _accuracy_errors(results: list[Result]) -> tuple[int, int]:
 
 def print_summary(by_level: dict[str, list[Result]]) -> None:
     print("\n=== summary ===")
-    print(f"  {'level':<10} {'in tok':>9} {'out tok':>9} {'mean dev':>9} {'exact':>8}")
+    print(
+        f"  {'level':<10} {'input':>8} {'cache-r':>8} {'cache-w':>8} "
+        f"{'output':>8} {'mean dev':>9} {'exact':>8}"
+    )
     for level, results in by_level.items():
         deviations = [
             abs(r.score - r.expected_score)
@@ -127,8 +130,11 @@ def print_summary(by_level: dict[str, list[Result]]) -> None:
             f"{sum(d == 0 for d in deviations)}/{len(deviations)}" if deviations else "—"
         )
         print(
-            f"  {level:<10} {sum(r.usage.input_tokens for r in results):>9} "
-            f"{sum(r.usage.output_tokens for r in results):>9} {mean_dev:>9} {exact:>8}"
+            f"  {level:<10} {sum(r.usage.input_tokens for r in results):>8} "
+            f"{sum(r.usage.cache_read_tokens for r in results):>8} "
+            f"{sum(r.usage.cache_write_tokens for r in results):>8} "
+            f"{sum(r.usage.output_tokens for r in results):>8} "
+            f"{mean_dev:>9} {exact:>8}"
         )
 
         false_pass, false_fail = _accuracy_errors(results)

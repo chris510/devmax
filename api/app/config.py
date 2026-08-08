@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # 8 cases, 2026-07): 1460 vs 2353 output tokens, and 6/8 vs 3/8 exact score
     # matches. Against a rubric this crisp, more thinking produced *less*
     # consistent grading — medium's errors were scattered where low's were not.
+    # A source-grounded 18-case Week 1 sweep on 2026-08-07 confirmed the choice:
+    # low had 13/18 exact composites at 4068 output tokens versus medium's 12/18
+    # at 5029, with no false Accuracy passes or failures at either level.
     # Re-run the sweep before changing this; it's the product's core signal.
     scoring_effort: str | None = "low"
     question_effort: str | None = None
@@ -42,10 +45,12 @@ class Settings(BaseSettings):
     # grades the same axis against the same transcript, so a weaker model would
     # write a mastery summary the scoring call then reads as peer evidence.
     #
-    # UNSWEPT. `scoring_effort`'s "low" was chosen from a live sweep; this one is
-    # inherited, not measured. The task is narrower than scoring (one axis, no
-    # composite, no probe), so "low" is the right prior — but run
-    # scripts/reattempt_effort_sweep.py against this prompt before treating it as settled.
+    # A 12-case source-grounded sweep on 2026-08-07 retained low provisionally.
+    # Both levels were within one point on 11/12 cases and each had one false
+    # parrot pass; medium additionally produced one false reconstruction failure
+    # and used 1412 output tokens versus low's 944. Every mastery summary at both
+    # levels correctly said the performance was coached. Expand the evaluation
+    # before treating the numeric rubric as settled.
     reattempt_model: str = "claude-sonnet-5"
     reattempt_effort: str | None = "low"
 

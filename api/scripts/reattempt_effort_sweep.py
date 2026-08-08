@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -71,6 +72,7 @@ async def main() -> int:
     parser.add_argument("cases", type=Path)
     parser.add_argument("--levels", nargs="+", default=["low", "medium"])
     parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--verbose", action="store_true", help="print mastery summaries")
     parser.add_argument(
         "--grounding-manifest",
         type=Path,
@@ -104,8 +106,23 @@ async def main() -> int:
                         f"  {result.name[:42]:<42} accuracy={result.actual} "
                         f"expected={result.expected} out={result.usage.output_tokens:>5}{flag}"
                     )
+                    if args.verbose:
+                        print(f"      {result.summary}")
+                deviations = [abs(r.actual - r.expected) for r in results]
+                false_pass = sum(
+                    r.expected <= 2 and r.actual >= 3 for r in results
+                )
+                false_fail = sum(
+                    r.expected >= 3 and r.actual <= 2 for r in results
+                )
                 print(
                     f"  exact={sum(r.actual == r.expected for r in results)}/{len(results)} "
+                    f"within-one={sum(d <= 1 for d in deviations)}/{len(results)} "
+                    f"mean-dev={statistics.mean(deviations):.2f} "
+                    f"false-pass={false_pass} false-fail={false_fail} "
+                    f"in={sum(r.usage.input_tokens for r in results)} "
+                    f"cache-r={sum(r.usage.cache_read_tokens for r in results)} "
+                    f"cache-w={sum(r.usage.cache_write_tokens for r in results)} "
                     f"out={sum(r.usage.output_tokens for r in results)}"
                 )
     finally:

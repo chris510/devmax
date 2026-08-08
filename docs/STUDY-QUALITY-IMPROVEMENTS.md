@@ -1,6 +1,6 @@
 # Devmax study-quality improvements
 
-Status: **structural implementation merged; Week 1 grounding human-approved; paid evaluation blocked by Anthropic credits**
+Status: **structural implementation merged; Week 1 grounding approved and live-evaluated**
 
 Claude Design artifact: [Study Quality Improvements v1](https://claude.ai/design/p/25258e0c-5891-401c-9690-88790421a788?file=Study+Quality+Improvements+v1.dc.html)
 
@@ -292,9 +292,9 @@ pretend that an old ungrounded card acquired authority during deployment.
   has a real excerpt and an explicit eligibility review.
 - Week 1 contributes 18 scoring and 12 coached re-attempt cases toward the
   planned 60–100-case source-grounded evaluation. The offline gate passes on
-  SQLite and Postgres. A live scoring attempt was rejected for insufficient
-  Anthropic credits before producing results; the re-attempt sweep remains
-  unrun. Results must be recorded before any model or prompt change is proposed.
+  SQLite and Postgres, and both low/medium live sweeps are recorded in the Week 1
+  review. Low effort remains the default for both paths; no prompt or model
+  change is justified until the broader evaluation is complete.
 
 ## Remaining content order
 

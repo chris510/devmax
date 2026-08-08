@@ -1,6 +1,6 @@
 # Week 1 curriculum grounding review
 
-Status: **human-approved on 2026-08-07; paid evaluation blocked by Anthropic credits**
+Status: **human-approved and live-evaluated on 2026-08-07**
 
 This tranche adds reviewed answer authority and fixed canonical questions for
 the six Week 1 conversational cards. It does not activate them; activation is
@@ -124,12 +124,59 @@ axes Accuracy, Depth, and Boundaries. Both scoring runners, all evaluation case
 labels, and regression tests were updated to that contract before another live
 attempt.
 
-The retry reached `claude-sonnet-5` at low effort, but Anthropic rejected the
-batch because the account credit balance was too low. It produced no usable
-case results, and the coached re-attempt sweep was not started. No production
-prompt, model, effort setting, or scheduler behavior changed as a result.
+Credits were restored later on 2026-08-07 and both final sweeps completed against
+`claude-sonnet-5` at low and medium effort with concurrency 4.
 
-Once credits are restored, rerun:
+### Scoring results
+
+| Effort | Composite exact | Mean deviation | Accuracy exact / within one | Depth exact / within one | Boundaries exact / within one | False Accuracy pass / fail | Input | Cache read / write | Output |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| low | 13/18 | 0.28 | 9/18 · 17/18 | 10/18 · 17/18 | 16/18 · 18/18 | 0 / 0 | 35,267 | 0 / 0 | 4,068 |
+| medium | 12/18 | 0.33 | 10/18 · 17/18 | 10/18 · 17/18 | 16/18 · 18/18 | 0 / 0 | 35,267 | 0 / 0 | 5,029 |
+
+Low effort remains the scoring default. It was more exact, had lower mean
+deviation, and used 19% fewer output tokens without changing the false-pass or
+false-failure result.
+
+### Coached re-attempt results
+
+| Effort | Exact | Within one | Mean deviation | False parrot pass | False reconstruction fail | Input | Cache read / write | Output |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| low | 6/12 | 11/12 | 0.58 | 1 | 0 | 20,528 | 0 / 0 | 944 |
+| medium | 8/12 | 11/12 | 0.50 | 1 | 1 | 20,528 | 0 / 0 | 1,412 |
+
+Low effort remains the coached-grading default provisionally. Medium was more
+exact, but both levels were within one on 11 cases and medium introduced a false
+failure on a correct reconstruction. Low also used 33% fewer output tokens.
+Most importantly, all 24 final mastery summaries explicitly described the
+performance as coached or not yet demonstrated unaided.
+
+### Findings and corrections
+
+- The initial identity “mechanism only” scoring answer also stated the trust
+  boundary, so Claude reasonably treated it as depth. The fixture now contains
+  only the core caller/resource authorization flow and is labeled 4/2/2; a
+  focused low/medium rerun produced that exact composite and stayed within one
+  on every axis.
+- Confidently wrong scoring answers were repeatedly graded Accuracy 0 instead of
+  the rubric's 1. Both values remain in the scheduler's failing bucket, so this
+  did not create a false retention pass, but it is a display-severity mismatch.
+- Correct coached extensions were sometimes graded as plain reconstruction,
+  apparently because the model treated trusted grading authority as though it
+  had been shown to the learner. A verbatim sequence also sometimes scored 3
+  despite a mastery summary correctly calling it parroting.
+- Three coached answers that remained fully wrong were relabeled from 1 to 0,
+  matching the written rubric. The source-aligned cursor reconstruction was
+  relabeled from 5 to 4 because it adds no independent extension.
+- The re-attempt runner now prints full input, output, cache usage, within-one
+  agreement, false-pass/failure counts, and optional mastery summaries.
+
+This 30-case tranche is enough to retain the current low-effort settings, but
+not enough to approve a production prompt or model change. The trusted-authority
+versus learner-visible-feedback ambiguity must be retested in the planned
+60–100-case evaluation before editing the prompt.
+
+To reproduce the evaluation:
 
 ```sh
 cd api
@@ -143,7 +190,7 @@ uv run python scripts/reattempt_effort_sweep.py \
   --grounding-manifest cards.json
 ```
 
-Record model ID, effort levels, token usage, false mechanism passes/failures,
+Record model ID, effort levels, token usage, false Accuracy passes/failures,
 per-axis agreement, and every mismatch before changing a production prompt or
 model setting. Do not approve the remaining 48 curriculum cards by analogy;
 each needs its own source review and first-question audit.

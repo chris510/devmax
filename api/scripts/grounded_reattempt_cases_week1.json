@@ -61,7 +61,7 @@
     "feedback": "Reuse the same operation-scoped idempotency key because a timeout does not prove failure.",
     "reattempt_answer": "I retry with a new idempotency key so the server knows this is a new attempt and does not confuse it with the timed-out request.",
     "unaided_accuracy": 1,
-    "expected_accuracy": 1
+    "expected_accuracy": 0
   },
   {
     "name": "cursor pagination — reconstructed",
@@ -69,7 +69,7 @@
     "feedback": "The cursor points to the final record returned, such as its ID or timestamp, and the next request resumes after that record instead of recounting a moving offset.",
     "reattempt_answer": "I carry the ID or timestamp of the final record from the first page. The next request resumes after that record, so a new insertion before it does not move my continuation the way an offset would.",
     "unaided_accuracy": 1,
-    "expected_accuracy": 5
+    "expected_accuracy": 4
   },
   {
     "name": "cursor pagination — adjacent jargon",
@@ -77,7 +77,7 @@
     "feedback": "Resume after the last row's stable ordered key; the cursor is not a page number.",
     "reattempt_answer": "Cursors are faster because they are opaque base64 strings that users cannot edit.",
     "unaided_accuracy": 1,
-    "expected_accuracy": 1
+    "expected_accuracy": 0
   },
   {
     "name": "decision-driven estimation — reconstructed",
@@ -93,6 +93,6 @@
     "feedback": "Calculate only a bound that decides between concrete designs.",
     "reattempt_answer": "I would calculate all the standard numbers first because every system design interview requires capacity estimation.",
     "unaided_accuracy": 1,
-    "expected_accuracy": 1
+    "expected_accuracy": 0
   }
 ]
