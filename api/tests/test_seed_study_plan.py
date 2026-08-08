@@ -12,7 +12,10 @@ import pytest
 from sqlmodel import select
 
 from app.models import (
+    FOUNDER_USER_ID,
     PLAN_ACTIVE,
+    PLAN_PAUSED,
+    REVISION_CREATED,
     Card,
     Session,
     StudyPlan,
@@ -20,6 +23,7 @@ from app.models import (
     StudyPlanPhase,
     StudyPlanRevision,
     StudyPlanWeek,
+    User,
 )
 from app.seed_study_plan import (
     DEFAULT_MANIFEST,
@@ -171,6 +175,80 @@ async def test_an_explicit_start_date_must_be_a_monday(db) -> None:
         await load_first_party_plan(start_date=date(2026, 7, 31), activate=True, db=db)
 
     assert (await db.exec(select(StudyPlan))).all() == []
+
+
+async def test_default_start_date_uses_founder_settings_without_request_context(db) -> None:
+    seeded = await load_first_party_plan(db=db)
+
+    plan = (
+        await db.exec(select(StudyPlan).where(StudyPlan.user_id == FOUNDER_USER_ID))
+    ).one()
+    assert seeded.created
+    assert plan.start_date.weekday() == 0
+
+
+async def test_a_public_users_matching_seed_does_not_satisfy_the_founder_seed(db) -> None:
+    other = User()
+    db.add(other)
+    await db.flush()
+    other_plan = StudyPlan(
+        user_id=other.id,
+        title="Other user's curriculum",
+        subject="Backend",
+        subject_slug="backend",
+        guide_text="other",
+        status=PLAN_PAUSED,
+        mode="flexible",
+        start_date=START,
+        default_weekly_capacity_minutes=720,
+        forecast_end_plan_week=12,
+    )
+    db.add(other_plan)
+    await db.flush()
+    db.add(
+        StudyPlanRevision(
+            plan_id=other_plan.id,
+            kind=REVISION_CREATED,
+            base_plan_revision=1,
+            before={},
+            after={"seed_key": "devmax.senior-backend-12-week.v3"},
+            summary="Other user's seed",
+        )
+    )
+    await db.commit()
+
+    seeded = await load_first_party_plan(start_date=START, db=db)
+
+    assert seeded.created
+    assert seeded.plan_id != str(other_plan.id)
+    assert len((await db.exec(select(StudyPlan))).all()) == 2
+
+
+async def test_a_public_users_active_plan_does_not_block_founder_activation(db) -> None:
+    other = User()
+    db.add(other)
+    await db.flush()
+    db.add(
+        StudyPlan(
+            user_id=other.id,
+            title="Other active plan",
+            subject="Law",
+            subject_slug="law",
+            guide_text="other",
+            status=PLAN_ACTIVE,
+            mode="flexible",
+            start_date=START,
+            default_weekly_capacity_minutes=720,
+            forecast_end_plan_week=4,
+        )
+    )
+    await db.commit()
+
+    seeded = await load_first_party_plan(start_date=START, activate=True, db=db)
+
+    assert seeded.active
+    active = (await db.exec(select(StudyPlan).where(StudyPlan.status == PLAN_ACTIVE))).all()
+    assert {plan.user_id for plan in active} == {FOUNDER_USER_ID, other.id}
 
 
 def test_a_changed_embedded_guide_requires_a_reviewed_manifest_update(tmp_path) -> None:

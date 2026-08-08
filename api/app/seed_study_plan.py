@@ -27,13 +27,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db import session_factory
 from app.models import (
+    FOUNDER_USER_ID,
     PLAN_ACTIVE,
     PLAN_PAUSED,
     REVISION_CREATED,
     StudyPlan,
     StudyPlanRevision,
 )
-from app.routers.deps import local_today
+from app.routers.deps import get_settings_row, now_in
 from app.services import study_plan as sp
 from app.services import study_plan_import as spi
 
@@ -180,7 +181,12 @@ async def _existing_seed(
 ) -> tuple[StudyPlan, StudyPlanRevision] | None:
     revisions = (
         await db.exec(
-            select(StudyPlanRevision).where(col(StudyPlanRevision.kind) == REVISION_CREATED)
+            select(StudyPlanRevision)
+            .join(StudyPlan, StudyPlan.id == StudyPlanRevision.plan_id)
+            .where(
+                StudyPlan.user_id == FOUNDER_USER_ID,
+                col(StudyPlanRevision.kind) == REVISION_CREATED,
+            )
         )
     ).all()
     revision = next(
@@ -189,7 +195,14 @@ async def _existing_seed(
     )
     if revision is None:
         return None
-    plan = (await db.exec(select(StudyPlan).where(col(StudyPlan.id) == revision.plan_id))).first()
+    plan = (
+        await db.exec(
+            select(StudyPlan).where(
+                StudyPlan.user_id == FOUNDER_USER_ID,
+                col(StudyPlan.id) == revision.plan_id,
+            )
+        )
+    ).first()
     return (plan, revision) if plan is not None else None
 
 
@@ -200,9 +213,17 @@ async def load_first_party_plan(
     activate: bool = False,
     db: AsyncSession | None = None,
 ) -> SeedResult:
-    """Validate and atomically create the curated plan, or return the prior seed."""
+    """Create or return the founder's curated first-party plan.
+
+    Public users build plans through authenticated imports. This operator path
+    is founder-only and therefore never relies on request-local identity.
+    """
     async with _session(db) as session:
-        begin = start_date or spi.default_start_date(await local_today(session))
+        if start_date is None:
+            settings = await get_settings_row(session, FOUNDER_USER_ID)
+            begin = spi.default_start_date(now_in(settings.timezone).date())
+        else:
+            begin = start_date
         if begin.weekday() != 0:
             raise PlanSeedError(
                 f"Study Plan start dates must be Mondays; {begin.isoformat()} is a "
@@ -223,7 +244,7 @@ async def load_first_party_plan(
                 items=int((revision.after or {}).get("items", 0)),
             )
 
-        if activate and await sp.active_plan(session) is not None:
+        if activate and await sp.active_plan(session, FOUNDER_USER_ID) is not None:
             raise PlanSeedError(
                 "another Study Plan is already active; pause it in the app before "
                 "activating this first-party plan"
@@ -231,6 +252,7 @@ async def load_first_party_plan(
 
         rows = spi.build_plan_rows(validated.preview, start_date=begin)
         plan: StudyPlan = rows["plan"]
+        plan.user_id = FOUNDER_USER_ID
         plan.status = PLAN_ACTIVE if activate else PLAN_PAUSED
         if not activate:
             plan.paused_at = datetime.now(UTC)
