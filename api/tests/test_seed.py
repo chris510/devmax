@@ -15,7 +15,15 @@ import pytest
 from sqlmodel import select
 
 from app.db import is_local_database
-from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK, Card, PendingCapture, Session
+from app.models import (
+    DELIVERY_CONVERSATIONAL,
+    DELIVERY_DESK,
+    FOUNDER_USER_ID,
+    Card,
+    PendingCapture,
+    Session,
+    User,
+)
 from app.seed import (
     SeedGroundingError,
     _schedule,
@@ -23,6 +31,7 @@ from app.seed import (
     _selected_entries,
     _validated_grounding,
     delivery_mode_for,
+    load_fixtures,
     load_from_file,
     retire_from_file,
 )
@@ -229,14 +238,27 @@ def test_desk_reference_material_does_not_need_a_scoring_rubric() -> None:
 async def test_approved_seed_persists_the_reviewed_answer_authority(tmp_path, db) -> None:
     path = tmp_path / "approved.json"
     path.write_text(json.dumps([approved_entry()]))
+    other = User()
+    db.add(other)
+    await db.flush()
+    db.add(make_card(user_id=other.id, topic="Cursor pagination"))
+    await db.commit()
 
     assert await load_from_file(path, weeks_through=1, start=START, db=db) == 1
 
-    card = (await db.exec(select(Card).where(Card.topic == "Cursor pagination"))).one()
+    card = (
+        await db.exec(
+            select(Card).where(
+                Card.user_id == FOUNDER_USER_ID,
+                Card.topic == "Cursor pagination",
+            )
+        )
+    ).one()
     assert card.source_label == "Reviewed source"
     assert card.answer_basis.startswith("Resume strictly")
     assert card.answer_rubric["failure_mode"].startswith("A mutable key")
     assert card.canonical_question == "How does a cursor preserve stable traversal?"
+    assert len((await db.exec(select(Card).where(Card.user_id == other.id))).all()) == 1
 
 
 async def test_one_draft_entry_prevents_the_entire_selected_cohort(tmp_path, db) -> None:
@@ -254,6 +276,27 @@ async def test_one_draft_entry_prevents_the_entire_selected_cohort(tmp_path, db)
         await load_from_file(path, weeks_through=1, start=START, db=db)
 
     assert (await db.exec(select(Card))).all() == []
+
+
+async def test_fixtures_ignore_a_public_users_same_topic(db) -> None:
+    other = User()
+    db.add(other)
+    await db.flush()
+    db.add(make_card(user_id=other.id, topic="Consistent hashing"))
+    await db.commit()
+
+    assert await load_fixtures(db=db) == 4
+
+    founder_cards = (
+        await db.exec(select(Card).where(Card.user_id == FOUNDER_USER_ID))
+    ).all()
+    assert {card.topic for card in founder_cards} == {
+        "Consistent hashing",
+        "Raft leader election",
+        "Postgres index types",
+        "Multi-source BFS",
+    }
+    assert len((await db.exec(select(Card).where(Card.user_id == other.id))).all()) == 1
 
 
 @pytest.mark.parametrize(
@@ -398,3 +441,41 @@ async def test_retiring_twice_is_a_no_op(db, manifest) -> None:
 async def test_a_manifest_topic_absent_from_the_database_is_not_an_error(db) -> None:
     """The real case: the legacy deck against a database that never held it."""
     assert await retire_from_file(LEGACY_JSON, db=db) == ([], 0)
+
+
+async def test_retirement_never_crosses_the_founder_ownership_boundary(db, manifest) -> None:
+    other = User()
+    db.add(other)
+    await db.flush()
+    founder_card = make_card(topic="Doomed")
+    other_card = make_card(user_id=other.id, topic="Doomed")
+    db.add(founder_card)
+    db.add(other_card)
+    await db.flush()
+    db.add(Session(card_id=founder_card.id, question_asked="founder session"))
+    db.add(Session(card_id=other_card.id, question_asked="other session"))
+    db.add(
+        PendingCapture(
+            user_id=FOUNDER_USER_ID,
+            topic="Doomed",
+            status="activated",
+            activated_card_id=founder_card.id,
+        )
+    )
+    db.add(
+        PendingCapture(
+            user_id=other.id,
+            topic="Doomed",
+            status="activated",
+            activated_card_id=other_card.id,
+        )
+    )
+    await db.commit()
+
+    assert await retire_from_file(manifest, db=db) == (["Doomed"], 1)
+
+    assert (await db.exec(select(Card))).all() == [other_card]
+    assert [row.question_asked for row in (await db.exec(select(Session))).all()] == [
+        "other session"
+    ]
+    assert (await db.exec(select(PendingCapture))).all()[0].user_id == other.id

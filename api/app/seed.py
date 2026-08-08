@@ -49,12 +49,13 @@ from app.db import is_local_database, session_factory
 from app.models import (
     DELIVERY_CONVERSATIONAL,
     DELIVERY_DESK,
+    FOUNDER_USER_ID,
     STATUS_COMPLETE,
     Card,
     PendingCapture,
     Session,
 )
-from app.routers.deps import get_settings_row, local_today, now_in
+from app.routers.deps import get_settings_row, now_in
 from app.services.card_lifecycle import Grounding, GroundingError
 
 # Coding problems need a keyboard and an hour, not a two-minute voice session.
@@ -178,11 +179,18 @@ async def load_from_file(
     activate_week: int | None = None,
     db: AsyncSession | None = None,
 ) -> int:
+    """Add reviewed curriculum cards to the founder account.
+
+    Public accounts create material through authenticated product flows. This
+    operator command is the compatibility path for the curated founder deck, so
+    every lookup and write is explicitly founder-scoped rather than depending on
+    request-local authentication context or model defaults.
+    """
     entries = _selected_entries(json.loads(path.read_text()), weeks_through, activate_week)
     grounding = [_validated_grounding(entry) for entry in entries]
     added = 0
     async with _session(db) as db:
-        settings = await get_settings_row(db)
+        settings = await get_settings_row(db, FOUNDER_USER_ID)
         begin = start or now_in(settings.timezone).date()
 
         # An activated week starts now. Keep the original target_week on Card so
@@ -190,12 +198,20 @@ async def load_from_file(
         schedule_entries = _schedule_entries(entries, activate_week)
         due_dates = _schedule(schedule_entries, begin, settings.reviews_per_day)
         for entry, due, authority in zip(entries, due_dates, grounding, strict=True):
-            existing = (await db.exec(select(Card).where(Card.topic == entry["topic"]))).first()
+            existing = (
+                await db.exec(
+                    select(Card).where(
+                        Card.user_id == FOUNDER_USER_ID,
+                        Card.topic == entry["topic"],
+                    )
+                )
+            ).first()
             if existing is not None:
                 continue
             category = entry.get("category", "Unsorted")
             db.add(
                 Card(
+                    user_id=FOUNDER_USER_ID,
                     topic=entry["topic"],
                     category=category,
                     pattern=entry.get("pattern"),
@@ -234,17 +250,32 @@ async def retire_from_file(
     foreign keys unless asked, so leaning on the cascade would mean the behaviour
     under test and the behaviour in production are different code paths.
 
-    Returns the retired topics and the number of sessions removed with them.
+    This operator command owns only the founder curriculum. A public user may
+    independently create a card with the same topic, so topic matching without
+    owner scoping would be cross-account deletion.
+
+    Returns the retired founder topics and the number of founder sessions
+    removed with them.
     Idempotent: a second run matches nothing and reports `([], 0)`.
     """
     topics = {entry["topic"] for entry in json.loads(path.read_text())}
     async with _session(db) as db:
-        cards = (await db.exec(select(Card).where(col(Card.topic).in_(topics)))).all()
+        cards = (
+            await db.exec(
+                select(Card).where(
+                    Card.user_id == FOUNDER_USER_ID,
+                    col(Card.topic).in_(topics),
+                )
+            )
+        ).all()
         card_ids = [card.id for card in cards]
         sessions = (await db.exec(select(Session).where(col(Session.card_id).in_(card_ids)))).all()
         captures = (
             await db.exec(
-                select(PendingCapture).where(col(PendingCapture.activated_card_id).in_(card_ids))
+                select(PendingCapture).where(
+                    PendingCapture.user_id == FOUNDER_USER_ID,
+                    col(PendingCapture.activated_card_id).in_(card_ids),
+                )
             )
         ).all()
         retired = sorted(card.topic for card in cards)
@@ -389,11 +420,20 @@ async def load_fixtures(db: AsyncSession | None = None) -> int:
     async with _session(db) as db:
         # The configured timezone, not the container's: a UTC server would seed
         # these a day early after 17:00 PT.
-        today = await local_today(db)
+        settings = await get_settings_row(db, FOUNDER_USER_ID)
+        today = now_in(settings.timezone).date()
         for spec in _fixtures():
-            if (await db.exec(select(Card).where(Card.topic == spec["topic"]))).first():
+            if (
+                await db.exec(
+                    select(Card).where(
+                        Card.user_id == FOUNDER_USER_ID,
+                        Card.topic == spec["topic"],
+                    )
+                )
+            ).first():
                 continue
             card = Card(
+                user_id=FOUNDER_USER_ID,
                 topic=spec["topic"],
                 category=spec["category"],
                 delivery_mode=delivery_mode_for(spec["category"]),
