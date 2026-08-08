@@ -23,9 +23,9 @@ def completed(mechanism: int, trade_offs: int = 0, failure_modes: int = 0, **kwa
     return ScoreResult(
         status="complete",
         score=llm.derive_composite(mechanism, trade_offs, failure_modes),
-        mechanism_accuracy=mechanism,
-        trade_off_awareness=trade_offs,
-        failure_mode_awareness=failure_modes,
+        accuracy=mechanism,
+        depth=trade_offs,
+        boundaries=failure_modes,
         **{"feedback": "Good.", "mastery_summary": "ok", **kwargs},
     )
 
@@ -189,9 +189,9 @@ async def test_completing_a_session_applies_sm2_and_updates_the_card(client, db,
     assert card.mastery_summary == "solid"
     assert card.next_review_at == local_today() + timedelta(days=6)
     # Denormalised alongside last_score so Coverage's rollup is one query.
-    assert card.last_mechanism_accuracy == 4
-    assert card.last_trade_off_awareness == 3
-    assert card.last_failure_mode_awareness == 0
+    assert card.last_accuracy == 4
+    assert card.last_depth == 3
+    assert card.last_boundaries == 0
     assert card.last_reviewed_at is not None
 
 
@@ -288,9 +288,7 @@ async def test_the_first_session_generates_and_persists_the_question(client, db,
     assert len(score.questions) == 1
 
 
-async def test_later_sessions_reuse_the_question_without_calling_the_model(
-    client, db, stub_llm
-):
+async def test_later_sessions_reuse_the_question_without_calling_the_model(client, db, stub_llm):
     """Testing the same retrieval repeatedly is the point; it also saves a call."""
     score, _ = stub_llm
     card = make_card()
@@ -402,7 +400,7 @@ async def test_the_library_carries_due_labels_and_axis_scores(client, db, stub_l
     row = (await client.get("/cards", headers=API_HEADERS)).json()[0]
     assert row["due_label"] == "3 days overdue"
     assert row["days_since_review"] is None
-    assert row["last_mechanism_accuracy"] is None
+    assert row["last_accuracy"] is None
 
     start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
     await client.post(
@@ -411,9 +409,9 @@ async def test_the_library_carries_due_labels_and_axis_scores(client, db, stub_l
 
     row = (await client.get("/cards", headers=API_HEADERS)).json()[0]
     assert row["days_since_review"] == 0
-    assert row["last_mechanism_accuracy"] == 4
-    assert row["last_trade_off_awareness"] == 3
-    assert row["last_failure_mode_awareness"] == 1
+    assert row["last_accuracy"] == 4
+    assert row["last_depth"] == 3
+    assert row["last_boundaries"] == 1
 
 
 async def test_answering_a_complete_session_returns_409(client, db, stub_llm):
@@ -542,9 +540,7 @@ async def test_a_morning_push_does_not_block_the_evening_window(
     assert capture_push[0]["body"] == "Raft"
 
 
-async def test_the_same_card_is_not_offered_twice_in_one_day(
-    client, db, monkeypatch, capture_push
-):
+async def test_the_same_card_is_not_offered_twice_in_one_day(client, db, monkeypatch, capture_push):
     """One unanswered card is not worth two notifications.
 
     The evening window takes the next card down, or stays quiet — it never
@@ -1022,7 +1018,7 @@ def stub_reattempt(monkeypatch):
         calls.append(kwargs)
         return _reattempt.result
 
-    _reattempt.result = ReattemptResult(mechanism_accuracy=4, mastery_summary="reconstructed it")
+    _reattempt.result = ReattemptResult(accuracy=4, mastery_summary="reconstructed it")
     monkeypatch.setattr(llm, "score_reattempt", _reattempt)
     return _reattempt, calls
 
@@ -1064,13 +1060,13 @@ async def test_reattempt_never_touches_sm2_or_the_score(client, db, stub_llm, st
     # The unaided attempt still describes the card: a 4 on the re-attempt must not
     # relabel a card the engineer could not reconstruct on its own.
     assert card.last_score == 1
-    assert card.last_mechanism_accuracy == 1
+    assert card.last_accuracy == 1
 
     session = await db.get(Session, session_id)
     await db.refresh(session)
     assert session.score == 1
-    assert session.mechanism_accuracy == 1
-    assert session.reattempt_mechanism_accuracy == 4
+    assert session.accuracy == 1
+    assert session.reattempt_accuracy == 4
 
 
 async def test_reattempt_writes_mastery_and_the_transcript(client, db, stub_llm, stub_reattempt):
@@ -1098,7 +1094,7 @@ async def test_reattempt_writes_mastery_and_the_transcript(client, db, stub_llm,
     assert calls[0]["feedback_given"] == "Ring position decides ownership."
     # And without the unaided score it cannot tell this was a coached turn at all,
     # so it writes summaries that read as unaided mastery.
-    assert calls[0]["unaided_mechanism"] == 1
+    assert calls[0]["unaided_accuracy"] == 1
 
 
 async def test_reattempt_cannot_be_replayed(client, db, stub_llm, stub_reattempt):

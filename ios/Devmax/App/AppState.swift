@@ -23,6 +23,10 @@ final class AppState: ObservableObject {
         case planLifecycle(UUID, PlanLifecycleAction, PlanLifecycleOrigin)
         case planRecap(UUID)
         case planAudit(String)
+        case materialSetup
+        case fullSettings
+        case privacy
+        case deleteAccount
     }
     enum Sheet: String, Identifiable {
         case settings, add, plans, planCapacity
@@ -82,6 +86,9 @@ final class AppState: ObservableObject {
     @Published var practice = false
     /// This session's scored cards, in walk order. Drives the rail and the recap.
     @Published var run: [RunEntry] = []
+    /// Installed only for onboarding's first real review. The ordinary review
+    /// path has no callback and continues to Today exactly as before.
+    var firstReviewCompletion: (() -> Void)?
 
     // Review Sprint / Coverage
     @Published var library: [CardSummary] = []
@@ -101,7 +108,7 @@ final class AppState: ObservableObject {
     static let minSessionSize = 4
     static let maxSessionSize = 10
 
-    enum DepthAxis: String { case tradeOff, failureMode }
+    enum DepthAxis: String { case depth, boundaries }
     enum SprintKind: Equatable { case review, depth(DepthAxis) }
 
     struct AxisRollupItem: Identifiable {
@@ -380,8 +387,8 @@ final class AppState: ObservableObject {
 
     private func depthValue(_ card: CardSummary, axis: DepthAxis) -> Int? {
         switch axis {
-        case .tradeOff: return card.lastTradeOffAwareness
-        case .failureMode: return card.lastFailureModeAwareness
+        case .depth: return card.lastDepth
+        case .boundaries: return card.lastBoundaries
         }
     }
 
@@ -420,7 +427,7 @@ final class AppState: ObservableObject {
         libraryLoad.status { "\(library.count) CARDS · \(categories.count) CATEGORIES" }
     }
 
-    /// `MECHANISM 4.1 · TRADE-OFFS 2.8 · FAILURE MODES 3.2`.
+    /// `ACCURACY 4.1 · DEPTH 2.8 · BOUNDARIES 3.2`.
     ///
     /// Scoring runs on three axes internally; this is the only place that
     /// decomposition surfaces, because "which axis is systemically weak" is the
@@ -428,9 +435,9 @@ final class AppState: ObservableObject {
     var axisRollup: [AxisRollupItem] {
         guard libraryLoad == .ready else { return [] }
         let axes: [(String, DepthAxis?, (CardSummary) -> Int?)] = [
-            ("MECHANISM", nil, \.lastMechanismAccuracy),
-            ("TRADE-OFFS", .tradeOff, \.lastTradeOffAwareness),
-            ("FAILURE MODES", .failureMode, \.lastFailureModeAwareness),
+            ("ACCURACY", nil, \.lastAccuracy),
+            ("DEPTH", .depth, \.lastDepth),
+            ("BOUNDARIES", .boundaries, \.lastBoundaries),
         ]
         let means: [(String, DepthAxis?, Double)] = axes.compactMap { name, depthAxis, value in
             let values = library.compactMap(value)
@@ -844,6 +851,11 @@ final class AppState: ObservableObject {
         // a resumable session; reopening the card will retrieve it normally.
         invalidateQuestionLoad()
         path = []
+        if let completion = firstReviewCompletion {
+            firstReviewCompletion = nil
+            completion()
+            return
+        }
         Task { await loadToday() }
     }
 

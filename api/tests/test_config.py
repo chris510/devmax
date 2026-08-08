@@ -68,7 +68,9 @@ def test_the_two_secrets_must_differ() -> None:
 # Railway's private mesh address, which is what ${{Postgres.DATABASE_URL}} resolves to.
 RAILWAY_PRIVATE = "postgresql+asyncpg://postgres:p@postgres.railway.internal:5432/railway"
 # The public TCP proxy, fronted by a self-signed certificate.
-RAILWAY_PUBLIC = "postgresql+asyncpg://postgres:p@metro.proxy.rlwy.net:41234/railway?sslmode=require"
+RAILWAY_PUBLIC = (
+    "postgresql+asyncpg://postgres:p@metro.proxy.rlwy.net:41234/railway?sslmode=require"
+)
 HOSTED = "postgresql+asyncpg://u:p@db.example-cloud.com/wc?sslmode=require&channel_binding=require"
 
 

@@ -29,6 +29,7 @@ from tests.test_study_plan_api import (  # noqa: F401
 # column to `cards` and forgetting it here is a test failure, not a silent gap.
 CARD_COLUMNS = (
     "id",
+    "user_id",
     "topic",
     "category",
     "pattern",
@@ -36,6 +37,9 @@ CARD_COLUMNS = (
     "target_week",
     "delivery_mode",
     "canonical_question",
+    "answer_anchor",
+    "source_excerpt",
+    "source_id",
     "source_url",
     "source_section",
     "source_label",
@@ -50,9 +54,9 @@ CARD_COLUMNS = (
     "repetitions",
     "next_review_at",
     "last_score",
-    "last_mechanism_accuracy",
-    "last_trade_off_awareness",
-    "last_failure_mode_awareness",
+    "last_accuracy",
+    "last_depth",
+    "last_boundaries",
     "last_reviewed_at",
     "mastery_summary",
     "missed_count",
@@ -71,13 +75,13 @@ SESSION_COLUMNS = (
     "follow_up_answer",
     "draft_text",
     "score",
-    "mechanism_accuracy",
-    "trade_off_awareness",
-    "failure_mode_awareness",
+    "accuracy",
+    "depth",
+    "boundaries",
     "feedback",
     "follow_up_used",
     "reattempt_answer",
-    "reattempt_mechanism_accuracy",
+    "reattempt_accuracy",
     "reattempt_used",
     "practice",
     "status",
@@ -112,9 +116,9 @@ async def review_state(db):
         repetitions=3,
         next_review_at=local_today() + timedelta(days=6),
         last_score=4,
-        last_mechanism_accuracy=4,
-        last_trade_off_awareness=3,
-        last_failure_mode_awareness=2,
+        last_accuracy=4,
+        last_depth=3,
+        last_boundaries=2,
         mastery_summary="solid on ring mechanics, shaky on virtual nodes",
         missed_count=2,
         canonical_question="You add a sixth node to a five-node ring — what moves?",
@@ -126,9 +130,9 @@ async def review_state(db):
             question_asked="You add a sixth node to a five-node ring — what moves?",
             answer_text="Only the keys between the new node and its predecessor.",
             score=4,
-            mechanism_accuracy=4,
-            trade_off_awareness=3,
-            failure_mode_awareness=2,
+            accuracy=4,
+            depth=3,
+            boundaries=2,
             feedback="Good on ring mechanics.",
             status="complete",
         )
@@ -138,33 +142,25 @@ async def review_state(db):
 
 
 async def _first_item(client, plan) -> str:
-    week = (
-        await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)
-    ).json()
+    week = (await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)).json()
     return week["sections"][0]["rows"][0]["id"]
 
 
 # --- one test per operation the safety boundary names ------------------------
 
 
-async def test_creating_a_plan_touches_no_card_or_session(
-    client, db, review_state, stub_import
-):
+async def test_creating_a_plan_touches_no_card_or_session(client, db, review_state, stub_import):
     before = await snapshot(db)
     await make_plan(client)
     assert await snapshot(db) == before
 
 
-async def test_completing_an_item_touches_no_card_or_session(
-    client, db, review_state, stub_import
-):
+async def test_completing_an_item_touches_no_card_or_session(client, db, review_state, stub_import):
     plan = await make_plan(client)
     item_id = await _first_item(client, plan)
     before = await snapshot(db)
 
-    await client.post(
-        f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS
-    )
+    await client.post(f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS)
     assert await snapshot(db) == before
 
 
@@ -174,14 +170,10 @@ async def test_reopening_an_item_preserves_every_card_and_sm2_field(
     """Reopen is the operation most likely to be mistaken for "undo the review"."""
     plan = await make_plan(client)
     item_id = await _first_item(client, plan)
-    await client.post(
-        f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS
-    )
+    await client.post(f"/study-plans/{plan['id']}/items/{item_id}/complete", headers=API_HEADERS)
     before = await snapshot(db)
 
-    overview = (
-        await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)
-    ).json()
+    overview = (await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)).json()
     await client.post(
         f"/study-plans/{plan['id']}/items/{item_id}/reopen/preview", headers=API_HEADERS
     )
@@ -202,9 +194,7 @@ async def test_reopening_an_item_preserves_every_card_and_sm2_field(
     assert card.mastery_summary == "solid on ring mechanics, shaky on virtual nodes"
 
 
-async def test_replanning_touches_no_card_or_session(
-    client, db, review_state, stub_import
-):
+async def test_replanning_touches_no_card_or_session(client, db, review_state, stub_import):
     plan = await make_plan(client)
     before = await snapshot(db)
 
@@ -225,9 +215,7 @@ async def test_replanning_touches_no_card_or_session(
     assert await snapshot(db) == before
 
 
-async def test_a_capacity_change_touches_no_card_or_session(
-    client, db, review_state, stub_import
-):
+async def test_a_capacity_change_touches_no_card_or_session(client, db, review_state, stub_import):
     plan = await make_plan(client)
     before = await snapshot(db)
     await client.patch(
@@ -248,9 +236,7 @@ async def test_lifecycle_transitions_touch_no_card_or_session(
 ):
     plan = await make_plan(client)
     before = await snapshot(db)
-    response = await client.post(
-        f"/study-plans/{plan['id']}/{action}", headers=API_HEADERS
-    )
+    response = await client.post(f"/study-plans/{plan['id']}/{action}", headers=API_HEADERS)
     assert response.status_code == 200
     assert await snapshot(db) == before
 
@@ -262,9 +248,7 @@ async def test_pausing_and_resuming_touches_no_card_or_session(
     before = await snapshot(db)
 
     await client.post(f"/study-plans/{plan['id']}/pause", headers=API_HEADERS)
-    overview = (
-        await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)
-    ).json()
+    overview = (await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)).json()
     await client.post(f"/study-plans/{plan['id']}/resume/preview", headers=API_HEADERS)
     resumed = await client.post(
         f"/study-plans/{plan['id']}/resume/apply",
@@ -283,9 +267,7 @@ async def test_activating_another_plan_touches_no_card_or_session(
     second = await make_plan(client)
     before = await snapshot(db)
 
-    overview = (
-        await client.get(f"/study-plans/{first['id']}", headers=API_HEADERS)
-    ).json()
+    overview = (await client.get(f"/study-plans/{first['id']}", headers=API_HEADERS)).json()
     activated = await client.post(
         f"/study-plans/{first['id']}/activate",
         params={"base_plan_revision": overview["revision"]},
@@ -317,9 +299,7 @@ async def test_duplicating_copies_no_card_score_session_or_sm2_state(
     )
     before = await snapshot(db)
 
-    copy = await client.post(
-        f"/study-plans/{plan['id']}/duplicate", headers=API_HEADERS
-    )
+    copy = await client.post(f"/study-plans/{plan['id']}/duplicate", headers=API_HEADERS)
     assert copy.status_code == 201
     assert await snapshot(db) == before
 
@@ -335,9 +315,7 @@ async def test_duplicating_copies_no_card_score_session_or_sm2_state(
     assert links == []
 
 
-async def test_editing_an_item_touches_no_card_or_session(
-    client, db, review_state, stub_import
-):
+async def test_editing_an_item_touches_no_card_or_session(client, db, review_state, stub_import):
     plan = await make_plan(client)
     item_id = await _first_item(client, plan)
     before = await snapshot(db)
@@ -369,12 +347,8 @@ async def test_saving_and_submitting_a_practice_debrief_touches_no_review_state(
     before = await snapshot(db)
     path = f"/study-plans/{plan['id']}/items/{item_id}/practice-debrief"
 
-    await client.patch(
-        f"{path}/draft", json={"text": "Retries felt shaky."}, headers=API_HEADERS
-    )
-    submitted = await client.post(
-        path, json={"text": "Retries felt shaky."}, headers=API_HEADERS
-    )
+    await client.patch(f"{path}/draft", json={"text": "Retries felt shaky."}, headers=API_HEADERS)
+    submitted = await client.post(path, json={"text": "Retries felt shaky."}, headers=API_HEADERS)
     assert submitted.status_code == 200
     assert await snapshot(db) == before
 
@@ -425,9 +399,7 @@ async def test_a_card_created_from_a_proposal_starts_at_sm2_defaults(
         },
         headers=API_HEADERS,
     )
-    card = (
-        await db.exec(select(Card).where(Card.topic == "Postgres write path"))
-    ).one()
+    card = (await db.exec(select(Card).where(Card.topic == "Postgres write path"))).one()
     assert (card.ease_factor, card.interval_days, card.repetitions) == (2.5, 1, 0)
     assert card.last_score is None
     assert card.mastery_summary == ""
@@ -459,17 +431,13 @@ async def test_deleting_a_plan_leaves_its_cards_alone(
     )
     after_accept = await snapshot(db)
 
-    row = (
-        await db.exec(select(StudyPlan).where(StudyPlan.id == uuid.UUID(plan["id"])))
-    ).one()
+    row = (await db.exec(select(StudyPlan).where(StudyPlan.id == uuid.UUID(plan["id"])))).one()
     # SQLite does not enforce FKs by default, so the links are removed explicitly
     # here the same way seed.retire_from_file does it. Issued as a bulk DELETE
     # rather than per-object, because on Postgres the plan's own cascade may have
     # already taken them and the ORM would warn about the missing rows.
     await db.exec(
-        delete(StudyPlanCardLink).where(
-            col(StudyPlanCardLink.plan_id) == uuid.UUID(plan["id"])
-        )
+        delete(StudyPlanCardLink).where(col(StudyPlanCardLink.plan_id) == uuid.UUID(plan["id"]))
     )
     await db.delete(row)
     await db.commit()

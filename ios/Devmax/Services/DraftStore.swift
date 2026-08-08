@@ -11,22 +11,12 @@ struct UUIDTextDraftStore {
         self.filename = filename
     }
 
-    private var url: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(filename)
-    }
-
     private func load() -> [String: String] {
-        guard let data = try? Data(contentsOf: url),
-              let map = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return map
+        LocalJSONStore.read([String: String].self, from: filename) ?? [:]
     }
 
     private func persist(_ map: [String: String]) {
-        let directory = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? JSONEncoder().encode(map).write(to: url, options: .atomic)
+        LocalJSONStore.save(map, to: filename)
     }
 
     func save(_ text: String, for id: UUID) {

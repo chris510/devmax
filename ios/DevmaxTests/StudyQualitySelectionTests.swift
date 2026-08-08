@@ -6,32 +6,32 @@ final class StudyQualitySelectionTests: XCTestCase {
     func test_only_weakest_depth_axis_is_actionable() {
         let state = AppState(api: MockAPI.shared)
         state.library = [
-            card(1, tradeOff: 1, failureMode: 4),
-            card(2, tradeOff: 2, failureMode: 3),
-            card(3, tradeOff: 1, failureMode: 4),
-            card(4, tradeOff: 2, failureMode: 3),
+            card(1, depth: 1, boundaries: 4),
+            card(2, depth: 2, boundaries: 3),
+            card(3, depth: 1, boundaries: 4),
+            card(4, depth: 2, boundaries: 3),
         ]
         state.libraryLoad = .ready
 
         let actionable = state.axisRollup.filter(\.isActionable)
         XCTAssertEqual(actionable.count, 1)
-        XCTAssertEqual(actionable.first?.depthAxis, .tradeOff)
+        XCTAssertEqual(actionable.first?.depthAxis, .depth)
     }
 
     @MainActor
     func test_depth_repair_ranks_the_selected_axis_and_removal_does_not_refill() {
         let state = AppState(api: MockAPI.shared)
         state.library = (0..<8).map {
-            card($0, tradeOff: $0 % 4, failureMode: 4, daysSinceReview: $0)
+            card($0, depth: $0 % 4, boundaries: 4, daysSinceReview: $0)
         }
         state.libraryLoad = .ready
         state.setupSize = 6
-        state.sprintKind = .depth(.tradeOff)
+        state.sprintKind = .depth(.depth)
 
         let before = state.sprintSet
         let poolCount = state.sprintPool.count
         XCTAssertEqual(before.count, 6)
-        XCTAssertEqual(before.map(\.lastTradeOffAwareness), before.map(\.lastTradeOffAwareness).sorted {
+        XCTAssertEqual(before.map(\.lastDepth), before.map(\.lastDepth).sorted {
             ($0 ?? 5) < ($1 ?? 5)
         })
 
@@ -47,13 +47,13 @@ final class StudyQualitySelectionTests: XCTestCase {
     }
 
     private func card(
-        _ value: Int, tradeOff: Int, failureMode: Int, daysSinceReview: Int = 1
+        _ value: Int, depth: Int, boundaries: Int, daysSinceReview: Int = 1
     ) -> CardSummary {
         CardSummary(
             id: Self.id(value), topic: "Topic \(value)", category: "Core Concept",
             deliveryMode: "conversational", masterySummary: "", lastScore: 3,
-            lastMechanismAccuracy: 4, lastTradeOffAwareness: tradeOff,
-            lastFailureModeAwareness: failureMode, easeFactor: 2.5, intervalDays: 3,
+            lastAccuracy: 4, lastDepth: depth, lastBoundaries: boundaries,
+            easeFactor: 2.5, intervalDays: 3,
             repetitions: 2, nextReviewAt: "2026-08-08", dueLabel: "not due",
             daysSinceReview: daysSinceReview, missedCount: 0
         )

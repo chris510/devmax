@@ -61,7 +61,7 @@ struct CoverageScreen: View {
         .padding(.horizontal, Metrics.screenPadding)
     }
 
-    /// One mono line: `MECHANISM 4.1 · TRADE-OFFS 2.8 · FAILURE MODES 3.2`.
+    /// One mono line: `ACCURACY 4.1 · DEPTH 2.8 · BOUNDARIES 3.2`.
     ///
     /// No bars or colour. Only the weakest depth axis is actionable; mechanism
     /// stays under normal scheduling rather than getting a second practice path.

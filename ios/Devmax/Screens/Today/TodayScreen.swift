@@ -18,7 +18,11 @@ struct TodayScreen: View {
                     case .loading: LoadingList()
                     case .error: LoadFailure { Task { await state.loadToday() } }
                     case .ready:
-                        if state.queue.isEmpty { EmptyQueue() } else { rowList }
+                        if state.queue.isEmpty, state.library.isEmpty {
+                            NoMaterialTodayContent()
+                        } else if state.queue.isEmpty {
+                            EmptyQueue()
+                        } else { rowList }
                     }
                 }
                 .padding(.horizontal, Metrics.listContainerPadding)
@@ -196,52 +200,83 @@ struct TodayScreen: View {
 
     // MARK: - Bottom
 
+    @ViewBuilder
     private var bottomBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Quick-add stays visible in every state, including empty and error.
-            Button {
-                state.savedCapture = nil
-                state.addError = false
-                state.sheet = .add
-            } label: {
-                HStack(spacing: 8) {
-                    Text("+").font(WCFont.sans(16))
-                    Text("Capture a gap").font(TypeRole.rowSummary)
+        if state.load == .ready, state.queue.isEmpty, state.library.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                // Quick-add stays visible in every state, including empty and error.
+                Button {
+                    state.savedCapture = nil
+                    state.addError = false
+                    state.sheet = .add
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("+").font(WCFont.sans(16))
+                        Text("Capture a gap").font(TypeRole.rowSummary)
+                    }
+                    .foregroundStyle(Theme.meta)
+                    .padding(.vertical, 4)
                 }
-                .foregroundStyle(Theme.meta)
-                .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            // Always visible, including when the queue is empty or the fetch
-            // failed — a sprint draws from the whole library, not from what's due.
-            // Deliberately lower weight than Start, which stays the dominant
-            // daily action.
-            Button { state.enterSprintSetup() } label: {
-                Text("Review sprint")
-                    .font(WCFont.sans(15))
-                    .foregroundStyle(Theme.textMuted)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
+                // Always visible, including when the queue is empty or the fetch
+                // failed — a sprint draws from the whole library, not from what's due.
+                // Deliberately lower weight than Start, which stays the dominant
+                // daily action.
+                Button { state.enterSprintSetup() } label: {
+                    Text("Review sprint")
+                        .font(WCFont.sans(15))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
 
-            // Start appears only when more than one card is due.
-            if state.visibleQueue.count > 1 {
-                PrimaryButton(title: "Start — \(state.visibleQueue.count) cards") {
-                    state.beginSession(cards: state.visibleQueue)
+                // Start appears only when more than one card is due.
+                if state.visibleQueue.count > 1 {
+                    PrimaryButton(title: "Start — \(state.visibleQueue.count) cards") {
+                        state.beginSession(cards: state.visibleQueue)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.top, Metrics.listContainerPadding)
+            .padding(.bottom, Metrics.bottomSafeArea)
+            .background(Theme.bg)
         }
+    }
+}
+
+struct NoMaterialTodayContent: View {
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var flow: PublicOnboardingState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Add something you want to understand.")
+                .font(TypeRole.emptyQueue).foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            PrimaryButton(title: "Add study material") { open(.material) }
+            SecondaryButton(title: "Add a few topics") { open(.manual) }
+            Button("Browse Devmax collections") { open(.collections) }
+                .buttonStyle(.plain).font(TypeRole.secondaryAction).foregroundStyle(Theme.meta)
+                .frame(minHeight: Metrics.minTapTarget)
+        }
+        .padding(.horizontal, Metrics.rowInset).padding(.top, 28)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Metrics.screenPadding)
-        .padding(.top, Metrics.listContainerPadding)
-        .padding(.bottom, Metrics.bottomSafeArea)
-        .background(Theme.bg)
+    }
+
+    private func open(_ step: PublicOnboardingState.Step) {
+        flow.step = step
+        state.path.append(.materialSetup)
+        if step == .collections { Task { await flow.loadCollections() } }
     }
 }
 

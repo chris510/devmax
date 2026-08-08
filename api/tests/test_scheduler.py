@@ -112,8 +112,14 @@ def test_full_multi_review_sequence():
 
 @pytest.mark.parametrize(
     ("mechanism", "expected"),
-    [(0, RATING_AGAIN), (1, RATING_AGAIN), (2, RATING_AGAIN),
-     (3, RATING_GOOD), (4, RATING_GOOD), (5, RATING_GOOD)],
+    [
+        (0, RATING_AGAIN),
+        (1, RATING_AGAIN),
+        (2, RATING_AGAIN),
+        (3, RATING_GOOD),
+        (4, RATING_GOOD),
+        (5, RATING_GOOD),
+    ],
 )
 def test_rating_splits_at_the_mechanism_pass_mark(mechanism: int, expected: str):
     assert rating_for(mechanism) == expected

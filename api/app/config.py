@@ -70,6 +70,23 @@ class Settings(BaseSettings):
     apns_private_key: str = ""
     apns_use_sandbox: bool = True
 
+    # Sign in with Apple. Empty values keep the founder compatibility build
+    # bootable, but /auth/apple returns service_unavailable until all are set.
+    apple_client_id: str = ""
+    apple_team_id: str = ""
+    apple_key_id: str = ""
+    apple_private_key: str = ""
+    # Fernet key used only for Apple's revocation-capable refresh token at rest.
+    # Generate with `python -c 'from cryptography.fernet import Fernet; ...'`.
+    auth_encryption_key: str = ""
+    access_token_ttl_minutes: int = Field(default=15, ge=5, le=60)
+    refresh_token_ttl_days: int = Field(default=90, ge=1, le=365)
+
+    # Launch guardrails for paid model work. These are deliberately simple
+    # account-level budgets, not engagement limits or analytics.
+    llm_calls_per_day: int = Field(default=200, ge=10, le=10_000)
+    guide_imports_per_day: int = Field(default=3, ge=1, le=100)
+
     # The production API is a single always-on Railway replica. Keeping the dumb
     # trigger-review poll in that process removes an unreliable external schedule;
     # the endpoint still owns every notification-time decision. Disabled by

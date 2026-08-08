@@ -54,9 +54,9 @@ def scored(score: Any, probe: str | None = "probe?") -> dict[str, Any]:
     """
     mechanism, trade_offs, failure_modes = AXES_FOR_COMPOSITE[score]
     payload: dict[str, Any] = {
-        "mechanism_accuracy": mechanism,
-        "trade_off_awareness": trade_offs,
-        "failure_mode_awareness": failure_modes,
+        "accuracy": mechanism,
+        "depth": trade_offs,
+        "boundaries": failure_modes,
         "feedback": "f",
         "mastery_summary": "m",
     }
@@ -83,8 +83,14 @@ def stub_completion(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) ->
 # that does not probe — see docs/DEVIATIONS.md §15.
 @pytest.mark.parametrize(
     ("score", "expected"),
-    [(0, "complete"), (1, "follow_up"), (2, "follow_up"), (3, "follow_up"), (4, "complete"),
-     (5, "complete")],
+    [
+        (0, "complete"),
+        (1, "follow_up"),
+        (2, "follow_up"),
+        (3, "follow_up"),
+        (4, "complete"),
+        (5, "complete"),
+    ],
 )
 async def test_only_shaky_scores_probe(
     monkeypatch: pytest.MonkeyPatch, score: int, expected: str
@@ -162,8 +168,8 @@ async def test_the_prior_follow_up_turns_are_sent_for_the_second_scoring(
     "payload",
     [
         {},
-        {**scored(4), "mechanism_accuracy": None},
-        {**scored(4), "trade_off_awareness": "not a number"},
+        {**scored(4), "accuracy": None},
+        {**scored(4), "depth": "not a number"},
         # The old blended shape: a model or config that ignored the new schema.
         {"score": 4, "feedback": "f", "mastery_summary": "m"},
     ],
@@ -224,8 +230,8 @@ async def test_the_axes_are_carried_onto_the_result(monkeypatch: pytest.MonkeyPa
 
     result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
 
-    assert (result.mechanism_accuracy, result.trade_off_awareness) == (4, 3)
-    assert result.failure_mode_awareness == 0
+    assert (result.accuracy, result.depth) == (4, 3)
+    assert result.boundaries == 0
     assert result.score == 4
 
 

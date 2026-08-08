@@ -30,6 +30,7 @@ push on a phone.
 | `spec.md` | The backend: schema, endpoints, SM-2, LLM prompt rules, and an explicit out-of-scope list. It says "build exactly what's described here" — take that literally. |
 | `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 29 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
 | `docs/STUDY-PLAN-SPEC.md` | Study Plan, end to end. Extends `spec.md` rather than amending it; `design_handoff_study_plan/` is its design source (V3.4 owns behaviour, V3.5 owns presentation). |
+| `docs/PUBLIC-APP-SPEC.md` | Accounts, authentication, per-user ownership, onboarding, public guide ingestion, and subject-agnostic vocabulary. Approved for implementation 2026-08-07. |
 
 **Where the first two disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
@@ -380,6 +381,9 @@ Where the code and `spec.md` disagree, `docs/DEVIATIONS.md` records why.
 
 ## Out of scope — do not build
 
-Everything in `spec.md` §"Out of scope" (accounts, multi-tenancy, admin UI, gamification,
-analytics, rate limiting, CORS, API versioning, server-side STT, task queues), plus light
-mode, onboarding, and any motion beyond the four specified animations.
+Everything still listed in `spec.md` §"Out of scope" after the public-app
+extension (admin UI, gamification, analytics, CORS, API versioning, server-side
+STT, and general-purpose task queues), plus light mode and any motion beyond the
+four specified animations. Accounts, multi-tenancy, launch rate limits, and the
+onboarding states in `design_handoff_public_app/` are now in scope under
+`docs/PUBLIC-APP-SPEC.md`.

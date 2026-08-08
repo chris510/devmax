@@ -40,9 +40,7 @@ def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
 
     assert result.can_create
     assert manifest["seed_key"] == "devmax.senior-backend-12-week.v3"
-    assert [
-        phase["overview_title"] for phase in result.preview["phases"]
-    ] == [
+    assert [phase["overview_title"] for phase in result.preview["phases"]] == [
         "Foundations",
         "Patterns and application",
         "Technologies",
@@ -60,19 +58,13 @@ def test_coding_mechanisms_are_core_and_implementation_is_optional() -> None:
     items = result.preview["items"]
 
     optional_desk = [
-        item
-        for item in items
-        if item["full_title"].startswith("Optional desk implementation:")
+        item for item in items if item["full_title"].startswith("Optional desk implementation:")
     ]
     assert len(optional_desk) == 12
     assert {item["week_index"] for item in optional_desk} == set(range(1, 13))
     assert {item["priority"] for item in optional_desk} == {"optional"}
 
-    core_titles = [
-        item["full_title"].lower()
-        for item in items
-        if item["priority"] == "core"
-    ]
+    core_titles = [item["full_title"].lower() for item in items if item["priority"] == "core"]
     assert not any("timed coding" in title for title in core_titles)
     assert not any("coding mock" in title for title in core_titles)
     assert any("two-pointer" in title and "invariant" in title for title in core_titles)
@@ -87,9 +79,7 @@ def test_coding_mechanisms_are_core_and_implementation_is_optional() -> None:
 
 
 async def test_the_seed_creates_an_active_week_one_plan_graph(db) -> None:
-    seeded = await load_first_party_plan(
-        start_date=START, activate=True, db=db
-    )
+    seeded = await load_first_party_plan(start_date=START, activate=True, db=db)
 
     plan = (await db.exec(select(StudyPlan))).one()
     phases = (await db.exec(select(StudyPlanPhase))).all()
@@ -173,16 +163,12 @@ async def test_activation_refuses_to_displace_an_existing_active_plan(db) -> Non
     with pytest.raises(PlanSeedError, match="already active"):
         await load_first_party_plan(start_date=START, activate=True, db=db)
 
-    assert [plan.title for plan in (await db.exec(select(StudyPlan))).all()] == [
-        "Existing"
-    ]
+    assert [plan.title for plan in (await db.exec(select(StudyPlan))).all()] == ["Existing"]
 
 
 async def test_an_explicit_start_date_must_be_a_monday(db) -> None:
     with pytest.raises(PlanSeedError, match="must be Mondays"):
-        await load_first_party_plan(
-            start_date=date(2026, 7, 31), activate=True, db=db
-        )
+        await load_first_party_plan(start_date=date(2026, 7, 31), activate=True, db=db)
 
     assert (await db.exec(select(StudyPlan))).all() == []
 

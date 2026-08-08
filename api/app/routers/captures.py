@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth import current_user_id
 from app.db import get_session
 from app.models import CAPTURE_ACTIVATED, Card, PendingCapture
 from app.routers.cards import card_summary
@@ -53,7 +54,14 @@ def _summary(
 
 
 async def _capture(db: AsyncSession, capture_id: uuid.UUID) -> PendingCapture:
-    capture = await db.get(PendingCapture, capture_id)
+    capture = (
+        await db.exec(
+            select(PendingCapture).where(
+                PendingCapture.id == capture_id,
+                PendingCapture.user_id == current_user_id(),
+            )
+        )
+    ).first()
     if capture is None:
         raise HTTPException(status_code=404, detail="capture not found")
     return capture
@@ -63,7 +71,11 @@ async def _capture(db: AsyncSession, capture_id: uuid.UUID) -> PendingCapture:
 async def create_capture(
     body: CaptureCreate, db: AsyncSession = Depends(get_session)
 ) -> CaptureOut:
-    capture = PendingCapture(topic=body.topic.strip(), context=body.context.strip())
+    capture = PendingCapture(
+        user_id=current_user_id(),
+        topic=body.topic.strip(),
+        context=body.context.strip(),
+    )
     db.add(capture)
     await db.commit()
     await db.refresh(capture)
@@ -85,7 +97,7 @@ async def list_captures(
         PendingCapture.source_label,
         PendingCapture.created_at,
         PendingCapture.updated_at,
-    )
+    ).where(PendingCapture.user_id == current_user_id())
     if not include_activated:
         statement = statement.where(PendingCapture.status != CAPTURE_ACTIVATED)
     statement = statement.order_by(col(PendingCapture.created_at).desc())
@@ -173,13 +185,21 @@ async def activate_capture(
     today, tz = await local_calendar(db)
 
     if capture.activated_card_id is not None:
-        card = await db.get(Card, capture.activated_card_id)
+        card = (
+            await db.exec(
+                select(Card).where(
+                    Card.id == capture.activated_card_id,
+                    Card.user_id == current_user_id(),
+                )
+            )
+        ).first()
         if card is None:
             raise HTTPException(status_code=409, detail="activated card no longer exists")
         return card_summary(card, today, tz)
 
     try:
         card = build_grounded_card(
+            user_id=current_user_id(),
             topic=capture.topic,
             category="Unsorted",
             grounding=grounding_from_capture(capture),
@@ -192,7 +212,9 @@ async def activate_capture(
             detail={"code": "missing_grounding", "missing": exc.missing},
         ) from exc
 
-    duplicate = (await normalized_card_index(db)).get(normalize_topic(card.topic))
+    duplicate = (await normalized_card_index(db, current_user_id())).get(
+        normalize_topic(card.topic)
+    )
     if duplicate is not None:
         raise HTTPException(
             status_code=409,

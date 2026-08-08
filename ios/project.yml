@@ -46,6 +46,8 @@ targets:
         # Driven by the xcconfig so it cannot drift from the server's
         # APNS_USE_SANDBOX: development <-> true, production <-> false.
         aps-environment: $(WC_APS_ENVIRONMENT)
+        com.apple.developer.applesignin:
+          - Default
 
   DevmaxTests:
     type: bundle.unit-test

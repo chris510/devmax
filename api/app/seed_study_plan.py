@@ -37,9 +37,7 @@ from app.routers.deps import local_today
 from app.services import study_plan as sp
 from app.services import study_plan_import as spi
 
-DEFAULT_MANIFEST = (
-    Path(__file__).resolve().parent.parent / "plans" / "senior-backend-12-week.json"
-)
+DEFAULT_MANIFEST = Path(__file__).resolve().parent.parent / "plans" / "senior-backend-12-week.json"
 
 
 class PlanSeedError(ValueError):
@@ -160,9 +158,7 @@ def _raw_import(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_bundle(
-    path: Path, *, start_date: date
-) -> tuple[dict[str, Any], spi.ImportResult]:
+def validate_bundle(path: Path, *, start_date: date) -> tuple[dict[str, Any], spi.ImportResult]:
     manifest, guide_text = _read_bundle(path)
     result = spi.validate_import(
         _raw_import(manifest),
@@ -184,9 +180,7 @@ async def _existing_seed(
 ) -> tuple[StudyPlan, StudyPlanRevision] | None:
     revisions = (
         await db.exec(
-            select(StudyPlanRevision).where(
-                col(StudyPlanRevision.kind) == REVISION_CREATED
-            )
+            select(StudyPlanRevision).where(col(StudyPlanRevision.kind) == REVISION_CREATED)
         )
     ).all()
     revision = next(
@@ -195,9 +189,7 @@ async def _existing_seed(
     )
     if revision is None:
         return None
-    plan = (
-        await db.exec(select(StudyPlan).where(col(StudyPlan.id) == revision.plan_id))
-    ).first()
+    plan = (await db.exec(select(StudyPlan).where(col(StudyPlan.id) == revision.plan_id))).first()
     return (plan, revision) if plan is not None else None
 
 
@@ -257,8 +249,7 @@ async def load_first_party_plan(
                     "items": len(rows["items"]),
                 },
                 summary=(
-                    "Plan created from the first-party curriculum · "
-                    f"{len(rows['items'])} items"
+                    f"Plan created from the first-party curriculum · {len(rows['items'])} items"
                 ),
             )
         )
@@ -295,9 +286,7 @@ def main() -> None:
 
     try:
         result = asyncio.run(
-            load_first_party_plan(
-                args.file, start_date=args.start_date, activate=args.activate
-            )
+            load_first_party_plan(args.file, start_date=args.start_date, activate=args.activate)
         )
     except PlanSeedError as exc:
         parser.error(str(exc))

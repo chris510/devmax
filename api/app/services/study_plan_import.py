@@ -146,8 +146,13 @@ class ImportResult:
 
 
 def validate_request(
-    *, guide_text: str, requested_weeks: int, weekly_capacity_minutes: int,
-    mode: str, deadline: date | None, start_date: date,
+    *,
+    guide_text: str,
+    requested_weeks: int,
+    weekly_capacity_minutes: int,
+    mode: str,
+    deadline: date | None,
+    start_date: date,
 ) -> list[str]:
     """Reject what should never reach a paid call. Returns error strings."""
     errors: list[str] = []
@@ -160,9 +165,7 @@ def validate_request(
     if len(stripped) > MAX_GUIDE_CHARS:
         errors.append(f"the guide is longer than {MAX_GUIDE_CHARS} characters")
     if not HARD_MIN_WEEKS <= requested_weeks <= HARD_MAX_WEEKS:
-        errors.append(
-            f"duration must be between {HARD_MIN_WEEKS} and {HARD_MAX_WEEKS} weeks"
-        )
+        errors.append(f"duration must be between {HARD_MIN_WEEKS} and {HARD_MAX_WEEKS} weeks")
     if weekly_capacity_minutes <= 0 or weekly_capacity_minutes % ESTIMATE_INCREMENT:
         errors.append("weekly capacity must be a positive multiple of 30 minutes")
     if mode == MODE_FIXED and deadline is None:
@@ -309,8 +312,9 @@ def validate_import(
                 status=CHECK_OK,
                 value=weeks_label,
                 detail=(
-                    "Outside the usual 8-12 weeks; the plan screens still work but "
-                    "will scroll." if outside else ""
+                    "Outside the usual 8-12 weeks; the plan screens still work but will scroll."
+                    if outside
+                    else ""
                 ),
             )
         )
@@ -351,9 +355,7 @@ def validate_import(
         "unresolved_estimates": [
             str(k) for k in raw.get("unresolved_estimates", []) if isinstance(k, str)
         ],
-        "possible_omissions": [
-            o for o in raw.get("possible_omissions", []) if isinstance(o, dict)
-        ],
+        "possible_omissions": [o for o in raw.get("possible_omissions", []) if isinstance(o, dict)],
         "resolutions": resolutions,
         "total_minutes": sum(i["estimate_minutes"] for i in items),
         "forecast_end_plan_week": max((w["index"] for w in weeks), default=0),
@@ -526,9 +528,7 @@ def _read_items(
     return items
 
 
-def _read_dependencies(
-    raw: Mapping[str, Any], item_keys: set[str]
-) -> list[dict[str, Any]]:
+def _read_dependencies(raw: Mapping[str, Any], item_keys: set[str]) -> list[dict[str, Any]]:
     entries = raw.get("dependencies")
     if not isinstance(entries, list):
         return []
@@ -581,8 +581,7 @@ def _capacity_check(items, weeks, capacity) -> Check:
             status=CHECK_OK,
             value="Fits",
             detail=(
-                f"Busiest week is {sched.format_hours(busiest)} of "
-                f"{sched.format_hours(capacity)}."
+                f"Busiest week is {sched.format_hours(busiest)} of {sched.format_hours(capacity)}."
             ),
         )
     worst = max(loads[idx] for idx in over)
@@ -774,18 +773,14 @@ def _title_check(phases, weeks) -> Check:
         problem = overview_title_problem(week["overview_title"])
         if problem:
             problems.append(f"Week {week['index']} short title {problem}")
-        by_phase.setdefault(week["phase_index"], []).append(
-            week["overview_title"].casefold()
-        )
+        by_phase.setdefault(week["phase_index"], []).append(week["overview_title"].casefold())
     for phase_index, titles in by_phase.items():
         duplicates = {t for t in titles if titles.count(t) > 1 and t}
         for title in sorted(duplicates):
             problems.append(f"Phase {phase_index} has two weeks called {title!r}")
 
     if not problems:
-        return Check(
-            key="titles", label="Short titles", status=CHECK_OK, value="Generated"
-        )
+        return Check(key="titles", label="Short titles", status=CHECK_OK, value="Generated")
     return Check(
         key="titles",
         label="Short titles",

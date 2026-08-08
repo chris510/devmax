@@ -9,11 +9,24 @@ struct SettingsSheet: View {
     @AppStorage(Preferences.readAloudKey) private var readAloud = true
 
     var body: some View {
-        SheetChrome(title: "Settings", height: 412) {
+        SheetChrome(title: "Settings", height: 472) {
             VStack(alignment: .leading, spacing: 22) {
                 reviewsPerDay
                 readAloudRow
                 windows
+                Button {
+                    state.sheet = nil
+                    state.path.append(.fullSettings)
+                } label: {
+                    HStack {
+                        Text("More settings").font(TypeRole.secondaryAction)
+                        Spacer()
+                        Text("→").font(WCFont.mono(11)).foregroundStyle(Theme.accent)
+                    }
+                    .foregroundStyle(Theme.meta)
+                    .frame(minHeight: Metrics.minTapTarget)
+                }
+                .buttonStyle(.plain)
             }
         }
         .onAppear { draft = state.settings }

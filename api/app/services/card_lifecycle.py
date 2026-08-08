@@ -7,6 +7,7 @@ same SM-2 defaults regardless of whether it came from Capture or Study Plan.
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from uuid import UUID
 
 from app.models import (
     CAPTURE_ACTIVATED,
@@ -110,6 +111,7 @@ def active_card_filter():
 
 def build_grounded_card(
     *,
+    user_id: UUID,
     topic: str,
     category: str,
     grounding: Grounding,
@@ -119,6 +121,7 @@ def build_grounded_card(
 ) -> Card:
     value = grounding.require_complete()
     return Card(
+        user_id=user_id,
         topic=topic.strip(),
         category=category,
         canonical_question=value.canonical_question,

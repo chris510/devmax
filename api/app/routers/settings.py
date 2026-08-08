@@ -22,9 +22,7 @@ async def read_settings(db: AsyncSession = Depends(get_session)) -> SettingsOut:
 
 
 @router.put("/settings", response_model=SettingsOut)
-async def write_settings(
-    body: SettingsIn, db: AsyncSession = Depends(get_session)
-) -> SettingsOut:
+async def write_settings(body: SettingsIn, db: AsyncSession = Depends(get_session)) -> SettingsOut:
     row = await get_settings_row(db)
     row.reviews_per_day = body.reviews_per_day
     row.timezone = body.timezone

@@ -25,9 +25,9 @@ struct CardSummary: Codable, Identifiable, Equatable {
     let lastScore: Int?
     /// The three axes behind `lastScore`. Coverage's rollup line is the only
     /// consumer — nothing else in the app decomposes a score.
-    let lastMechanismAccuracy: Int?
-    let lastTradeOffAwareness: Int?
-    let lastFailureModeAwareness: Int?
+    let lastAccuracy: Int?
+    let lastDepth: Int?
+    let lastBoundaries: Int?
     let easeFactor: Double
     let intervalDays: Int
     let repetitions: Int
@@ -250,7 +250,7 @@ struct SessionResult: Equatable {
     let feedback: String
     /// `NEXT REVIEW · 27 JUL · INTERVAL 3D`, or the practice-mode line in a sprint.
     let scheduleLine: String
-    /// Server-computed (`mechanism_accuracy <= 2`). The client never sees the axis
+    /// Server-computed (`accuracy <= 2`). The client never sees the axis
     /// itself — the score block shows one numeral, and that numeral is the composite.
     /// `var` so consuming the offer is a one-field write, not a struct rebuild.
     var reattemptOffered: Bool

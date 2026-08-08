@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import UTC, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,8 +10,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db import get_session
 from app.models import DELIVERY_CONVERSATIONAL, Card, DeviceToken, Session, Settings
-from app.routers.deps import as_utc, get_settings_row, now_in
-from app.schemas import TriggerResult
+from app.routers.deps import as_utc, now_in
+from app.schemas import TriggerBatchResult, TriggerResult
 from app.services.card_lifecycle import active_card_filter
 from app.services.push import send_push
 
@@ -68,8 +69,9 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
     return datetime.combine(at.date(), max(starts), tzinfo=at.tzinfo)
 
 
-@router.post("/trigger-review", response_model=TriggerResult)
-async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResult:
+async def _trigger_review_for_user(
+    settings: Settings, user_id: uuid.UUID, db: AsyncSession
+) -> TriggerResult:
     """Polled by the production API process; decides whether to push.
 
     The poller encodes no schedule beyond "often". Everything about *when* a push
@@ -86,7 +88,6 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     never be opened wastes tokens and latency. Question generation happens on
     engagement, in POST /cards/{id}/sessions.
     """
-    settings = await get_settings_row(db)
     local_now = now_in(settings.timezone)
 
     window_start_local = _active_window_start(settings, local_now)
@@ -111,7 +112,7 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     pushed_today, latest_push = (
         await db.exec(
             select(func.count(), func.max(col(Card.last_pushed_at))).where(
-                col(Card.last_pushed_at) >= day_start
+                Card.user_id == user_id, col(Card.last_pushed_at) >= day_start
             )
         )
     ).one()
@@ -125,13 +126,12 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
         return TriggerResult(sent=False, reason="daily_limit")
 
     due_filter = (
+        Card.user_id == user_id,
         active_card_filter(),
         Card.delivery_mode == DELIVERY_CONVERSATIONAL,
         col(Card.next_review_at) <= today,
     )
-    due_count = (
-        await db.exec(select(func.count()).select_from(Card).where(*due_filter))
-    ).one()
+    due_count = (await db.exec(select(func.count()).select_from(Card).where(*due_filter))).one()
     if not due_count:
         return TriggerResult(sent=False, reason="nothing_due")
 
@@ -158,7 +158,10 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     ).first()
     if top is None:
         return TriggerResult(sent=False, reason="already_offered", due_count=due_count)
-    tokens = [t.token for t in (await db.exec(select(DeviceToken))).all()]
+    tokens = [
+        t.token
+        for t in (await db.exec(select(DeviceToken).where(DeviceToken.user_id == user_id))).all()
+    ]
     delivered = await send_push(
         tokens=tokens,
         title=f"{due_count} due",
@@ -181,6 +184,29 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     await db.commit()
 
     return TriggerResult(sent=True, card_id=top.id, due_count=due_count)
+@router.post("/trigger-review", response_model=TriggerResult | TriggerBatchResult)
+async def trigger_review(
+    db: AsyncSession = Depends(get_session),
+) -> TriggerResult | TriggerBatchResult:
+    """Evaluate every account independently on one dumb poll.
+
+    A one-user installation keeps the original response byte shape. Once there
+    are multiple users, the aggregate reports counts while each user's window,
+    daily cap, cards, and APNs tokens remain isolated inside the helper above.
+    """
+    rows = (await db.exec(select(Settings))).all()
+    if not rows:
+        return TriggerResult(sent=False, reason="outside_window")
+
+    results = [await _trigger_review_for_user(row, row.user_id, db) for row in rows]
+    if len(results) == 1:
+        return results[0]
+    sent_count = sum(1 for result in results if result.sent)
+    return TriggerBatchResult(
+        sent=sent_count > 0,
+        processed_users=len(results),
+        sent_count=sent_count,
+    )
 
 
 @router.post("/check-missed")

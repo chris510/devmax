@@ -7,6 +7,7 @@ from sqlalchemy.orm import load_only
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth import current_user_id
 from app.db import get_session
 from app.models import (
     CARD_ACTIVE,
@@ -50,6 +51,14 @@ from app.services.cards import (
 router = APIRouter(tags=["cards"])
 
 
+async def _owned_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
+    return (
+        await db.exec(
+            select(Card).where(Card.id == card_id, Card.user_id == current_user_id())
+        )
+    ).first()
+
+
 def card_summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
     """One card as the library sees it. Two fields are derived, not stored."""
     return CardSummary(
@@ -59,9 +68,9 @@ def card_summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
         delivery_mode=card.delivery_mode,
         mastery_summary=card.mastery_summary,
         last_score=card.last_score,
-        last_mechanism_accuracy=card.last_mechanism_accuracy,
-        last_trade_off_awareness=card.last_trade_off_awareness,
-        last_failure_mode_awareness=card.last_failure_mode_awareness,
+        last_accuracy=card.last_accuracy,
+        last_depth=card.last_depth,
+        last_boundaries=card.last_boundaries,
         ease_factor=card.ease_factor,
         interval_days=card.interval_days,
         repetitions=card.repetitions,
@@ -82,9 +91,9 @@ def _summary_columns():
         Card.delivery_mode,
         Card.mastery_summary,
         Card.last_score,
-        Card.last_mechanism_accuracy,
-        Card.last_trade_off_awareness,
-        Card.last_failure_mode_awareness,
+        Card.last_accuracy,
+        Card.last_depth,
+        Card.last_boundaries,
         Card.ease_factor,
         Card.interval_days,
         Card.repetitions,
@@ -130,12 +139,14 @@ async def list_due(
     limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_session),
 ) -> list[DueCard]:
+    user_id = current_user_id()
     today = await local_today(db)
     cards = (
         await db.exec(
             select(Card)
             .options(_summary_columns())
             .where(
+                Card.user_id == user_id,
                 active_card_filter(),
                 Card.delivery_mode == DELIVERY_CONVERSATIONAL,
                 col(Card.next_review_at) <= today,
@@ -168,7 +179,11 @@ async def overview(
 ) -> Overview:
     """Mastery classification across all cards — the desk-hour view."""
     today = await local_today(db)
-    statement = select(Card).options(_overview_columns()).where(active_card_filter())
+    statement = (
+        select(Card)
+        .options(_overview_columns())
+        .where(Card.user_id == current_user_id(), active_card_filter())
+    )
     if mode != "all":
         statement = statement.where(Card.delivery_mode == mode)
     cards = (await db.exec(statement)).all()
@@ -210,7 +225,11 @@ async def list_cards(
 ) -> list[CardSummary]:
     """The whole library. Backs Review Sprint Setup and Coverage."""
     today, tz = await local_calendar(db)
-    statement = select(Card).options(_summary_columns()).where(active_card_filter())
+    statement = (
+        select(Card)
+        .options(_summary_columns())
+        .where(Card.user_id == current_user_id(), active_card_filter())
+    )
     if mode != "all":
         statement = statement.where(Card.delivery_mode == mode)
     if sort == "weakest":
@@ -222,7 +241,7 @@ async def list_cards(
 
 @router.get("/cards/{card_id}", response_model=CardDetail)
 async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> CardDetail:
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -294,7 +313,7 @@ async def _require_no_live_session(db: AsyncSession, card: Card) -> None:
 async def get_maintenance(
     card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardMaintenance:
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     return _maintenance(card)
@@ -307,7 +326,7 @@ async def update_card_grounding(
     db: AsyncSession = Depends(get_session),
 ) -> CardMaintenance:
     """Add trusted authority to a legacy card without touching review state."""
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -340,7 +359,7 @@ async def update_card_grounding(
 async def archive_card(
     card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardMaintenance:
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     await _require_no_live_session(db, card)
@@ -355,7 +374,7 @@ async def archive_card(
 async def restore_card(
     card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardMaintenance:
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     if card.lifecycle_status == CARD_ACTIVE:
@@ -383,7 +402,7 @@ async def replace_card(
     body: ReplaceCard,
     db: AsyncSession = Depends(get_session),
 ) -> CardSummary:
-    card = await db.get(Card, card_id)
+    card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     if card.lifecycle_status == CARD_ARCHIVED:
@@ -393,6 +412,7 @@ async def replace_card(
     today, tz = await local_calendar(db)
     try:
         replacement = build_grounded_card(
+            user_id=current_user_id(),
             topic=card.topic,
             category=card.category,
             grounding=Grounding(
