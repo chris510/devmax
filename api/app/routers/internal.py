@@ -3,6 +3,7 @@ from datetime import UTC, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
+from sqlalchemy.orm import load_only
 from sqlmodel import col, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -10,6 +11,7 @@ from app.db import get_session
 from app.models import DELIVERY_CONVERSATIONAL, Card, DeviceToken, Session, Settings
 from app.routers.deps import as_utc, get_settings_row, now_in
 from app.schemas import TriggerResult
+from app.services.card_lifecycle import active_card_filter
 from app.services.push import send_push
 
 logger = logging.getLogger(__name__)
@@ -122,36 +124,44 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     if pushed_today >= settings.reviews_per_day:
         return TriggerResult(sent=False, reason="daily_limit")
 
-    due = (
-        await db.exec(
-            select(Card)
-            .where(
-                Card.delivery_mode == DELIVERY_CONVERSATIONAL,
-                col(Card.next_review_at) <= today,
-            )
-            .order_by(col(Card.next_review_at).asc(), col(Card.ease_factor).asc())
-        )
-    ).all()
-    if not due:
+    due_filter = (
+        active_card_filter(),
+        Card.delivery_mode == DELIVERY_CONVERSATIONAL,
+        col(Card.next_review_at) <= today,
+    )
+    due_count = (
+        await db.exec(select(func.count()).select_from(Card).where(*due_filter))
+    ).one()
+    if not due_count:
         return TriggerResult(sent=False, reason="nothing_due")
 
     # `due_count` stays the whole queue — it becomes the notification's "N due" and
     # has to agree with what GET /cards/due shows. Only the *selection* skips cards
     # pushed earlier today, so the evening window advances to the next card instead
     # of repeating the morning's. One unanswered card is not worth two
-    # notifications. Filtered here rather than in SQL simply because `due` is
-    # already materialised for the count, so a second predicate would buy nothing.
-    candidates = [
-        c for c in due if c.last_pushed_at is None or as_utc(c.last_pushed_at) < day_start
-    ]
-    if not candidates:
-        return TriggerResult(sent=False, reason="already_offered", due_count=len(due))
-
-    top = candidates[0]
+    # notifications. Count and selection are separate aggregate/narrow queries so
+    # the 15-minute poll never hydrates every due card's grounding payload.
+    top = (
+        await db.exec(
+            select(Card)
+            .options(load_only(Card.id, Card.topic, Card.last_pushed_at))
+            .where(
+                *due_filter,
+                or_(
+                    col(Card.last_pushed_at).is_(None),
+                    col(Card.last_pushed_at) < day_start,
+                ),
+            )
+            .order_by(col(Card.next_review_at).asc(), col(Card.ease_factor).asc())
+            .limit(1)
+        )
+    ).first()
+    if top is None:
+        return TriggerResult(sent=False, reason="already_offered", due_count=due_count)
     tokens = [t.token for t in (await db.exec(select(DeviceToken))).all()]
     delivered = await send_push(
         tokens=tokens,
-        title=f"{len(due)} due",
+        title=f"{due_count} due",
         body=top.topic,
         card_id=top.id,
     )
@@ -161,7 +171,7 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     # then increment missed_count four hours later for a push the user never received.
     # missed_count is the product's only compliance signal; don't corrupt it.
     if not delivered:
-        return TriggerResult(sent=False, reason="no_devices", due_count=len(due))
+        return TriggerResult(sent=False, reason="no_devices", due_count=due_count)
 
     # From the injected clock, not `datetime.now(UTC)`: the stamp has to land inside
     # the window that was just matched, and a direct clock read is unpatchable, so
@@ -170,7 +180,7 @@ async def trigger_review(db: AsyncSession = Depends(get_session)) -> TriggerResu
     db.add(top)
     await db.commit()
 
-    return TriggerResult(sent=True, card_id=top.id, due_count=len(due))
+    return TriggerResult(sent=True, card_id=top.id, due_count=due_count)
 
 
 @router.post("/check-missed")
@@ -192,6 +202,7 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
     candidates = (
         await db.exec(
             select(Card).where(
+                active_card_filter(),
                 col(Card.last_pushed_at).is_not(None),
                 col(Card.last_pushed_at) <= cutoff,
                 or_(

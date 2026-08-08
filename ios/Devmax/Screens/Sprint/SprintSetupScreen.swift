@@ -20,7 +20,7 @@ struct SprintSetupScreen: View {
                 .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Review sprint")
+                    Text(state.sprintKind == .review ? "Review sprint" : "Depth repair")
                         .font(TypeRole.screenTitle)
                         .tracking(-0.6)
                         .foregroundStyle(Theme.text)
@@ -63,7 +63,7 @@ struct SprintSetupScreen: View {
     /// One chip per category, multi-select. No selection means the whole library.
     private var categoryChips: some View {
         FlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-            ForEach(state.categories, id: \.self) { name in
+            ForEach(state.sprintCategories, id: \.self) { name in
                 let on = state.setupCats.contains(name)
                 Button {
                     withAnimation(Motion.fadeFast) { state.toggleCategory(name) }
@@ -108,7 +108,11 @@ struct SprintSetupScreen: View {
                 Text("Session size")
                     .font(WCFont.sans(14.5))
                     .foregroundStyle(Theme.text)
-                Text("Weakest and least recently reviewed first")
+                Text(
+                    state.sprintKind == .review
+                        ? "Weakest and least recently reviewed first"
+                        : "Thin depth signal first"
+                )
                     .font(WCFont.sans(12.5))
                     .foregroundStyle(Theme.metaAlt)
             }
@@ -138,7 +142,10 @@ struct SprintSetupScreen: View {
                 // Regenerates from the current filter and size. Instant — no
                 // loading state, because nothing is fetched.
                 Button {
-                    withAnimation(Motion.fadeFast) { state.seed += 1 }
+                    withAnimation(Motion.fadeFast) {
+                        state.sprintExcluded = []
+                        state.seed += 1
+                    }
                 } label: {
                     Text("Shuffle")
                         .font(TypeRole.secondaryAction)
@@ -152,7 +159,11 @@ struct SprintSetupScreen: View {
 
             // Rows are a preview, not a queue — deliberately not tappable.
             ForEach(state.sprintSet) { card in
-                SprintPreviewRow(card: card)
+                SprintPreviewRow(
+                    card: card,
+                    remove: state.sprintKind == .review
+                        ? nil : { state.removeFromSprint(card.id) }
+                )
             }
 
             Button { state.path.append(.coverage) } label: {
@@ -203,6 +214,7 @@ struct SprintSetupScreen: View {
 /// Today's row anatomy minus the meta line.
 private struct SprintPreviewRow: View {
     let card: CardSummary
+    let remove: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: Metrics.scoreColumnGap) {
@@ -216,6 +228,14 @@ private struct SprintPreviewRow: View {
                         .lineSpacing(13.5 * 1.45 - 13.5 * 1.2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                if let remove {
+                    Button("Remove from this run", action: remove)
+                        .font(WCFont.sans(12.5))
+                        .foregroundStyle(Theme.meta)
+                        .buttonStyle(.plain)
+                        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+                }
             }
 
             ScoreColumn(score: card.lastScore)
@@ -225,4 +245,3 @@ private struct SprintPreviewRow: View {
         .overlay(alignment: .top) { Hairline() }
     }
 }
-

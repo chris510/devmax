@@ -51,6 +51,7 @@ from app.models import (
     DELIVERY_DESK,
     STATUS_COMPLETE,
     Card,
+    PendingCapture,
     Session,
 )
 from app.routers.deps import get_settings_row, local_today, now_in
@@ -195,12 +196,23 @@ async def retire_from_file(
         cards = (await db.exec(select(Card).where(col(Card.topic).in_(topics)))).all()
         card_ids = [card.id for card in cards]
         sessions = (await db.exec(select(Session).where(col(Session.card_id).in_(card_ids)))).all()
+        captures = (
+            await db.exec(
+                select(PendingCapture).where(col(PendingCapture.activated_card_id).in_(card_ids))
+            )
+        ).all()
         retired = sorted(card.topic for card in cards)
         if dry_run:
             return retired, len(sessions)
 
         for session in sessions:
             await db.delete(session)
+        for capture in captures:
+            await db.delete(capture)
+        # Flush dependents before their cards. Postgres would otherwise cascade
+        # the rows first and leave SQLAlchemy warning that its queued explicit
+        # delete matched nothing; SQLite still needs the explicit deletes.
+        await db.flush()
         for card in cards:
             await db.delete(card)
         await db.commit()

@@ -751,6 +751,7 @@ def duplicate_plan(source: StudyPlan, graph: PlanGraph, *, start_date: date) -> 
             source_start=item.source_start,
             source_end=item.source_end,
             source_excerpt=item.source_excerpt,
+            recall_supported=item.recall_supported,
             parser_interpretation=item.parser_interpretation,
             approved_at=item.approved_at,
             notes=item.notes,
@@ -855,4 +856,3 @@ def blocking_dependencies(
         for pid in prereq_ids
         if pid in graph.item_by_id and graph.item_by_id[pid].status != ITEM_COMPLETE
     ]
-

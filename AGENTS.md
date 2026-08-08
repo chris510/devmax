@@ -57,6 +57,14 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   same retrieval every review; regenerating per session puts every review in the
   weak-transfer regime. The follow-up probe still varies every time — that variation is
   wanted, and is not the same thing.
+- **A captured gap is not a card.** `pending_captures` is structurally outside due,
+  push, Sprint, Coverage, scoring, and SM-2. Activation is atomic and requires trusted
+  provenance, an answer basis, all five rubric fields, and an approved canonical
+  question. A replay returns the same card; missing authority fails closed.
+- **Archive never deletes history or changes scheduling state.** Every active-card
+  selection uses `card_lifecycle.active_card_filter`. Replacing a question creates a
+  fresh blank-history card at default SM-2 values, archives the predecessor, and keeps
+  bidirectional lineage; a question is never rewritten underneath scored history.
 - **A practice session scores and writes history but never moves the schedule.** `ease_factor`,
   `interval_days`, `repetitions`, and `next_review_at` are the four fields a Review Sprint
   must leave alone. Mastery signal is written normally.
@@ -226,8 +234,9 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 
 `WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup` `score` `resume`
 `submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
-`filter` `setup` (alias
-`sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded`. An unrecognised
+`filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
+`sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
+An unrecognised
 value falls through to the conversation question state rather than erroring, so check the
 spelling. Also `WC_LOAD` (`auto|loading|error`),
 `WC_RAIL_STYLE` (`dots|chips` — dots ships; chips exists only for the side-by-side) and

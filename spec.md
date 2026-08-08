@@ -102,8 +102,9 @@ table — this is deliberate, not an omission to be "improved."
 
 ## Data model
 
-Three tables plus a settings singleton. This extends the earlier schema
-with `delivery_mode` and the session draft fields.
+Four primary tables plus a settings singleton. Pending captures are structurally
+separate from cards so an ungrounded observation cannot accidentally become due,
+trigger a push, or enter scoring.
 
 ### `cards`
 
@@ -116,6 +117,13 @@ with `delivery_mode` and the session draft fields.
 | `source_company` | text NULL | e.g. "Anthropic" |
 | `target_week` | int NULL | from the study plan |
 | `delivery_mode` | text NOT NULL | `'conversational'` or `'desk'` |
+| `canonical_question` | text NULL | generated or approved once, then reused |
+| `source_url` / `source_section` / `source_label` | text NOT NULL DEFAULT '' | trusted provenance |
+| `answer_basis` | text NOT NULL DEFAULT '' | concise trusted answer authority |
+| `answer_rubric` | jsonb NOT NULL DEFAULT `{}` | mechanism, alternative, trade-off, failure mode, misconception |
+| `lifecycle_status` | text NOT NULL DEFAULT `'active'` | `'active'` or `'archived'` |
+| `archived_at` | timestamptz NULL | recoverable removal time |
+| `replaces_card_id` / `replaced_by_card_id` | UUID NULL | question-replacement lineage |
 | `ease_factor` | real NOT NULL DEFAULT 2.5 | SM-2, floor 1.3 |
 | `interval_days` | int NOT NULL DEFAULT 1 | |
 | `repetitions` | int NOT NULL DEFAULT 0 | consecutive successful reviews |
@@ -125,15 +133,24 @@ with `delivery_mode` and the session draft fields.
 | `missed_count` | int NOT NULL DEFAULT 0 | compliance only — never feeds SM-2 |
 | `created_at` / `updated_at` | timestamptz | |
 
-Index on `next_review_at`. Partial index on
-`(next_review_at) WHERE delivery_mode = 'conversational'` since that's the
-hot query.
+Index on `next_review_at`. Partial index on `(next_review_at) WHERE
+delivery_mode = 'conversational' AND lifecycle_status = 'active'` since that is
+the hot query. Every active-card selection uses the same lifecycle predicate.
 
 **`delivery_mode` matters:** `'desk'` cards (coding problems, Tier 2
 practical builds) are tracked and scheduled but are **never** returned by
 `/cards/due` and never trigger a push. They need a keyboard and an hour,
 not a two-minute voice session. Only `'conversational'` cards enter the
 push loop.
+
+### `pending_captures`
+
+Fast observations awaiting review. Fields: `id`, `topic`, optional `context`,
+`status`, the three provenance strings, `answer_basis`, `answer_rubric`,
+`canonical_question`, optional `activated_card_id`, and timestamps. A pending
+capture is never returned from a card endpoint. Activation requires provenance,
+an answer basis, all five rubric fields, and a canonical question in one atomic
+transaction. Replaying a successful activation returns the same card.
 
 ### `sessions`
 
@@ -403,15 +420,30 @@ different responses, and nothing else in the API distinguishes them.
 
 ### `POST /cards`
 
-```json
-{"topic": "Write-ahead logging", "schedule": "now"}
-```
+Returns 409. Interactive card creation goes through `/captures`; there is no
+endpoint that creates an ungrounded active card.
 
-`schedule` is `"now"` or `"next"`. Creates a card with
-`category: "Unsorted"`, `delivery_mode: "conversational"`,
-`ease_factor: 2.5`, `interval_days: 1`, `repetitions: 0`, and
-`next_review_at` = today (for `"now"`) or today + 1 (for `"next"`).
-Returns the created card.
+### Capture and activation
+
+- `POST /captures` stores only a topic and optional context.
+- `GET /captures` lists non-activated inbox items by newest first.
+- `PATCH /captures/{id}` saves provenance, answer basis, rubric, and question edits.
+- `POST /captures/{id}/question` generates the question only after grounding is
+  complete; it is idempotent unless `regenerate=true` is explicit.
+- `POST /captures/{id}/activate` accepts `schedule: "now"|"next"` and atomically
+  creates a fresh active card at the normal SM-2 defaults.
+- `DELETE /captures/{id}` discards only a pending capture.
+
+### Card maintenance
+
+- `GET /cards/{id}/maintenance` returns grounding and lifecycle metadata.
+- `PATCH /cards/{id}/grounding` grounds a legacy card without changing schedule
+  or history. Its question cannot be rewritten after history exists.
+- `POST /cards/{id}/archive` removes the card from every active selection while
+  preserving history and all SM-2 fields.
+- `POST /cards/{id}/restore` reverses archive unless an active replacement exists.
+- `POST /cards/{id}/replace` creates a fresh blank-history card with the edited
+  question, archives the predecessor, and records both lineage links.
 
 ### `POST /cards/{id}/sessions`
 
@@ -419,11 +451,13 @@ Called when the user taps into a card to start reviewing — **not** when
 the push fires.
 
 Behavior:
+- Reject an archived card.
 - If an existing session for this card has status `'open'` or
   `'awaiting_follow_up'`, return that session instead of creating a new
   one (this is what makes resume work).
 - Otherwise generate a question via `llm.generate_question`, create a
   session with `status: 'open'`, return it.
+- Supply the card's trusted answer basis and rubric to question generation.
 
 ```json
 {
@@ -640,9 +674,9 @@ Two properties of that extension matter from here:
   confirmed, gated, atomic card-proposal acceptance, and no path modifies an
   existing one. Linkage lives in `study_plan_card_links` — nothing is added to
   the `cards` table.
-- **A card created that way starts at the same defaults `POST /cards` produces**,
-  with one addition: the approved question is persisted as `canonical_question`,
-  so the first review reuses it rather than generating one.
+- **A card created that way passes the same grounding gate and starts at the same
+  defaults as Capture activation.** The approved question is persisted as
+  `canonical_question`, so the first review reuses it rather than generating one.
 
 Where `docs/STUDY-PLAN-SPEC.md` and this file disagree about Study Plan, that
 file wins. Where either disagrees with `AGENTS.md`'s load-bearing invariants,

@@ -141,6 +141,7 @@ def _raw_import(manifest: Mapping[str, Any]) -> dict[str, Any]:
                     "source_start": None,
                     "source_end": None,
                     "source_excerpt": "",
+                    "recall_supported": False,
                     "parser_interpretation": "Curated first-party curriculum activity.",
                 }
             )

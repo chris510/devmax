@@ -246,6 +246,7 @@ enum StudyPlanFixtures {
             sourceExcerpt: "PostgreSQL: query planning, indexes, MVCC, WAL, and "
                 + "replication.",
             sourceLabel: "Hello Interview · PostgreSQL",
+            recallSupported: true,
             notes: "Write out the WAL path once — that's the part I lose under pressure.",
             studyBlockLabel: "Tue 19:00", studyBlockWeekday: 2,
             studyBlockMinuteOfDay: 1140, studyBlockReminderOn: true,

@@ -174,22 +174,24 @@ struct PlanItemScreen: View {
                             ?? "SAVED",
                         font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
                     )
-                    Button {
-                        plan.prepareCardProposals()
-                        state.path.append(.planCards(planID, item.id))
-                    } label: {
-                        let count = max(item.linkedCardIds.count, debrief.proposalCount)
-                        Text(count > 0
-                            ? "\(count) focused card\(count == 1 ? "" : "s") →"
-                            : "Check for focused cards →")
-                        .font(TypeRole.secondaryAction)
-                        .foregroundStyle(Theme.accent)
+                    if item.recallSupported {
+                        Button {
+                            plan.prepareCardProposals()
+                            state.path.append(.planCards(planID, item.id))
+                        } label: {
+                            let count = max(item.linkedCardIds.count, debrief.proposalCount)
+                            Text(count > 0
+                                ? "Review \(count) source-based suggestion\(count == 1 ? "" : "s") →"
+                                : "Check for source-based suggestions →")
+                            .font(TypeRole.secondaryAction)
+                            .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
-                    .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
                 }
             }
-        } else if item.practiceDebriefEligible {
+        } else if item.recallSupported, item.practiceDebriefEligible {
             Block(label: "RETRIEVAL SUPPORT") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Turn what broke down into focused recall cards.")
@@ -207,7 +209,8 @@ struct PlanItemScreen: View {
                     .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
                 }
             }
-        } else if item.cardProposalsAvailable || !item.linkedCardIds.isEmpty {
+        } else if item.recallSupported,
+                  item.cardProposalsAvailable || !item.linkedCardIds.isEmpty {
             Block(label: "RETRIEVAL SUPPORT") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(
@@ -224,7 +227,7 @@ struct PlanItemScreen: View {
                             plan.prepareCardProposals()
                             state.path.append(.planCards(planID, item.id))
                         } label: {
-                            Text("Suggest recall cards →")
+                            Text("Review source-based suggestions →")
                                 .font(TypeRole.secondaryAction)
                                 .foregroundStyle(Theme.accent)
                         }

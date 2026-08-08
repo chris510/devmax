@@ -10,6 +10,7 @@ struct TodayScreen: View {
             StatusBar()
             header
             planLine
+            captureLine
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -39,6 +40,10 @@ struct TodayScreen: View {
                     PlanCapacitySheet(planID: id)
                 }
             }
+        }
+        .fullScreenCover(item: $state.captureRoute) { route in
+            CaptureFlowScreen(route: route)
+                .environmentObject(state)
         }
     }
 
@@ -89,6 +94,29 @@ struct TodayScreen: View {
         // delays the due cards above it.
         if state.planSummaryFailed { return "PLAN · UNAVAILABLE" }
         return (state.planSummary ?? .none).todayLine
+    }
+
+    @ViewBuilder
+    private var captureLine: some View {
+        if !state.captures.isEmpty {
+            Button { state.captureRoute = .inbox } label: {
+                HStack(spacing: 8) {
+                    MetaText(
+                        text: "\(state.captures.count) captured gap\(state.captures.count == 1 ? "" : "s")",
+                        font: WCFont.mono(10.5), tracking: 0.65, color: Theme.meta
+                    )
+                    Spacer(minLength: 0)
+                    Text("→")
+                        .font(WCFont.mono(11))
+                        .foregroundStyle(Theme.accent)
+                }
+                .padding(.horizontal, Metrics.screenPadding)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: Metrics.minTapTarget)
+            .padding(.bottom, 4)
+        }
     }
 
     // MARK: - Header
@@ -171,10 +199,14 @@ struct TodayScreen: View {
     private var bottomBlock: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Quick-add stays visible in every state, including empty and error.
-            Button { state.sheet = .add } label: {
+            Button {
+                state.savedCapture = nil
+                state.addError = false
+                state.sheet = .add
+            } label: {
                 HStack(spacing: 8) {
                     Text("+").font(WCFont.sans(16))
-                    Text("Ask about something else").font(TypeRole.rowSummary)
+                    Text("Capture a gap").font(TypeRole.rowSummary)
                 }
                 .foregroundStyle(Theme.meta)
                 .padding(.vertical, 4)

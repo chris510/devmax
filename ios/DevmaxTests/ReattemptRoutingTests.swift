@@ -43,9 +43,33 @@ final class ReattemptRoutingTests: XCTestCase {
         func due() async throws -> [DueCard] { [] }
         func cards(sort: String, mode: String) async throws -> [CardSummary] { [] }
         func card(_ id: UUID) async throws -> CardDetail { throw CancellationError() }
-        func createCard(topic: String, schedule: String) async throws -> CardSummary {
+        func captures() async throws -> [CaptureSummary] { [] }
+        func capture(_ id: UUID) async throws -> PendingCapture { throw APIError.status(404) }
+        func createCapture(topic: String, context: String) async throws -> PendingCapture {
             throw CancellationError()
         }
+        func updateCapture(
+            _ id: UUID, update: CaptureUpdateRequest
+        ) async throws -> PendingCapture { throw CancellationError() }
+        func prepareCaptureQuestion(
+            _ id: UUID, regenerate: Bool
+        ) async throws -> PendingCapture { throw CancellationError() }
+        func activateCapture(_ id: UUID, schedule: String) async throws -> CardSummary {
+            throw CancellationError()
+        }
+        func discardCapture(_ id: UUID) async throws { throw CancellationError() }
+        func cardMaintenance(_ id: UUID) async throws -> CardMaintenance {
+            throw CancellationError()
+        }
+        func archiveCard(_ id: UUID) async throws -> CardMaintenance {
+            throw CancellationError()
+        }
+        func restoreCard(_ id: UUID) async throws -> CardMaintenance {
+            throw CancellationError()
+        }
+        func replaceCard(
+            _ id: UUID, question: String, schedule: String
+        ) async throws -> CardSummary { throw CancellationError() }
         func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart {
             guard var stubs = startStubs[cardID], !stubs.isEmpty else {
                 throw CancellationError()

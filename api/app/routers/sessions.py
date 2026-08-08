@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db import get_session
 from app.models import (
+    CARD_ACTIVE,
     LIVE_STATUSES,
     STATUS_AWAITING_FOLLOW_UP,
     STATUS_COMPLETE,
@@ -82,6 +83,8 @@ async def start_session(
     card = await db.get(Card, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
+    if card.lifecycle_status != CARD_ACTIVE:
+        raise HTTPException(status_code=409, detail="card is archived")
 
     existing = await _live_session(db, card_id)
     if existing is not None:
@@ -116,6 +119,8 @@ async def start_session(
             mastery_summary=card.mastery_summary,
             last_score=card.last_score,
             recent_questions=list(recent),
+            answer_basis=card.answer_basis,
+            answer_rubric=card.answer_rubric,
         )
         # Persisted before it is returned, so the same question comes back next
         # time. Clearing this column by hand is the way to re-roll a bad one.
@@ -188,6 +193,8 @@ async def submit_answer(
         follow_up_question=session.follow_up_question,
         follow_up_answer=session.follow_up_answer,
         follow_up_used=session.follow_up_used,
+        answer_basis=card.answer_basis,
+        answer_rubric=card.answer_rubric,
     )
 
     if result.status == "follow_up":
@@ -310,6 +317,8 @@ async def submit_reattempt(
         reattempt_answer=body.text,
         # `_reattempt_eligible` guarantees this is set and <= 2.
         unaided_mechanism=session.mechanism_accuracy or 0,
+        answer_basis=card.answer_basis,
+        answer_rubric=card.answer_rubric,
     )
 
     session.reattempt_answer = body.text
