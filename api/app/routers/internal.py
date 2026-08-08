@@ -4,6 +4,7 @@ from datetime import UTC, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
+from sqlalchemy.orm import load_only
 from sqlmodel import col, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -11,6 +12,7 @@ from app.db import get_session
 from app.models import DELIVERY_CONVERSATIONAL, Card, DeviceToken, Session, Settings
 from app.routers.deps import as_utc, now_in
 from app.schemas import TriggerBatchResult, TriggerResult
+from app.services.card_lifecycle import active_card_filter
 from app.services.push import send_push
 
 logger = logging.getLogger(__name__)
@@ -125,6 +127,7 @@ async def _trigger_review_for_user(
 
     due_filter = (
         Card.user_id == user_id,
+        active_card_filter(),
         Card.delivery_mode == DELIVERY_CONVERSATIONAL,
         col(Card.next_review_at) <= today,
     )
@@ -135,10 +138,13 @@ async def _trigger_review_for_user(
     # `due_count` stays the whole queue — it becomes the notification's "N due" and
     # has to agree with what GET /cards/due shows. Only the *selection* skips cards
     # pushed earlier today, so the evening window advances to the next card instead
-    # of repeating the morning's. One unanswered card is not worth two notifications.
+    # of repeating the morning's. One unanswered card is not worth two
+    # notifications. Count and selection are separate aggregate/narrow queries so
+    # the 15-minute poll never hydrates every due card's grounding payload.
     top = (
         await db.exec(
             select(Card)
+            .options(load_only(Card.id, Card.topic, Card.last_pushed_at))
             .where(
                 *due_filter,
                 or_(
@@ -178,8 +184,6 @@ async def _trigger_review_for_user(
     await db.commit()
 
     return TriggerResult(sent=True, card_id=top.id, due_count=due_count)
-
-
 @router.post("/trigger-review", response_model=TriggerResult | TriggerBatchResult)
 async def trigger_review(
     db: AsyncSession = Depends(get_session),
@@ -224,6 +228,7 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
     candidates = (
         await db.exec(
             select(Card).where(
+                active_card_filter(),
                 col(Card.last_pushed_at).is_not(None),
                 col(Card.last_pushed_at) <= cutoff,
                 or_(

@@ -6,6 +6,7 @@ struct CardHistoryScreen: View {
     @State private var detail: CardDetail?
     /// One row open at a time.
     @State private var expanded: UUID?
+    @State private var maintenance: CardMaintenance?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +34,18 @@ struct CardHistoryScreen: View {
         .background(Theme.bg)
         .navigationBarHidden(true)
         .task { detail = try? await state.api.card(cardID) }
+        .sheet(item: $maintenance) { value in
+            CardMaintenanceSheet(
+                value: value,
+                updated: { maintenance = $0 },
+                replaced: {
+                    maintenance = nil
+                    state.path.removeLast()
+                    Task { await state.loadToday() }
+                }
+            )
+            .environmentObject(state)
+        }
     }
 
     private func heading(_ detail: CardDetail) -> some View {
@@ -55,6 +68,19 @@ struct CardHistoryScreen: View {
 
             MetaText(text: metaLine(detail), font: TypeRole.metaBody, tracking: 1.0,
                      color: Theme.metaFaint, uppercased: true)
+
+            Button {
+                Task {
+                    maintenance = try? await state.api.cardMaintenance(cardID)
+                }
+            } label: {
+                MetaText(
+                    text: "MAINTAIN CARD", font: TypeRole.metaBody,
+                    tracking: 1.0, color: Theme.meta
+                )
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
         }
         .padding(.top, 6)
         .padding(.bottom, 26)
@@ -103,6 +129,126 @@ struct CardHistoryScreen: View {
                 }
             }
         }
+    }
+}
+
+private struct CardMaintenanceSheet: View {
+    @EnvironmentObject private var state: AppState
+    @Environment(\.dismiss) private var dismiss
+    let value: CardMaintenance
+    let updated: (CardMaintenance) -> Void
+    let replaced: () -> Void
+
+    @State private var replacing = false
+    @State private var question = ""
+    @State private var schedule = "next"
+    @State private var pending = false
+    @State private var errorText = ""
+
+    var body: some View {
+        SheetChrome(title: replacing ? "Replace question" : "Card maintenance") {
+            VStack(alignment: .leading, spacing: 18) {
+                if replacing { replacementForm } else { actions }
+
+                if !errorText.isEmpty {
+                    InlineNotice {
+                        Text(errorText)
+                            .font(TypeRole.secondaryAction)
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .onAppear { question = value.canonicalQuestion }
+    }
+
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if value.lifecycleStatus == "active" {
+                maintenanceAction(
+                    "Archive card",
+                    detail: "Removes it from reviews and Coverage. Every session stays here. You can restore it later."
+                ) { Task { await archive() } }
+
+                Hairline()
+
+                maintenanceAction(
+                    "Replace question",
+                    detail: "Creates a new blank-history card and archives this one. Earlier scores keep the question they measured."
+                ) { replacing = true }
+            } else {
+                maintenanceAction(
+                    "Restore card",
+                    detail: "Returns this card to the active library with its schedule and history intact."
+                ) { Task { await restore() } }
+            }
+        }
+    }
+
+    private var replacementForm: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            captureEditor("NEW CANONICAL QUESTION", text: $question, minHeight: 118, serif: true)
+            ScheduleChoice(schedule: $schedule)
+            PrimaryButton(
+                title: pending ? "Replacing…" : "Create replacement",
+                enabled: !pending && !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ) { Task { await replace() } }
+            SecondaryButton(title: "Cancel") { replacing = false }
+        }
+    }
+
+    private func maintenanceAction(
+        _ title: String, detail: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(TypeRole.bodyLarge)
+                    .foregroundStyle(Theme.text)
+                Text(detail)
+                    .font(TypeRole.rowSummary)
+                    .foregroundStyle(Theme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(pending)
+    }
+
+    private func archive() async {
+        await perform("Couldn't archive this card.") {
+            let result = try await state.api.archiveCard(value.id)
+            updated(result)
+            state.queue.removeAll { $0.id == value.id }
+            state.library.removeAll { $0.id == value.id }
+            dismiss()
+        }
+    }
+
+    private func restore() async {
+        await perform("Couldn't restore this card.") {
+            let result = try await state.api.restoreCard(value.id)
+            updated(result)
+            await state.loadToday()
+            dismiss()
+        }
+    }
+
+    private func replace() async {
+        await perform("Couldn't create the replacement. This card is unchanged.") {
+            _ = try await state.api.replaceCard(value.id, question: question, schedule: schedule)
+            replaced()
+        }
+    }
+
+    private func perform(_ message: String, operation: @escaping () async throws -> Void) async {
+        pending = true
+        errorText = ""
+        do { try await operation() } catch { errorText = message }
+        pending = false
     }
 }
 

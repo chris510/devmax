@@ -337,7 +337,7 @@ All five must pass. A missing or malformed answer counts as a **failure** — th
 gate exists to stop weak cards, so an unparseable answer must not open the door.
 Failures appear under `NOT SUGGESTED` with the failed question and a reason, are
 **not selectable and not counted**, and carry no action. There is no "add back".
-Writing a card by hand through Add card remains available and separate.
+Capturing and grounding a gap by hand remains available and separate.
 
 At most three suggestions; low confidence produces none.
 
@@ -363,6 +363,14 @@ One transaction:
 An approved proposal's question is persisted as `cards.canonical_question`, so
 the first review reuses it rather than regenerating — the "generated once, then
 reused" invariant applies from birth.
+
+An item is proposal-eligible only when `recall_supported = true` and its trusted
+source excerpt is non-empty. The proposal model must return the five-field answer
+rubric. Acceptance revalidates every proposal through the same grounding gate as
+Capture before staging the acceptance row, cards, or links. Missing authority
+aborts the entire batch. The approved source excerpt becomes the card's
+`answer_basis`; the debrief remains gap-selection context and never answer
+authority.
 
 ### Duplicate checking
 

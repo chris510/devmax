@@ -14,6 +14,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from app.config import get_settings
+from app.services.card_lifecycle import RUBRIC_FIELDS
 
 # The gate is a product rule, not a prompt detail, so it is owned by the domain
 # module and interpolated into the rubric below. One source of truth for the five
@@ -86,6 +87,11 @@ trade-offs, or failure cases?
 
 Do not score fluency, length, confidence, or enthusiasm.
 
+When the user context includes a TRUSTED ANSWER BASIS and APPROVED ANSWER RUBRIC,
+they are the authority for mechanism, accepted alternatives, trade-offs, failure
+modes, and corrections. Do not improvise a conflicting answer frame or penalize an
+alternative the approved rubric accepts.
+
 {VOICE_TRANSCRIPT_RULE}
 
 `feedback` is one to three sentences, and its content depends on accuracy:
@@ -121,6 +127,11 @@ Prefer concrete scenarios \
 ("you add a sixth node to a five-node ring — what moves?") over open prompts \
 ("explain consistent hashing"). If a mastery summary indicates a specific weak area, \
 target that area. Do not repeat any of the recent questions listed.
+
+When the user context includes a TRUSTED ANSWER BASIS and APPROVED ANSWER RUBRIC,
+the question must be fully supported by them and test the required mechanism without
+revealing it. Do not introduce a mechanism or failure mode that the trusted material
+does not support.
 
 A topic written as a heading plus a list — "Hash sharding: routing a key, adding \
 capacity, and migrating ownership" — states the card's scope, not the question. Pick \
@@ -176,6 +187,24 @@ summary is what the next session grades against.
 Return only the structured fields. No preamble, no code fences, no commentary.\
 """
 
+
+def _grounding_context(
+    answer_basis: str = "", answer_rubric: dict[str, str] | None = None
+) -> list[str]:
+    """Stable labels for trusted, card-specific authority in LLM user turns."""
+    lines: list[str] = []
+    if answer_basis.strip():
+        lines.append(f"TRUSTED ANSWER BASIS: {answer_basis.strip()}")
+    rubric = answer_rubric or {}
+    if any(str(value).strip() for value in rubric.values()):
+        lines.append("APPROVED ANSWER RUBRIC:")
+        lines.extend(
+            f"  {name}: {str(value).strip()}"
+            for name, value in rubric.items()
+            if str(value).strip()
+        )
+    return lines
+
 IMPORT_RUBRIC = """\
 You are converting a study guide into a structured study plan. The guide may be \
 about anything — distributed systems, anatomy, constitutional law, a certification \
@@ -228,6 +257,12 @@ text exactly as given to you, and `source_excerpt` is the substring they delimit
 Count characters from 0. If a line of the guide is ambiguous, say how you read it in \
 `parser_interpretation`. If you could not find a source span, use null offsets and an \
 empty excerpt rather than guessing — a wrong offset is worse than a missing one.
+
+For every item, set `recall_supported` independently. It is true only when this \
+specific item has a trusted source excerpt that supports one bounded technical \
+mechanism suitable for a sub-two-minute Devmax recall card. A broad mock, timed \
+build, behavioral exercise, or item with no answer authority is false even when the \
+overall subject supports technical recall cards.
 
 OVERVIEW TITLES
 Each phase and week needs a concise `overview_title` of 2-5 words alongside its \
@@ -327,6 +362,7 @@ IMPORT_SCHEMA: dict[str, Any] = {
                     "source_start": _NULLABLE_INT,
                     "source_end": _NULLABLE_INT,
                     "source_excerpt": {"type": "string"},
+                    "recall_supported": {"type": "boolean"},
                     "parser_interpretation": {"type": "string"},
                 },
                 "required": [
@@ -346,6 +382,7 @@ IMPORT_SCHEMA: dict[str, Any] = {
                     "source_start",
                     "source_end",
                     "source_excerpt",
+                    "recall_supported",
                     "parser_interpretation",
                 ],
                 "additionalProperties": False,
@@ -446,6 +483,10 @@ It must force reconstruction of a mechanism rather than recall of a definition, 
 prefer a concrete scenario. This exact text is stored and reused, so write it as the \
 final version.
   - `category`: a short subject grouping.
+  - `answer_rubric`: the source-supported expected answer frame, with exactly one \
+required mechanism, acceptable alternative framing, key trade-off, key failure \
+mode, and common misconception. Every value must be supported by the trusted source \
+excerpt; if it is not, return no candidate.
   - `reason`: one sentence on why this card earns its place.
   - `gate`: five entries, one per question, each with `question_index` (1-5), \
 `passed`, and a `reason` specific to this candidate.
@@ -464,6 +505,12 @@ CARD_PROPOSAL_SCHEMA: dict[str, Any] = {
                     "topic": {"type": "string"},
                     "category": {"type": "string"},
                     "canonical_question": {"type": "string"},
+                    "answer_rubric": {
+                        "type": "object",
+                        "properties": {field: {"type": "string"} for field in RUBRIC_FIELDS},
+                        "required": list(RUBRIC_FIELDS),
+                        "additionalProperties": False,
+                    },
                     "reason": {"type": "string"},
                     "gate": {
                         "type": "array",
@@ -482,7 +529,14 @@ CARD_PROPOSAL_SCHEMA: dict[str, Any] = {
                         },
                     },
                 },
-                "required": ["topic", "category", "canonical_question", "reason", "gate"],
+                "required": [
+                    "topic",
+                    "category",
+                    "canonical_question",
+                    "answer_rubric",
+                    "reason",
+                    "gate",
+                ],
                 "additionalProperties": False,
             },
         }
@@ -736,6 +790,8 @@ async def generate_question(
     recent_questions: list[str],
     answer_anchor: str = "",
     source_excerpt: str = "",
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
 ) -> str:
     """The opening question for a card. Called on engagement, never on push."""
     settings = get_settings()
@@ -749,6 +805,7 @@ async def generate_question(
         f"A good answer should include: {answer_anchor}" if answer_anchor else None,
         f"Source excerpt: {source_excerpt}" if source_excerpt else None,
     ]
+    context.extend(_grounding_context(answer_basis, answer_rubric))
     if recent_questions:
         context.append("Recent questions (do not repeat):")
         context.extend(f"  - {q}" for q in recent_questions)
@@ -778,6 +835,8 @@ async def score_answer(
     follow_up_used: bool,
     answer_anchor: str = "",
     source_excerpt: str = "",
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
 ) -> ScoreResult:
     """Score the session so far, or return a probe if the answer was partial."""
     settings = get_settings()
@@ -786,6 +845,7 @@ async def score_answer(
         f"Rolling mastery summary: {mastery_summary}" if mastery_summary else None,
         f"A good answer should include: {answer_anchor}" if answer_anchor else None,
         f"Source excerpt: {source_excerpt}" if source_excerpt else None,
+        *_grounding_context(answer_basis, answer_rubric),
         "",
         f"QUESTION: {question_asked}",
         f"ANSWER: {answer_text}",
@@ -947,6 +1007,8 @@ async def score_reattempt(
     feedback_given: str,
     reattempt_answer: str,
     unaided_accuracy: int,
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
 ) -> ReattemptResult:
     """Grade turn 3 — the coached re-attempt. Never reaches SM-2.
 
@@ -964,6 +1026,7 @@ async def score_reattempt(
     settings = get_settings()
     transcript = [
         f"Topic: {topic}",
+        *_grounding_context(answer_basis, answer_rubric),
         "",
         f"QUESTION: {question_asked}",
         f"UNAIDED ACCURACY SCORE, BEFORE THEY WERE TOLD: {unaided_accuracy}/5",

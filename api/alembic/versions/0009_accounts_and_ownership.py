@@ -1,7 +1,7 @@
 """accounts, rotating sessions, and per-user aggregate ownership
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0009
+Revises: 0008
 Create Date: 2026-08-07
 
 Written by hand. The existing installation is backfilled to one stable founder
@@ -17,8 +17,8 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from alembic import op
 
-revision: str = "0008"
-down_revision: str | None = "0007"
+revision: str = "0009"
+down_revision: str | None = "0008"
 branch_labels = None
 depends_on = None
 
@@ -136,6 +136,7 @@ def upgrade() -> None:
     _add_owner("settings", "fk_settings_user_id_users")
     _add_owner("study_plans", "fk_study_plans_user_id_users")
     _add_owner("study_plan_guide_drafts", "fk_study_plan_guide_drafts_user_id_users")
+    _add_owner("pending_captures", "fk_pending_captures_user_id_users")
 
     # Migration 0001 inserted the singleton settings row with an explicit id,
     # which does not advance Postgres's sequence. The first public account would
@@ -153,6 +154,12 @@ def upgrade() -> None:
     op.create_index(
         "ix_study_plan_guide_drafts_user", "study_plan_guide_drafts", ["user_id"]
     )
+    op.drop_index("ix_pending_captures_created", table_name="pending_captures")
+    op.create_index(
+        "ix_pending_captures_user_created",
+        "pending_captures",
+        ["user_id", "created_at"],
+    )
 
     op.drop_index("uq_study_plans_one_active", table_name="study_plans")
     op.drop_index("ix_study_plans_status", table_name="study_plans")
@@ -168,6 +175,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_pending_captures_user_created", table_name="pending_captures")
+    op.create_index("ix_pending_captures_created", "pending_captures", ["created_at"])
+
     op.drop_index("ix_study_plans_status", table_name="study_plans")
     op.drop_index("uq_study_plans_one_active", table_name="study_plans")
     op.create_index(
@@ -187,6 +197,7 @@ def downgrade() -> None:
     op.drop_index("ix_cards_user_next_review", table_name="cards")
 
     for table, fk_name in (
+        ("pending_captures", "fk_pending_captures_user_id_users"),
         ("study_plan_guide_drafts", "fk_study_plan_guide_drafts_user_id_users"),
         ("study_plans", "fk_study_plans_user_id_users"),
         ("settings", "fk_settings_user_id_users"),

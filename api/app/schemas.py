@@ -36,6 +36,7 @@ class CardSummary(BaseModel):
     due_label: str
     days_since_review: int | None
     missed_count: int
+    lifecycle_status: Literal["active", "archived"] = "active"
 
 
 class Turn(BaseModel):
@@ -69,9 +70,83 @@ class Overview(BaseModel):
     cold: list[TierCard]
 
 
-class CreateCard(BaseModel):
+class AnswerRubric(BaseModel):
+    mechanism: str = Field(min_length=1, max_length=4000)
+    acceptable_alternative: str = Field(min_length=1, max_length=4000)
+    trade_off: str = Field(min_length=1, max_length=4000)
+    failure_mode: str = Field(min_length=1, max_length=4000)
+    misconception: str = Field(min_length=1, max_length=4000)
+
+
+class CaptureCreate(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
-    schedule: Literal["now", "next"] = "now"
+    context: str = Field(default="", max_length=1000)
+
+
+class GroundingUpdate(BaseModel):
+    source_url: str | None = Field(default=None, max_length=4000)
+    source_section: str | None = Field(default=None, max_length=1000)
+    source_label: str | None = Field(default=None, max_length=1000)
+    answer_basis: str | None = Field(default=None, max_length=20_000)
+    answer_rubric: AnswerRubric | None = None
+    canonical_question: str | None = Field(default=None, max_length=4000)
+
+
+class CaptureUpdate(GroundingUpdate):
+    topic: str | None = Field(default=None, min_length=1, max_length=200)
+    context: str | None = Field(default=None, max_length=1000)
+
+
+class CaptureSummary(BaseModel):
+    id: uuid.UUID
+    topic: str
+    context: str
+    status: Literal["pending_source", "ready_to_review", "activated"]
+    needs_source: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CaptureOut(BaseModel):
+    id: uuid.UUID
+    topic: str
+    context: str
+    status: Literal["pending_source", "ready_to_review", "activated"]
+    source_url: str
+    source_section: str
+    source_label: str
+    answer_basis: str
+    answer_rubric: dict[str, str]
+    canonical_question: str
+    activated_card_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CaptureActivate(BaseModel):
+    schedule: Literal["now", "next"]
+
+
+class ReplaceCard(BaseModel):
+    canonical_question: str = Field(min_length=1, max_length=4000)
+    schedule: Literal["now", "next"]
+
+
+class CardGroundingUpdate(GroundingUpdate):
+    canonical_question: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
+class CardMaintenance(BaseModel):
+    id: uuid.UUID
+    lifecycle_status: Literal["active", "archived"]
+    canonical_question: str
+    source_url: str
+    source_section: str
+    source_label: str
+    answer_basis: str
+    answer_rubric: dict[str, str]
+    replaces_card_id: uuid.UUID | None
+    replaced_by_card_id: uuid.UUID | None
 
 
 class SessionStart(BaseModel):
@@ -407,6 +482,7 @@ class ItemDetail(BaseModel):
     estimate_confidence: str
     source_excerpt: str
     source_label: str
+    recall_supported: bool = False
     notes: str
     study_block_label: str
     study_block_weekday: int | None

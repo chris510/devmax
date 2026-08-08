@@ -9,6 +9,7 @@ from app.auth import current_user_id
 from app.config import get_settings
 from app.db import get_session
 from app.models import (
+    CARD_ACTIVE,
     LIVE_STATUSES,
     STATUS_AWAITING_FOLLOW_UP,
     STATUS_COMPLETE,
@@ -97,6 +98,8 @@ async def start_session(
     card = await _owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
+    if card.lifecycle_status != CARD_ACTIVE:
+        raise HTTPException(status_code=409, detail="card is archived")
 
     existing = await _live_session(db, card_id)
     if existing is not None:
@@ -134,6 +137,8 @@ async def start_session(
             recent_questions=list(recent),
             answer_anchor=card.answer_anchor,
             source_excerpt=card.source_excerpt,
+            answer_basis=card.answer_basis,
+            answer_rubric=card.answer_rubric,
         )
         usage.record(db, current_user_id(), "question")
         # Persisted before it is returned, so the same question comes back next
@@ -210,6 +215,8 @@ async def submit_answer(
         follow_up_used=session.follow_up_used,
         answer_anchor=card.answer_anchor,
         source_excerpt=card.source_excerpt,
+        answer_basis=card.answer_basis,
+        answer_rubric=card.answer_rubric,
     )
     usage.record(db, current_user_id(), "score")
 
@@ -334,6 +341,8 @@ async def submit_reattempt(
         reattempt_answer=body.text,
         # `_reattempt_eligible` guarantees this is set and <= 2.
         unaided_accuracy=session.accuracy or 0,
+        answer_basis=card.answer_basis or card.answer_anchor,
+        answer_rubric=card.answer_rubric,
     )
     usage.record(db, current_user_id(), "reattempt")
 

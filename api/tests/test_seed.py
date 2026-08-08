@@ -15,7 +15,7 @@ import pytest
 from sqlmodel import select
 
 from app.db import is_local_database
-from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK, Card, Session
+from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK, Card, PendingCapture, Session
 from app.seed import (
     _schedule,
     _schedule_entries,
@@ -273,6 +273,26 @@ async def test_retire_removes_the_sessions_that_belonged_to_the_card(db, manifes
     assert await retire_from_file(manifest, db=db) == (["Doomed"], 2)
     survivors = (await db.exec(select(Session))).all()
     assert [s.question_asked for s in survivors] == ["q3"]
+
+
+async def test_retire_removes_the_activated_capture_that_points_at_the_card(
+    db, manifest
+) -> None:
+    card = make_card(topic="Doomed")
+    db.add(card)
+    await db.flush()
+    db.add(
+        PendingCapture(
+            topic=card.topic,
+            status="activated",
+            activated_card_id=card.id,
+        )
+    )
+    await db.commit()
+
+    await retire_from_file(manifest, db=db)
+
+    assert (await db.exec(select(PendingCapture))).all() == []
 
 
 async def test_a_dry_run_reports_without_deleting(db, manifest) -> None:

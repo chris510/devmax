@@ -141,6 +141,33 @@ actor MockAPI: DevmaxAPI {
     private var sessionIsPractice = false
     private var storedSettings = AppSettings.placeholder
     private var extraCards: [DueCard] = []
+    private var capturedGaps: [PendingCapture] = [
+        PendingCapture(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d1")!,
+            topic: "Lease-based leader election",
+            context: "I mixed up lease expiry with quorum loss.",
+            status: "pending_source", sourceUrl: "", sourceSection: "", sourceLabel: "",
+            answerBasis: "", answerRubric: AnswerRubric(), canonicalQuestion: "",
+            activatedCardId: nil, createdAt: Date(), updatedAt: Date()
+        ),
+        PendingCapture(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d2")!,
+            topic: "Postgres vacuum horizons",
+            context: "Why one old transaction prevents cleanup.",
+            status: "ready_to_review", sourceUrl: "https://www.postgresql.org/docs/",
+            sourceSection: "Routine Vacuuming", sourceLabel: "PostgreSQL documentation",
+            answerBasis: "VACUUM cannot remove tuples that remain visible to any active snapshot.",
+            answerRubric: AnswerRubric(
+                mechanism: "The global oldest active snapshot bounds tuple removal.",
+                acceptableAlternative: "Explain xmin or the visibility horizon accurately.",
+                tradeOff: "Long snapshots preserve consistency but delay reclamation.",
+                failureMode: "A long transaction causes dead tuples and table bloat.",
+                misconception: "VACUUM can always delete every dead tuple immediately."
+            ),
+            canonicalQuestion: "How can one long-running transaction prevent Postgres from reclaiming dead tuples?",
+            activatedCardId: nil, createdAt: Date(), updatedAt: Date()
+        ),
+    ]
 
     private static let chID = UUID(uuidString: "00000000-0000-0000-0000-0000000000c1")!
     private static let raftID = UUID(uuidString: "00000000-0000-0000-0000-0000000000c2")!
@@ -300,23 +327,136 @@ actor MockAPI: DevmaxAPI {
         )
     }
 
-    func createCard(topic: String, schedule: String) async throws -> CardSummary {
-        try await Task.sleep(nanoseconds: 600_000_000)
+    func captures() async throws -> [CaptureSummary] {
+        try await Task.sleep(nanoseconds: 180_000_000)
+        return capturedGaps.filter { $0.status != "activated" }.map(\.summary)
+    }
+
+    func capture(_ id: UUID) async throws -> PendingCapture {
+        guard let value = capturedGaps.first(where: { $0.id == id }) else {
+            throw APIError.status(404)
+        }
+        return value
+    }
+
+    func createCapture(topic: String, context: String) async throws -> PendingCapture {
+        try await Task.sleep(nanoseconds: 350_000_000)
         addAttempts += 1
-        // Forced failures succeed on the retry so the path can be walked end to end.
         if await MainActor.run(body: { DebugFlags.shared.failAdd }), addAttempts % 2 == 1 {
             throw APIError.status(500)
         }
+        let now = Date()
+        let capture = PendingCapture(
+            id: UUID(), topic: topic, context: context, status: "pending_source",
+            sourceUrl: "", sourceSection: "", sourceLabel: "", answerBasis: "",
+            answerRubric: AnswerRubric(), canonicalQuestion: "", activatedCardId: nil,
+            createdAt: now, updatedAt: now
+        )
+        capturedGaps.insert(capture, at: 0)
+        return capture
+    }
+
+    func updateCapture(
+        _ id: UUID, update: CaptureUpdateRequest
+    ) async throws -> PendingCapture {
+        guard let index = capturedGaps.firstIndex(where: { $0.id == id }) else {
+            throw APIError.status(404)
+        }
+        capturedGaps[index].sourceUrl = update.sourceUrl
+        capturedGaps[index].sourceSection = update.sourceSection
+        capturedGaps[index].sourceLabel = update.sourceLabel
+        capturedGaps[index].answerBasis = update.answerBasis
+        capturedGaps[index].answerRubric = update.answerRubric
+        capturedGaps[index].canonicalQuestion = update.canonicalQuestion
+        capturedGaps[index].updatedAt = Date()
+        capturedGaps[index].status = update.answerRubric.isComplete
+            && !update.answerBasis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !update.canonicalQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "ready_to_review" : "pending_source"
+        return capturedGaps[index]
+    }
+
+    func prepareCaptureQuestion(
+        _ id: UUID, regenerate: Bool = false
+    ) async throws -> PendingCapture {
+        try await Task.sleep(nanoseconds: 450_000_000)
+        guard let index = capturedGaps.firstIndex(where: { $0.id == id }) else {
+            throw APIError.status(404)
+        }
+        if capturedGaps[index].canonicalQuestion.isEmpty || regenerate {
+            capturedGaps[index].canonicalQuestion =
+                "Explain \(capturedGaps[index].topic.lowercased()) from the mechanism outward. Where does it fail?"
+        }
+        capturedGaps[index].status = "ready_to_review"
+        capturedGaps[index].updatedAt = Date()
+        return capturedGaps[index]
+    }
+
+    func activateCapture(_ id: UUID, schedule: String) async throws -> CardSummary {
+        guard let index = capturedGaps.firstIndex(where: { $0.id == id }) else {
+            throw APIError.status(404)
+        }
+        let capture = capturedGaps[index]
+        guard capture.status == "ready_to_review" else { throw APIError.status(409) }
+        let due = schedule == "now" ? "added just now" : "queued for next review"
         let card = DueCard(
-            id: UUID(), topic: topic, category: "Unsorted", masterySummary: "no signal yet",
-            lastScore: nil,
-            dueLabel: schedule == "now" ? "added just now" : "queued for next review",
+            id: capture.activatedCardId ?? UUID(), topic: capture.topic, category: "Unsorted",
+            masterySummary: "no signal yet", lastScore: nil, dueLabel: due,
             resumable: false, missedCount: 0
         )
-        extraCards.insert(card, at: 0)
+        if !extraCards.contains(where: { $0.topic == card.topic }) {
+            extraCards.insert(card, at: 0)
+        }
+        capturedGaps[index].status = "activated"
+        capturedGaps[index].activatedCardId = card.id
         return Self.summary(
-            card.id, topic, "Unsorted", "", score: nil, axes: nil,
-            due: card.dueLabel, ago: nil
+            card.id, card.topic, card.category, "", score: nil, axes: nil,
+            due: due, ago: nil
+        )
+    }
+
+    func discardCapture(_ id: UUID) async throws {
+        guard let index = capturedGaps.firstIndex(where: { $0.id == id }) else {
+            throw APIError.status(404)
+        }
+        capturedGaps.remove(at: index)
+    }
+
+    func cardMaintenance(_ id: UUID) async throws -> CardMaintenance {
+        CardMaintenance(
+            id: id, lifecycleStatus: "active",
+            canonicalQuestion: "Explain this topic from the mechanism outward.",
+            sourceUrl: "https://example.com/source", sourceSection: "", sourceLabel: "Source",
+            answerBasis: "Trusted answer basis.", answerRubric: AnswerRubric(
+                mechanism: "Required mechanism", acceptableAlternative: "Equivalent framing",
+                tradeOff: "Key trade-off", failureMode: "Key failure mode",
+                misconception: "Common misconception"
+            ), replacesCardId: nil, replacedByCardId: nil
+        )
+    }
+
+    func archiveCard(_ id: UUID) async throws -> CardMaintenance {
+        let value = try await cardMaintenance(id)
+        return CardMaintenance(
+            id: value.id, lifecycleStatus: "archived",
+            canonicalQuestion: value.canonicalQuestion, sourceUrl: value.sourceUrl,
+            sourceSection: value.sourceSection, sourceLabel: value.sourceLabel,
+            answerBasis: value.answerBasis, answerRubric: value.answerRubric,
+            replacesCardId: value.replacesCardId, replacedByCardId: value.replacedByCardId
+        )
+    }
+
+    func restoreCard(_ id: UUID) async throws -> CardMaintenance {
+        try await cardMaintenance(id)
+    }
+
+    func replaceCard(
+        _ id: UUID, question: String, schedule: String
+    ) async throws -> CardSummary {
+        let original = Self.library.first(where: { $0.id == id }) ?? Self.library[0]
+        return Self.summary(
+            UUID(), original.topic, original.category, "", score: nil, axes: nil,
+            due: schedule == "now" ? "added just now" : "queued for next review", ago: nil
         )
     }
 

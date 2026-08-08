@@ -759,6 +759,25 @@ async def test_an_unsupported_subject_never_reaches_the_card_model(client, stub_
     assert stub_cards.calls == 0
 
 
+async def test_an_item_without_confirmed_recall_support_never_reaches_the_card_model(
+    client, stub_import, stub_cards
+):
+    payload = import_payload()
+    payload["items"][0] = {**payload["items"][0], "recall_supported": False}
+    stub_import.response = payload
+    plan = await make_plan(client)
+    item_id = await _complete_first_item(client, plan)
+
+    response = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/card-proposals", headers=API_HEADERS
+    )
+
+    assert response.status_code == 200
+    assert response.json()["proposals"] == []
+    assert "no confirmed answer basis" in response.json()["note"]
+    assert stub_cards.calls == 0
+
+
 async def test_a_candidate_that_fails_the_gate_is_not_suggested_and_not_counted(
     client, stub_import, stub_cards
 ):
@@ -887,6 +906,9 @@ async def test_accepting_a_proposal_creates_the_card_and_keeps_its_question(
     card = (await db.exec(select(Card).where(Card.topic == "Postgres write path"))).one()
     # The approved question is persisted, so the first review does not regenerate.
     assert card.canonical_question == proposal["canonical_question"]
+    assert card.answer_basis == GUIDE[0:20].strip()
+    assert card.answer_rubric["mechanism"] == "The source-supported mechanism."
+    assert card.source_label.endswith(" · Study Plan")
     assert card.delivery_mode == "conversational"
     assert card.ease_factor == 2.5
     assert card.repetitions == 0

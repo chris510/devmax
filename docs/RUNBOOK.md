@@ -268,7 +268,7 @@ railway ssh --service <api> \
 `--dry-run` prints the matched topics and the session count and stops; nothing is
 deleted without `--confirm`. The manifest is the delete list — retirement never
 diffs against the current deck, so `library/`, `modules/`, and gap-driven cards from
-`POST /cards` are structurally out of reach. `archive/` ships in the image
+Capture activation are structurally out of reach. `archive/` ships in the image
 (`.dockerignore` doesn't exclude it), so the path above resolves inside the
 container.
 

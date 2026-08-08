@@ -77,7 +77,17 @@ protocol DevmaxAPI {
     func due() async throws -> [DueCard]
     func cards(sort: String, mode: String) async throws -> [CardSummary]
     func card(_ id: UUID) async throws -> CardDetail
-    func createCard(topic: String, schedule: String) async throws -> CardSummary
+    func captures() async throws -> [CaptureSummary]
+    func capture(_ id: UUID) async throws -> PendingCapture
+    func createCapture(topic: String, context: String) async throws -> PendingCapture
+    func updateCapture(_ id: UUID, update: CaptureUpdateRequest) async throws -> PendingCapture
+    func prepareCaptureQuestion(_ id: UUID, regenerate: Bool) async throws -> PendingCapture
+    func activateCapture(_ id: UUID, schedule: String) async throws -> CardSummary
+    func discardCapture(_ id: UUID) async throws
+    func cardMaintenance(_ id: UUID) async throws -> CardMaintenance
+    func archiveCard(_ id: UUID) async throws -> CardMaintenance
+    func restoreCard(_ id: UUID) async throws -> CardMaintenance
+    func replaceCard(_ id: UUID, question: String, schedule: String) async throws -> CardSummary
     /// `practice` marks a Review Sprint run: scored and written to the card's
     /// history exactly like a normal session, with SM-2 left untouched.
     func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart
@@ -332,9 +342,71 @@ struct LiveAPI: DevmaxAPI {
         try Self.decoder.decode(CardDetail.self, from: await request("GET", "cards/\(id)"))
     }
 
-    func createCard(topic: String, schedule: String) async throws -> CardSummary {
-        let body = try Self.encoder.encode(["topic": topic, "schedule": schedule])
-        return try Self.decoder.decode(CardSummary.self, from: await request("POST", "cards", body: body))
+    func captures() async throws -> [CaptureSummary] {
+        try await get("captures", [CaptureSummary].self)
+    }
+
+    func capture(_ id: UUID) async throws -> PendingCapture {
+        try await get("captures/\(id)", PendingCapture.self)
+    }
+
+    func createCapture(topic: String, context: String) async throws -> PendingCapture {
+        return try await post("captures", PendingCapture.self, body: CaptureCreateRequest(
+            topic: topic, context: context
+        ))
+    }
+
+    func updateCapture(
+        _ id: UUID, update: CaptureUpdateRequest
+    ) async throws -> PendingCapture {
+        let body = try Self.encoder.encode(update)
+        return try Self.decoder.decode(
+            PendingCapture.self, from: await request("PATCH", "captures/\(id)", body: body)
+        )
+    }
+
+    func prepareCaptureQuestion(
+        _ id: UUID, regenerate: Bool = false
+    ) async throws -> PendingCapture {
+        try await post(
+            "captures/\(id)/question", PendingCapture.self,
+            query: [URLQueryItem(name: "regenerate", value: regenerate ? "true" : "false")]
+        )
+    }
+
+    func activateCapture(_ id: UUID, schedule: String) async throws -> CardSummary {
+        try await post(
+            "captures/\(id)/activate", CardSummary.self, body: ["schedule": schedule]
+        )
+    }
+
+    func discardCapture(_ id: UUID) async throws {
+        _ = try await request("DELETE", "captures/\(id)")
+    }
+
+    func cardMaintenance(_ id: UUID) async throws -> CardMaintenance {
+        try await get("cards/\(id)/maintenance", CardMaintenance.self)
+    }
+
+    func archiveCard(_ id: UUID) async throws -> CardMaintenance {
+        try await post("cards/\(id)/archive", CardMaintenance.self)
+    }
+
+    func restoreCard(_ id: UUID) async throws -> CardMaintenance {
+        try await post("cards/\(id)/restore", CardMaintenance.self)
+    }
+
+    func replaceCard(
+        _ id: UUID, question: String, schedule: String
+    ) async throws -> CardSummary {
+        struct Body: Encodable {
+            let canonicalQuestion: String
+            let schedule: String
+        }
+        return try await post(
+            "cards/\(id)/replace", CardSummary.self,
+            body: Body(canonicalQuestion: question, schedule: schedule)
+        )
     }
 
     func startSession(cardID: UUID, practice: Bool = false) async throws -> SessionStart {

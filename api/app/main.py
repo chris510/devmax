@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.db import session_factory
 from app.routers import (
     authentication,
+    captures,
     cards,
     devices,
     internal,
@@ -81,6 +82,7 @@ if not _settings.apns_private_key:
 app.include_router(authentication.router)
 client_dependencies = [Depends(require_user)]
 app.include_router(cards.router, dependencies=client_dependencies)
+app.include_router(captures.router, dependencies=client_dependencies)
 app.include_router(sessions.router, dependencies=client_dependencies)
 app.include_router(devices.router, dependencies=client_dependencies)
 app.include_router(settings.router, dependencies=client_dependencies)

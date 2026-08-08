@@ -54,6 +54,7 @@ def _item(key: str, week: int, order: int, **overrides) -> dict:
         "source_start": span[0],
         "source_end": span[1],
         "source_excerpt": excerpt_at(*span),
+        "recall_supported": True,
         "parser_interpretation": "",
     }
     return {**defaults, **overrides}

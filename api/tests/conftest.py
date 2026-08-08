@@ -66,7 +66,7 @@ async def db() -> AsyncIterator[AsyncSession]:
             # next one. New tables must be added here as well as to models.py.
             await conn.execute(
                 text(
-                    "TRUNCATE cards, sessions, device_tokens, settings, "
+                    "TRUNCATE pending_captures, cards, sessions, device_tokens, settings, "
                     "study_plans, study_plan_phases, study_plan_weeks, "
                     "study_plan_items, study_plan_item_dependencies, "
                     "study_plan_revisions, study_plan_guide_drafts, "
@@ -195,6 +195,7 @@ def _item(key, week, order, **overrides):
         "source_start": 0,
         "source_end": 20,
         "source_excerpt": GUIDE[0:20],
+        "recall_supported": True,
         "parser_interpretation": "",
     }
     return {**defaults, **overrides}
@@ -293,7 +294,14 @@ def stub_cards(monkeypatch):
     async def fake(**kwargs):
         Stub.calls += 1
         Stub.last_kwargs = kwargs
-        return Stub.candidates
+        rubric = {
+            "mechanism": "The source-supported mechanism.",
+            "acceptable_alternative": "Equivalent terminology is valid.",
+            "trade_off": "The source-supported trade-off.",
+            "failure_mode": "The source-supported failure mode.",
+            "misconception": "The common source-contradicted misconception.",
+        }
+        return [{"answer_rubric": rubric, **candidate} for candidate in Stub.candidates]
 
     monkeypatch.setattr(llm, "propose_cards", fake)
     monkeypatch.setattr(study_plan_router.llm, "propose_cards", fake)

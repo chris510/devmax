@@ -28,7 +28,6 @@ from app.models import (
     ACCEPTANCE_COMMITTED,
     ACCEPTANCE_FAILED,
     ACCEPTANCE_PROCESSING,
-    DELIVERY_CONVERSATIONAL,
     DISPOSITION_ACCEPTED,
     DISPOSITION_EXISTING,
     DISPOSITION_SKIPPED,
@@ -108,6 +107,13 @@ from app.services import guide_import, llm, materials, usage
 from app.services import study_plan as sp
 from app.services import study_plan_import as spi
 from app.services import study_plan_scheduler as sched
+from app.services.card_lifecycle import (
+    Grounding,
+    GroundingError,
+    active_card_filter,
+    build_grounded_card,
+    clean_rubric,
+)
 
 router = APIRouter(tags=["study-plan"])
 
@@ -179,6 +185,15 @@ def _block_label(item: StudyPlanItem) -> str | None:
     return f"{WEEKDAYS[item.study_block_weekday - 1]} {hour:02d}:{minute:02d}"
 
 
+def _source_recall_eligible(subject_slug: str, item: StudyPlanItem) -> bool:
+    """The shared fail-closed boundary for source-grounded recall work."""
+    return (
+        sp.slug_supports_cards(subject_slug)
+        and item.recall_supported
+        and bool(item.source_excerpt.strip())
+    )
+
+
 def _debrief_eligible(subject_slug: str, item: StudyPlanItem) -> bool:
     """Whether this item may collect a gap that can safely become a card.
 
@@ -190,8 +205,7 @@ def _debrief_eligible(subject_slug: str, item: StudyPlanItem) -> bool:
     return (
         item.type == ITEM_PRACTICE
         and item.status == ITEM_COMPLETE
-        and sp.slug_supports_cards(subject_slug)
-        and bool(item.source_excerpt.strip())
+        and _source_recall_eligible(subject_slug, item)
     )
 
 
@@ -839,6 +853,7 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
         estimate_confidence=item.estimate_confidence,
         source_excerpt=item.source_excerpt,
         source_label=item.parser_interpretation,
+        recall_supported=item.recall_supported,
         notes=item.notes,
         study_block_label=_block_label(item) or item.study_block_label,
         study_block_weekday=item.study_block_weekday,
@@ -849,7 +864,7 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
         linked_card_ids=[link.card_id for link in links],
         card_proposals_available=(
             item.status == ITEM_COMPLETE
-            and sp.slug_supports_cards(graph.plan.subject_slug)
+            and _source_recall_eligible(graph.plan.subject_slug, item)
             and (
                 item.type != ITEM_PRACTICE
                 or (debrief is not None and debrief.submitted_at is not None)
@@ -1558,12 +1573,23 @@ async def create_card_proposals(
             ),
         )
 
+    if not _source_recall_eligible(graph.plan.subject_slug, item):
+        return CardProposalList(
+            plan_id=plan_id,
+            item_id=item_id,
+            supports_recall_cards=True,
+            suggested_count=0,
+            proposals=[],
+            note=(
+                "This item has no confirmed answer basis, so it cannot produce "
+                "a review card."
+            ),
+        )
+
     observed_gap = ""
     if item.type == ITEM_PRACTICE:
         # A reflection identifies where to look; the trusted source still supplies
         # the answer basis. Without both, no Practice proposal call is allowed.
-        if not item.source_excerpt.strip():
-            raise HTTPException(status_code=409, detail="practice item has no answer basis")
         debrief = await _debrief_for(db, item_id)
         if debrief is None or debrief.submitted_at is None:
             raise HTTPException(status_code=409, detail="practice debrief is required")
@@ -1580,7 +1606,7 @@ async def create_card_proposals(
         weak = (
             await db.exec(
                 select(Card)
-                .where(Card.user_id == current_user_id())
+                .where(Card.user_id == current_user_id(), active_card_filter())
                 .where(col(Card.last_score).is_not(None))
                 .where(col(Card.last_score) <= 3)
                 .order_by(col(Card.last_score))
@@ -1604,6 +1630,25 @@ async def create_card_proposals(
             if not topic:
                 continue
             gate = sp.normalise_gate_results(candidate.get("gate", []))
+            rubric = clean_rubric(candidate.get("answer_rubric"))
+            question = str(candidate.get("canonical_question", "")).strip()
+            grounding = Grounding(
+                source_label=f"{item.full_title} · Study Plan",
+                answer_basis=item.source_excerpt,
+                answer_rubric=rubric,
+                canonical_question=question,
+            )
+            try:
+                grounding.require_complete()
+            except GroundingError as exc:
+                # Structured output should make this unreachable, but an
+                # incomplete authority must fail the existing gate closed rather
+                # than becoming a selectable malformed proposal.
+                gate[0] = {
+                    **gate[0],
+                    "passed": False,
+                    "reason": f"Grounding is incomplete: {', '.join(exc.missing)}.",
+                }
             exact = existing_cards.get(sp.normalize_topic(topic))
             duplicate_result, card_id = sp.classify_duplicate(exact, None)
             row = StudyPlanCardProposal(
@@ -1611,7 +1656,10 @@ async def create_card_proposals(
                 source_plan_item_id=item_id,
                 topic=topic,
                 category=str(candidate.get("category", "Unsorted")).strip() or "Unsorted",
-                canonical_question=str(candidate.get("canonical_question", "")).strip(),
+                canonical_question=question,
+                source_label=grounding.source_label,
+                answer_basis=grounding.answer_basis,
+                answer_rubric=rubric,
                 reason=str(candidate.get("reason", "")).strip(),
                 gate_results=gate,
                 duplicate_check_result=duplicate_result,
@@ -1752,7 +1800,7 @@ async def accept_card_proposals(
     # half-built batch, and an ORM rollback mid-request expires exactly the rows
     # needed to report which candidate clashed. Checking first means the abort
     # path never has anything to undo.
-    resolved: list[tuple[StudyPlanCardProposal, str, str]] = []
+    prepared: list[tuple[StudyPlanCardProposal, Card]] = []
     existing_cards = await sp.normalized_card_index(db, current_user_id())
     for row in proposals:
         edit = body.edits.get(str(row.id), {})
@@ -1771,7 +1819,26 @@ async def accept_card_proposals(
                 status_code=409,
                 detail=f"a card for “{clash.topic}” already exists; nothing was created",
             )
-        resolved.append((row, topic, question))
+        try:
+            card = build_grounded_card(
+                user_id=current_user_id(),
+                topic=topic,
+                category=row.category,
+                grounding=Grounding(
+                    source_label=row.source_label,
+                    answer_basis=row.answer_basis,
+                    answer_rubric=row.answer_rubric,
+                    canonical_question=question,
+                ),
+                today=today,
+                schedule="now",
+            )
+        except GroundingError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "missing_grounding", "missing": exc.missing},
+            ) from exc
+        prepared.append((row, card))
 
     acceptance = StudyPlanCardProposalAcceptance(
         proposal_id=proposals[0].id,
@@ -1784,17 +1851,7 @@ async def accept_card_proposals(
 
     created: list[uuid.UUID] = []
     links: list[StudyPlanCardLink] = []
-    for row, topic, question in resolved:
-        card = Card(
-            user_id=current_user_id(),
-            topic=topic,
-            category=row.category,
-            delivery_mode=DELIVERY_CONVERSATIONAL,
-            # The approved question becomes the card's canonical question, so the
-            # first review reuses it rather than generating a different one.
-            canonical_question=question or None,
-            next_review_at=today,
-        )
+    for row, card in prepared:
         db.add(card)
         links.append(
             StudyPlanCardLink(

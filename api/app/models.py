@@ -27,6 +27,13 @@ FOUNDER_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 USER_ACTIVE = "active"
 USER_DELETING = "deleting"
 
+CARD_ACTIVE = "active"
+CARD_ARCHIVED = "archived"
+
+CAPTURE_PENDING_SOURCE = "pending_source"
+CAPTURE_READY = "ready_to_review"
+CAPTURE_ACTIVATED = "activated"
+
 STATUS_OPEN = "open"
 STATUS_AWAITING_FOLLOW_UP = "awaiting_follow_up"
 STATUS_COMPLETE = "complete"
@@ -117,9 +124,14 @@ class Card(SQLModel, table=True):
         Index("ix_cards_user_next_review", "user_id", "next_review_at"),
         # The hot query: due conversational cards. Desk cards never enter the push loop.
         Index(
-            "ix_cards_due_conversational",
+            "ix_cards_active_due_conversational",
             "next_review_at",
-            postgresql_where=text("delivery_mode = 'conversational'"),
+            postgresql_where=text(
+                "delivery_mode = 'conversational' AND lifecycle_status = 'active'"
+            ),
+            sqlite_where=text(
+                "delivery_mode = 'conversational' AND lifecycle_status = 'active'"
+            ),
         ),
     )
 
@@ -144,6 +156,28 @@ class Card(SQLModel, table=True):
         default=None, foreign_key="material_sources.id", ondelete="SET NULL"
     )
 
+    # Grounding is optional only for cards that predate the grounding boundary.
+    # Every new activation path validates these fields before it creates a card.
+    source_url: str = ""
+    source_section: str = ""
+    source_label: str = ""
+    answer_basis: str = ""
+    answer_rubric: dict[str, str] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+
+    # Archive is recoverable and leaves sessions untouched. Replacing a question
+    # creates a new card and joins the pair here instead of rewriting the retrieval
+    # that the old card's scores measured.
+    lifecycle_status: str = CARD_ACTIVE
+    archived_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    replaces_card_id: uuid.UUID | None = Field(
+        default=None, foreign_key="cards.id", ondelete="SET NULL"
+    )
+    replaced_by_card_id: uuid.UUID | None = Field(
+        default=None, foreign_key="cards.id", ondelete="SET NULL"
+    )
+
     ease_factor: float = 2.5
     interval_days: int = 1
     repetitions: int = 0
@@ -165,6 +199,47 @@ class Card(SQLModel, table=True):
     # still uncounted. Replaces clearing `last_pushed_at`, which destroyed the
     # evidence both the daily cap and the per-window guard read.
     missed_counted_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class PendingCapture(SQLModel, table=True):
+    """A fast-captured gap that has not entered the review system.
+
+    This is a separate table on purpose: no due, push, scoring, Sprint, Coverage,
+    history, or scheduler query can accidentally include a capture as a card.
+    Draft rubric and question fields make the multi-screen grounding flow durable
+    and make question generation idempotent across retries.
+    """
+
+    __tablename__ = "pending_captures"
+    __table_args__ = (
+        Index("ix_pending_captures_user_created", "user_id", text("created_at DESC")),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE"
+    )
+    topic: str
+    context: str = ""
+    status: str = CAPTURE_PENDING_SOURCE
+
+    source_url: str = ""
+    source_section: str = ""
+    source_label: str = ""
+    answer_basis: str = ""
+    answer_rubric: dict[str, str] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    canonical_question: str = ""
+
+    # Kept after activation so a lost response can replay safely and return the
+    # same card rather than creating a duplicate.
+    activated_card_id: uuid.UUID | None = Field(
+        default=None, foreign_key="cards.id", ondelete="SET NULL"
+    )
 
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
@@ -552,6 +627,10 @@ class StudyPlanItem(SQLModel, table=True):
     source_start: int | None = None
     source_end: int | None = None
     source_excerpt: str = ""
+    # Explicit per-item decision. Subject eligibility is necessary but not
+    # sufficient: a broad mock can be valuable plan work without containing a
+    # trustworthy, bounded answer basis for a recall card.
+    recall_supported: bool = False
     # What the importer understood this line of the guide to mean. Shown in the
     # estimate and retrieval audits so a wrong reading is correctable.
     parser_interpretation: str = ""
@@ -714,6 +793,14 @@ class StudyPlanCardProposal(SQLModel, table=True):
     # Persisted onto the card as `canonical_question` when accepted, so an
     # approved question is never regenerated on the first review.
     canonical_question: str
+    # Snapshot the trusted item authority and the model's source-grounded rubric
+    # on the proposal. Acceptance is then deterministic and makes no second model
+    # call, even if the plan item is edited while the user reviews candidates.
+    source_label: str = ""
+    answer_basis: str = ""
+    answer_rubric: dict[str, str] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
     reason: str = ""
 
     # Five {question, passed, reason} objects, in gate order. All five must pass.

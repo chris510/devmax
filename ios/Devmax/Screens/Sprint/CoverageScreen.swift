@@ -4,9 +4,8 @@ import SwiftUI
 /// deciding where the study guide needs more cards, fewer cards, or rebalancing.
 /// Not a daily habit screen.
 ///
-/// **Read-only.** It surfaces the gap, it doesn't fix it: card authoring stays in
-/// Quick Add or the seed data. Reached only from Review Sprint Setup, which is
-/// the moment someone is already thinking in category gaps.
+/// Category tiers remain read-only. The weakest global depth axis can start a
+/// Practice-mode repair run; it never changes SM-2.
 struct CoverageScreen: View {
     @EnvironmentObject private var state: AppState
 
@@ -64,19 +63,31 @@ struct CoverageScreen: View {
 
     /// One mono line: `ACCURACY 4.1 · DEPTH 2.8 · BOUNDARIES 3.2`.
     ///
-    /// No bars, no colour, not tappable. Hidden until something has been scored —
-    /// three axes at 0.0 would read as a finding rather than as no data.
+    /// No bars or colour. Only the weakest depth axis is actionable; mechanism
+    /// stays under normal scheduling rather than getting a second practice path.
     @ViewBuilder
     private var axisRollup: some View {
-        let parts = state.axisRollup
-        if !parts.isEmpty {
+        let items = state.axisRollup
+        if !items.isEmpty {
             FlowLayout(horizontalSpacing: 6, verticalSpacing: 2) {
-                ForEach(Array(parts.enumerated()), id: \.offset) { index, text in
-                    MetaText(
-                        text: index < parts.count - 1 ? "\(text) ·" : text,
-                        font: WCFont.mono(10), tracking: 0.4, color: Theme.metaDim
-                    )
-                    .fixedSize()
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    if item.isActionable, let axis = item.depthAxis {
+                        Button { state.enterDepthRepair(axis) } label: {
+                            MetaText(
+                                text: "\(item.text) →\(index < items.count - 1 ? " ·" : "")",
+                                font: WCFont.mono(10), tracking: 0.4, color: Theme.meta
+                            )
+                            .fixedSize()
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(item.text). Start depth repair.")
+                    } else {
+                        MetaText(
+                            text: index < items.count - 1 ? "\(item.text) ·" : item.text,
+                            font: WCFont.mono(10), tracking: 0.4, color: Theme.metaDim
+                        )
+                        .fixedSize()
+                    }
                 }
             }
             .padding(.top, 1)
@@ -89,7 +100,7 @@ struct CoverageScreen: View {
                 CoverageSection(category: section.category, cards: section.cards)
             }
 
-            MetaText(text: "TAP A TIER TO LIST ITS CARDS · READ ONLY",
+            MetaText(text: "TAP A TIER TO LIST ITS CARDS",
                      font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint)
                 .padding(.top, 16)
                 .overlay(alignment: .top) { Hairline() }
