@@ -1,0 +1,164 @@
+[
+  {
+    "name": "delivery sequence — complete",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "Once requirements are agreed, I name the core entities, turn the main user actions into an external API or interface, and draw the simplest end-to-end high-level design that makes those calls work. Then I spend the remaining time on the bottlenecks and non-functional constraints that matter. That ordering protects a complete answer; starting with sharding or a favorite database can consume the interview before there is a working system.",
+    "expected_score": 5,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 4,
+    "expected_failure_mode_awareness": 4
+  },
+  {
+    "name": "delivery sequence — mechanism only",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "I identify the entities, define the API, draw the high-level design, and then do the deep dives.",
+    "expected_score": 3,
+    "expected_mechanism_accuracy": 4,
+    "expected_trade_off_awareness": 1,
+    "expected_failure_mode_awareness": 1
+  },
+  {
+    "name": "delivery sequence — technology first",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "I would start by selecting Kafka, Redis, and Cassandra, estimate their throughput, and then fit the requirements and endpoints around that stack.",
+    "expected_score": 1,
+    "expected_mechanism_accuracy": 1,
+    "expected_trade_off_awareness": 0,
+    "expected_failure_mode_awareness": 0
+  },
+  {
+    "name": "non-functional requirements — complete",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "I would replace fast with a feed-read target such as p95 under 300 milliseconds at the expected read QPS, and replace reliable with an explicit availability target plus what stale data is acceptable during failures. I would keep only the three or four constraints that change the design. Stronger latency, availability, and freshness targets increase replication, caching, and operational cost; saying scalable and reliable without bounds gives us no way to choose among those designs.",
+    "expected_score": 5,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 4,
+    "expected_failure_mode_awareness": 4
+  },
+  {
+    "name": "non-functional requirements — mechanism only",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "I would quantify feed latency, expected traffic, availability, and the consistency requirement instead of leaving fast and reliable vague.",
+    "expected_score": 3,
+    "expected_mechanism_accuracy": 4,
+    "expected_trade_off_awareness": 1,
+    "expected_failure_mode_awareness": 1
+  },
+  {
+    "name": "non-functional requirements — generic checklist",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "The system should maximize scalability, availability, consistency, durability, security, and performance. Those are the standard non-functional requirements for every system.",
+    "expected_score": 1,
+    "expected_mechanism_accuracy": 1,
+    "expected_trade_off_awareness": 0,
+    "expected_failure_mode_awareness": 0
+  },
+  {
+    "name": "identity boundary — complete",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "The service verifies the bearer token and derives the acting principal from that trusted result. It loads the booking named by the request and authorizes that principal as the owner or an allowed administrator; the body user ID is not identity evidence. A gateway can forward signed identity context, but blindly trusting the client field creates an IDOR where one authenticated user cancels another user's booking. Authentication tells us who called, not whether this action is permitted.",
+    "expected_score": 5,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 4,
+    "expected_failure_mode_awareness": 5
+  },
+  {
+    "name": "identity boundary — mechanism only",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "Use the verified token to identify the caller, load the booking, and check that caller is allowed to cancel it. Do not use the body user ID as the caller.",
+    "expected_score": 3,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 1,
+    "expected_failure_mode_awareness": 1
+  },
+  {
+    "name": "identity boundary — trusts client identity",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "The token proves the request is authenticated, so the service can use the user ID in the body to select whose booking to cancel.",
+    "expected_score": 1,
+    "expected_mechanism_accuracy": 1,
+    "expected_trade_off_awareness": 0,
+    "expected_failure_mode_awareness": 0
+  },
+  {
+    "name": "timeout retry — complete",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "answer": "The client must treat the charge outcome as unknown, not failed. It retries a transient error with the same operation-scoped idempotency key and bounded exponential backoff plus jitter. The server atomically owns or records that key and returns or waits for the original result, so a replay cannot create a second charge. This costs retained deduplication state and a key-expiry policy; a new key duplicates effects, while immediate unlimited retries can turn the dependency failure into a retry storm.",
+    "expected_score": 5,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 5,
+    "expected_failure_mode_awareness": 5
+  },
+  {
+    "name": "timeout retry — mechanism only",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "answer": "A timeout does not reveal whether the charge happened. Retry with the same idempotency key, and have the server reuse the stored result for that key.",
+    "expected_score": 3,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 1,
+    "expected_failure_mode_awareness": 1
+  },
+  {
+    "name": "timeout retry — assumes rollback",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "answer": "The timeout means the request failed, so the client should immediately send a fresh payment request with a new key until one succeeds.",
+    "expected_score": 1,
+    "expected_mechanism_accuracy": 1,
+    "expected_trade_off_awareness": 0,
+    "expected_failure_mode_awareness": 0
+  },
+  {
+    "name": "cursor pagination — complete",
+    "topic": "Cursor pagination: preserving stable traversal while rows are inserted or deleted",
+    "answer": "The response cursor represents the final row's stable ordered position, for example created_at plus a unique ID. The next query uses the same ordering and asks strictly after that tuple, so a new row inserted ahead of the boundary does not shift the continuation as an offset would. The trade-off is that page-number jumps and reverse navigation are harder. If the sort key is mutable or not unique, records can still be skipped or repeated.",
+    "expected_score": 5,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 4,
+    "expected_failure_mode_awareness": 5
+  },
+  {
+    "name": "cursor pagination — mechanism only",
+    "topic": "Cursor pagination: preserving stable traversal while rows are inserted or deleted",
+    "answer": "Put the last row's ordered key in the cursor and have the next query fetch rows strictly after that key in the same order.",
+    "expected_score": 3,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 1,
+    "expected_failure_mode_awareness": 1
+  },
+  {
+    "name": "cursor pagination — encoded offset",
+    "topic": "Cursor pagination: preserving stable traversal while rows are inserted or deleted",
+    "answer": "The cursor is the next page number encoded in base64. The server decodes it to an offset, so inserts cannot affect the pages.",
+    "expected_score": 1,
+    "expected_mechanism_accuracy": 1,
+    "expected_trade_off_awareness": 0,
+    "expected_failure_mode_awareness": 0
+  },
+  {
+    "name": "decision-driven estimation — complete",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "answer": "The pending branch is whether the Top-K state fits on one machine. I would estimate distinct topics times bytes per counter or heap entry, add reasonable overhead, and compare that working set with the memory budget. If it fits with headroom, distribution is unjustified; if it does not, partition and merge partial Top-K results. The estimate saves complexity when the bound is small, but skipping it near a real limit risks a design that cannot run. Unrelated DAU and storage arithmetic would not answer this choice.",
+    "expected_score": 5,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 5,
+    "expected_failure_mode_awareness": 4
+  },
+  {
+    "name": "decision-driven estimation — mechanism only",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "answer": "Estimate the number of distinct topics times the state kept per topic and compare it with one machine's memory. Distribute only if it will not fit.",
+    "expected_score": 3,
+    "expected_mechanism_accuracy": 5,
+    "expected_trade_off_awareness": 1,
+    "expected_failure_mode_awareness": 1
+  },
+  {
+    "name": "decision-driven estimation — ritual math",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "answer": "I would always calculate DAU, peak QPS, bandwidth, and ten-year storage first. Because the product is large, the aggregation must be distributed.",
+    "expected_score": 1,
+    "expected_mechanism_accuracy": 1,
+    "expected_trade_off_awareness": 0,
+    "expected_failure_mode_awareness": 0
+  }
+]

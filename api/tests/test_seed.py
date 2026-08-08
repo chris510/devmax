@@ -17,10 +17,13 @@ from sqlmodel import select
 from app.db import is_local_database
 from app.models import DELIVERY_CONVERSATIONAL, DELIVERY_DESK, Card, PendingCapture, Session
 from app.seed import (
+    SeedGroundingError,
     _schedule,
     _schedule_entries,
     _selected_entries,
+    _validated_grounding,
     delivery_mode_for,
+    load_from_file,
     retire_from_file,
 )
 from tests.conftest import make_card
@@ -37,6 +40,29 @@ def study_plan() -> list[dict]:
 
 def week_one(n: int, category: str = "Core Concept") -> list[dict]:
     return [{"topic": f"t{i}", "category": category, "target_week": 1} for i in range(n)]
+
+
+def approved_entry(**changes) -> dict:
+    entry = {
+        "topic": "Cursor pagination",
+        "category": "Core Concept",
+        "target_week": 1,
+        "source_url": "https://example.com/cursor",
+        "source_section": "Cursor pagination",
+        "source_label": "Reviewed source",
+        "answer_basis": "Resume strictly after the last stable ordered key.",
+        "answer_rubric": {
+            "mechanism": "Use the last stable ordered key.",
+            "acceptable_alternative": "Keyset pagination.",
+            "trade_off": "No arbitrary page jumps.",
+            "failure_mode": "A mutable key duplicates or skips rows.",
+            "misconception": "A cursor is not a page number.",
+        },
+        "canonical_question": "How does a cursor preserve stable traversal?",
+        "grounding_status": "approved",
+    }
+    entry.update(changes)
+    return entry
 
 
 def due_by_mode(entries: list[dict], per_day: int, mode: str) -> collections.Counter:
@@ -174,6 +200,60 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
         }
         for e in entries
     )
+
+
+def test_the_week_one_grounding_pack_stays_draft_until_human_review() -> None:
+    entries = study_plan()
+    drafts = [entry for entry in entries if entry.get("grounding_status") == "draft_review"]
+
+    assert len(drafts) == 6
+    assert {entry["target_week"] for entry in drafts} == {1}
+    for entry in drafts:
+        with pytest.raises(SeedGroundingError, match="draft_review"):
+            _validated_grounding(entry)
+
+
+def test_an_approved_conversational_seed_still_requires_every_grounding_field() -> None:
+    entry = approved_entry(answer_rubric={"mechanism": "Only one field."})
+
+    with pytest.raises(SeedGroundingError, match="answer_rubric.acceptable_alternative"):
+        _validated_grounding(entry)
+
+
+def test_desk_reference_material_does_not_need_a_scoring_rubric() -> None:
+    assert _validated_grounding(
+        {"topic": "Implement a heap", "category": "Coding Pattern"}
+    ) is None
+
+
+async def test_approved_seed_persists_the_reviewed_answer_authority(tmp_path, db) -> None:
+    path = tmp_path / "approved.json"
+    path.write_text(json.dumps([approved_entry()]))
+
+    assert await load_from_file(path, weeks_through=1, start=START, db=db) == 1
+
+    card = (await db.exec(select(Card).where(Card.topic == "Cursor pagination"))).one()
+    assert card.source_label == "Reviewed source"
+    assert card.answer_basis.startswith("Resume strictly")
+    assert card.answer_rubric["failure_mode"].startswith("A mutable key")
+    assert card.canonical_question == "How does a cursor preserve stable traversal?"
+
+
+async def test_one_draft_entry_prevents_the_entire_selected_cohort(tmp_path, db) -> None:
+    path = tmp_path / "mixed.json"
+    path.write_text(
+        json.dumps(
+            [
+                approved_entry(topic="Approved first"),
+                approved_entry(topic="Draft second", grounding_status="draft_review"),
+            ]
+        )
+    )
+
+    with pytest.raises(SeedGroundingError, match="Draft second"):
+        await load_from_file(path, weeks_through=1, start=START, db=db)
+
+    assert (await db.exec(select(Card))).all() == []
 
 
 @pytest.mark.parametrize(

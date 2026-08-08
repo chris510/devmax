@@ -25,6 +25,7 @@ from effort_sweep_support import (  # noqa: E402
     UsageTap,
     capture_usage,
     case_key,
+    hydrate_grounding,
     load_cases,
     run_bounded,
 )
@@ -33,6 +34,8 @@ from app.config import get_settings  # noqa: E402
 from app.services import llm  # noqa: E402
 
 DEFAULT_LEVELS = ("low", "medium")
+
+
 @dataclass
 class Result:
     index: int
@@ -145,18 +148,25 @@ async def main() -> int:
     parser.add_argument("cases", type=Path, help="JSON file: a list of case objects")
     parser.add_argument("--levels", nargs="+", default=list(DEFAULT_LEVELS))
     parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument(
+        "--grounding-manifest",
+        type=Path,
+        help="approved cards manifest that owns each case's question, basis, and rubric",
+    )
     parser.add_argument("--verbose", action="store_true", help="print feedback per case")
     args = parser.parse_args()
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
+
+    cases = load_cases(args.cases, parser)
+    if args.grounding_manifest:
+        cases = hydrate_grounding(cases, args.grounding_manifest, parser)
 
     sys.stdout.reconfigure(line_buffering=True)
     settings = get_settings()
     if not settings.anthropic_api_key:
         print("ANTHROPIC_API_KEY is unset — this script makes live calls.", file=sys.stderr)
         return 1
-
-    cases = load_cases(args.cases, parser)
 
     original_effort = settings.scoring_effort
     by_level: dict[str, list[Result]] = {}
