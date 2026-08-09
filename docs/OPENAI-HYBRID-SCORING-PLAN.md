@@ -3,6 +3,11 @@
 **Status:** Proposed evaluation; no production change and no paid calls
 authorized by this document.
 
+**Preparation update:** The 42 additional labels and cost-guarded Batch tooling
+are ready for human review in
+[`OPENAI-HYBRID-RELEASE-PACK.md`](OPENAI-HYBRID-RELEASE-PACK.md). Their explicit
+candidate status prevents a paid submission until that review is complete.
+
 ## Decision
 
 GPT-5.6 Terra is not a safe single-provider replacement for Claude. It passed

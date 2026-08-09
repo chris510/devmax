@@ -38,6 +38,12 @@ MODEL_RATES: dict[str, tuple[tuple[date, Decimal, Decimal], ...]] = {
     "claude-haiku-4-5": ((date.max, Decimal("1"), Decimal("5")),),
     "claude-opus-5": ((date.max, Decimal("5"), Decimal("25")),),
     "gpt-5.6-luna": ((date.max, Decimal("0.2"), Decimal("1.2")),),
+    "gpt-5.6-terra": ((date.max, Decimal("2"), Decimal("12")),),
+}
+
+BATCH_MODEL_RATES: dict[str, tuple[tuple[date, Decimal, Decimal], ...]] = {
+    "gpt-5.6-luna": ((date.max, Decimal("0.1"), Decimal("0.6")),),
+    "gpt-5.6-terra": ((date.max, Decimal("1"), Decimal("6")),),
 }
 
 case_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -188,7 +194,10 @@ def completion_fingerprint(
     kind: str, case: dict[str, Any], completion: dict[str, Any]
 ) -> str:
     """Hash every input that can change the request or its expected judgement."""
-    judged_case = {key: value for key, value in case.items() if key != "tags"}
+    metadata_keys = {"tags", "review_status", "review_note"}
+    judged_case = {
+        key: value for key, value in case.items() if key not in metadata_keys
+    }
     payload = {
         "format_version": RESULT_FORMAT_VERSION,
         "kind": kind,
@@ -436,6 +445,45 @@ def rate_for_model(
                 label,
             )
     raise AssertionError(f"price schedule for {model} has no terminal rate")
+
+
+def batch_rate_for_model(
+    model: str,
+    *,
+    on_date: date | None = None,
+    input_override: Decimal | None = None,
+    output_override: Decimal | None = None,
+) -> ModelRate:
+    """Return the published asynchronous Batch price for an OpenAI model."""
+    if (input_override is None) != (output_override is None):
+        raise ValueError("input and output price overrides must be supplied together")
+    if input_override is not None and output_override is not None:
+        return ModelRate(model, input_override, output_override, "explicit Batch override")
+
+    schedule = BATCH_MODEL_RATES.get(model)
+    if schedule is None:
+        raise ValueError(
+            f"no Batch price schedule for {model}; pass both per-million price overrides"
+        )
+    effective = on_date or date.today()
+    for through, input_price, output_price in schedule:
+        if effective <= through:
+            return ModelRate(
+                model,
+                input_price,
+                output_price,
+                "published Batch rate",
+            )
+    raise AssertionError(f"Batch price schedule for {model} has no terminal rate")
+
+
+def pending_case_reviews(cases: list[dict[str, Any]]) -> list[str]:
+    """List explicit review candidates while preserving trusted legacy packs."""
+    return [
+        case_name(case, index)
+        for index, case in enumerate(cases)
+        if case.get("review_status", "approved") != "approved"
+    ]
 
 
 async def count_prepared_calls(

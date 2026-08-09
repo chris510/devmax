@@ -15,6 +15,9 @@ from scripts.effort_sweep_support import hydrate_grounding
 
 API = Path(__file__).resolve().parent.parent
 SCORING_CASES = API / "scripts" / "grounded_effort_cases_week1.json"
+RELEASE_CANDIDATES = (
+    API / "scripts" / "grounded_effort_cases_week1_release_candidates.json"
+)
 REATTEMPT_CASES = API / "scripts" / "grounded_reattempt_cases_week1.json"
 
 
@@ -81,6 +84,47 @@ def test_week_one_scoring_pack_has_three_consistent_labels_per_card() -> None:
         )
         assert case["expected_score"] == derive_composite(*axes)
         assert not {"question", "answer_basis", "answer_rubric"} & case.keys()
+
+
+def test_release_candidates_add_seven_reviewed_families_per_card() -> None:
+    cases = json.loads(RELEASE_CANDIDATES.read_text())
+    family_tags = {
+        "partial-self-correction",
+        "source-compatible-alternative",
+        "speech-noise",
+        "adjacent-jargon",
+        "follow-up-anchored",
+        "prior-summary-contradiction",
+        "axis-isolation",
+    }
+
+    assert len(cases) == 42
+    assert set(Counter(case["topic"] for case in cases).values()) == {7}
+    assert sum("risk-smoke" in case["tags"] for case in cases) == 12
+    assert Counter(
+        tag for case in cases for tag in case["tags"] if tag in family_tags
+    ) == {tag: 6 for tag in family_tags}
+    for case in cases:
+        axes = (
+            case["expected_accuracy"],
+            case["expected_depth"],
+            case["expected_boundaries"],
+        )
+        assert case["expected_score"] == derive_composite(*axes)
+        assert case["review_status"] == "candidate"
+        assert case["review_note"]
+        assert not {"question", "answer_basis", "answer_rubric"} & case.keys()
+
+
+def test_release_candidates_hydrate_against_the_six_approved_cards() -> None:
+    cases = json.loads(RELEASE_CANDIDATES.read_text())
+
+    hydrated = hydrate_grounding(
+        cases, API / "cards.json", argparse.ArgumentParser()
+    )
+
+    assert len(hydrated) == 42
+    assert all(case["question"] and case["answer_basis"] for case in hydrated)
 
 
 def test_week_one_reattempt_pack_has_two_authority_free_cases_per_card() -> None:
@@ -172,6 +216,17 @@ def test_fingerprint_invalidates_when_a_label_or_request_changes() -> None:
     assert original.fingerprint != changed_label.fingerprint
     assert original.fingerprint != changed_completion.fingerprint
     assert original.fingerprint == retagged.fingerprint
+
+
+def test_review_metadata_does_not_change_the_paid_request_fingerprint() -> None:
+    candidate = prepared_call(
+        review_status="candidate", review_note="Human should inspect this boundary."
+    )
+    approved = prepared_call(
+        review_status="approved", review_note="Boundary was inspected."
+    )
+
+    assert candidate.fingerprint == approved.fingerprint
 
 
 def test_jsonl_results_are_durable_and_resume_by_exact_fingerprint(tmp_path) -> None:
