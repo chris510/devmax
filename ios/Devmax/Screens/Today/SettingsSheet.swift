@@ -7,10 +7,12 @@ struct SettingsSheet: View {
     // Device-local, so it stays out of `AppSettings` and off the server: which
     // phone reads questions aloud is not something the scheduler needs to know.
     @AppStorage(Preferences.readAloudKey) private var readAloud = true
+    @AppStorage(Preferences.appearanceKey) private var appearance = AppAppearance.system.rawValue
 
     var body: some View {
-        SheetChrome(title: "Settings", height: 472) {
+        SheetChrome(title: "Settings", height: 510) {
             VStack(alignment: .leading, spacing: 22) {
+                appearanceRow
                 reviewsPerDay
                 readAloudRow
                 windows
@@ -31,6 +33,27 @@ struct SettingsSheet: View {
         }
         .onAppear { draft = state.settings }
         .onDisappear { state.saveSettings(draft) }
+    }
+
+    private var appearanceRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MetaText(
+                text: "APPEARANCE", font: TypeRole.metaBody,
+                tracking: 1.2, color: Theme.metaFaint
+            )
+            AppearanceSelector(selection: $appearance)
+            Text(appearanceNote)
+                .font(TypeRole.secondaryAction)
+                .foregroundStyle(Theme.metaAlt)
+        }
+    }
+
+    private var appearanceNote: String {
+        switch AppAppearance(rawValue: appearance) ?? .system {
+        case .light: "Always uses the light appearance"
+        case .dark: "Always uses the dark appearance"
+        case .system: "Follows your phone’s appearance"
+        }
     }
 
     private var readAloudRow: some View {

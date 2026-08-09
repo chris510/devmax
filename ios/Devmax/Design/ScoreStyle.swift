@@ -7,7 +7,8 @@ enum ScoreStyle {
         guard let score else { return Theme.scoreNone }
         switch score {
         case ...1: return Theme.scoreLow
-        case 2...3: return Theme.scoreMid
+        case 2: return Theme.scoreMid
+        case 3: return Theme.scoreDeveloping
         default: return Theme.scoreHigh
         }
     }
@@ -71,7 +72,8 @@ enum ScoreStyle {
         var color: Color {
             switch self {
             case .cold: return Theme.scoreLow
-            case .shaky, .developing: return Theme.scoreMid
+            case .shaky: return Theme.scoreMid
+            case .developing: return Theme.scoreDeveloping
             case .solid: return Theme.scoreHigh
             case .untested: return Theme.scoreNone
             }

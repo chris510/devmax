@@ -635,7 +635,7 @@ enum StudyPlanFixtures {
             return CardProposalList(
                 planId: planID, itemId: itemID, supportsRecallCards: false,
                 suggestedCount: 0, proposals: [],
-                note: "This subject uses plan-local retrieval activities. Devmax "
+                note: "This subject uses plan-local retrieval activities. Unprompted "
                     + "recall cards are only proposed for subjects the scoring "
                     + "rubric can grade."
             )

@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// 44px tall, mono 11px, bottom-aligned. The right slot carries `DEVMAX`
+/// 44px tall, mono 11px, bottom-aligned. The right slot carries `UNPROMPTED`
 /// normally and `READING ALOUD` while TTS is speaking.
 struct StatusBar: View {
-    var rightText: String = "DEVMAX"
+    var rightText: String = "UNPROMPTED"
 
     var body: some View {
         HStack {
@@ -13,7 +13,7 @@ struct StatusBar: View {
         }
         .font(TypeRole.metaStatus)
         .tracking(0.44)
-        .foregroundStyle(Color(hex: 0x616870))
+        .foregroundStyle(Theme.statusBar)
         .frame(height: Metrics.statusBarHeight, alignment: .bottom)
         .padding(.horizontal, Metrics.screenPadding)
         .padding(.bottom, 6)

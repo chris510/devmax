@@ -480,7 +480,7 @@ async def load_fixtures(db: AsyncSession | None = None) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed Devmax cards")
+    parser = argparse.ArgumentParser(description="Seed Unprompted cards")
     parser.add_argument("--file", type=Path, help="cards.json from the study plan")
     parser.add_argument(
         "--weeks-through",

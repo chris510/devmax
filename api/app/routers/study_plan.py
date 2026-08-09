@@ -1568,7 +1568,7 @@ async def create_card_proposals(
             suggested_count=0,
             proposals=[],
             note=(
-                "This subject uses plan-local retrieval activities. Devmax recall "
+                "This subject uses plan-local retrieval activities. Unprompted recall "
                 "cards are only proposed for subjects the scoring rubric can grade."
             ),
         )

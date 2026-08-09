@@ -62,7 +62,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Devmax API",
+    title="Unprompted API",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,

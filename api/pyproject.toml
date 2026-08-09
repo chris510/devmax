@@ -1,7 +1,7 @@
 [project]
 name = "devmax-api"
 version = "0.1.0"
-description = "Devmax backend — conversational spaced-repetition study coach"
+description = "Unprompted backend — conversational spaced-repetition study coach"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.115",
