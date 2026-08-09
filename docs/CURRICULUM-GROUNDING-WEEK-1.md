@@ -237,8 +237,15 @@ failure. Both correct decision-driven estimation answers scored Accuracy 0 on
 the first pass, then Accuracy 5 on an identical controlled rerun. That material
 repeatability failure blocks a production provider switch despite Luna being
 about 92% cheaper than the calculated Claude full-pack cost. Production remains
-on Claude while a focused Luna low-versus-medium repeatability experiment is
-designed.
+on Claude. A subsequent five-trial low-versus-medium matrix reproduced two low
+false failures; medium avoided those failures but inflated the mechanism-only
+answer from composite 3 to 5 in all five trials. A provider-specific evidence
+and axis calibration still produced six false failures across five trials, and
+disabling the documented implicit prompt cache reproduced both failures with
+zero cached tokens. Concurrency, effort, prompt calibration, and cache behavior
+are therefore ruled out as sufficient fixes. If OpenAI remains a goal, the next
+candidate is a separately cost-capped stronger-model canary, not more Luna
+tuning or production retries.
 
 This 30-case tranche is enough to retain the current low-effort settings, but
 not enough to approve a production prompt or model change. The trusted-authority

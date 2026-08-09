@@ -124,6 +124,43 @@ while the mechanism-only answer was over-scored at composite 5 instead of 3.
 The rerun cost $0.0011. This rules out a missing-input or result-ordering bug and
 demonstrates material output instability on identical reviewed evidence.
 
+### Focused repeatability experiment
+
+The unstable complete answer, its mechanism-only counterpart, and the
+confidently-wrong same-topic control were then run five times each at low and
+medium effort, sequentially at concurrency 1. The output cap was reduced to
+1,024 tokens; no response approached it.
+
+| Configuration | Complete scores (expected 5) | Mechanism-only scores (expected 3) | Wrong-control scores (expected 1) | False Accuracy failures | Calculated cost |
+|---|---|---|---|---:|---:|
+| Unchanged Luna low, 5 trials | 5 · 0 · 5 · 0 · 5 | 5 · 5 · 5 · 5 · 5 | 1 · 1 · 1 · 0 · 1 | 2 | $0.0073 |
+| Unchanged Luna medium, 5 trials | 5 · 5 · 5 · 5 · 5 | 5 · 5 · 5 · 5 · 5 | 1 · 1 · 0 · 1 · 0 | 0 | $0.0086 |
+| Calibrated medium, implicit cache, 5 trials | 5 · 0 · 5 · 0 · 0 | 3 · 0 · 0 · 3 · 0 | 0 · 1 · 1 · 1 · 1 | 6 | $0.0098 |
+| Calibrated medium, implicit cache disabled, 2 trials | 5 · 0 | 4 · 0 | 1 · 1 | 2 | $0.0041 |
+
+Medium effort removed the complete-answer false failures under the unchanged
+prompt, but it over-scored the mechanism-only answer as composite 5 in all five
+trials. That preserves the scheduler's Accuracy signal but inflates the score
+shown to the learner.
+
+A narrow OpenAI-only calibration explicitly separated learner evidence from
+trusted grading authority and added Depth and Boundaries anchors. It scored the
+mechanism-only answer correctly when it processed the answer, but valid
+structured responses still intermittently claimed that non-empty answers were
+missing. Setting [`prompt_cache_options.mode`](https://developers.openai.com/api/docs/guides/prompt-caching)
+to `explicit` with no breakpoint, the documented way to disable GPT-5.6's
+implicit cache, produced zero cache-read tokens and reproduced both false
+failures on the second trial. The experiment stopped after that falsified the
+cache hypothesis.
+
+The matrix and prompt diagnostics made 54 calls and cost $0.0322, including one
+three-call intermediate calibration trial not shown in the table. Concurrency,
+reasoning effort, explicit evidence instructions, axis anchors, and automatic
+prompt caching have now been ruled out as sufficient fixes. Retrying is not a
+safe production repair: the bad result is valid structured output and cannot be
+distinguished from a genuinely wrong learner answer without already knowing
+the answer's score.
+
 ### Claude comparison and decision
 
 | Provider | Scoring exact | Scoring mean deviation | False Accuracy pass / fail | Coached exact / within one | Full-pack calculated cost |
@@ -138,11 +175,12 @@ Claude was materially more reliable on first-pass scoring and produced no false
 Accuracy failures.
 
 The production scorer therefore remains Claude. Luna does not advance to a
-production adapter or the 60–100-case release gate in its current low-effort,
-unchanged-prompt configuration. The next useful experiment is a small repeated
-trial over the unstable estimation cases and nearby controls, comparing Luna
-low and medium effort. A configuration must first demonstrate repeatable
-first-pass scoring before the full pack is rerun.
+production adapter or the 60–100-case release gate. The focused experiment
+showed that more Luna prompt tuning, cache changes, retries, or a medium-effort
+switch cannot provide an honest single-call scorer. If an OpenAI scorer remains
+a product goal, the next candidate should be a stronger model such as GPT-5.6
+Terra, starting with a separately cost-capped canary rather than another Luna
+configuration.
 
 Both complete result files were replayed with `OPENAI_API_KEY` unavailable. All
 30 fingerprints resumed, zero new paid calls were scheduled, and both runs
