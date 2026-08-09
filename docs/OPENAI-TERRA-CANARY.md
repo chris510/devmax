@@ -2,8 +2,9 @@
 
 **Run date:** 2026-08-08
 
-**Decision:** The focused canary passes. Terra may advance to the reviewed
-30-case pack, but this result does not authorize a production provider switch.
+**Decision:** The focused canary and reviewed 18-case scoring stage pass. Terra
+may advance to the coached re-attempt pack, but these results do not authorize a
+production provider switch.
 
 ## Why this canary exists
 
@@ -110,24 +111,95 @@ establish performance across the other Week 1 rubrics, coached re-attempts, or
 the broader 60–100-case provider-switch gate. Production therefore remains on
 Claude.
 
+## Reviewed Week 1 scoring stage
+
+After the canary merged, Terra ran the complete 18-case scoring pack at medium
+effort and concurrency 1. The prompt, schema, parser, 1,024-token output cap,
+and grounding manifest were unchanged. The free preflight's hard ceiling was
+$0.483986; the user authorized $0.484.
+
+### Aggregate result
+
+| Measure | Terra medium | Luna low | Claude Sonnet 5 low |
+| --- | ---: | ---: | ---: |
+| Composite exact | 12/18 | 12/18 | 13/18 |
+| Composite within one | 18/18 | 16/18 | — |
+| Mean composite deviation | 0.33 | 0.67 | 0.28 |
+| False Accuracy pass / fail | **0 / 0** | 0 / 2 | **0 / 0** |
+| Accuracy exact / within one | 11/18 · 18/18 | 12/18 · 15/18 | 9/18 · 17/18 |
+| Depth exact / within one | 7/18 · 16/18 | 9/18 · 15/18 | 10/18 · 17/18 |
+| Boundaries exact / within one | 12/18 · 18/18 | 13/18 · 17/18 | 16/18 · 18/18 |
+| Calculated scoring cost | **$0.081106** | $0.008730 | $0.111214 |
+
+The Claude cost uses its recorded 35,267 input and 4,068 output tokens at the
+promotional $2/$10 per-million rate through 2026-08-31. Terra's conservative
+runner cost treats all input at $2/M. Applying the published $0.20/M rate to
+the 1,064 returned cached-input tokens produces $0.079191 instead. Provider
+billing remains authoritative.
+
+Terra is not as cheap as Luna, but it removed Luna's scheduler-critical failure
+and cost about 27% less than the current promotional Claude scoring run. Once
+Claude's published promotion ends, the same recorded Claude usage would cost
+$0.166821 at $3/$15, making this Terra run about 51% less expensive. Tokenizers
+and generated output differ, so these are observed evaluation costs rather than
+a guaranteed production ratio.
+
+### Case matrix
+
+| Case family | Complete | Mechanism only | Incorrect |
+| --- | ---: | ---: | ---: |
+| Delivery sequence | 5 / 5 | 3 / 3 | 0 / 1 |
+| Non-functional requirements | 5 / 5 | 3 / 3 | 1 / 1 |
+| Identity boundary | 5 / 5 | 4 / 3 | 1 / 1 |
+| Timeout retry | 5 / 5 | 4 / 3 | 0 / 1 |
+| Cursor pagination | 5 / 5 | 3 / 3 | 1 / 1 |
+| Decision-driven estimation | 5 / 5 | 4 / 3 | 0 / 1 |
+
+Each cell is `actual / expected`. All six complete answers scored 5. Every
+incorrect answer remained in the failing Accuracy bucket. The three
+mechanism-only composite 4s came from extra Depth or Boundaries credit; their
+Accuracy remained correctly passing, so none can move SM-2 incorrectly.
+
+### Usage, latency, and resume
+
+| Measure | Result |
+| --- | ---: |
+| Paid calls | 18 |
+| Input tokens | 18,809 |
+| Cached input tokens | 1,064 |
+| Output tokens | 3,624 |
+| Median provider latency | 3.26 s |
+| Mean provider latency | 3.43 s |
+| Slowest call | 5.97 s |
+| Conservative cost | **$0.081106** |
+| Cache-adjusted calculation | **$0.079191** |
+
+All 18 responses parsed through the strict schema. No missing-answer
+hallucination or catastrophic score appeared. A keyless replay restored all 18
+fingerprints, scheduled zero new calls, and reported $0.0000 new paid-call cost.
+Raw JSONL records remain local and ignored.
+
+The scoring stage therefore passes and Terra may advance to coached grading.
+Production remains on Claude: first-pass scoring alone does not establish safe
+coached attribution or satisfy the broader provider-switch release gate.
+
 ## Recommended next experiment
 
-Run the existing reviewed Week 1 pack on Terra at medium effort and concurrency
-1:
+Run only the remaining 12 reviewed coached re-attempt cases on Terra at medium
+effort and concurrency 1:
 
-- 18 scoring cases;
 - 12 coached re-attempt cases;
 - the unchanged schemas, parser, and grounding manifest; and
 - a fresh output file followed by a keyless resume proof.
 
-Free preflights put the current hard ceilings at $0.4840 for scoring and $0.2379
-for coached re-attempts, or **$0.7219 total**. These are intentionally loose
-bounds, not expected spend. Applying Terra's 10x token rates to the prior Luna
-full-pack usage suggests roughly **$0.13 actual**, before any cache discount;
-medium effort may move that figure, so the full pack needs its own explicit
-budget approval.
+The free preflight puts the coached hard ceiling at **$0.2379**. This is an
+intentionally loose refusal bound, not expected spend. Applying Terra's 10x
+token rates to the prior Luna coached usage suggests roughly **$0.041 actual**,
+before any cache discount; the coached pack needs its own explicit budget
+approval.
 
-The full pack should stop and reject Terra on any false Accuracy pass, false
-Accuracy failure, coached/unaided attribution error, schema failure, or
-catastrophic score. Passing it would advance Terra to the larger 60–100-case
-evaluation and adapter design review—not directly to production.
+The coached pack should stop and reject Terra on any false reconstruction pass,
+false reconstruction failure, coached/unaided attribution error, schema
+failure, or catastrophic score. Passing it would complete the Week 1 pack and
+advance Terra to the larger 60–100-case evaluation and adapter design
+review—not directly to production.
