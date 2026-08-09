@@ -1,6 +1,10 @@
 # Explicit-evidence scoring experiment
 
-**Status:** Prepared and free-preflighted; no paid calls made
+**Status:** Stage A failed; Stage B and Terra stopped
+
+Stage A has now run on Claude. Five of six composites were exact, but the
+non-functional-requirements answer remained two points high at composite 5.
+See `CLAUDE-EXPLICIT-EVIDENCE-STAGE-A.md` for the complete evidence and decision.
 
 ## Decision this PR enables
 
@@ -154,7 +158,6 @@ key and an explicit budget acknowledgement. Results remain in the ignored
 
 ## Recommended next action
 
-After this preparation PR merges, authorize only Stage A: six Claude Sonnet 5
-low-effort speech-noise calls, concurrency 1, with a current ceiling no higher
-than the freshly recomputed preflight. Audit all six records before considering
-Stage B.
+Stage A was authorized and failed its first stop gate. Do not run Stage B or
+Terra. Draft and offline-test a stricter evaluation-only candidate before
+requesting any additional paid call.
