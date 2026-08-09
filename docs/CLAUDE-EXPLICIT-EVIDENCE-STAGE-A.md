@@ -108,3 +108,6 @@ claims, set an axis ceiling of 2 when either claim is absent, and only then choo
 0–5 severity within the eligible range. That proposal needs deterministic prompt
 tests and a new free preflight before requesting any paid call. It must remain
 evaluation-only until it passes a reviewed Claude regression.
+
+That offline candidate and its one-call-first gate are now prepared in
+`EXPLICIT-EVIDENCE-V2-EXPERIMENT.md`. No V2 paid call has been made.
