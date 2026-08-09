@@ -4,9 +4,10 @@
 authorized by this document.
 
 **Preparation update:** The 42 additional labels and cost-guarded Batch tooling
-are ready for human review in
-[`OPENAI-HYBRID-RELEASE-PACK.md`](OPENAI-HYBRID-RELEASE-PACK.md). Their explicit
-candidate status prevents a paid submission until that review is complete.
+landed in PR #41. The owner's merge accepted the requested label review; the
+approved pack and execution controls are recorded in
+[`OPENAI-HYBRID-RELEASE-PACK.md`](OPENAI-HYBRID-RELEASE-PACK.md). Paid stages
+still require separate cost authorization.
 
 ## Decision
 

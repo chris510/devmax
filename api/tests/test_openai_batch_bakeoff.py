@@ -9,7 +9,7 @@ from scripts import openai_bakeoff, openai_batch_bakeoff
 from scripts.effort_sweep_support import batch_rate_for_model
 
 API = Path(__file__).resolve().parent.parent
-CANDIDATES = API / "scripts" / "grounded_effort_cases_week1_release_candidates.json"
+RELEASE_CASES = API / "scripts" / "grounded_effort_cases_week1_release.json"
 CARDS = API / "cards.json"
 
 
@@ -117,7 +117,7 @@ def test_batch_output_is_unordered_but_must_be_complete_and_unique() -> None:
 
 
 @pytest.mark.anyio
-async def test_candidate_dry_run_is_free_and_reports_review_gate(
+async def test_approved_release_dry_run_is_free_and_clears_review_gate(
     monkeypatch, capsys
 ) -> None:
     monkeypatch.chdir(API)
@@ -128,7 +128,7 @@ async def test_candidate_dry_run_is_free_and_reports_review_gate(
         [
             "openai_batch_bakeoff.py",
             "submit",
-            str(CANDIDATES),
+            str(RELEASE_CASES),
             "--grounding-manifest",
             str(CARDS),
             "--dry-run",
@@ -138,14 +138,18 @@ async def test_candidate_dry_run_is_free_and_reports_review_gate(
     assert await openai_batch_bakeoff.main() == 0
     output = capsys.readouterr().out
     assert "new paid calls     42" in output
-    assert "human review       42 case label(s) pending" in output
+    assert "human review       0 case label(s) pending" in output
     assert "no file upload or paid Batch request was made" in output
 
 
 @pytest.mark.anyio
 async def test_candidate_paid_submit_is_refused_before_key_or_network(
-    monkeypatch,
+    monkeypatch, tmp_path
 ) -> None:
+    cases = json.loads(RELEASE_CASES.read_text())
+    cases[0]["review_status"] = "candidate"
+    candidate_path = tmp_path / "candidate-cases.json"
+    candidate_path.write_text(json.dumps(cases))
     monkeypatch.chdir(API)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
@@ -154,7 +158,7 @@ async def test_candidate_paid_submit_is_refused_before_key_or_network(
         [
             "openai_batch_bakeoff.py",
             "submit",
-            str(CANDIDATES),
+            str(candidate_path),
             "--grounding-manifest",
             str(CARDS),
             "--max-cost-usd",

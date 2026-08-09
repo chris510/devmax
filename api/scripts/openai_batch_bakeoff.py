@@ -9,7 +9,7 @@ stages can resume without paying for an identical request twice.
 Examples:
     uv run python scripts/openai_batch_bakeoff.py submit \
       scripts/grounded_effort_cases_week1.json \
-      scripts/grounded_effort_cases_week1_release_candidates.json \
+      scripts/grounded_effort_cases_week1_release.json \
       --grounding-manifest cards.json --exclude-tag risk-smoke --dry-run
     uv run python scripts/openai_batch_bakeoff.py collect \
       .eval-results/openai-batch-state-....json

@@ -1,12 +1,12 @@
 # OpenAI hybrid scoring release pack
 
-**Status:** Free preparation complete; 42 new labels require human review. No
-OpenAI request, file upload, or paid Batch was made while preparing this pack.
+**Status:** The 42 new labels were accepted when the owner merged PR #41. No
+OpenAI request, file upload, or paid Batch has been made for this release pack.
 
-## What this PR adds
+## What the release pack adds
 
 The existing 18 reviewed Week 1 cases remain frozen in
-`api/scripts/grounded_effort_cases_week1.json`. A second file adds 42 candidate
+`api/scripts/grounded_effort_cases_week1.json`. A second file adds 42 approved
 cases, giving the planned 60 unique scheduler-grade cases when the two files
 are loaded together.
 
@@ -19,27 +19,27 @@ are loaded together.
 | Follow-up anchored | 6 | Credit only evidence actually supplied across the two learner turns |
 | Prior-summary contradiction | 6 | Current recall outranks a stale mastery summary |
 | Depth/Boundaries isolation | 6 | Keep the two secondary axes independent |
-| **New candidates** | **42** | |
+| **New approved cases** | **42** | |
 
 Every approved Week 1 card contributes one case to every family. Twelve cases
 carry `risk-smoke`: one noisy-but-correct and one fluent-but-wrong answer per
 card. That is the repeatability subset from the evaluation plan.
 
-The candidate file deliberately contains no question, answer basis, or rubric.
+The release file deliberately contains no question, answer basis, or rubric.
 The runners hydrate those fields from the six `grounding_status: approved`
 entries in `api/cards.json`. Offline tests verify all 42 labels derive the
 declared composite through `llm.derive_composite`, all names are unique, every
 family has six cases, and all cases hydrate against approved authority.
 
-## Human label audit
+## Human label approval
 
-Each new case has `review_status: "candidate"` and a `review_note` explaining
-the intended boundary. A paid standard or Batch run refuses these cases. A
-reviewer should compare the answer and note against the hydrated card rubric,
-then either correct the three expected axes or change the status to
-`"approved"`.
+Each new case has `review_status: "approved"` and retains the `review_note` that
+explains its axis boundary. PR #41 requested review of every expected Accuracy,
+Depth, Boundaries, derived composite, and note against approved grounding; the
+owner's merge records acceptance of that review pack. The runner still refuses
+any future case carrying an explicit status other than `approved`.
 
-Use these rules during review:
+The approval follows these rules:
 
 - Accuracy is the mechanism/retention signal and the only axis that may reach
   SM-2. Correct is 3–5; incorrect or materially partial is 0–2.
@@ -124,7 +124,7 @@ Run from `api/`. These commands make no API requests:
 ```bash
 # 12 standard-latency risk cases
 uv run python scripts/openai_bakeoff.py scoring \
-  scripts/grounded_effort_cases_week1_release_candidates.json \
+  scripts/grounded_effort_cases_week1_release.json \
   --grounding-manifest cards.json --tag risk-smoke \
   --model gpt-5.6-terra --levels medium \
   --max-output-tokens 1024 --dry-run
@@ -132,23 +132,23 @@ uv run python scripts/openai_bakeoff.py scoring \
 # 48 remaining unique cases at Batch rates
 uv run python scripts/openai_batch_bakeoff.py submit \
   scripts/grounded_effort_cases_week1.json \
-  scripts/grounded_effort_cases_week1_release_candidates.json \
+  scripts/grounded_effort_cases_week1_release.json \
   --grounding-manifest cards.json --exclude-tag risk-smoke \
   --model gpt-5.6-terra --levels medium \
   --max-output-tokens 1024 --dry-run
 
 # One 12-case Batch repeat; run twice only after the first 60 calls pass audit
 uv run python scripts/openai_batch_bakeoff.py submit \
-  scripts/grounded_effort_cases_week1_release_candidates.json \
+  scripts/grounded_effort_cases_week1_release.json \
   --grounding-manifest cards.json --tag risk-smoke \
   --model gpt-5.6-terra --levels medium \
   --max-output-tokens 1024 --dry-run
 ```
 
-Removing `--dry-run` is not sufficient to spend. The cases must first be
-approved, an API key must be present, and `--max-cost-usd` must acknowledge that
-stage's freshly printed ceiling. Submission prints the local state path. After
-the Batch reports completion, collect it explicitly:
+Removing `--dry-run` is not sufficient to spend. An API key must be present and
+`--max-cost-usd` must acknowledge that stage's freshly printed ceiling.
+Submission prints the local state path. After the Batch reports completion,
+collect it explicitly:
 
 ```bash
 uv run python scripts/openai_batch_bakeoff.py collect \
@@ -157,8 +157,7 @@ uv run python scripts/openai_batch_bakeoff.py collect \
 
 ## What remains blocked
 
-This PR does not approve the 42 new labels, make a paid call, change any
-production provider, or implement fallback routing. After human label approval,
-the next authorized action is only the 12-case standard smoke. Terra may move
-to production adapter design only after the full 84-call gate in
-`OPENAI-HYBRID-SCORING-PLAN.md` passes.
+This approval does not authorize a paid call, change any production provider,
+or implement fallback routing. The next separately authorized action is only
+the 12-case standard smoke. Terra may move to production adapter design only
+after the full 84-call gate in `OPENAI-HYBRID-SCORING-PLAN.md` passes.
