@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from effort_sweep_support import (  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.services import llm  # noqa: E402
+from scripts.effort_sweep_support import (  # noqa: E402
     Usage,
     UsageTap,
     capture_usage,
@@ -26,9 +29,6 @@ from effort_sweep_support import (  # noqa: E402
     load_cases,
     run_bounded,
 )
-
-from app.config import get_settings  # noqa: E402
-from app.services import llm  # noqa: E402
 
 
 @dataclass
@@ -51,7 +51,7 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
             question_asked=case["question"],
             feedback_given=case["feedback"],
             reattempt_answer=case["reattempt_answer"],
-            unaided_mechanism=case["unaided_mechanism"],
+            unaided_accuracy=case["unaided_accuracy"],
             answer_basis=case.get("answer_basis", ""),
             answer_rubric=case.get("answer_rubric"),
         )
@@ -60,8 +60,8 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
     return Result(
         index=index,
         name=case.get("name", case["topic"]),
-        expected=case["expected_mechanism_accuracy"],
-        actual=result.mechanism_accuracy,
+        expected=case["expected_accuracy"],
+        actual=result.accuracy,
         summary=result.mastery_summary,
         usage=tap.usage_for(key),
     )
@@ -72,6 +72,7 @@ async def main() -> int:
     parser.add_argument("cases", type=Path)
     parser.add_argument("--levels", nargs="+", default=["low", "medium"])
     parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--verbose", action="store_true", help="print mastery summaries")
     parser.add_argument(
         "--grounding-manifest",
         type=Path,
@@ -102,11 +103,26 @@ async def main() -> int:
                 for result in results:
                     flag = "" if result.actual == result.expected else "  <-- mismatch"
                     print(
-                        f"  {result.name[:42]:<42} mechanism={result.actual} "
+                        f"  {result.name[:42]:<42} accuracy={result.actual} "
                         f"expected={result.expected} out={result.usage.output_tokens:>5}{flag}"
                     )
+                    if args.verbose:
+                        print(f"      {result.summary}")
+                deviations = [abs(r.actual - r.expected) for r in results]
+                false_pass = sum(
+                    r.expected <= 2 and r.actual >= 3 for r in results
+                )
+                false_fail = sum(
+                    r.expected >= 3 and r.actual <= 2 for r in results
+                )
                 print(
                     f"  exact={sum(r.actual == r.expected for r in results)}/{len(results)} "
+                    f"within-one={sum(d <= 1 for d in deviations)}/{len(results)} "
+                    f"mean-dev={statistics.mean(deviations):.2f} "
+                    f"false-pass={false_pass} false-fail={false_fail} "
+                    f"in={sum(r.usage.input_tokens for r in results)} "
+                    f"cache-r={sum(r.usage.cache_read_tokens for r in results)} "
+                    f"cache-w={sum(r.usage.cache_write_tokens for r in results)} "
                     f"out={sum(r.usage.output_tokens for r in results)}"
                 )
     finally:

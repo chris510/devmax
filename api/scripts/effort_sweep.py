@@ -20,7 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from effort_sweep_support import (  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.services import llm  # noqa: E402
+from scripts.effort_sweep_support import (  # noqa: E402
     Usage,
     UsageTap,
     capture_usage,
@@ -29,9 +31,6 @@ from effort_sweep_support import (  # noqa: E402
     load_cases,
     run_bounded,
 )
-
-from app.config import get_settings  # noqa: E402
-from app.services import llm  # noqa: E402
 
 DEFAULT_LEVELS = ("low", "medium")
 
@@ -50,9 +49,9 @@ class Result:
 
 def _expected_axes(case: dict) -> tuple[int | None, int | None, int | None]:
     return (
-        case.get("expected_mechanism_accuracy"),
-        case.get("expected_trade_off_awareness"),
-        case.get("expected_failure_mode_awareness"),
+        case.get("expected_accuracy"),
+        case.get("expected_depth"),
+        case.get("expected_boundaries"),
     )
 
 
@@ -77,9 +76,9 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
     finally:
         case_key.reset(token)
 
-    assert result.mechanism_accuracy is not None
-    assert result.trade_off_awareness is not None
-    assert result.failure_mode_awareness is not None
+    assert result.accuracy is not None
+    assert result.depth is not None
+    assert result.boundaries is not None
     return Result(
         index=index,
         case=case.get("name", case["topic"]),
@@ -87,9 +86,9 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
         score=result.score if result.score is not None else -1,
         expected_axes=_expected_axes(case),
         axes=(
-            result.mechanism_accuracy,
-            result.trade_off_awareness,
-            result.failure_mode_awareness,
+            result.accuracy,
+            result.depth,
+            result.boundaries,
         ),
         usage=tap.usage_for(key),
         feedback=result.feedback,
@@ -107,7 +106,7 @@ def _axis_metrics(results: list[Result], index: int) -> tuple[int, int, int]:
     return exact, within_one, len(pairs)
 
 
-def _mechanism_errors(results: list[Result]) -> tuple[int, int]:
+def _accuracy_errors(results: list[Result]) -> tuple[int, int]:
     labeled = [r for r in results if r.expected_axes[0] is not None]
     false_pass = sum(r.expected_axes[0] <= 2 and r.axes[0] >= 3 for r in labeled)
     false_fail = sum(r.expected_axes[0] >= 3 and r.axes[0] <= 2 for r in labeled)
@@ -116,7 +115,10 @@ def _mechanism_errors(results: list[Result]) -> tuple[int, int]:
 
 def print_summary(by_level: dict[str, list[Result]]) -> None:
     print("\n=== summary ===")
-    print(f"  {'level':<10} {'in tok':>9} {'out tok':>9} {'mean dev':>9} {'exact':>8}")
+    print(
+        f"  {'level':<10} {'input':>8} {'cache-r':>8} {'cache-w':>8} "
+        f"{'output':>8} {'mean dev':>9} {'exact':>8}"
+    )
     for level, results in by_level.items():
         deviations = [
             abs(r.score - r.expected_score)
@@ -128,13 +130,16 @@ def print_summary(by_level: dict[str, list[Result]]) -> None:
             f"{sum(d == 0 for d in deviations)}/{len(deviations)}" if deviations else "—"
         )
         print(
-            f"  {level:<10} {sum(r.usage.input_tokens for r in results):>9} "
-            f"{sum(r.usage.output_tokens for r in results):>9} {mean_dev:>9} {exact:>8}"
+            f"  {level:<10} {sum(r.usage.input_tokens for r in results):>8} "
+            f"{sum(r.usage.cache_read_tokens for r in results):>8} "
+            f"{sum(r.usage.cache_write_tokens for r in results):>8} "
+            f"{sum(r.usage.output_tokens for r in results):>8} "
+            f"{mean_dev:>9} {exact:>8}"
         )
 
-        false_pass, false_fail = _mechanism_errors(results)
-        print(f"    mechanism false pass={false_pass} false fail={false_fail}")
-        for name, index in (("mechanism", 0), ("trade-offs", 1), ("failure modes", 2)):
+        false_pass, false_fail = _accuracy_errors(results)
+        print(f"    accuracy false pass={false_pass} false fail={false_fail}")
+        for name, index in (("accuracy", 0), ("depth", 1), ("boundaries", 2)):
             axis_exact, within_one, total = _axis_metrics(results, index)
             if total:
                 print(

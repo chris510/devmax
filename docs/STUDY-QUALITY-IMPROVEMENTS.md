@@ -1,6 +1,6 @@
 # Devmax study-quality improvements
 
-Status: **structural implementation merged; Week 1 grounding and evaluation packs drafted for human review**
+Status: **structural implementation merged; Week 1 grounding approved and live-evaluated**
 
 Claude Design artifact: [Study Quality Improvements v1](https://claude.ai/design/p/25258e0c-5891-401c-9690-88790421a788?file=Study+Quality+Improvements+v1.dc.html)
 
@@ -282,17 +282,19 @@ pretend that an old ungrounded card acquired authority during deployment.
 
 ### Remaining content and live-evaluation gates
 
-- The first six Week 1 cards now have machine-drafted answer bases, rubrics, and
-  canonical questions. They remain `draft_review`, cannot be seeded, and are
-  tracked in [the Week 1 grounding review](CURRICULUM-GROUNDING-WEEK-1.md).
+- The first six Week 1 cards now have human-approved answer bases, rubrics, and
+  canonical questions. They may be deliberately seeded as the Week 1 cohort and
+  are tracked in [the Week 1 grounding review](CURRICULUM-GROUNDING-WEEK-1.md).
 - The other 48 curriculum cards still need source-grounded drafts and human
   review. Topic names and URLs are not enough to manufacture trusted
   corrections.
 - The first-party Study Plan remains `recall_supported = false` until each item
   has a real excerpt and an explicit eligibility review.
 - Week 1 contributes 18 scoring and 12 coached re-attempt cases toward the
-  planned 60–100-case source-grounded evaluation. Paid sweeps remain blocked
-  until its answer authorities are human-approved; no paid calls were made.
+  planned 60–100-case source-grounded evaluation. The offline gate passes on
+  SQLite and Postgres, and both low/medium live sweeps are recorded in the Week 1
+  review. Low effort remains the default for both paths; no prompt or model
+  change is justified until the broader evaluation is complete.
 
 ## Remaining content order
 

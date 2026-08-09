@@ -5,8 +5,8 @@
     "question": "What moves when a node joins the ring?",
     "feedback": "A joining node takes the hash-space arc previously owned by its clockwise successor; unrelated arcs do not move.",
     "reattempt_answer": "The new node lands at one ring position and takes only the keys in the arc between its predecessor and itself from the clockwise successor. Other nodes' arcs stay put.",
-    "unaided_mechanism": 1,
-    "expected_mechanism_accuracy": 5,
+    "unaided_accuracy": 1,
+    "expected_accuracy": 5,
     "answer_basis": "A node owns the interval from its predecessor to its own position; adding a node transfers only that interval from the next node clockwise.",
     "answer_rubric": {
       "mechanism": "Identify the one adjacent ownership interval that transfers.",
@@ -22,8 +22,8 @@
     "question": "What moves when a node joins the ring?",
     "feedback": "A joining node takes one adjacent arc from its clockwise successor.",
     "reattempt_answer": "One adjacent arc from its clockwise successor.",
-    "unaided_mechanism": 1,
-    "expected_mechanism_accuracy": 2
+    "unaided_accuracy": 1,
+    "expected_accuracy": 2
   },
   {
     "name": "raft commit — reconstructed",
@@ -31,8 +31,8 @@
     "question": "When may a leader treat a current-term entry as committed?",
     "feedback": "The leader needs the entry stored on a majority; commitment then advances in log order.",
     "reattempt_answer": "After the leader sees that its current-term entry is replicated on a majority, it can move commitIndex through that entry and tell followers in later AppendEntries.",
-    "unaided_mechanism": 1,
-    "expected_mechanism_accuracy": 5
+    "unaided_accuracy": 1,
+    "expected_accuracy": 5
   },
   {
     "name": "raft commit — still local only",
@@ -40,8 +40,8 @@
     "question": "When may a leader treat an entry as committed?",
     "feedback": "A local append is insufficient; replication to a majority is required.",
     "reattempt_answer": "Once the leader writes it to its own durable log, because followers will catch up later.",
-    "unaided_mechanism": 1,
-    "expected_mechanism_accuracy": 1
+    "unaided_accuracy": 1,
+    "expected_accuracy": 1
   },
   {
     "name": "cursor pagination — reconstructed",
@@ -49,8 +49,8 @@
     "question": "Why is a compound cursor tied to the sort order?",
     "feedback": "The cursor encodes the last row's ordered key tuple and the next query applies the matching lexicographic boundary.",
     "reattempt_answer": "If the order is created_at then id, the cursor carries both. The next page asks for rows after that tuple in the same order, so ties do not duplicate or skip rows.",
-    "unaided_mechanism": 2,
-    "expected_mechanism_accuracy": 5
+    "unaided_accuracy": 2,
+    "expected_accuracy": 5
   },
   {
     "name": "cursor pagination — adjacent jargon",
@@ -58,8 +58,8 @@
     "question": "Why is a compound cursor tied to the sort order?",
     "feedback": "Encode the last row's ordered key tuple and apply the same tuple boundary.",
     "reattempt_answer": "Cursors are faster than offsets and usually use base64 so clients cannot edit them.",
-    "unaided_mechanism": 1,
-    "expected_mechanism_accuracy": 1
+    "unaided_accuracy": 1,
+    "expected_accuracy": 1
   },
   {
     "name": "cache stampede — reconstructed with speech noise",
@@ -67,8 +67,8 @@
     "question": "How does request coalescing stop a miss storm?",
     "feedback": "One caller becomes the loader for a key while concurrent callers await the same in-flight result.",
     "reattempt_answer": "For each key, the first miss owns the load and everyone else weights—waits—on that same in flight promise, so the back end sees one fetch instead of all the misses.",
-    "unaided_mechanism": 2,
-    "expected_mechanism_accuracy": 5
+    "unaided_accuracy": 2,
+    "expected_accuracy": 5
   },
   {
     "name": "cache stampede — partial self-correction",
@@ -76,7 +76,7 @@
     "question": "How does request coalescing stop a miss storm?",
     "feedback": "One caller loads while the others wait for its in-flight result.",
     "reattempt_answer": "You add a lock—well, not a global lock, a per-key in-flight entry. I think later callers wait, but I am not sure how errors or cleanup work.",
-    "unaided_mechanism": 1,
-    "expected_mechanism_accuracy": 3
+    "unaided_accuracy": 1,
+    "expected_accuracy": 3
   }
 ]
