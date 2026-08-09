@@ -56,6 +56,10 @@ from scripts.openai_eval_support import (  # noqa: E402
     parse_response,
     response_request,
 )
+from scripts.scoring_prompt_variants import (  # noqa: E402
+    PRODUCTION,
+    SCORING_PROMPT_VARIANTS,
+)
 
 FILES_URL = "https://api.openai.com/v1/files"
 BATCHES_URL = "https://api.openai.com/v1/batches"
@@ -125,6 +129,7 @@ def build_batch_input(
                 "effort": call.effort,
                 "completion": call.completion,
                 "fingerprint": call.fingerprint,
+                "scoring_prompt_variant": call.scoring_prompt_variant,
             }
         )
     return "\n".join(lines) + ("\n" if lines else ""), calls
@@ -188,6 +193,9 @@ def _prepared_from_state(raw: dict[str, Any]) -> PreparedCall:
             effort=raw.get("effort"),
             completion=raw["completion"],
             fingerprint=str(raw["fingerprint"]),
+            scoring_prompt_variant=str(
+                raw.get("scoring_prompt_variant", PRODUCTION)
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Batch state contains an invalid prepared call") from exc
@@ -258,6 +266,12 @@ def _submit_parser(subparsers) -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--levels", nargs="+", default=[DEFAULT_EFFORT])
     parser.add_argument(
+        "--scoring-prompt-variant",
+        choices=SCORING_PROMPT_VARIANTS,
+        default=PRODUCTION,
+        help="evaluation-only rubric variant; production is unchanged",
+    )
+    parser.add_argument(
         "--max-output-tokens",
         type=openai_bakeoff.positive_int,
         default=DEFAULT_OUTPUT_CAP,
@@ -301,6 +315,7 @@ async def _submit(args, parser) -> int:
         levels=list(dict.fromkeys(args.levels)),
         model=args.model,
         max_output_tokens=args.max_output_tokens,
+        prompt_variant=args.scoring_prompt_variant,
     )
     try:
         prior = load_result_records(args.resume, kind="scoring")

@@ -49,6 +49,11 @@ from scripts.effort_sweep_support import (  # noqa: E402
     select_cases,
     usage_from_record,
 )
+from scripts.scoring_prompt_variants import (  # noqa: E402
+    PRODUCTION,
+    SCORING_PROMPT_VARIANTS,
+    apply_scoring_prompt_variant,
+)
 
 
 @dataclass
@@ -72,8 +77,14 @@ def _expected_axes(case: dict) -> tuple[int | None, int | None, int | None]:
     )
 
 
-def build_completion(case: dict[str, Any], *, model: str, effort: str | None) -> dict:
-    return llm.build_score_answer_completion(
+def build_completion(
+    case: dict[str, Any],
+    *,
+    model: str,
+    effort: str | None,
+    prompt_variant: str = PRODUCTION,
+) -> dict:
+    completion = llm.build_score_answer_completion(
         model=model,
         effort=effort,
         topic=case["topic"],
@@ -86,10 +97,15 @@ def build_completion(case: dict[str, Any], *, model: str, effort: str | None) ->
         answer_basis=case.get("answer_basis", ""),
         answer_rubric=case.get("answer_rubric"),
     )
+    return apply_scoring_prompt_variant(completion, prompt_variant)
 
 
 def prepare_cases(
-    cases: list[dict], *, levels: list[str | None], model: str
+    cases: list[dict],
+    *,
+    levels: list[str | None],
+    model: str,
+    prompt_variant: str = PRODUCTION,
 ) -> list[PreparedCall]:
     return [
         prepare_call(
@@ -97,7 +113,13 @@ def prepare_cases(
             case=case,
             kind="scoring",
             effort=level,
-            completion=build_completion(case, model=model, effort=level),
+            completion=build_completion(
+                case,
+                model=model,
+                effort=level,
+                prompt_variant=prompt_variant,
+            ),
+            scoring_prompt_variant=prompt_variant,
         )
         for level in levels
         for index, case in enumerate(cases)
@@ -144,19 +166,8 @@ async def run_case(
     tap.start(key)
     token = case_key.set(key)
     try:
-        result = await llm.score_answer(
-            topic=case["topic"],
-            mastery_summary=case.get("mastery_summary", ""),
-            question_asked=case["question"],
-            answer_text=case["answer"],
-            follow_up_question=case.get("follow_up_question"),
-            follow_up_answer=case.get("follow_up_answer", ""),
-            # Every case must return a comparable final grade. Follow-up-band
-            # agreement is derived from the axes/composite below.
-            follow_up_used=True,
-            answer_basis=case.get("answer_basis", ""),
-            answer_rubric=case.get("answer_rubric"),
-        )
+        data = await llm._complete(**prepared.completion)
+        result = llm.parse_score_result(data, follow_up_used=True)
     finally:
         case_key.reset(token)
 
@@ -251,6 +262,12 @@ async def main() -> int:
         help="approved cards manifest that owns each case's question, basis, and rubric",
     )
     parser.add_argument("--verbose", action="store_true", help="print feedback per case")
+    parser.add_argument(
+        "--scoring-prompt-variant",
+        choices=SCORING_PROMPT_VARIANTS,
+        default=PRODUCTION,
+        help="evaluation-only rubric variant; production is unchanged",
+    )
     args = parser.parse_args()
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
@@ -267,7 +284,12 @@ async def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)
     settings = get_settings()
     levels = levels_for(args.levels, settings.scoring_effort)
-    prepared = prepare_cases(cases, levels=levels, model=settings.scoring_model)
+    prepared = prepare_cases(
+        cases,
+        levels=levels,
+        model=settings.scoring_model,
+        prompt_variant=args.scoring_prompt_variant,
+    )
 
     try:
         prior_by_fingerprint = load_result_records(args.resume, kind="scoring")

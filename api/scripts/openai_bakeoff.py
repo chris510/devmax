@@ -55,6 +55,11 @@ from scripts.openai_eval_support import (  # noqa: E402
     conservative_input_bound,
     response_request,
 )
+from scripts.scoring_prompt_variants import (  # noqa: E402
+    PRODUCTION,
+    SCORING_PROMPT_VARIANTS,
+    apply_scoring_prompt_variant,
+)
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_EFFORT = "low"
@@ -82,6 +87,7 @@ def prepare_cases(
     levels: list[str | None],
     model: str,
     max_output_tokens: int,
+    prompt_variant: str = PRODUCTION,
 ) -> list[PreparedCall]:
     builder = (
         effort_sweep.build_completion
@@ -92,6 +98,12 @@ def prepare_cases(
     for level in levels:
         for index, case in enumerate(cases):
             completion = builder(case, model=model, effort=level)
+            if kind == "scoring":
+                completion = apply_scoring_prompt_variant(
+                    completion, prompt_variant
+                )
+            elif prompt_variant != PRODUCTION:
+                raise ValueError("scoring prompt variants cannot grade reattempts")
             completion = {
                 **completion,
                 "provider": "openai-responses",
@@ -104,6 +116,7 @@ def prepare_cases(
                     kind=kind,
                     effort=level,
                     completion=completion,
+                    scoring_prompt_variant=prompt_variant,
                 )
             )
     return prepared
@@ -228,6 +241,12 @@ async def main() -> int:
     parser.add_argument("--max-output-tokens", type=positive_int)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
+        "--scoring-prompt-variant",
+        choices=SCORING_PROMPT_VARIANTS,
+        default=PRODUCTION,
+        help="evaluation-only rubric variant; production is unchanged",
+    )
+    parser.add_argument(
         "--grounding-manifest",
         type=Path,
         help="approved cards manifest that owns each case's question, basis, and rubric",
@@ -254,13 +273,17 @@ async def main() -> int:
 
     levels = levels_for(args.levels, DEFAULT_EFFORT)
     max_output_tokens = args.max_output_tokens or DEFAULT_OUTPUT_CAPS[args.kind]
-    prepared = prepare_cases(
-        cases,
-        kind=args.kind,
-        levels=levels,
-        model=args.model,
-        max_output_tokens=max_output_tokens,
-    )
+    try:
+        prepared = prepare_cases(
+            cases,
+            kind=args.kind,
+            levels=levels,
+            model=args.model,
+            max_output_tokens=max_output_tokens,
+            prompt_variant=args.scoring_prompt_variant,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     try:
         prior_by_fingerprint = load_result_records(args.resume, kind=args.kind)
