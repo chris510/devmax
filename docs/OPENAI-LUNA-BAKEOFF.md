@@ -1,6 +1,6 @@
 # OpenAI GPT-5.6 Luna scoring bake-off
 
-Status: **ten-case live smoke passed on 2026-08-08; full Week 1 pack pending**
+Status: **full Week 1 pack completed on 2026-08-08; production switch blocked**
 
 This experiment compares OpenAI GPT-5.6 Luna with the shipping Claude Sonnet 5
 grader. It does not change the production provider, prompts, model defaults,
@@ -85,6 +85,69 @@ This passes the smoke acceptance gate and authorizes the next evaluation step:
 all 30 reviewed Week 1 cases. It does not authorize a production provider
 switch.
 
+## Full Week 1 results
+
+The 30-case first-pass evaluation reused the ten exact smoke fingerprints and
+made 20 new paid calls. All 30 responses satisfied the strict schema and the
+unchanged production parser.
+
+| Pack | Exact | Within one | False pass / fail | Input | Output | Median latency | Actual cost |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Scoring | 12/18 composites | 16/18 composites | 0 / 2 Accuracy | 18,809 | 4,140 | 2.99s | $0.0087 |
+| Coached re-attempt | 7/12 | 11/12 | 0 / 0 reconstruction | 11,462 | 1,512 | 1.56s | $0.0041 |
+| **Total** |  |  | **0 / 2** | **30,271** | **5,652** |  | **$0.0128** |
+
+Scoring-axis agreement was:
+
+| Axis | Exact | Within one |
+|---|---:|---:|
+| Accuracy | 12/18 | 15/18 |
+| Depth | 9/18 | 15/18 |
+| Boundaries | 13/18 | 17/18 |
+
+The scoring mean composite deviation was 0.67. Median latency was 2.99 seconds,
+but one response took 19.55 seconds. Coached grading had mean deviation 0.50,
+zero false reconstruction passes or failures, and every mastery summary
+preserved the coached-versus-unaided distinction.
+
+### Repeatability failure
+
+The primary run scored both correct decision-driven estimation answers as
+Accuracy 0 and claimed no answer was provided, even though the recorded request
+construction contained each answer in full. This created two false Accuracy
+failures: the complete answer moved from expected composite 5 to 0, and the
+mechanism-only answer moved from expected 3 to 0.
+
+A controlled concurrency-1 rerun of those exact two fingerprints produced
+Accuracy 5 for both. The complete answer then scored composite 5 as expected,
+while the mechanism-only answer was over-scored at composite 5 instead of 3.
+The rerun cost $0.0011. This rules out a missing-input or result-ordering bug and
+demonstrates material output instability on identical reviewed evidence.
+
+### Claude comparison and decision
+
+| Provider | Scoring exact | Scoring mean deviation | False Accuracy pass / fail | Coached exact / within one | Full-pack calculated cost |
+|---|---:|---:|---:|---:|---:|
+| Claude Sonnet 5 low | 13/18 | 0.28 | 0 / 0 | 6/12 · 11/12 | $0.1617 |
+| GPT-5.6 Luna low | 12/18 | 0.67 | 0 / 2 | 7/12 · 11/12 | $0.0128 |
+
+Claude's cost is calculated from its recorded 55,795 input and 5,012 output
+tokens at the published promotional $2/$10 per-million rate through 2026-08-31.
+Luna was about 92% cheaper and slightly better on coached exact agreement, but
+Claude was materially more reliable on first-pass scoring and produced no false
+Accuracy failures.
+
+The production scorer therefore remains Claude. Luna does not advance to a
+production adapter or the 60–100-case release gate in its current low-effort,
+unchanged-prompt configuration. The next useful experiment is a small repeated
+trial over the unstable estimation cases and nearby controls, comparing Luna
+low and medium effort. A configuration must first demonstrate repeatable
+first-pass scoring before the full pack is rerun.
+
+Both complete result files were replayed with `OPENAI_API_KEY` unavailable. All
+30 fingerprints resumed, zero new paid calls were scheduled, and both runs
+reported `$0.0000`.
+
 ## Live procedure
 
 Add an API key funded on the OpenAI API platform to the uncommitted `api/.env`,
@@ -146,7 +209,9 @@ adapter receives its own design and reliability review.
   and coached-result parsing used by the Anthropic path.
 - State: `store: false`; no persisted reasoning or previous response.
 - Tools and multimodal input: none.
-- Prompt caching: not enabled for this small rubric experiment.
+- Prompt caching: no explicit breakpoints; the primary pack reported no cache
+  reads, while the controlled rerun reported 1,064 automatically cached input
+  tokens.
 - Optional GPT-5.6 features: no Pro mode, programmatic tool calling, multi-agent,
   or explicit cache writes.
 

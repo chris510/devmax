@@ -230,7 +230,15 @@ Its ten-case live smoke passed on 2026-08-08: scoring composites were exact on
 false passes or false failures, and every coached summary preserved the
 coached-versus-unaided distinction. The run used 10,101 input and 1,840 output
 tokens, cost $0.0042, and replayed from fingerprints with zero new paid calls.
-The next provider-comparison step is the complete 30-case Week 1 pack.
+The complete 30-case Week 1 comparison then cost $0.0128: Luna scoring was
+exact on 12/18 with mean deviation 0.67 and two false Accuracy failures;
+coached grading was exact on 7/12 and within one on 11/12 with no false pass or
+failure. Both correct decision-driven estimation answers scored Accuracy 0 on
+the first pass, then Accuracy 5 on an identical controlled rerun. That material
+repeatability failure blocks a production provider switch despite Luna being
+about 92% cheaper than the calculated Claude full-pack cost. Production remains
+on Claude while a focused Luna low-versus-medium repeatability experiment is
+designed.
 
 This 30-case tranche is enough to retain the current low-effort settings, but
 not enough to approve a production prompt or model change. The trusted-authority
