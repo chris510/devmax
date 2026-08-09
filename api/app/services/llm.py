@@ -260,7 +260,7 @@ empty excerpt rather than guessing — a wrong offset is worse than a missing on
 
 For every item, set `recall_supported` independently. It is true only when this \
 specific item has a trusted source excerpt that supports one bounded technical \
-mechanism suitable for a sub-two-minute Devmax recall card. A broad mock, timed \
+mechanism suitable for a sub-two-minute Unprompted recall card. A broad mock, timed \
 build, behavioral exercise, or item with no answer authority is false even when the \
 overall subject supports technical recall cards.
 

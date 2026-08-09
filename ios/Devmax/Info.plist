@@ -15,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleDisplayName</key>
-	<string>Devmax</string>
+	<string>Unprompted</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
@@ -25,9 +25,7 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
-	<key>UIUserInterfaceStyle</key>
-	<string>Dark</string>
-	<!-- The design draws its own 44px mono status row (clock left, DEVMAX /
+	<!-- The design draws its own 44px mono status row (clock left, UNPROMPTED /
 	     READING ALOUD right). Without this the system bar sits above it and the
 	     clock appears twice. -->
 	<key>UIStatusBarHidden</key>
@@ -44,7 +42,7 @@
 		<string>audio</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Devmax listens while you answer a question out loud.</string>
+	<string>Unprompted listens while you answer a question out loud.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Your spoken answers are transcribed on this device so they can be scored.</string>
 	<!-- Injected from ios/Config/*.xcconfig. WCAPIKey comes from the gitignored
@@ -61,7 +59,7 @@
 	     shown without this string — the request fails silently instead. Needed for
 	     on-device testing against the Mac; verified against a physical iPhone. -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Devmax connects to a development server running on your Mac when testing on device.</string>
+	<string>Unprompted connects to a development server running on your Mac when testing on device.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

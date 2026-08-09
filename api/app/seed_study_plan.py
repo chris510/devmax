@@ -287,7 +287,7 @@ async def load_first_party_plan(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed a first-party Devmax Study Plan")
+    parser = argparse.ArgumentParser(description="Seed a first-party Unprompted Study Plan")
     parser.add_argument(
         "--file",
         type=Path,

@@ -21,7 +21,7 @@ struct ConversationScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StatusBar(rightText: speaker.isSpeaking ? "READING ALOUD" : "DEVMAX")
+            StatusBar(rightText: speaker.isSpeaking ? "READING ALOUD" : "UNPROMPTED")
             chrome
             progressRail
             thread
