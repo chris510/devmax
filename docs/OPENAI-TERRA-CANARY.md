@@ -2,9 +2,10 @@
 
 **Run date:** 2026-08-08
 
-**Decision:** The focused canary and reviewed 18-case scoring stage pass. Terra
-may advance to the coached re-attempt pack, but these results do not authorize a
-production provider switch.
+**Decision:** The focused canary and reviewed 18-case scoring stage pass, but
+the 12-case coached re-attempt stage fails with three false reconstruction
+failures. Terra does not advance to the larger release evaluation or a
+production provider adapter. Production remains on Claude.
 
 ## Why this canary exists
 
@@ -183,23 +184,78 @@ The scoring stage therefore passes and Terra may advance to coached grading.
 Production remains on Claude: first-pass scoring alone does not establish safe
 coached attribution or satisfy the broader provider-switch release gate.
 
-## Recommended next experiment
+## Reviewed Week 1 coached stage
 
-Run only the remaining 12 reviewed coached re-attempt cases on Terra at medium
-effort and concurrency 1:
+After the scoring stage merged, Terra ran the remaining 12 coached re-attempt
+cases at medium effort and concurrency 1. The schema, parser, 512-token output
+cap, and grounding manifest were unchanged. The free preflight's hard ceiling
+was $0.237896; the user authorized $0.238.
 
-- 12 coached re-attempt cases;
-- the unchanged schemas, parser, and grounding manifest; and
-- a fresh output file followed by a keyless resume proof.
+### Result
 
-The free preflight puts the coached hard ceiling at **$0.2379**. This is an
-intentionally loose refusal bound, not expected spend. Applying Terra's 10x
-token rates to the prior Luna coached usage suggests roughly **$0.041 actual**,
-before any cache discount; the coached pack needs its own explicit budget
-approval.
+| Measure | Terra medium | Luna low | Claude Sonnet 5 low |
+| --- | ---: | ---: | ---: |
+| Exact | 6/12 | 7/12 | 6/12 |
+| Within one | 9/12 | 11/12 | 11/12 |
+| Mean deviation | 0.92 | 0.50 | 0.58 |
+| False parrot pass | **0** | **0** | 1 |
+| False reconstruction fail | **3** | **0** | **0** |
+| Calculated coached cost | **$0.035236** | $0.004107 | $0.050496 |
 
-The coached pack should stop and reject Terra on any false reconstruction pass,
-false reconstruction failure, coached/unaided attribution error, schema
-failure, or catastrophic score. Passing it would complete the Week 1 pack and
-advance Terra to the larger 60–100-case evaluation and adapter design
-review—not directly to production.
+The three false failures were:
+
+| Case | Expected | Actual | Model characterization |
+| --- | ---: | ---: | --- |
+| Identity boundary — reconstructed | 5 | 2 | Called the correct applied booking-owner answer parroting |
+| Cursor pagination — reconstructed | 4 | 2 | Called the correct ordered-boundary reconstruction parroting |
+| Decision-driven estimation — reconstructed | 5 | 2 | Called the correct heap-versus-sharding reconstruction parroting |
+
+Those deviations are not borderline calibration differences. They turn
+reviewed correct reconstructions into failing coached results and repeat the
+same evidence-separation weakness that made Luna unsafe on first-pass scoring.
+The outputs were valid structured responses, so production cannot distinguish
+them from genuinely failed reconstructions without already knowing the grade.
+
+All 12 mastery summaries did preserve coached attribution with language such as
+"after being told" or "could only parrot." That gate passed. All responses also
+parsed through the strict schema, and there were no false reconstruction passes.
+The pack nevertheless fails because its acceptance gate required zero false
+failures and no deviation greater than one.
+
+### Usage, latency, and resume
+
+| Measure | Result |
+| --- | ---: |
+| Paid calls | 12 |
+| Input tokens | 11,462 |
+| Cached input tokens | 0 |
+| Output tokens | 1,026 |
+| Median provider latency | 1.42 s |
+| Mean provider latency | 1.73 s |
+| Slowest call | 3.47 s |
+| Conservative cost | **$0.035236** |
+
+A keyless replay restored all 12 fingerprints, scheduled zero new calls, and
+reported $0.0000 new paid-call cost. Raw JSONL records remain local and ignored.
+
+## Final provider decision
+
+| Provider | First-pass false Accuracy pass / fail | Coached false pass / fail | Reviewed 30-case cost | Decision |
+| --- | ---: | ---: | ---: | --- |
+| Claude Sonnet 5 low | 0 / 0 | 1 / 0 | $0.161710 | Production baseline |
+| GPT-5.6 Luna low | 0 / 2 | 0 / 0 | $0.012837 | Reject: unsafe first-pass scoring |
+| GPT-5.6 Terra medium | 0 / 0 | 0 / 3 | $0.116342 | Reject: unsafe coached grading |
+
+Terra's reviewed pack cost about 28% less than Claude at the promotional
+$2/$10 rate and would be about 52% less than the same recorded Claude usage at
+$3/$15. Cost does not overcome the coached failure: Terra was exact no more
+often than Claude, was within one on fewer cases, and introduced three false
+failures. A split-provider implementation would add routing, observability, and
+fallback complexity while retaining Claude for the path Terra failed, before
+Terra has passed the larger first-pass release pack.
+
+The Terra investigation therefore stops here. Do not run the 60–100-case Terra
+release evaluation and do not build an OpenAI production adapter from these
+results. Keep Claude as the single production provider. Reconsider OpenAI only
+when a materially different model or grading approach can first pass this
+frozen 30-case gate without prompt-specific expected-score knowledge.
