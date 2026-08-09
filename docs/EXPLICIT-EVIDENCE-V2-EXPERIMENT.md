@@ -1,6 +1,10 @@
 # Explicit-evidence V2 experiment
 
-**Status:** Prepared and free-preflighted; no paid calls made
+**Status:** A1 passed; A2 not run
+
+A1 returned axes 4 / 1 / 1 and the exact approved composite 3 on the single
+known blocking case. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A1.md` for the complete
+feedback, cost, and resume audit. A2 remains separately gated and unspent.
 
 ## Decision this PR enables
 
@@ -159,6 +163,7 @@ alone is insufficient to spend.
 
 ## Recommended next action
 
-After this preparation PR merges, authorize only A1: one Claude Sonnet 5
-low-effort call at concurrency 1, with a ceiling no higher than the freshly
-recomputed preflight. Audit its axes and feedback before any further call.
+A1 passed its reviewed gate. After this result merges, the next proposed action
+is A2: five Claude Sonnet 5 low-effort speech-noise calls at concurrency 1, with
+a freshly recomputed ceiling no higher than $0.0574. Stop and audit before any
+broader regression or provider call.
