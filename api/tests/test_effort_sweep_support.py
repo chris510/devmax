@@ -15,9 +15,7 @@ from scripts.effort_sweep_support import hydrate_grounding
 
 API = Path(__file__).resolve().parent.parent
 SCORING_CASES = API / "scripts" / "grounded_effort_cases_week1.json"
-RELEASE_CANDIDATES = (
-    API / "scripts" / "grounded_effort_cases_week1_release_candidates.json"
-)
+RELEASE_CASES = API / "scripts" / "grounded_effort_cases_week1_release.json"
 REATTEMPT_CASES = API / "scripts" / "grounded_reattempt_cases_week1.json"
 
 
@@ -86,8 +84,8 @@ def test_week_one_scoring_pack_has_three_consistent_labels_per_card() -> None:
         assert not {"question", "answer_basis", "answer_rubric"} & case.keys()
 
 
-def test_release_candidates_add_seven_reviewed_families_per_card() -> None:
-    cases = json.loads(RELEASE_CANDIDATES.read_text())
+def test_release_pack_has_seven_approved_families_per_card() -> None:
+    cases = json.loads(RELEASE_CASES.read_text())
     family_tags = {
         "partial-self-correction",
         "source-compatible-alternative",
@@ -101,6 +99,11 @@ def test_release_candidates_add_seven_reviewed_families_per_card() -> None:
     assert len(cases) == 42
     assert set(Counter(case["topic"] for case in cases).values()) == {7}
     assert sum("risk-smoke" in case["tags"] for case in cases) == 12
+    risk_cases = [case for case in cases if "risk-smoke" in case["tags"]]
+    assert Counter(case["expected_accuracy"] >= 3 for case in risk_cases) == {
+        True: 6,
+        False: 6,
+    }
     assert Counter(
         tag for case in cases for tag in case["tags"] if tag in family_tags
     ) == {tag: 6 for tag in family_tags}
@@ -111,13 +114,37 @@ def test_release_candidates_add_seven_reviewed_families_per_card() -> None:
             case["expected_boundaries"],
         )
         assert case["expected_score"] == derive_composite(*axes)
-        assert case["review_status"] == "candidate"
+        assert case["review_status"] == "approved"
+        assert "release-pack" in case["tags"]
         assert case["review_note"]
         assert not {"question", "answer_basis", "answer_rubric"} & case.keys()
 
 
-def test_release_candidates_hydrate_against_the_six_approved_cards() -> None:
-    cases = json.loads(RELEASE_CANDIDATES.read_text())
+def test_release_pack_conversational_families_have_required_evidence() -> None:
+    cases = json.loads(RELEASE_CASES.read_text())
+    follow_ups = [case for case in cases if "follow-up-anchored" in case["tags"]]
+    contradictions = [
+        case for case in cases if "prior-summary-contradiction" in case["tags"]
+    ]
+    depth_only = [case for case in cases if "depth-only" in case["tags"]]
+    boundaries_only = [case for case in cases if "boundaries-only" in case["tags"]]
+
+    assert len(follow_ups) == len(contradictions) == 6
+    assert all(case["follow_up_question"] and case["follow_up_answer"] for case in follow_ups)
+    assert all(case["mastery_summary"] for case in contradictions)
+    assert len(depth_only) == len(boundaries_only) == 3
+    assert all(
+        case["expected_depth"] >= 3 and case["expected_boundaries"] <= 2
+        for case in depth_only
+    )
+    assert all(
+        case["expected_depth"] <= 2 and case["expected_boundaries"] >= 3
+        for case in boundaries_only
+    )
+
+
+def test_release_pack_hydrates_against_the_six_approved_cards() -> None:
+    cases = json.loads(RELEASE_CASES.read_text())
 
     hydrated = hydrate_grounding(
         cases, API / "cards.json", argparse.ArgumentParser()
