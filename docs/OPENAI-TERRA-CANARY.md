@@ -238,24 +238,25 @@ failures and no deviation greater than one.
 A keyless replay restored all 12 fingerprints, scheduled zero new calls, and
 reported $0.0000 new paid-call cost. Raw JSONL records remain local and ignored.
 
-## Final provider decision
+## Single-provider decision
 
 | Provider | First-pass false Accuracy pass / fail | Coached false pass / fail | Reviewed 30-case cost | Decision |
 | --- | ---: | ---: | ---: | --- |
 | Claude Sonnet 5 low | 0 / 0 | 1 / 0 | $0.161710 | Production baseline |
 | GPT-5.6 Luna low | 0 / 2 | 0 / 0 | $0.012837 | Reject: unsafe first-pass scoring |
-| GPT-5.6 Terra medium | 0 / 0 | 0 / 3 | $0.116342 | Reject: unsafe coached grading |
+| GPT-5.6 Terra medium | 0 / 0 | 0 / 3 | $0.116342 | Reject as a single provider; retain as a first-pass candidate |
 
 Terra's reviewed pack cost about 28% less than Claude at the promotional
 $2/$10 rate and would be about 52% less than the same recorded Claude usage at
 $3/$15. Cost does not overcome the coached failure: Terra was exact no more
 often than Claude, was within one on fewer cases, and introduced three false
-failures. A split-provider implementation would add routing, observability, and
-fallback complexity while retaining Claude for the path Terra failed, before
-Terra has passed the larger first-pass release pack.
+failures. Terra therefore fails as a drop-in replacement for every Claude path.
 
-The Terra investigation therefore stops here. Do not run the 60–100-case Terra
-release evaluation and do not build an OpenAI production adapter from these
-results. Keep Claude as the single production provider. Reconsider OpenAI only
-when a materially different model or grading approach can first pass this
-frozen 30-case gate without prompt-specific expected-score knowledge.
+That does not erase the first-pass result. The scheduler-grade path and coached
+path already have separate model configuration, coached grading never reaches
+SM-2 or the displayed score, and Terra passed the scheduler-critical scoring
+pack with zero false Accuracy decisions. A narrower hybrid remains worth
+evaluating: Terra for `score_answer`, Claude for `score_reattempt` and every
+other production model path. Production remains entirely on Claude until that
+larger first-pass gate passes and the provider routing receives its own review.
+See [OpenAI hybrid scoring evaluation plan](OPENAI-HYBRID-SCORING-PLAN.md).
