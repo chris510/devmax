@@ -319,6 +319,15 @@ def test_cost_estimate_uses_counted_input_and_conservative_output() -> None:
     assert estimate.usd == Decimal("0.0016")
 
 
+def test_preflight_cost_display_rounds_up_to_an_authorizable_budget() -> None:
+    assert support.cost_ceiling_for_display(Decimal("0.321850")) == Decimal(
+        "0.3219"
+    )
+    assert support.cost_ceiling_for_display(Decimal("0.321800")) == Decimal(
+        "0.3218"
+    )
+
+
 @pytest.mark.anyio
 async def test_preflight_uses_free_token_count_shape_without_max_tokens() -> None:
     prepared = prepared_call()
