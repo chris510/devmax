@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -22,6 +22,7 @@ from app.services import llm
 from app.services.card_lifecycle import Grounding, GroundingError
 
 RESULT_FORMAT_VERSION = 1
+USD_DISPLAY_QUANTUM = Decimal("0.0001")
 
 # Versioned from the providers' public pricing tables. Sonnet 5's introductory
 # rate ends after 2026-08-31; keeping the boundary in code prevents a stale
@@ -391,7 +392,12 @@ def print_preflight(
         f"${rate.output_per_million} output"
     )
     print(f"  pricing schedule   {rate.label}")
-    print(f"  estimated cost     ${estimate.usd:.4f}")
+    print(f"  estimated ceiling  ${cost_ceiling_for_display(estimate.usd):.4f}")
+
+
+def cost_ceiling_for_display(cost: Decimal) -> Decimal:
+    """Round a preflight estimate upward so the printed budget can authorize it."""
+    return cost.quantize(USD_DISPLAY_QUANTUM, rounding=ROUND_CEILING)
 
 
 def enforce_budget(
@@ -409,7 +415,8 @@ def enforce_budget(
         )
     if estimate.usd > budget:
         parser.error(
-            f"estimated cost ${estimate.usd:.4f} exceeds --max-cost-usd ${budget}"
+            f"estimated ceiling ${cost_ceiling_for_display(estimate.usd):.4f} "
+            f"exceeds --max-cost-usd ${budget}"
         )
 
 

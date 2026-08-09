@@ -1,7 +1,8 @@
 # OpenAI hybrid scoring release pack
 
-**Status:** The 42 new labels were accepted when the owner merged PR #41. No
-OpenAI request, file upload, or paid Batch has been made for this release pack.
+**Status:** The 42 new labels were reviewed in PR #41 and approved in PR #42.
+The 12-case standard smoke then failed the composite gate; no Batch was
+submitted. See `OPENAI-TERRA-RELEASE-SMOKE.md`.
 
 ## What the release pack adds
 
@@ -35,9 +36,9 @@ family has six cases, and all cases hydrate against approved authority.
 
 Each new case has `review_status: "approved"` and retains the `review_note` that
 explains its axis boundary. PR #41 requested review of every expected Accuracy,
-Depth, Boundaries, derived composite, and note against approved grounding; the
-owner's merge records acceptance of that review pack. The runner still refuses
-any future case carrying an explicit status other than `approved`.
+Depth, Boundaries, derived composite, and note against approved grounding; PR
+#42 records the resulting approved status. The runner still refuses any future
+case carrying an explicit status other than `approved`.
 
 The approval follows these rules:
 
@@ -98,11 +99,11 @@ Terra run.
 
 | Stage | Calls | Rate | Authorization ceiling | Expected from observed Terra run |
 | --- | ---: | ---: | ---: | ---: |
-| Standard risk smoke | 12 | $2/M input · $12/M output | $0.3218 | about $0.0541 |
-| Batch remaining unique cases | 48 | $1/M input · $6/M output | $0.6469 | about $0.1081 |
-| Batch risk repeat, each run | 12 | $1/M input · $6/M output | $0.1609 | about $0.0270 |
-| Two Batch repeats | 24 | Batch | $0.3218 | about $0.0541 |
-| **Complete 84-call gate** | **84** | Mixed | **$1.2905** | **about $0.2163** |
+| Standard risk smoke | 12 | $2/M input · $12/M output | $0.3219 | about $0.0541 |
+| Batch remaining unique cases | 48 | $1/M input · $6/M output | $0.6470 | about $0.1081 |
+| Batch risk repeat, each run | 12 | $1/M input · $6/M output | $0.1610 | about $0.0270 |
+| Two Batch repeats | 24 | Batch | $0.3220 | about $0.0541 |
+| **Complete 84-call gate** | **84** | Mixed | **$1.2909** | **about $0.2163** |
 
 The authorization ceiling is intentionally much higher than the expected
 charge. It treats every visible UTF-8 byte as a possible input token, adds a
@@ -114,8 +115,8 @@ The observed 18-case Terra run used 18,809 input and 3,624 output tokens: about
 1,045 input and 201 output tokens per call, with a maximum of 394 output
 tokens. Applying that observed per-call cost and the published 50% Batch
 discount produces the approximately $0.216 projection. Provider billing is
-authoritative; the ceiling is what must be separately acknowledged at each
-stage.
+authoritative; the upward-rounded ceiling is what must be separately
+acknowledged at each stage.
 
 ## Reproducing the free preflights
 
@@ -157,7 +158,7 @@ uv run python scripts/openai_batch_bakeoff.py collect \
 
 ## What remains blocked
 
-This approval does not authorize a paid call, change any production provider,
-or implement fallback routing. The next separately authorized action is only
-the 12-case standard smoke. Terra may move to production adapter design only
-after the full 84-call gate in `OPENAI-HYBRID-SCORING-PLAN.md` passes.
+The standard smoke was separately authorized and run, then failed because
+three composites were two points above their approved labels. The remaining
+48 unique calls and both repeatability Batches are stopped. This result does
+not change any production provider or implement fallback routing.

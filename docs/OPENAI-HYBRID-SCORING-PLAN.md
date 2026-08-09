@@ -1,11 +1,16 @@
 # OpenAI hybrid scoring evaluation plan
 
-**Status:** Proposed evaluation; no production change and no paid calls
-authorized by this document.
+**Status:** Release evaluation stopped after the failed standard smoke;
+production is unchanged.
+
+**Gate result:** The authorized 12-case standard smoke failed the composite
+criterion even though Accuracy had zero false passes or failures. The remaining
+Batch stages are stopped and Terra does not advance to adapter design. See
+[`OPENAI-TERRA-RELEASE-SMOKE.md`](OPENAI-TERRA-RELEASE-SMOKE.md).
 
 **Preparation update:** The 42 additional labels and cost-guarded Batch tooling
-landed in PR #41. The owner's merge accepted the requested label review; the
-approved pack and execution controls are recorded in
+landed in PR #41, and the reviewed labels were approved in PR #42. The approved
+pack and execution controls are recorded in
 [`OPENAI-HYBRID-RELEASE-PACK.md`](OPENAI-HYBRID-RELEASE-PACK.md). Paid stages
 still require separate cost authorization.
 
