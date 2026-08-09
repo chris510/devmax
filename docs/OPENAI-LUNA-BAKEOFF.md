@@ -1,6 +1,6 @@
 # OpenAI GPT-5.6 Luna scoring bake-off
 
-Status: **harness complete; live run blocked on `OPENAI_API_KEY`**
+Status: **ten-case live smoke passed on 2026-08-08; full Week 1 pack pending**
 
 This experiment compares OpenAI GPT-5.6 Luna with the shipping Claude Sonnet 5
 grader. It does not change the production provider, prompts, model defaults,
@@ -54,6 +54,36 @@ The 2026-08-08 credential-free preflight produced these worst-case bounds:
 The input bound intentionally exceeds likely tokenizer usage. Actual output is
 also expected to be below the hard ceiling, but the paid acknowledgement uses
 the ceiling rather than that expectation.
+
+## Live smoke results
+
+The funded-key run completed all ten risk-stratified cases against
+`gpt-5.6-luna` at low reasoning effort. Every response satisfied the strict
+schema and the unchanged production parser.
+
+| Pack | Exact | Within one | False pass / fail | Input | Output | Mean latency | Actual cost |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Scoring | 6/6 composites | 6/6 on every axis | 0 / 0 Accuracy | 6,267 | 1,384 | 3.01s | $0.0029 |
+| Coached re-attempt | 3/4 | 4/4 | 0 / 0 reconstruction | 3,834 | 456 | 1.78s | $0.0013 |
+| **Total** |  |  | **0 / 0** | **10,101** | **1,840** |  | **$0.0042** |
+
+Scoring matched all six expected composites. Accuracy and Depth were exact on
+five of six cases and within one on all six; Boundaries was exact on all six.
+The only coached-label mismatch was a correct cursor-pagination reconstruction
+scored 5 instead of the conservative expected 4. Its mastery summary still
+said the learner got there after being told and that unaided recall remained
+unproven. All four coached summaries likewise distinguished coached performance
+from unaided mastery.
+
+The live result files were then replayed with `OPENAI_API_KEY` unavailable.
+All ten fingerprints resumed, zero new paid calls were scheduled, and both
+runs reported `$0.0000`. The observed $0.0042 total was 87% below the $0.0314
+worst-case authorization ceiling and about 47% below the normalized $0.0080
+estimate used before an OpenAI-tokenized run existed.
+
+This passes the smoke acceptance gate and authorizes the next evaluation step:
+all 30 reviewed Week 1 cases. It does not authorize a production provider
+switch.
 
 ## Live procedure
 
