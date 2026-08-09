@@ -943,6 +943,12 @@ async def score_answer(
     )
     data = await _complete(**completion)
 
+    return parse_score_result(data, follow_up_used=follow_up_used)
+
+
+def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreResult:
+    """Apply the production scoring contract to provider-structured data."""
+
     # The JSON schema makes all three axes required, so this should be unreachable —
     # but an unguarded KeyError/ValueError here is a 500, and the client only knows
     # how to retry a 503. Losing a spoken answer is the worst failure mode in the
@@ -1152,6 +1158,12 @@ async def score_reattempt(
         answer_rubric=answer_rubric,
     )
     data = await _complete(**completion)
+
+    return parse_reattempt_result(data)
+
+
+def parse_reattempt_result(data: dict[str, Any]) -> ReattemptResult:
+    """Apply the production coached-grade contract to provider-structured data."""
 
     try:
         accuracy = int(data["accuracy"])

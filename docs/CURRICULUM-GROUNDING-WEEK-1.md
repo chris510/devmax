@@ -223,6 +223,15 @@ pack passes with no false Accuracy pass and acceptable per-axis agreement. This
 keeps the scheduler's retention signal behind the same quality gate regardless
 of provider.
 
+The isolated Luna runner, cost ceilings, commands, and acceptance gate are
+recorded in [OpenAI GPT-5.6 Luna scoring bake-off](OPENAI-LUNA-BAKEOFF.md).
+Its ten-case live smoke passed on 2026-08-08: scoring composites were exact on
+6/6 cases, coached grading was exact on 3/4 and within one on 4/4, there were no
+false passes or false failures, and every coached summary preserved the
+coached-versus-unaided distinction. The run used 10,101 input and 1,840 output
+tokens, cost $0.0042, and replayed from fingerprints with zero new paid calls.
+The next provider-comparison step is the complete 30-case Week 1 pack.
+
 This 30-case tranche is enough to retain the current low-effort settings, but
 not enough to approve a production prompt or model change. The trusted-authority
 versus learner-visible-feedback ambiguity must be retested in the planned
