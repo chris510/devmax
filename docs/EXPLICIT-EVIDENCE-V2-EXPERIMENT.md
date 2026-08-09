@@ -1,10 +1,12 @@
 # Explicit-evidence V2 experiment
 
-**Status:** A1 passed; A2 not run
+**Status:** A1 and A2 passed; broader axis regression not run
 
 A1 returned axes 4 / 1 / 1 and the exact approved composite 3 on the single
 known blocking case. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A1.md` for the complete
-feedback, cost, and resume audit. A2 remains separately gated and unspent.
+feedback, cost, and resume audit. A2 then returned five exact composites with
+all axes within one. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A2.md` for the combined
+six-case evidence and next regression gate.
 
 ## Decision this PR enables
 
@@ -163,7 +165,7 @@ alone is insufficient to spend.
 
 ## Recommended next action
 
-A1 passed its reviewed gate. After this result merges, the next proposed action
-is A2: five Claude Sonnet 5 low-effort speech-noise calls at concurrency 1, with
-a freshly recomputed ceiling no higher than $0.0574. Stop and audit before any
-broader regression or provider call.
+A1 and A2 passed their reviewed gates. After the A2 result merges, the next
+proposed action is B1: three reviewed `boundaries-only` Claude Sonnet 5 calls at
+low effort and concurrency 1, with a freshly recomputed ceiling no higher than
+$0.0346. B2 and every provider or production step remain separately gated.
