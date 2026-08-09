@@ -8,10 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.llm import ReattemptResult, ScoreResult, derive_composite
-from scripts import effort_sweep, reattempt_effort_sweep
+from app.services.llm import ReattemptResult, derive_composite
+from scripts import effort_sweep, openai_bakeoff, reattempt_effort_sweep
 from scripts import effort_sweep_support as support
 from scripts.effort_sweep_support import hydrate_grounding
+from scripts.scoring_prompt_variants import EXPLICIT_EVIDENCE_V1, PRODUCTION
 
 API = Path(__file__).resolve().parent.parent
 SCORING_CASES = API / "scripts" / "grounded_effort_cases_week1.json"
@@ -270,6 +271,7 @@ def test_jsonl_results_are_durable_and_resume_by_exact_fingerprint(tmp_path) -> 
         recorder.append(record)
         assert path.read_text().endswith("\n")
 
+    assert record["scoring_prompt_variant"] == PRODUCTION
     assert support.load_result_records(path, kind="scoring") == {
         prepared.fingerprint: record
     }
@@ -410,7 +412,7 @@ async def test_dry_run_counts_shipping_effort_without_paid_messages(
         raise AssertionError("dry-run reached a paid Message call")
 
     monkeypatch.setattr(effort_sweep, "count_prepared_calls", count_calls)
-    monkeypatch.setattr(effort_sweep.llm, "score_answer", forbidden_score)
+    monkeypatch.setattr(effort_sweep.llm, "_complete", forbidden_score)
     monkeypatch.setattr(
         effort_sweep.sys,
         "argv",
@@ -435,7 +437,7 @@ async def test_missing_budget_refuses_before_paid_messages(monkeypatch, tmp_path
         raise AssertionError("budget refusal reached a paid Message call")
 
     monkeypatch.setattr(effort_sweep, "count_prepared_calls", count_calls)
-    monkeypatch.setattr(effort_sweep.llm, "score_answer", forbidden_score)
+    monkeypatch.setattr(effort_sweep.llm, "_complete", forbidden_score)
     monkeypatch.setattr(effort_sweep.sys, "argv", ["effort_sweep.py", str(cases)])
 
     with pytest.raises(SystemExit, match="2"):
@@ -471,7 +473,7 @@ async def test_exact_resume_needs_no_api_key_or_paid_call(monkeypatch, tmp_path)
         raise AssertionError("exact resume reached an API call")
 
     monkeypatch.setattr(effort_sweep, "count_prepared_calls", forbidden)
-    monkeypatch.setattr(effort_sweep.llm, "score_answer", forbidden)
+    monkeypatch.setattr(effort_sweep.llm, "_complete", forbidden)
     output_path = tmp_path / "resumed.jsonl"
     monkeypatch.setattr(
         effort_sweep.sys,
@@ -492,12 +494,18 @@ async def test_exact_resume_needs_no_api_key_or_paid_call(monkeypatch, tmp_path)
 
 @pytest.mark.anyio
 async def test_scoring_sweep_reads_the_current_axis_contract(monkeypatch, tmp_path) -> None:
-    async def score_answer(**_kwargs) -> ScoreResult:
-        return ScoreResult(
-            status="complete", score=5, accuracy=5, depth=4, boundaries=5
-        )
+    async def complete(**kwargs):
+        assert "EXPLICIT EVIDENCE ATTRIBUTION V1" in kwargs["rubric"]
+        return {
+            "accuracy": 5,
+            "depth": 4,
+            "boundaries": 5,
+            "feedback": "saved",
+            "follow_up_question": "One more — why?",
+            "mastery_summary": "solid",
+        }
 
-    monkeypatch.setattr(effort_sweep.llm, "score_answer", score_answer)
+    monkeypatch.setattr(effort_sweep.llm, "_complete", complete)
     case = {
         "name": "current scoring contract",
         "topic": "Topic",
@@ -509,7 +517,10 @@ async def test_scoring_sweep_reads_the_current_axis_contract(monkeypatch, tmp_pa
         "expected_boundaries": 5,
     }
     prepared = effort_sweep.prepare_cases(
-        [case], levels=["low"], model="claude-sonnet-5"
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V1,
     )[0]
     with effort_sweep.JsonlRecorder(tmp_path / "scoring.jsonl") as recorder:
         result, _record = await effort_sweep.run_case(
@@ -521,6 +532,71 @@ async def test_scoring_sweep_reads_the_current_axis_contract(monkeypatch, tmp_pa
 
     assert result.axes == (5, 4, 5)
     assert result.expected_axes == (5, 4, 5)
+
+
+def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> None:
+    case = {
+        "name": "shared candidate",
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Answer.",
+    }
+    production = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=PRODUCTION,
+    )[0]
+    claude_candidate = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V1,
+    )[0]
+    openai_candidate = openai_bakeoff.prepare_cases(
+        [case],
+        kind="scoring",
+        levels=["low"],
+        model="gpt-5.6-terra",
+        max_output_tokens=1024,
+        prompt_variant=EXPLICIT_EVIDENCE_V1,
+    )[0]
+
+    assert production.completion["rubric"] == effort_sweep.llm.SCORING_RUBRIC
+    assert claude_candidate.completion["rubric"] == openai_candidate.completion["rubric"]
+    assert claude_candidate.fingerprint != production.fingerprint
+    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V1
+    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V1
+
+    record = support.make_result_record(
+        claude_candidate,
+        model="claude-sonnet-5",
+        result={"score": 3},
+        usage=support.Usage(),
+    )
+    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V1
+
+
+def test_explicit_evidence_candidate_maps_axes_and_forbids_context_credit() -> None:
+    case = {
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Answer.",
+    }
+
+    rubric = effort_sweep.build_completion(
+        case,
+        model="claude-sonnet-5",
+        effort="low",
+        prompt_variant=EXPLICIT_EVIDENCE_V1,
+    )["rubric"]
+
+    assert "depth — trade-off awareness only" in rubric
+    assert "boundaries — failure-mode awareness only" in rubric
+    assert "The only learner evidence is text after `ANSWER:` labels" in rubric
+    assert "not claims the learner made" in rubric
+    assert "If feedback supplies a missing trade-off, depth must be 0-2" in rubric
+    assert "If feedback supplies a missing failure" in rubric
 
 
 @pytest.mark.anyio

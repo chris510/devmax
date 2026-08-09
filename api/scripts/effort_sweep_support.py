@@ -69,6 +69,7 @@ class PreparedCall:
     effort: str | None
     completion: dict[str, Any]
     fingerprint: str
+    scoring_prompt_variant: str = "production"
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,7 @@ def prepare_call(
     kind: str,
     effort: str | None,
     completion: dict[str, Any],
+    scoring_prompt_variant: str = "production",
 ) -> PreparedCall:
     return PreparedCall(
         index=index,
@@ -227,6 +229,7 @@ def prepare_call(
         effort=effort,
         completion=completion,
         fingerprint=completion_fingerprint(kind, case, completion),
+        scoring_prompt_variant=scoring_prompt_variant,
     )
 
 
@@ -302,6 +305,7 @@ def make_result_record(
         "case": prepared.case_name,
         "model": model,
         "effort": prepared.effort,
+        "scoring_prompt_variant": prepared.scoring_prompt_variant,
         "result": result,
         "usage": asdict(usage),
     }

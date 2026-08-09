@@ -98,3 +98,7 @@ would be a new cross-provider experiment with its own offline prompt review,
 Claude regression gate, Terra smoke authorization, and cost cap. A
 provider-specific rubric would no longer test the unchanged production
 contract and should not be treated as evidence for the current adapter plan.
+
+That experiment is now prepared, with no paid calls made, in
+`EXPLICIT-EVIDENCE-SCORING-EXPERIMENT.md`. It starts with a six-call Claude
+speech-noise gate and stops for audit before any additional spend.

@@ -7,13 +7,14 @@ import pytest
 
 from scripts import openai_bakeoff, openai_batch_bakeoff
 from scripts.effort_sweep_support import batch_rate_for_model
+from scripts.scoring_prompt_variants import EXPLICIT_EVIDENCE_V1
 
 API = Path(__file__).resolve().parent.parent
 RELEASE_CASES = API / "scripts" / "grounded_effort_cases_week1_release.json"
 CARDS = API / "cards.json"
 
 
-def one_prepared_call():
+def one_prepared_call(*, prompt_variant: str = "production"):
     case = {
         "name": "one",
         "topic": "Topic",
@@ -30,6 +31,7 @@ def one_prepared_call():
         levels=["medium"],
         model="gpt-5.6-terra",
         max_output_tokens=2048,
+        prompt_variant=prompt_variant,
     )[0]
 
 
@@ -61,6 +63,16 @@ def test_batch_input_preserves_the_responses_request_and_custom_id() -> None:
     assert line["body"]["text"]["format"]["strict"] is True
     assert line["body"]["store"] is False
     assert calls[0]["fingerprint"] == prepared.fingerprint
+
+
+def test_batch_state_preserves_scoring_prompt_variant() -> None:
+    prepared = one_prepared_call(prompt_variant=EXPLICIT_EVIDENCE_V1)
+
+    _content, calls = openai_batch_bakeoff.build_batch_input([prepared])
+    restored = openai_batch_bakeoff._prepared_from_state(calls[0])
+
+    assert restored.scoring_prompt_variant == EXPLICIT_EVIDENCE_V1
+    assert restored.fingerprint == prepared.fingerprint
 
 
 @pytest.mark.anyio
