@@ -1,12 +1,14 @@
 # Explicit-evidence V2 experiment
 
-**Status:** A1 and A2 passed; broader axis regression not run
+**Status:** A1, A2, and B1 passed; B2 not run
 
 A1 returned axes 4 / 1 / 1 and the exact approved composite 3 on the single
 known blocking case. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A1.md` for the complete
 feedback, cost, and resume audit. A2 then returned five exact composites with
 all axes within one. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A2.md` for the combined
-six-case evidence and next regression gate.
+six-case evidence. B1 then activated Boundaries on all three reviewed positive
+cases while keeping Depth at 1. See `CLAUDE-EXPLICIT-EVIDENCE-V2-B1.md` for the
+complete audit. B2 remains separately gated and unspent.
 
 ## Decision this PR enables
 
@@ -165,7 +167,7 @@ alone is insufficient to spend.
 
 ## Recommended next action
 
-A1 and A2 passed their reviewed gates. After the A2 result merges, the next
-proposed action is B1: three reviewed `boundaries-only` Claude Sonnet 5 calls at
-low effort and concurrency 1, with a freshly recomputed ceiling no higher than
-$0.0346. B2 and every provider or production step remain separately gated.
+A1, A2, and B1 passed their reviewed gates. After the B1 result merges, the next
+proposed action is B2: three reviewed `depth-only` Claude Sonnet 5 calls at low
+effort and concurrency 1, with a freshly recomputed ceiling no higher than
+$0.0346. Every broader, provider, or production step remains separately gated.
