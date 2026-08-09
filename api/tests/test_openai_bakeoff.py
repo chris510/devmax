@@ -196,6 +196,32 @@ async def test_paid_run_stops_after_preflight_when_api_key_is_missing(
     assert "ChatGPT credits cannot authorize API calls" in capsys.readouterr().err
 
 
+@pytest.mark.anyio
+async def test_paid_run_refuses_an_explicit_candidate_before_api_key(
+    monkeypatch, tmp_path
+) -> None:
+    cases = write_scoring_case(tmp_path)
+    payload = json.loads(cases.read_text())
+    payload[0]["review_status"] = "candidate"
+    cases.write_text(json.dumps(payload))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "scoring",
+            str(cases),
+            "--max-cost-usd",
+            "1",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        await openai_bakeoff.main()
+
+
 def test_eval_key_can_load_from_local_dotenv(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

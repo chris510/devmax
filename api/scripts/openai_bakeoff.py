@@ -41,6 +41,7 @@ from scripts.effort_sweep_support import (  # noqa: E402
     load_result_records,
     make_result_record,
     output_path_for,
+    pending_case_reviews,
     prepare_call,
     print_preflight,
     rate_for_model,
@@ -243,6 +244,13 @@ async def main() -> int:
     )
     if args.grounding_manifest:
         cases = hydrate_grounding(cases, args.grounding_manifest, parser)
+    pending_reviews = pending_case_reviews(cases)
+    if pending_reviews:
+        print(f"  human review       {len(pending_reviews)} case label(s) still pending")
+        if not args.dry_run:
+            parser.error(
+                "paid run not started: every explicit review_status must be approved"
+            )
 
     levels = levels_for(args.levels, DEFAULT_EFFORT)
     max_output_tokens = args.max_output_tokens or DEFAULT_OUTPUT_CAPS[args.kind]
