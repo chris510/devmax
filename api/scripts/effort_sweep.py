@@ -5,8 +5,9 @@ This is a live, paid evaluation tool rather than a test. Independent cases run
 with bounded concurrency, results print in source-file order, and every result
 owns its own input/output/cache usage even when calls overlap.
 
-    uv run python scripts/effort_sweep.py scripts/effort_cases.json
-    uv run python scripts/effort_sweep.py cases.json --levels low medium --concurrency 4
+    uv run python scripts/effort_sweep.py scripts/effort_cases.json --dry-run
+    uv run python scripts/effort_sweep.py cases.json --max-cost-usd 0.20
+    uv run python scripts/effort_sweep.py cases.json --levels low medium --dry-run
 """
 
 from __future__ import annotations
@@ -17,22 +18,37 @@ import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import get_settings  # noqa: E402
 from app.services import llm  # noqa: E402
 from scripts.effort_sweep_support import (  # noqa: E402
+    JsonlRecorder,
+    PreparedCall,
     Usage,
     UsageTap,
+    actual_cost,
+    add_paid_evaluation_args,
     capture_usage,
     case_key,
+    count_prepared_calls,
+    enforce_budget,
+    estimate_cost,
     hydrate_grounding,
+    levels_for,
     load_cases,
+    load_result_records,
+    make_result_record,
+    output_path_for,
+    prepare_call,
+    print_preflight,
+    rate_for_model,
     run_bounded,
+    select_cases,
+    usage_from_record,
 )
-
-DEFAULT_LEVELS = ("low", "medium")
 
 
 @dataclass
@@ -45,6 +61,7 @@ class Result:
     axes: tuple[int, int, int]
     usage: Usage
     feedback: str = ""
+    resumed: bool = False
 
 
 def _expected_axes(case: dict) -> tuple[int | None, int | None, int | None]:
@@ -55,8 +72,75 @@ def _expected_axes(case: dict) -> tuple[int | None, int | None, int | None]:
     )
 
 
-async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
-    key = f"{level}:{index}"
+def build_completion(case: dict[str, Any], *, model: str, effort: str | None) -> dict:
+    return llm.build_score_answer_completion(
+        model=model,
+        effort=effort,
+        topic=case["topic"],
+        mastery_summary=case.get("mastery_summary", ""),
+        question_asked=case["question"],
+        answer_text=case["answer"],
+        follow_up_question=case.get("follow_up_question"),
+        follow_up_answer=case.get("follow_up_answer", ""),
+        follow_up_used=True,
+        answer_basis=case.get("answer_basis", ""),
+        answer_rubric=case.get("answer_rubric"),
+    )
+
+
+def prepare_cases(
+    cases: list[dict], *, levels: list[str | None], model: str
+) -> list[PreparedCall]:
+    return [
+        prepare_call(
+            index=index,
+            case=case,
+            kind="scoring",
+            effort=level,
+            completion=build_completion(case, model=model, effort=level),
+        )
+        for level in levels
+        for index, case in enumerate(cases)
+    ]
+
+
+def result_payload(result: Result) -> dict[str, Any]:
+    return {
+        "expected_score": result.expected_score,
+        "score": result.score,
+        "expected_axes": list(result.expected_axes),
+        "axes": list(result.axes),
+        "feedback": result.feedback,
+    }
+
+
+def result_from_record(prepared: PreparedCall, record: dict[str, Any]) -> Result:
+    try:
+        payload = record["result"]
+        return Result(
+            index=prepared.index,
+            case=prepared.case_name,
+            expected_score=payload["expected_score"],
+            score=int(payload["score"]),
+            expected_axes=tuple(payload["expected_axes"]),
+            axes=tuple(int(value) for value in payload["axes"]),
+            usage=usage_from_record(record),
+            feedback=str(payload.get("feedback", "")),
+            resumed=True,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid saved scoring result for {prepared.case_name}") from exc
+
+
+async def run_case(
+    prepared: PreparedCall,
+    tap: UsageTap,
+    recorder: JsonlRecorder,
+    *,
+    model: str,
+) -> tuple[Result, dict[str, Any]]:
+    case = prepared.case
+    key = f"{prepared.effort}:{prepared.index}:{prepared.fingerprint[:8]}"
     tap.start(key)
     token = case_key.set(key)
     try:
@@ -79,9 +163,9 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
     assert result.accuracy is not None
     assert result.depth is not None
     assert result.boundaries is not None
-    return Result(
-        index=index,
-        case=case.get("name", case["topic"]),
+    scored = Result(
+        index=prepared.index,
+        case=prepared.case_name,
         expected_score=case.get("expected_score"),
         score=result.score if result.score is not None else -1,
         expected_axes=_expected_axes(case),
@@ -93,6 +177,11 @@ async def run_case(index: int, case: dict, level: str, tap: UsageTap) -> Result:
         usage=tap.usage_for(key),
         feedback=result.feedback,
     )
+    record = make_result_record(
+        prepared, model=model, result=result_payload(scored), usage=scored.usage
+    )
+    recorder.append(record)
+    return scored, record
 
 
 def _axis_metrics(results: list[Result], index: int) -> tuple[int, int, int]:
@@ -111,6 +200,10 @@ def _accuracy_errors(results: list[Result]) -> tuple[int, int]:
     false_pass = sum(r.expected_axes[0] <= 2 and r.axes[0] >= 3 for r in labeled)
     false_fail = sum(r.expected_axes[0] >= 3 and r.axes[0] <= 2 for r in labeled)
     return false_pass, false_fail
+
+
+def level_label(level: str | None) -> str:
+    return level or "none"
 
 
 def print_summary(by_level: dict[str, list[Result]]) -> None:
@@ -151,8 +244,7 @@ def print_summary(by_level: dict[str, list[Result]]) -> None:
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cases", type=Path, help="JSON file: a list of case objects")
-    parser.add_argument("--levels", nargs="+", default=list(DEFAULT_LEVELS))
-    parser.add_argument("--concurrency", type=int, default=4)
+    add_paid_evaluation_args(parser)
     parser.add_argument(
         "--grounding-manifest",
         type=Path,
@@ -163,31 +255,122 @@ async def main() -> int:
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
 
-    cases = load_cases(args.cases, parser)
+    cases = select_cases(
+        load_cases(args.cases, parser),
+        names=args.case_names,
+        tags=args.tags,
+        parser=parser,
+    )
     if args.grounding_manifest:
         cases = hydrate_grounding(cases, args.grounding_manifest, parser)
 
     sys.stdout.reconfigure(line_buffering=True)
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        print("ANTHROPIC_API_KEY is unset — this script makes live calls.", file=sys.stderr)
+    levels = levels_for(args.levels, settings.scoring_effort)
+    prepared = prepare_cases(cases, levels=levels, model=settings.scoring_model)
+
+    try:
+        prior_by_fingerprint = load_result_records(args.resume, kind="scoring")
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    reusable = {} if args.fresh else prior_by_fingerprint
+    resumed_calls = [call for call in prepared if call.fingerprint in reusable]
+    pending_calls = [call for call in prepared if call.fingerprint not in reusable]
+    try:
+        resumed_results = {
+            call.fingerprint: result_from_record(call, reusable[call.fingerprint])
+            for call in resumed_calls
+        }
+        rate = rate_for_model(
+            settings.scoring_model,
+            input_override=args.input_price_per_million,
+            output_override=args.output_price_per_million,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if pending_calls and not settings.anthropic_api_key:
+        print(
+            "ANTHROPIC_API_KEY is unset — token preflight and paid calls need a key.",
+            file=sys.stderr,
+        )
         return 1
+
+    input_counts = (
+        await count_prepared_calls(
+            pending_calls, concurrency=args.concurrency
+        )
+        if pending_calls
+        else {}
+    )
+    estimate = estimate_cost(
+        pending_calls,
+        input_counts=input_counts,
+        prior_records=list(prior_by_fingerprint.values()),
+        fallback_output_tokens=512,
+        rate=rate,
+    )
+    print_preflight(
+        estimate,
+        selected=len(prepared),
+        resumed=len(resumed_calls),
+        rate=rate,
+    )
+    enforce_budget(
+        estimate,
+        budget=args.max_cost_usd,
+        dry_run=args.dry_run,
+        parser=parser,
+    )
+    if args.dry_run:
+        print("  dry run complete — no paid Message calls were made")
+        return 0
+
+    output_path = output_path_for(
+        requested=args.output,
+        resume=args.resume,
+        kind="scoring",
+        parser=parser,
+    )
 
     original_effort = settings.scoring_effort
     by_level: dict[str, list[Result]] = {}
+    new_records: list[dict[str, Any]] = []
     try:
-        with capture_usage() as tap:
-            for level in args.levels:
+        with JsonlRecorder(output_path) as recorder, capture_usage() as tap:
+            for level in levels:
                 settings.scoring_effort = level
+                label = level_label(level)
                 print(
-                    f"\n=== effort={level} (model={settings.scoring_model}, "
+                    f"\n=== effort={label} (model={settings.scoring_model}, "
                     f"concurrency={args.concurrency}) ==="
                 )
-                results = await run_bounded(
-                    cases, args.concurrency,
-                    lambda index, case, effort=level: run_case(index, case, effort, tap),
+                level_calls = [call for call in prepared if call.effort == level]
+                level_pending = [
+                    call for call in level_calls if call.fingerprint not in resumed_results
+                ]
+                for call in level_calls:
+                    if call.fingerprint in resumed_results:
+                        recorder.append(reusable[call.fingerprint])
+
+                outcomes = await run_bounded(
+                    level_pending,
+                    args.concurrency,
+                    lambda _index, call: run_case(
+                        call, tap, recorder, model=settings.scoring_model
+                    ),
                 )
-                by_level[level] = results
+                new_by_fingerprint = {
+                    call.fingerprint: outcome[0]
+                    for call, outcome in zip(level_pending, outcomes, strict=True)
+                }
+                new_records.extend(outcome[1] for outcome in outcomes)
+                results = [
+                    resumed_results.get(call.fingerprint)
+                    or new_by_fingerprint[call.fingerprint]
+                    for call in level_calls
+                ]
+                by_level[label] = results
                 for result in results:
                     expected = "—" if result.expected_score is None else str(result.expected_score)
                     flag = ""
@@ -196,7 +379,8 @@ async def main() -> int:
                     print(
                         f"  {result.case[:40]:<40} score={result.score} expected={expected} "
                         f"axes={result.axes} in={result.usage.input_tokens:>5} "
-                        f"out={result.usage.output_tokens:>5}{flag}"
+                        f"out={result.usage.output_tokens:>5}"
+                        f"{'  [resumed]' if result.resumed else ''}{flag}"
                     )
                     if args.verbose:
                         print(f"      {result.feedback}")
@@ -204,6 +388,8 @@ async def main() -> int:
         settings.scoring_effort = original_effort
 
     print_summary(by_level)
+    print(f"\nnew paid-call cost: ${actual_cost(new_records, rate):.4f}")
+    print(f"results: {output_path}")
     return 0
 
 

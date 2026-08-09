@@ -171,6 +171,58 @@ performance as coached or not yet demonstrated unaided.
 - The re-attempt runner now prints full input, output, cache usage, within-one
   agreement, false-pass/failure counts, and optional mastery summaries.
 
+### Cost-safety canary and provider comparison
+
+A two-call live canary on 2026-08-08 validated the paid-evaluation controls
+without rerunning the full pack:
+
+| Path | Case | Result | Input | Output | Conservative ceiling | Actual cost |
+|---|---|---:|---:|---:|---:|---:|
+| Scoring | Delivery sequence — complete | 5 expected 5; axes 5/4/4 | 2,026 | 235 | $0.0092 | $0.0064 |
+| Coached re-attempt | Delivery sequence — reconstructed | 5 expected 5 | 1,766 | 114 | $0.0048 | $0.0047 |
+| **Total** |  | **2/2 exact** | **3,792** | **349** | **$0.0140** | **$0.0111** |
+
+Both calls used `claude-sonnet-5` at the shipping low effort. Each preflight
+counted the exact request input, assumed the configured maximum output, and
+required a ceiling above that estimate before the paid Message call could
+start. Replaying both result files with `ANTHROPIC_API_KEY` explicitly unset
+reported one resumed call, zero new paid calls, and `$0.0000` for each path.
+This verifies the resume contract against the live response fingerprints, not
+only against unit fixtures.
+
+ChatGPT subscription usage cannot be substituted for API balance: OpenAI
+[bills and manages ChatGPT and API usage separately](https://help.openai.com/en/articles/8156019).
+An OpenAI backend would therefore need its own API billing account. The relevant
+comparison is provider API price, not the user's remaining ChatGPT credits.
+
+Using the ten-case smoke preflight's 18,600 input and conservative 3,584 output
+tokens as a normalized workload gives this price comparison. It is directional:
+OpenAI tokenization and reasoning-token use will differ, so only an equivalent
+live runner can establish the actual total.
+
+| Candidate | Published standard input / output per MTok | Normalized smoke cost | Versus current Claude |
+|---|---:|---:|---:|
+| Claude Sonnet 5 through 2026-08-31 | $2 / $10 | $0.0730 | baseline |
+| Claude Sonnet 5 from 2026-09-01 | $3 / $15 | $0.1096 | 50% more |
+| OpenAI GPT-5.6 Terra | $2 / $12 | $0.0802 | 10% more |
+| OpenAI GPT-5.6 Luna | $0.20 / $1.20 | $0.0080 | 89% less |
+
+OpenAI's current [model guidance](https://developers.openai.com/api/docs/guides/latest-model)
+positions GPT-5.6 Luna for efficient high-volume work, and the model supports
+structured outputs required by this grader. OpenAI's published
+[API pricing](https://developers.openai.com/api/docs/pricing) lists Luna at
+$0.20 input and $1.20 output per million short-context tokens. Its
+[Batch API](https://developers.openai.com/api/docs/guides/batch) is another 50%
+lower for evaluations that can wait up to 24 hours. Claude prices use
+Anthropic's published [pricing schedule](https://platform.claude.com/docs/en/about-claude/pricing).
+
+Price is not sufficient authority to change the production scorer. GPT-5.6
+Luna should first run the ten risk-stratified smoke cases, then all 30 reviewed
+Week 1 cases. A provider switch remains blocked until the planned 60–100-case
+pack passes with no false Accuracy pass and acceptable per-axis agreement. This
+keeps the scheduler's retention signal behind the same quality gate regardless
+of provider.
+
 This 30-case tranche is enough to retain the current low-effort settings, but
 not enough to approve a production prompt or model change. The trusted-authority
 versus learner-visible-feedback ambiguity must be retested in the planned
@@ -182,15 +234,29 @@ To reproduce the evaluation:
 cd api
 uv run pytest -q
 uv run ruff check .
+# Free preflight over the ten risk-stratified smoke cases. This makes no paid
+# Message calls and prints the exact input count plus a conservative output estimate.
 uv run python scripts/effort_sweep.py \
   scripts/grounded_effort_cases_week1.json \
-  --grounding-manifest cards.json
+  --grounding-manifest cards.json --tag smoke --dry-run
 uv run python scripts/reattempt_effort_sweep.py \
   scripts/grounded_reattempt_cases_week1.json \
-  --grounding-manifest cards.json
+  --grounding-manifest cards.json --tag smoke --dry-run
+
+# Full shipping-effort baseline. The explicit ceilings acknowledge the displayed
+# estimate; omit --levels to test only the configured production effort.
+uv run python scripts/effort_sweep.py \
+  scripts/grounded_effort_cases_week1.json \
+  --grounding-manifest cards.json --max-cost-usd 0.20
+uv run python scripts/reattempt_effort_sweep.py \
+  scripts/grounded_reattempt_cases_week1.json \
+  --grounding-manifest cards.json --max-cost-usd 0.08
 ```
 
-Record model ID, effort levels, token usage, false Accuracy passes/failures,
-per-axis agreement, and every mismatch before changing a production prompt or
-model setting. Do not approve the remaining 48 curriculum cards by analogy;
-each needs its own source review and first-question audit.
+Each paid response is flushed to the printed `.eval-results/*.jsonl` path. Use
+`--resume <path>` to reuse only exact request-and-label fingerprints, `--case`
+for one named fixture, and explicit `--levels low medium` only when making a real
+configuration comparison. Record model ID, effort levels, token usage, false
+Accuracy passes/failures, per-axis agreement, and every mismatch before changing
+a production prompt or model setting. Do not approve the remaining 48 curriculum
+cards by analogy; each needs its own source review and first-question audit.
