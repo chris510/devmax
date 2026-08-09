@@ -223,6 +223,11 @@ pack passes with no false Accuracy pass and acceptable per-axis agreement. This
 keeps the scheduler's retention signal behind the same quality gate regardless
 of provider.
 
+The isolated Luna runner, cost ceilings, commands, and acceptance gate are
+recorded in [OpenAI GPT-5.6 Luna scoring bake-off](OPENAI-LUNA-BAKEOFF.md).
+Its credential-free preflight passed on 2026-08-08; the live smoke run remains
+blocked until an API-funded `OPENAI_API_KEY` is supplied.
+
 This 30-case tranche is enough to retain the current low-effort settings, but
 not enough to approve a production prompt or model change. The trusted-authority
 versus learner-visible-feedback ambiguity must be retested in the planned

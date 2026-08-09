@@ -23,10 +23,11 @@ from app.services.card_lifecycle import Grounding, GroundingError
 
 RESULT_FORMAT_VERSION = 1
 
-# Versioned from Anthropic's public pricing table. Sonnet 5's introductory rate
-# ends after 2026-08-31; keeping the boundary in code prevents a stale promotion
-# from silently approving an under-budget run.
+# Versioned from the providers' public pricing tables. Sonnet 5's introductory
+# rate ends after 2026-08-31; keeping the boundary in code prevents a stale
+# promotion from silently approving an under-budget run.
 # https://platform.claude.com/docs/en/about-claude/pricing
+# https://developers.openai.com/api/docs/pricing
 MODEL_RATES: dict[str, tuple[tuple[date, Decimal, Decimal], ...]] = {
     "claude-sonnet-5": (
         (date(2026, 8, 31), Decimal("2"), Decimal("10")),
@@ -36,6 +37,7 @@ MODEL_RATES: dict[str, tuple[tuple[date, Decimal, Decimal], ...]] = {
     "claude-sonnet-4-5": ((date.max, Decimal("3"), Decimal("15")),),
     "claude-haiku-4-5": ((date.max, Decimal("1"), Decimal("5")),),
     "claude-opus-5": ((date.max, Decimal("5"), Decimal("25")),),
+    "gpt-5.6-luna": ((date.max, Decimal("0.2"), Decimal("1.2")),),
 }
 
 case_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -364,12 +366,13 @@ def print_preflight(
     selected: int,
     resumed: int,
     rate: ModelRate,
+    input_label: str = "counted input",
 ) -> None:
     print("\n=== paid-call preflight ===")
     print(f"  selected calls     {selected}")
     print(f"  resumed calls      {resumed}")
     print(f"  new paid calls     {estimate.calls}")
-    print(f"  counted input      {estimate.input_tokens}")
+    print(f"  {input_label:<18} {estimate.input_tokens}")
     print(
         f"  estimated output   {estimate.output_tokens} "
         f"({estimate.output_tokens_per_call}/call)"
