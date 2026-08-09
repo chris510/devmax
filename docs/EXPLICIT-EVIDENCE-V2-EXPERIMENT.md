@@ -1,6 +1,6 @@
 # Explicit-evidence V2 experiment
 
-**Status:** A1, A2, and B1 passed; B2 not run
+**Status:** B2 failed; all broader V2 stages stopped
 
 A1 returned axes 4 / 1 / 1 and the exact approved composite 3 on the single
 known blocking case. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A1.md` for the complete
@@ -8,7 +8,10 @@ feedback, cost, and resume audit. A2 then returned five exact composites with
 all axes within one. See `CLAUDE-EXPLICIT-EVIDENCE-V2-A2.md` for the combined
 six-case evidence. B1 then activated Boundaries on all three reviewed positive
 cases while keeping Depth at 1. See `CLAUDE-EXPLICIT-EVIDENCE-V2-B1.md` for the
-complete audit. B2 remains separately gated and unspent.
+complete audit. B2 then exposed a false-negative Depth eligibility decision: Claude
+acknowledged the learner's explicit timing trade-off in feedback but assigned
+Depth 2 against approved 5. See `CLAUDE-EXPLICIT-EVIDENCE-V2-B2.md`. V2 must not
+advance to broader, provider, or production evaluation.
 
 ## Decision this PR enables
 
@@ -161,13 +164,11 @@ uv run python scripts/effort_sweep.py \
   --scoring-prompt-variant explicit-evidence-v2 --dry-run
 ```
 
-A paid A1 run requires a separate user authorization, a new ignored output
-path, and a freshly recomputed budget acknowledgement. Removing `--dry-run`
-alone is insufficient to spend.
+These commands now reproduce historical preflights only. A1 and A2 have already
+run, and B2 later stopped the candidate. No additional V2 paid call is
+authorized.
 
 ## Recommended next action
 
-A1, A2, and B1 passed their reviewed gates. After the B1 result merges, the next
-proposed action is B2: three reviewed `depth-only` Claude Sonnet 5 calls at low
-effort and concurrency 1, with a freshly recomputed ceiling no higher than
-$0.0346. Every broader, provider, or production step remains separately gated.
+B2 failed its activation gate. Do not run more V2 calls. Draft and offline-test
+a bidirectional V3 eligibility rule before requesting any additional paid call.
