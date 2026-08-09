@@ -694,6 +694,54 @@ def _client() -> AsyncAnthropic:
     )
 
 
+def _message_params(
+    *,
+    model: str,
+    effort: str | None,
+    rubric: str,
+    user_content: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+    cache_rubric: bool = False,
+) -> dict[str, Any]:
+    """Build the exact Messages request shared by live calls and paid-eval preflight."""
+    system_block: dict[str, Any] = {"type": "text", "text": rubric}
+    if cache_rubric:
+        system_block["cache_control"] = {"type": "ephemeral"}
+
+    params: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": [system_block],
+        "messages": [{"role": "user", "content": user_content}],
+        "output_config": {"format": {"type": "json_schema", "schema": schema}},
+    }
+    # Haiku 4.5 rejects `effort` outright, so it's per-model config rather than a
+    # constant — see spec.md's "make the model a config value per function".
+    if effort is not None:
+        params["output_config"]["effort"] = effort
+    return params
+
+
+def count_params_for_completion(completion: dict[str, Any]) -> dict[str, Any]:
+    """Return the free token-count request for a prepared ``_complete`` call.
+
+    Evaluation tools use this instead of reconstructing prompts. A pricing guard
+    that counts a slightly different request is not a guard at all.
+    """
+    params = _message_params(
+        model=completion["model"],
+        effort=completion["effort"],
+        rubric=completion["rubric"],
+        user_content=completion["user_content"],
+        schema=completion["schema"],
+        max_tokens=completion["max_tokens"],
+        cache_rubric=completion.get("cache_rubric", False),
+    )
+    params.pop("max_tokens")
+    return params
+
+
 async def _complete(
     *,
     model: str,
@@ -724,21 +772,15 @@ async def _complete(
     setting when the rubric clears the model's minimum cacheable prefix; below it
     the marker silently does nothing.
     """
-    system_block: dict[str, Any] = {"type": "text", "text": rubric}
-    if cache_rubric:
-        system_block["cache_control"] = {"type": "ephemeral"}
-
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": [system_block],
-        "messages": [{"role": "user", "content": user_content}],
-        "output_config": {"format": {"type": "json_schema", "schema": schema}},
-    }
-    # Haiku 4.5 rejects `effort` outright, so it's per-model config rather than a
-    # constant — see spec.md's "make the model a config value per function".
-    if effort is not None:
-        kwargs["output_config"]["effort"] = effort
+    kwargs = _message_params(
+        model=model,
+        effort=effort,
+        rubric=rubric,
+        user_content=user_content,
+        schema=schema,
+        max_tokens=max_tokens,
+        cache_rubric=cache_rubric,
+    )
 
     client = _client()
     last_error: Exception | None = None
@@ -824,6 +866,50 @@ async def generate_question(
     return question
 
 
+def build_score_answer_completion(
+    *,
+    model: str,
+    effort: str | None,
+    topic: str,
+    mastery_summary: str,
+    question_asked: str,
+    answer_text: str,
+    follow_up_question: str | None,
+    follow_up_answer: str,
+    follow_up_used: bool,
+    answer_anchor: str = "",
+    source_excerpt: str = "",
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Prepare the scoring call without sending it.
+
+    Production scoring and paid-evaluation token preflight deliberately share this
+    builder so model, prompt, schema, and effort cannot drift.
+    """
+    transcript = [
+        f"Topic: {topic}",
+        f"Rolling mastery summary: {mastery_summary}" if mastery_summary else None,
+        f"A good answer should include: {answer_anchor}" if answer_anchor else None,
+        f"Source excerpt: {source_excerpt}" if source_excerpt else None,
+        *_grounding_context(answer_basis, answer_rubric),
+        "",
+        f"QUESTION: {question_asked}",
+        f"ANSWER: {answer_text}",
+    ]
+    if follow_up_used and follow_up_question:
+        transcript += [f"FOLLOW-UP: {follow_up_question}", f"ANSWER: {follow_up_answer}"]
+
+    return {
+        "model": model,
+        "effort": effort,
+        "rubric": SCORING_RUBRIC,
+        "user_content": "\n".join(t for t in transcript if t is not None),
+        "schema": SCORE_SCHEMA,
+        "max_tokens": 8000,
+    }
+
+
 async def score_answer(
     *,
     topic: str,
@@ -840,27 +926,28 @@ async def score_answer(
 ) -> ScoreResult:
     """Score the session so far, or return a probe if the answer was partial."""
     settings = get_settings()
-    transcript = [
-        f"Topic: {topic}",
-        f"Rolling mastery summary: {mastery_summary}" if mastery_summary else None,
-        f"A good answer should include: {answer_anchor}" if answer_anchor else None,
-        f"Source excerpt: {source_excerpt}" if source_excerpt else None,
-        *_grounding_context(answer_basis, answer_rubric),
-        "",
-        f"QUESTION: {question_asked}",
-        f"ANSWER: {answer_text}",
-    ]
-    if follow_up_used and follow_up_question:
-        transcript += [f"FOLLOW-UP: {follow_up_question}", f"ANSWER: {follow_up_answer}"]
-
-    data = await _complete(
+    completion = build_score_answer_completion(
         model=settings.scoring_model,
         effort=settings.scoring_effort,
-        rubric=SCORING_RUBRIC,
-        user_content="\n".join(t for t in transcript if t is not None),
-        schema=SCORE_SCHEMA,
-        max_tokens=8000,
+        topic=topic,
+        mastery_summary=mastery_summary,
+        question_asked=question_asked,
+        answer_text=answer_text,
+        follow_up_question=follow_up_question,
+        follow_up_answer=follow_up_answer,
+        follow_up_used=follow_up_used,
+        answer_anchor=answer_anchor,
+        source_excerpt=source_excerpt,
+        answer_basis=answer_basis,
+        answer_rubric=answer_rubric,
     )
+    data = await _complete(**completion)
+
+    return parse_score_result(data, follow_up_used=follow_up_used)
+
+
+def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreResult:
+    """Apply the production scoring contract to provider-structured data."""
 
     # The JSON schema makes all three axes required, so this should be unreachable —
     # but an unguarded KeyError/ValueError here is a 500, and the client only knows
@@ -1000,6 +1087,41 @@ async def propose_cards(
     return [c for c in candidates if isinstance(c, dict)]
 
 
+def build_reattempt_completion(
+    *,
+    model: str,
+    effort: str | None,
+    topic: str,
+    question_asked: str,
+    feedback_given: str,
+    reattempt_answer: str,
+    unaided_accuracy: int,
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Prepare the coached re-attempt call without sending it."""
+    transcript = [
+        f"Topic: {topic}",
+        *_grounding_context(answer_basis, answer_rubric),
+        "",
+        f"QUESTION: {question_asked}",
+        f"UNAIDED ACCURACY SCORE, BEFORE THEY WERE TOLD: {unaided_accuracy}/5",
+        f"CORRECT ESSENTIAL ACCOUNT, AS STATED TO THEM: {feedback_given}",
+        f"THEIR RE-ATTEMPT: {reattempt_answer}",
+    ]
+    return {
+        "model": model,
+        "effort": effort,
+        "rubric": REATTEMPT_RUBRIC,
+        "user_content": "\n".join(transcript),
+        "schema": REATTEMPT_SCHEMA,
+        # One enum integer and two sentences — well under 100 output tokens. Sized to
+        # bound the worst case, not the expected one: a degenerate generation on a
+        # turn the user is waiting through should fail fast, not run for 4000 tokens.
+        "max_tokens": 512,
+    }
+
+
 async def score_reattempt(
     *,
     topic: str,
@@ -1024,27 +1146,24 @@ async def score_reattempt(
     is the one way turn 3 reaches a future scheduling decision.
     """
     settings = get_settings()
-    transcript = [
-        f"Topic: {topic}",
-        *_grounding_context(answer_basis, answer_rubric),
-        "",
-        f"QUESTION: {question_asked}",
-        f"UNAIDED ACCURACY SCORE, BEFORE THEY WERE TOLD: {unaided_accuracy}/5",
-        f"CORRECT ESSENTIAL ACCOUNT, AS STATED TO THEM: {feedback_given}",
-        f"THEIR RE-ATTEMPT: {reattempt_answer}",
-    ]
-
-    data = await _complete(
+    completion = build_reattempt_completion(
         model=settings.reattempt_model,
         effort=settings.reattempt_effort,
-        rubric=REATTEMPT_RUBRIC,
-        user_content="\n".join(transcript),
-        schema=REATTEMPT_SCHEMA,
-        # One enum integer and two sentences — well under 100 output tokens. Sized to
-        # bound the worst case, not the expected one: a degenerate generation on a
-        # turn the user is waiting through should fail fast, not run for 4000 tokens.
-        max_tokens=512,
+        topic=topic,
+        question_asked=question_asked,
+        feedback_given=feedback_given,
+        reattempt_answer=reattempt_answer,
+        unaided_accuracy=unaided_accuracy,
+        answer_basis=answer_basis,
+        answer_rubric=answer_rubric,
     )
+    data = await _complete(**completion)
+
+    return parse_reattempt_result(data)
+
+
+def parse_reattempt_result(data: dict[str, Any]) -> ReattemptResult:
+    """Apply the production coached-grade contract to provider-structured data."""
 
     try:
         accuracy = int(data["accuracy"])

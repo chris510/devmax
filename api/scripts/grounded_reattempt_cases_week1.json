@@ -1,6 +1,7 @@
 [
   {
     "name": "delivery sequence — reconstructed",
+    "tags": ["smoke"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "feedback": "After requirements, establish the entities and external interface, make the simplest complete design satisfy that interface, then spend remaining time on targeted deep dives.",
     "reattempt_answer": "I first name the data the system owns, then define the user-facing calls. I trace those calls through a complete minimal architecture before hardening the few scale or failure points that matter. That way the interview has a working answer even if a deep dive runs long.",
@@ -9,6 +10,7 @@
   },
   {
     "name": "delivery sequence — parrots correction",
+    "tags": ["smoke"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "feedback": "Use entities, interface, a complete high-level design, then targeted deep dives.",
     "reattempt_answer": "Entities, interface, complete high-level design, targeted deep dives.",
@@ -57,6 +59,7 @@
   },
   {
     "name": "timeout retry — changes the key",
+    "tags": ["smoke"],
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
     "feedback": "Reuse the same operation-scoped idempotency key because a timeout does not prove failure.",
     "reattempt_answer": "I retry with a new idempotency key so the server knows this is a new attempt and does not confuse it with the timed-out request.",
@@ -65,6 +68,7 @@
   },
   {
     "name": "cursor pagination — reconstructed",
+    "tags": ["smoke"],
     "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
     "feedback": "The cursor points to the final record returned, such as its ID or timestamp, and the next request resumes after that record instead of recounting a moving offset.",
     "reattempt_answer": "I carry the ID or timestamp of the final record from the first page. The next request resumes after that record, so a new insertion before it does not move my continuation the way an offset would.",

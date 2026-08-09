@@ -320,6 +320,27 @@ async def test_effort_is_passed_through_when_set(fake_client, monkeypatch):
     assert client.calls[0]["output_config"]["effort"] == "low"
 
 
+async def test_paid_preflight_builder_is_the_exact_scoring_request(
+    fake_client, monkeypatch
+):
+    client = fake_client(make_response(scored(4)))
+    monkeypatch.setattr(llm.get_settings(), "scoring_effort", "low")
+
+    await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    completion = llm.build_score_answer_completion(
+        model=llm.get_settings().scoring_model,
+        effort="low",
+        **SCORE_ARGS,
+        follow_up_used=True,
+    )
+    counted = llm.count_params_for_completion(completion)
+
+    assert counted == {
+        key: value for key, value in client.calls[0].items() if key != "max_tokens"
+    }
+    assert "max_tokens" not in counted
+
+
 def test_client_is_cached_with_explicit_limits():
     """A per-call client leaked an httpx connection pool per request."""
     llm._client.cache_clear()

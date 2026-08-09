@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.eval-results/
 .env
 *.db
 ios/build/
