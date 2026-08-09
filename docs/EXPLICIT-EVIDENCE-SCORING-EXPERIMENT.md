@@ -161,3 +161,7 @@ key and an explicit budget acknowledgement. Results remain in the ignored
 Stage A was authorized and failed its first stop gate. Do not run Stage B or
 Terra. Draft and offline-test a stricter evaluation-only candidate before
 requesting any additional paid call.
+
+The stricter candidate is now prepared in
+`EXPLICIT-EVIDENCE-V2-EXPERIMENT.md`. Its next proposed live gate is the single
+known blocking case, not the remaining five-case stage.

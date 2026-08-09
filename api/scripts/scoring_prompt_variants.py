@@ -12,7 +12,7 @@ from typing import Any
 
 PRODUCTION = "production"
 EXPLICIT_EVIDENCE_V1 = "explicit-evidence-v1"
-SCORING_PROMPT_VARIANTS = (PRODUCTION, EXPLICIT_EVIDENCE_V1)
+EXPLICIT_EVIDENCE_V2 = "explicit-evidence-v2"
 
 EXPLICIT_EVIDENCE_RULES = """\
 
@@ -48,16 +48,89 @@ Keep all other production rules, schema fields, transcript handling, and feedbac
 behavior unchanged.\
 """
 
+EXPLICIT_EVIDENCE_V2_RULES = """\
+
+EVALUATION CANDIDATE — EXPLICIT EVIDENCE ELIGIBILITY V2
+
+For this candidate, grade the product's three axes in this order. Perform the
+eligibility checks silently; return only the production schema fields.
+
+1. ACCURACY — MECHANISM ACCURACY
+Grade whether the learner's essential account is correct. Keep the production
+Accuracy rules unchanged.
+
+2. DEPTH — TRADE-OFF AWARENESS ONLY
+Before choosing a Depth score, locate words in the learner's `ANSWER:` text that
+explicitly connect a choice, target, or approach to its cost, sacrificed property,
+tension, or opposing benefit.
+
+  - If no such learner-stated connection exists, Depth is ineligible for 3-5 and
+    must be 0-2.
+  - A target, priority, quality, technique, implementation step, or statement that
+    something matters is not a trade-off by itself.
+  - Do not supply the missing cost from the trusted rubric, context, implication,
+    or feedback and then credit the learner for it.
+
+3. BOUNDARIES — FAILURE-MODE AWARENESS ONLY
+Before choosing a Boundaries score, locate words in the learner's `ANSWER:` text
+that explicitly connect a triggering condition, action, exception, limitation, or
+mistaken belief to a concrete adverse outcome or incorrect behavior.
+
+  - If no such learner-stated connection exists, Boundaries is ineligible for 3-5
+    and must be 0-2.
+  - A recommendation, priority, selection rule, goal, constraint, check, guardrail,
+    bare negation, or statement that information is irrelevant is not failure-mode
+    evidence by itself.
+  - Never reverse a prescription into an unstated failure. From "do X," do not infer
+    "not doing X causes Y" unless the learner also states the adverse Y.
+  - Merely saying a detail does not affect or drive the design is not a concrete
+    adverse outcome.
+  - Do not supply the missing trigger or harm from the trusted rubric, context,
+    implication, or feedback and then credit the learner for it.
+
+CALIBRATION
+  - "only keep the few numbers that drive the design" gives no Boundaries eligibility:
+    it is a selection rule and states no adverse outcome. Boundaries must be 0-2.
+  - "using a fresh retry key can duplicate the charge" is eligible Boundaries
+    evidence: it states both the action and adverse outcome.
+  - "target p95 under 300 ms" gives no Depth eligibility: it states a target but no
+    cost or tension. Depth must be 0-2.
+  - "a tighter latency target needs more replication and cost" is eligible Depth
+    evidence: it states the target/cost relationship.
+
+EVIDENCE SOURCE AND FINAL CHECK
+Only text after `ANSWER:` labels is learner evidence, including the answer after a
+`FOLLOW-UP:` when present. Topic, questions, mastery summary, trusted answer basis,
+approved rubric, and model-written feedback are authority or context, never learner
+claims. Apply the hard 0-2 ceilings even when a missing relationship seems obvious.
+
+Choose 3-5 only after its eligibility check passes, using the production scale to
+distinguish completeness. Before returning, verify that feedback never introduces
+the evidence used to justify a 3-5 axis. If feedback supplies a missing trade-off,
+Depth must be 0-2. If feedback supplies a missing trigger or adverse outcome,
+Boundaries must be 0-2.
+
+Keep all other production rules, schema fields, transcript handling, and feedback
+behavior unchanged.\
+"""
+
+PROMPT_OVERLAYS = {
+    PRODUCTION: "",
+    EXPLICIT_EVIDENCE_V1: EXPLICIT_EVIDENCE_RULES,
+    EXPLICIT_EVIDENCE_V2: EXPLICIT_EVIDENCE_V2_RULES,
+}
+SCORING_PROMPT_VARIANTS = tuple(PROMPT_OVERLAYS)
+
 
 def apply_scoring_prompt_variant(
     completion: dict[str, Any], variant: str
 ) -> dict[str, Any]:
     """Return one prepared completion with an evaluation-only rubric overlay."""
-    if variant == PRODUCTION:
-        return dict(completion)
-    if variant == EXPLICIT_EVIDENCE_V1:
-        return {
-            **completion,
-            "rubric": completion["rubric"] + EXPLICIT_EVIDENCE_RULES,
-        }
-    raise ValueError(f"unknown scoring prompt variant: {variant}")
+    try:
+        overlay = PROMPT_OVERLAYS[variant]
+    except KeyError as exc:
+        raise ValueError(f"unknown scoring prompt variant: {variant}") from exc
+    return {
+        **completion,
+        "rubric": completion["rubric"] + overlay,
+    }

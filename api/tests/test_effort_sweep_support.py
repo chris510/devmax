@@ -12,7 +12,12 @@ from app.services.llm import ReattemptResult, derive_composite
 from scripts import effort_sweep, openai_bakeoff, reattempt_effort_sweep
 from scripts import effort_sweep_support as support
 from scripts.effort_sweep_support import hydrate_grounding
-from scripts.scoring_prompt_variants import EXPLICIT_EVIDENCE_V1, PRODUCTION
+from scripts.scoring_prompt_variants import (
+    EXPLICIT_EVIDENCE_V1,
+    EXPLICIT_EVIDENCE_V2,
+    PRODUCTION,
+    apply_scoring_prompt_variant,
+)
 
 API = Path(__file__).resolve().parent.parent
 SCORING_CASES = API / "scripts" / "grounded_effort_cases_week1.json"
@@ -551,7 +556,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         [case],
         levels=["low"],
         model="claude-sonnet-5",
-        prompt_variant=EXPLICIT_EVIDENCE_V1,
+        prompt_variant=EXPLICIT_EVIDENCE_V2,
     )[0]
     openai_candidate = openai_bakeoff.prepare_cases(
         [case],
@@ -559,14 +564,21 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         levels=["low"],
         model="gpt-5.6-terra",
         max_output_tokens=1024,
+        prompt_variant=EXPLICIT_EVIDENCE_V2,
+    )[0]
+    v1_candidate = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
         prompt_variant=EXPLICIT_EVIDENCE_V1,
     )[0]
 
     assert production.completion["rubric"] == effort_sweep.llm.SCORING_RUBRIC
     assert claude_candidate.completion["rubric"] == openai_candidate.completion["rubric"]
     assert claude_candidate.fingerprint != production.fingerprint
-    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V1
-    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V1
+    assert claude_candidate.fingerprint != v1_candidate.fingerprint
+    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V2
+    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V2
 
     record = support.make_result_record(
         claude_candidate,
@@ -574,7 +586,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         result={"score": 3},
         usage=support.Usage(),
     )
-    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V1
+    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V2
 
 
 def test_explicit_evidence_candidate_maps_axes_and_forbids_context_credit() -> None:
@@ -597,6 +609,35 @@ def test_explicit_evidence_candidate_maps_axes_and_forbids_context_credit() -> N
     assert "not claims the learner made" in rubric
     assert "If feedback supplies a missing trade-off, depth must be 0-2" in rubric
     assert "If feedback supplies a missing failure" in rubric
+
+
+def test_v2_uses_mechanical_secondary_axis_eligibility() -> None:
+    case = {
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Only keep the few numbers that drive the design.",
+    }
+
+    rubric = effort_sweep.build_completion(
+        case,
+        model="claude-sonnet-5",
+        effort="low",
+        prompt_variant=EXPLICIT_EVIDENCE_V2,
+    )["rubric"]
+
+    assert "DEPTH — TRADE-OFF AWARENESS ONLY" in rubric
+    assert "Depth is ineligible for 3-5 and" in rubric
+    assert "BOUNDARIES — FAILURE-MODE AWARENESS ONLY" in rubric
+    assert "Boundaries is ineligible for 3-5" in rubric
+    assert "Never reverse a prescription into an unstated failure" in rubric
+    assert "does not affect or drive the design is not a concrete" in rubric
+    assert '"only keep the few numbers that drive the design"' in rubric
+    assert "Apply the hard 0-2 ceilings even when" in rubric
+
+
+def test_unknown_scoring_prompt_variant_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown scoring prompt variant"):
+        apply_scoring_prompt_variant({"rubric": "base"}, "unknown")
 
 
 @pytest.mark.anyio
