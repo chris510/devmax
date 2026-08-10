@@ -117,3 +117,9 @@ The first paid V8 stage should contain only the three decision-driven controls:
 That smallest negative/positive matrix must pass before historical blockers or
 remaining follow-up cases are reopened. Preparation should again begin with
 shared Claude/OpenAI prompt tests, prompt-size audit, and free token counts.
+
+That preparation is now specified in
+`EXPLICIT-EVIDENCE-V8-SYMMETRIC-SELECTION-GATE.md`. V8 applies one symmetric
+selection rule to both secondary axes, is 64 bytes shorter than V7, and has a
+free-counted three-call maximum of $0.0352. No paid calls were made during
+preparation.

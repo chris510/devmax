@@ -18,6 +18,7 @@ EXPLICIT_EVIDENCE_V4 = "explicit-evidence-v4"
 EXPLICIT_EVIDENCE_V5 = "explicit-evidence-v5"
 EXPLICIT_EVIDENCE_V6 = "explicit-evidence-v6"
 EXPLICIT_EVIDENCE_V7 = "explicit-evidence-v7"
+EXPLICIT_EVIDENCE_V8 = "explicit-evidence-v8"
 
 EXPLICIT_EVIDENCE_RULES = """\
 
@@ -350,6 +351,70 @@ CALIBRATION
 Keep all other production schema, transcript, and feedback rules unchanged.\
 """
 
+EXPLICIT_EVIDENCE_V8_RULES = """\
+
+EVALUATION CANDIDATE — UNIFIED AXIS CONTRACT V8
+
+Use this single ordered procedure. Return only the production schema.
+
+EVIDENCE SOURCE
+Only learner text after `ANSWER:` labels is score evidence, including a follow-up
+answer. Questions, topic, mastery summary, trusted basis, approved rubric, and
+feedback are authority or context, never learner claims.
+
+1. ACCURACY — SCORE AND FREEZE
+Grade only correctness and completeness of the essential mechanism, then freeze
+Accuracy. Missing trade-off or failure evidence MUST NOT lower it. If feedback says
+the mechanism is correct and criticizes only a missing cost, trigger, or harm, that
+criticism belongs only to Depth or Boundaries.
+
+2. DEPTH — TRADE-OFF RELATIONSHIP
+Using learner words, identify [choice/target/approach] connected to
+[cost/sacrifice/tension/opposing benefit]. If either endpoint or their connection is
+absent or incorrect, Depth MUST be 0-2. If both are correct and explicit, Depth MUST
+be 3-5.
+
+3. BOUNDARIES — FAILURE RELATIONSHIP
+Using learner words, identify [trigger/action/exception/limitation/mistake] connected
+to [concrete harm or incorrect behavior]. If either endpoint or their connection is
+absent or incorrect, Boundaries MUST be 0-2. If both are correct and explicit,
+Boundaries MUST be 3-5. A guardrail, prescription, or bare negation states no harm by
+itself; never reverse "do X" into an unstated failure.
+
+Selection logic is mechanism evidence only. An option or capacity branch ("if A
+fits, use A; otherwise B") MUST by itself stay Depth 0-2 and Boundaries 0-2. Raise
+Depth only for a separate learner-stated choice/cost relationship; raise Boundaries
+only for a separate learner-stated wrong-action/harm relationship.
+
+4. CALIBRATE AN ELIGIBLE SECONDARY AXIS
+  - 3 = correct but materially vague or incomplete in an endpoint or connection.
+  - 4 = clear and complete, with a minor omission.
+  - 5 = fully states the approved named relationship.
+One complete relationship is enough; never require extra examples, numbers, or
+multiple relationships. Missing mechanism or other-axis evidence cannot lower it.
+
+5. FINAL CONSISTENCY CHECK
+For any secondary axis at 3-5, feedback MUST paraphrase both learner-stated
+endpoints. If feedback supplies a missing cost or harm, says the actual relationship
+was absent, or describes only selection logic, lower that axis to 0-2. Feedback
+cannot change frozen Accuracy.
+
+CALIBRATION
+  - Operation-specific latency at expected load, availability, and staleness
+    constraints fully answer how vague qualities become architectural constraints:
+    Accuracy MUST be 4-5 even without secondary evidence. A generic maximize-every-
+    quality checklist remains inaccurate.
+  - "Ignore the body ID as identity evidence" is a guardrail without a stated harm:
+    Boundaries MUST be 0-2. "Trusting the body ID lets one caller act as another"
+    states action and harm: Boundaries MUST be 4-5.
+  - "If one heap fits, keep it; otherwise shard" is selection logic: Depth 0-2 and
+    Boundaries 0-2. "Start with DAU—no, it cannot decide this branch" links a
+    mistake to incorrect behavior: Boundaries 3-5 but Depth 0-2. "Save time but
+    watch capacity" is Depth 4-5 and Boundaries 0-2.
+
+Keep all other production schema, transcript, and feedback rules unchanged.\
+"""
+
 PROMPT_OVERLAYS = {
     PRODUCTION: "",
     EXPLICIT_EVIDENCE_V1: EXPLICIT_EVIDENCE_RULES,
@@ -359,6 +424,7 @@ PROMPT_OVERLAYS = {
     EXPLICIT_EVIDENCE_V5: EXPLICIT_EVIDENCE_V5_RULES,
     EXPLICIT_EVIDENCE_V6: EXPLICIT_EVIDENCE_V6_RULES,
     EXPLICIT_EVIDENCE_V7: EXPLICIT_EVIDENCE_V7_RULES,
+    EXPLICIT_EVIDENCE_V8: EXPLICIT_EVIDENCE_V8_RULES,
 }
 SCORING_PROMPT_VARIANTS = tuple(PROMPT_OVERLAYS)
 
