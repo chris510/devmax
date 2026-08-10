@@ -21,6 +21,8 @@ from scripts.scoring_prompt_variants import (
     EXPLICIT_EVIDENCE_V5_RULES,
     EXPLICIT_EVIDENCE_V6,
     EXPLICIT_EVIDENCE_V6_RULES,
+    EXPLICIT_EVIDENCE_V7,
+    EXPLICIT_EVIDENCE_V7_RULES,
     PRODUCTION,
     apply_scoring_prompt_variant,
 )
@@ -773,6 +775,74 @@ def test_v6_unifies_the_contract_and_is_shorter_than_v5() -> None:
     assert len(EXPLICIT_EVIDENCE_V6_RULES.encode()) < len(
         EXPLICIT_EVIDENCE_V5_RULES.encode()
     )
+
+
+def test_v7_separates_option_selection_from_failure_evidence() -> None:
+    case = {
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "If one heap can hold the topics, keep it; otherwise shard.",
+    }
+
+    rubric = effort_sweep.build_completion(
+        case,
+        model="claude-sonnet-5",
+        effort="low",
+        prompt_variant=EXPLICIT_EVIDENCE_V7,
+    )["rubric"]
+
+    assert "UNIFIED AXIS CONTRACT V7" in rubric
+    assert "Selection logic is not failure evidence" in rubric
+    assert 'An option or capacity branch ("if A fits' in rubric
+    assert "only selection logic or identifies no failure" in rubric
+    assert '"If one heap fits, keep it; otherwise shard"' in rubric
+    assert "links a mistake to incorrect" in rubric
+    assert '"Save time but watch capacity"' in rubric
+    assert "UNIFIED AXIS CONTRACT V6" not in EXPLICIT_EVIDENCE_V7_RULES
+    assert len(EXPLICIT_EVIDENCE_V7_RULES.encode()) < (
+        len(EXPLICIT_EVIDENCE_V6_RULES.encode()) + 1000
+    )
+
+
+def test_v7_prompt_is_shared_and_fingerprint_isolated() -> None:
+    case = {
+        "name": "shared V7 candidate",
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Answer.",
+    }
+    production = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=PRODUCTION,
+    )[0]
+    v6 = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V6,
+    )[0]
+    claude_v7 = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V7,
+    )[0]
+    openai_v7 = openai_bakeoff.prepare_cases(
+        [case],
+        kind="scoring",
+        levels=["low"],
+        model="gpt-5.6-terra",
+        max_output_tokens=1024,
+        prompt_variant=EXPLICIT_EVIDENCE_V7,
+    )[0]
+
+    assert claude_v7.completion["rubric"] == openai_v7.completion["rubric"]
+    assert claude_v7.fingerprint != production.fingerprint
+    assert claude_v7.fingerprint != v6.fingerprint
+    assert claude_v7.scoring_prompt_variant == EXPLICIT_EVIDENCE_V7
+    assert openai_v7.scoring_prompt_variant == EXPLICIT_EVIDENCE_V7
 
 
 def test_reviewed_gate_accepts_results_within_one_on_every_signal() -> None:

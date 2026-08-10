@@ -114,3 +114,9 @@ Preparation should begin with shared Claude/OpenAI prompt tests and free token
 counts. Its first paid stage should be the smallest paired negative/positive
 Boundary gate. Only a pass should reopen the four-case follow-up stage and the
 deferred repeatability replicas.
+
+That preparation is now specified in
+`EXPLICIT-EVIDENCE-V7-DECISION-BOUNDARY-GATE.md`. It combines the focused
+negative/positive Boundary controls with a first V7 observation of every
+historical blocker, then conditionally completes follow-up coverage and two fresh
+repeatability observations. No paid calls were made during preparation.
