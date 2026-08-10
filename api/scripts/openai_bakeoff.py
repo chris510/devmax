@@ -8,6 +8,9 @@ Examples:
     uv run python scripts/openai_bakeoff.py reattempt \
       scripts/grounded_reattempt_cases_week1.json \
       --grounding-manifest cards.json --tag smoke --max-cost-usd 0.01
+    uv run python scripts/openai_bakeoff.py evidence \
+      scripts/grounded_effort_cases_week1_release.json \
+      --grounding-manifest cards.json --tag release-pack --dry-run
 """
 
 from __future__ import annotations
@@ -26,7 +29,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services import llm  # noqa: E402
-from scripts import effort_sweep, reattempt_effort_sweep  # noqa: E402
+from scripts import (  # noqa: E402
+    effort_sweep,
+    reattempt_effort_sweep,
+    structured_evidence_eval,
+)
 from scripts.effort_sweep_support import (  # noqa: E402
     JsonlRecorder,
     PreparedCall,
@@ -64,7 +71,7 @@ from scripts.scoring_prompt_variants import (  # noqa: E402
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_EFFORT = "low"
-DEFAULT_OUTPUT_CAPS = {"scoring": 2048, "reattempt": 512}
+DEFAULT_OUTPUT_CAPS = {"scoring": 2048, "reattempt": 512, "evidence": 512}
 
 
 class EvalSettings(BaseSettings):
@@ -90,11 +97,12 @@ def prepare_cases(
     max_output_tokens: int,
     prompt_variant: str = PRODUCTION,
 ) -> list[PreparedCall]:
-    builder = (
-        effort_sweep.build_completion
-        if kind == "scoring"
-        else reattempt_effort_sweep.build_completion
-    )
+    builders = {
+        "scoring": effort_sweep.build_completion,
+        "reattempt": reattempt_effort_sweep.build_completion,
+        "evidence": structured_evidence_eval.build_completion,
+    }
+    builder = builders[kind]
     prepared: list[PreparedCall] = []
     for level in levels:
         for index, case in enumerate(cases):
@@ -104,7 +112,7 @@ def prepare_cases(
                     completion, prompt_variant
                 )
             elif prompt_variant != PRODUCTION:
-                raise ValueError("scoring prompt variants cannot grade reattempts")
+                raise ValueError("scoring prompt variants are available only for scoring")
             completion = {
                 **completion,
                 "provider": "openai-responses",
@@ -156,13 +164,30 @@ def _reattempt_result(
     )
 
 
+def _evidence_result(
+    prepared: PreparedCall, data: dict[str, Any], usage: Usage
+) -> structured_evidence_eval.Result:
+    return structured_evidence_eval.parse_result(
+        prepared.case,
+        data,
+        usage=usage,
+        index=prepared.index,
+        case_name=prepared.case_name,
+    )
+
+
 async def run_case(
     prepared: PreparedCall,
     recorder: JsonlRecorder,
     *,
     api_key: str,
     client: httpx.AsyncClient,
-) -> tuple[effort_sweep.Result | reattempt_effort_sweep.Result, dict[str, Any]]:
+) -> tuple[
+    effort_sweep.Result
+    | reattempt_effort_sweep.Result
+    | structured_evidence_eval.Result,
+    dict[str, Any],
+]:
     response = await complete(
         response_request(prepared.completion, kind=prepared.kind),
         api_key=api_key,
@@ -171,9 +196,12 @@ async def run_case(
     if prepared.kind == "scoring":
         result = _scoring_result(prepared, response.data, response.usage)
         payload = effort_sweep.result_payload(result)
-    else:
+    elif prepared.kind == "reattempt":
         result = _reattempt_result(prepared, response.data, response.usage)
         payload = reattempt_effort_sweep.result_payload(result)
+    else:
+        result = _evidence_result(prepared, response.data, response.usage)
+        payload = structured_evidence_eval.result_payload(result)
     record = make_result_record(
         prepared,
         model=prepared.completion["model"],
@@ -233,9 +261,27 @@ def print_reattempt_results(
     )
 
 
+def print_evidence_results(
+    label: str, results: list[structured_evidence_eval.Result], *, verbose: bool
+) -> None:
+    print(f"\n=== OpenAI structured evidence effort={label} ===")
+    for result in results:
+        print(
+            f"  {result.case[:40]:<40} "
+            f"depth={result.depth.eligible}/{result.expected_depth_eligible} "
+            f"boundaries={result.boundaries.eligible}/"
+            f"{result.expected_boundaries_eligible} "
+            f"in={result.usage.input_tokens:>5} out={result.usage.output_tokens:>5}"
+            f"{'  [resumed]' if result.resumed else ''}"
+        )
+        if verbose:
+            print(f"      depth={result.depth}")
+            print(f"      boundaries={result.boundaries}")
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("scoring", "reattempt"))
+    parser.add_argument("kind", choices=("scoring", "reattempt", "evidence"))
     parser.add_argument("cases", type=Path)
     add_paid_evaluation_args(parser)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -255,6 +301,11 @@ async def main() -> int:
         help="exit nonzero after recording if any reviewed scoring gate fails",
     )
     parser.add_argument(
+        "--enforce-evidence-gate",
+        action="store_true",
+        help="exit nonzero unless exact learner-span eligibility matches review",
+    )
+    parser.add_argument(
         "--scoring-prompt-variant",
         choices=SCORING_PROMPT_VARIANTS,
         default=PRODUCTION,
@@ -270,6 +321,8 @@ async def main() -> int:
         parser.error("--concurrency must be at least 1")
     if args.enforce_reviewed_gate and args.kind != "scoring":
         parser.error("--enforce-reviewed-gate is available only for scoring")
+    if args.enforce_evidence_gate and args.kind != "evidence":
+        parser.error("--enforce-evidence-gate is available only for evidence")
 
     cases = select_cases(
         load_cases(args.cases, parser),
@@ -308,11 +361,12 @@ async def main() -> int:
     reusable = {} if args.fresh else prior_by_fingerprint
     resumed_calls = [call for call in prepared if call.fingerprint in reusable]
     pending_calls = [call for call in prepared if call.fingerprint not in reusable]
-    result_from_record = (
-        effort_sweep.result_from_record
-        if args.kind == "scoring"
-        else reattempt_effort_sweep.result_from_record
-    )
+    result_readers = {
+        "scoring": effort_sweep.result_from_record,
+        "reattempt": reattempt_effort_sweep.result_from_record,
+        "evidence": structured_evidence_eval.result_from_record,
+    }
+    result_from_record = result_readers[args.kind]
     try:
         resumed_results = {
             call.fingerprint: result_from_record(call, reusable[call.fingerprint])
@@ -439,14 +493,18 @@ async def main() -> int:
                     by_level[label] = results
                     if args.kind == "scoring":
                         print_scoring_results(label, results, verbose=args.verbose)
-                    else:
+                    elif args.kind == "reattempt":
                         print_reattempt_results(label, results, verbose=args.verbose)
+                    else:
+                        print_evidence_results(label, results, verbose=args.verbose)
     except OpenAIEvalError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     if args.kind == "scoring":
         effort_sweep.print_summary(by_level)
+    elif args.kind == "evidence":
+        structured_evidence_eval.print_summary(by_level)
     print(f"\nnew paid-call cost: ${actual_cost(new_records, rate):.4f}")
     print(f"results: {output_path}")
     if args.enforce_reviewed_gate:
@@ -457,6 +515,14 @@ async def main() -> int:
                 print(f"  - {failure}", file=sys.stderr)
             return 1
         print("reviewed gate passed")
+    if args.enforce_evidence_gate:
+        failures = structured_evidence_eval.gate_failures(by_level)
+        if failures:
+            print("\nstructured-evidence gate failed:", file=sys.stderr)
+            for failure in failures:
+                print(f"  - {failure}", file=sys.stderr)
+            return 1
+        print("structured-evidence gate passed")
     return 0
 
 
