@@ -1,6 +1,7 @@
 # Explicit-evidence V4 targeted gate
 
-**Status:** Prepared and free-preflighted; no paid V4 calls made
+**Status:** E1 passed; E2 failed the reviewed Depth tolerance. See
+`CLAUDE-EXPLICIT-EVIDENCE-V4-RESULTS.md`.
 
 ## Objective
 
@@ -122,3 +123,12 @@ breaking their closest controls. It would not authorize production, Terra, or
 prompt distillation. The next paid step would resume the remaining four
 follow-up-anchored cases and then the unrun V3 families, each behind the same
 automatic and manual gates.
+
+## Run outcome
+
+All six calls ran after E1 passed. E2 then stopped the experiment because the
+decision-driven-estimation trade-off received Depth 3 against reviewed 5. V4
+fixed the two original C5b blockers and preserved all evidence eligibility
+bands, but its within-band Depth calibration is not reliable enough to promote.
+No production setting changed. The full audit and cost ledger are in
+`CLAUDE-EXPLICIT-EVIDENCE-V4-RESULTS.md`.
