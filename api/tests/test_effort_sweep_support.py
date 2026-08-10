@@ -17,6 +17,7 @@ from scripts.scoring_prompt_variants import (
     EXPLICIT_EVIDENCE_V2,
     EXPLICIT_EVIDENCE_V3,
     EXPLICIT_EVIDENCE_V4,
+    EXPLICIT_EVIDENCE_V5,
     PRODUCTION,
     apply_scoring_prompt_variant,
 )
@@ -558,7 +559,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         [case],
         levels=["low"],
         model="claude-sonnet-5",
-        prompt_variant=EXPLICIT_EVIDENCE_V4,
+        prompt_variant=EXPLICIT_EVIDENCE_V5,
     )[0]
     openai_candidate = openai_bakeoff.prepare_cases(
         [case],
@@ -566,7 +567,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         levels=["low"],
         model="gpt-5.6-terra",
         max_output_tokens=1024,
-        prompt_variant=EXPLICIT_EVIDENCE_V4,
+        prompt_variant=EXPLICIT_EVIDENCE_V5,
     )[0]
     v1_candidate = effort_sweep.prepare_cases(
         [case],
@@ -586,6 +587,12 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         model="claude-sonnet-5",
         prompt_variant=EXPLICIT_EVIDENCE_V3,
     )[0]
+    v4_candidate = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V4,
+    )[0]
 
     assert production.completion["rubric"] == effort_sweep.llm.SCORING_RUBRIC
     assert claude_candidate.completion["rubric"] == openai_candidate.completion["rubric"]
@@ -593,8 +600,9 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
     assert claude_candidate.fingerprint != v1_candidate.fingerprint
     assert claude_candidate.fingerprint != v2_candidate.fingerprint
     assert claude_candidate.fingerprint != v3_candidate.fingerprint
-    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V4
-    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V4
+    assert claude_candidate.fingerprint != v4_candidate.fingerprint
+    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V5
+    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V5
 
     record = support.make_result_record(
         claude_candidate,
@@ -602,7 +610,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         result={"score": 3},
         usage=support.Usage(),
     )
-    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V4
+    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V5
 
 
 def test_explicit_evidence_candidate_maps_axes_and_forbids_context_credit() -> None:
@@ -703,6 +711,29 @@ def test_v4_freezes_accuracy_and_requires_two_learner_endpoints() -> None:
     assert "Both endpoints and their connection" in rubric
     assert '"Ignore/reject/do not trust client-supplied identity"' in rubric
     assert "If it cannot, lower the axis to 0-2" in rubric
+
+
+def test_v5_calibrates_complete_secondary_relationships_above_three() -> None:
+    case = {
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Skipping unrelated arithmetic saves interview time.",
+    }
+
+    rubric = effort_sweep.build_completion(
+        case,
+        model="claude-sonnet-5",
+        effort="low",
+        prompt_variant=EXPLICIT_EVIDENCE_V5,
+    )["rubric"]
+
+    assert "AXIS INDEPENDENCE AND TWO-ENDPOINT EVIDENCE V4" in rubric
+    assert "WITHIN-BAND SECONDARY CALIBRATION V5" in rubric
+    assert "correct but materially vague or incomplete" in rubric
+    assert "clear and complete, with a minor omission" in rubric
+    assert "One complete relationship is enough" in rubric
+    assert "this axis MUST be 4-5" in rubric
+    assert "capacity limits is Depth 4-5" in rubric
 
 
 def test_reviewed_gate_accepts_results_within_one_on_every_signal() -> None:
