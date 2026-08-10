@@ -1,6 +1,7 @@
 # Explicit-evidence V6 follow-up and repeatability gate
 
-**Status:** Prepared and free-counted; no paid Message calls made
+**Status:** Stopped at H1 after one automatic and manual gate failure; see
+`CLAUDE-EXPLICIT-EVIDENCE-V6-FOLLOWUP-REPEATABILITY-RESULTS.md`
 
 ## Objective
 
@@ -155,3 +156,11 @@ historical blockers three V6 observations each with no greater than one-point
 sample spread. It would justify moving V6 to the remaining release families and
 frozen baseline. It would still not authorize production, a provider change,
 or prompt distillation.
+
+## Run outcome
+
+H1 spent $0.040534 across its four approved calls. Three cases passed, but the
+decision-driven follow-up returned Boundaries 4 and composite 5 against reviewed
+2 and 3. Its feedback identified no failure-mode evidence, so the manual audit
+failed as well. The experiment stopped before R1 and R2, leaving $0.073066
+unspent. Production remained unchanged.
