@@ -1,6 +1,7 @@
 # OpenAI V8 provider diagnostic
 
-**Status:** Prepared; no evaluation payload transmitted and no paid call made
+**Status:** Completed; the reviewed gate failed. See
+[`OPENAI-V8-PROVIDER-DIAGNOSTIC-RESULTS.md`](OPENAI-V8-PROVIDER-DIAGNOSTIC-RESULTS.md).
 
 ## Decision
 
