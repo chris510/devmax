@@ -1,6 +1,7 @@
 # Explicit-evidence V8 symmetric-selection gate
 
-**Status:** Prepared, tested, and free-counted; no paid Message calls made
+**Status:** Passed L1 automatic and manual gates; see
+`CLAUDE-EXPLICIT-EVIDENCE-V8-L1-RESULTS.md`
 
 ## Objective
 
@@ -123,3 +124,12 @@ production. The next sequence would be:
 
 Every later phase retains its own free count, paid authorization, manual audit,
 durable result PR, and stop policy.
+
+## Run outcome
+
+L1 passed all three automatic and manual audits. Every composite and axis was
+within one of its reviewed label, Accuracy buckets were correct, and feedback
+matched learner evidence. Actual spend was $0.031638, leaving $0.003562
+unspent. A keyless replay resumed all three fingerprints and passed with zero
+new calls. Production remained unchanged; the complete audit is in
+`CLAUDE-EXPLICIT-EVIDENCE-V8-L1-RESULTS.md`.
