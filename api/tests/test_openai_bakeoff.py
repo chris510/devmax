@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app.services import llm
-from scripts import openai_bakeoff
+from scripts import openai_bakeoff, structured_evidence_eval
 from scripts.effort_sweep_support import (
     JsonlRecorder,
     Usage,
@@ -207,6 +207,25 @@ def write_scoring_case(tmp_path):
     return path
 
 
+def write_evidence_case(tmp_path):
+    path = tmp_path / "evidence-cases.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "selection only",
+                    "topic": "Decision-driven estimation",
+                    "answer": "If one heap fits, keep it; otherwise shard.",
+                    "expected_depth": 1,
+                    "expected_boundaries": 1,
+                    "review_status": "approved",
+                }
+            ]
+        )
+    )
+    return path
+
+
 @pytest.mark.anyio
 async def test_dry_run_needs_no_openai_key_or_network(monkeypatch, tmp_path, capsys) -> None:
     cases = write_scoring_case(tmp_path)
@@ -222,6 +241,103 @@ async def test_dry_run_needs_no_openai_key_or_network(monkeypatch, tmp_path, cap
     output = capsys.readouterr().out
     assert "new paid calls     1" in output
     assert "no paid Responses calls were made" in output
+
+
+@pytest.mark.anyio
+async def test_evidence_dry_run_needs_no_key_or_network(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_evidence_case(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "evidence",
+            str(cases),
+            "--model",
+            "gpt-5.6-terra",
+            "--levels",
+            "medium",
+            "--dry-run",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 0
+    output = capsys.readouterr().out
+    assert "selected calls     1" in output
+    assert "new paid calls     1" in output
+    assert "no paid Responses calls were made" in output
+
+
+@pytest.mark.anyio
+async def test_evidence_replay_is_keyless_and_enforces_gate(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases_path = write_evidence_case(tmp_path)
+    case = json.loads(cases_path.read_text())[0]
+    prepared = openai_bakeoff.prepare_cases(
+        [case],
+        kind="evidence",
+        levels=["medium"],
+        model="gpt-5.6-terra",
+        max_output_tokens=512,
+    )[0]
+    result = structured_evidence_eval.parse_result(
+        case,
+        {
+            "depth": {
+                "choice_or_target_span": "",
+                "cost_or_tension_span": "",
+                "connection_span": "",
+            },
+            "boundaries": {
+                "trigger_or_mistake_span": "",
+                "harm_or_incorrect_behavior_span": "",
+                "connection_span": "",
+            },
+        },
+        usage=Usage(),
+    )
+    resume = tmp_path / "evidence.jsonl"
+    with JsonlRecorder(resume) as recorder:
+        recorder.append(
+            make_result_record(
+                prepared,
+                model="gpt-5.6-terra",
+                result=structured_evidence_eval.result_payload(result),
+                usage=Usage(),
+            )
+        )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "evidence",
+            str(cases_path),
+            "--model",
+            "gpt-5.6-terra",
+            "--levels",
+            "medium",
+            "--resume",
+            str(resume),
+            "--output",
+            str(tmp_path / "replay.jsonl"),
+            "--enforce-evidence-gate",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 0
+    output = capsys.readouterr().out
+    assert "resumed calls      1" in output
+    assert "new paid calls     0" in output
+    assert "structured-evidence gate passed" in output
 
 
 @pytest.mark.anyio

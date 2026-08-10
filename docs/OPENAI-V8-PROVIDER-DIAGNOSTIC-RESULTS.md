@@ -133,3 +133,6 @@ changing production. A useful candidate must identify the self-correction
 positive control while continuing to reject selection-only, guardrail-only,
 and trade-off-only text as Boundary evidence. Only after the evidence layer is
 stable should a separate calibration step map eligible evidence to 0-5 axes.
+
+The credential-free preparation is documented in
+[`STRUCTURED-EVIDENCE-EXTRACTION-EXPERIMENT.md`](STRUCTURED-EVIDENCE-EXTRACTION-EXPERIMENT.md).
