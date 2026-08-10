@@ -15,6 +15,7 @@ from scripts.effort_sweep_support import hydrate_grounding
 from scripts.scoring_prompt_variants import (
     EXPLICIT_EVIDENCE_V1,
     EXPLICIT_EVIDENCE_V2,
+    EXPLICIT_EVIDENCE_V3,
     PRODUCTION,
     apply_scoring_prompt_variant,
 )
@@ -556,7 +557,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         [case],
         levels=["low"],
         model="claude-sonnet-5",
-        prompt_variant=EXPLICIT_EVIDENCE_V2,
+        prompt_variant=EXPLICIT_EVIDENCE_V3,
     )[0]
     openai_candidate = openai_bakeoff.prepare_cases(
         [case],
@@ -564,7 +565,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         levels=["low"],
         model="gpt-5.6-terra",
         max_output_tokens=1024,
-        prompt_variant=EXPLICIT_EVIDENCE_V2,
+        prompt_variant=EXPLICIT_EVIDENCE_V3,
     )[0]
     v1_candidate = effort_sweep.prepare_cases(
         [case],
@@ -572,13 +573,20 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         model="claude-sonnet-5",
         prompt_variant=EXPLICIT_EVIDENCE_V1,
     )[0]
+    v2_candidate = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V2,
+    )[0]
 
     assert production.completion["rubric"] == effort_sweep.llm.SCORING_RUBRIC
     assert claude_candidate.completion["rubric"] == openai_candidate.completion["rubric"]
     assert claude_candidate.fingerprint != production.fingerprint
     assert claude_candidate.fingerprint != v1_candidate.fingerprint
-    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V2
-    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V2
+    assert claude_candidate.fingerprint != v2_candidate.fingerprint
+    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V3
+    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V3
 
     record = support.make_result_record(
         claude_candidate,
@@ -586,7 +594,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         result={"score": 3},
         usage=support.Usage(),
     )
-    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V2
+    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V3
 
 
 def test_explicit_evidence_candidate_maps_axes_and_forbids_context_credit() -> None:
@@ -638,6 +646,76 @@ def test_v2_uses_mechanical_secondary_axis_eligibility() -> None:
 def test_unknown_scoring_prompt_variant_is_rejected() -> None:
     with pytest.raises(ValueError, match="unknown scoring prompt variant"):
         apply_scoring_prompt_variant({"rubric": "base"}, "unknown")
+
+
+def test_v3_uses_bidirectional_mandatory_axis_bands() -> None:
+    case = {
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Skipping unrelated arithmetic saves interview time.",
+    }
+
+    rubric = effort_sweep.build_completion(
+        case,
+        model="claude-sonnet-5",
+        effort="low",
+        prompt_variant=EXPLICIT_EVIDENCE_V3,
+    )["rubric"]
+
+    assert "BIDIRECTIONAL EVIDENCE ELIGIBILITY V3" in rubric
+    assert "No qualifying relationship: Depth MUST be 0-2" in rubric
+    assert "One or more qualifying relationships: Depth MUST be 3-5" in rubric
+    assert "No qualifying relationship: Boundaries MUST be 0-2" in rubric
+    assert "One or more qualifying relationships: Boundaries MUST be 3-5" in rubric
+    assert "MUST NOT lower it to 0-2" in rubric
+    assert "does not erase an independently stated trade-off" in rubric
+    assert "even without a numerical estimate" in rubric
+    assert "feedback acknowledges or paraphrases" in rubric
+
+
+def test_reviewed_gate_accepts_results_within_one_on_every_signal() -> None:
+    result = effort_sweep.Result(
+        index=0,
+        case="passing",
+        expected_score=4,
+        score=3,
+        expected_axes=(5, 5, 1),
+        axes=(4, 4, 1),
+        usage=support.Usage(),
+    )
+
+    assert effort_sweep.reviewed_gate_failures({"low": [result]}) == []
+
+
+def test_reviewed_gate_reports_axis_composite_bucket_and_label_failures() -> None:
+    false_failure = effort_sweep.Result(
+        index=0,
+        case="false failure",
+        expected_score=4,
+        score=2,
+        expected_axes=(5, 5, 1),
+        axes=(2, 2, 1),
+        usage=support.Usage(),
+    )
+    unlabeled = effort_sweep.Result(
+        index=1,
+        case="unlabeled",
+        expected_score=None,
+        score=3,
+        expected_axes=(None, None, None),
+        axes=(3, 1, 1),
+        usage=support.Usage(),
+    )
+
+    failures = effort_sweep.reviewed_gate_failures(
+        {"low": [false_failure, unlabeled]}
+    )
+
+    assert any("composite 2 is more than one from 4" in failure for failure in failures)
+    assert any("accuracy 2 is more than one from 5" in failure for failure in failures)
+    assert any("depth 2 is more than one from 5" in failure for failure in failures)
+    assert any("false Accuracy failure" in failure for failure in failures)
+    assert any("missing reviewed label" in failure for failure in failures)
 
 
 @pytest.mark.anyio
