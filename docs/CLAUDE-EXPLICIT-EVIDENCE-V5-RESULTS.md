@@ -126,4 +126,5 @@ passes should the full eight-case V5 set run.
 This direction reduces both instruction interference and cost. A complete pass
 would still need repeatability before any production or provider decision. V6
 requires an offline prompt/test PR, fresh free counts, and new explicit paid
-authorization.
+authorization. The prepared unified candidate and nine-case gate are documented
+in `EXPLICIT-EVIDENCE-V6-UNIFIED-GATE.md`.

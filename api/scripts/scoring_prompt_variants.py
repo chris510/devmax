@@ -16,6 +16,7 @@ EXPLICIT_EVIDENCE_V2 = "explicit-evidence-v2"
 EXPLICIT_EVIDENCE_V3 = "explicit-evidence-v3"
 EXPLICIT_EVIDENCE_V4 = "explicit-evidence-v4"
 EXPLICIT_EVIDENCE_V5 = "explicit-evidence-v5"
+EXPLICIT_EVIDENCE_V6 = "explicit-evidence-v6"
 
 EXPLICIT_EVIDENCE_RULES = """\
 
@@ -225,6 +226,63 @@ interview time and still noticing real capacity limits is Depth 4-5 without numb
 Keep every V4 and production rule unchanged.\
 """
 
+EXPLICIT_EVIDENCE_V6_RULES = """\
+
+EVALUATION CANDIDATE — UNIFIED AXIS CONTRACT V6
+
+Use this single ordered procedure. Return only the production schema.
+
+EVIDENCE SOURCE
+Only learner text after `ANSWER:` labels is score evidence, including a follow-up
+answer. Questions, topic, mastery summary, trusted basis, approved rubric, and
+feedback are authority or context, never learner claims.
+
+1. ACCURACY — SCORE AND FREEZE
+Grade only correctness and completeness of the essential mechanism, then freeze
+Accuracy. Missing trade-off or failure evidence MUST NOT lower it. If feedback says
+the mechanism is correct and criticizes only a missing cost, trigger, or harm, that
+criticism belongs only to Depth or Boundaries.
+
+2. DEPTH — TRADE-OFF RELATIONSHIP
+Using learner words, identify [choice/target/approach] connected to
+[cost/sacrifice/tension/opposing benefit]. If either endpoint or their connection is
+absent or incorrect, Depth MUST be 0-2. If both are correct and explicit, Depth MUST
+be 3-5.
+
+3. BOUNDARIES — FAILURE RELATIONSHIP
+Using learner words, identify [trigger/action/exception/limitation/mistake] connected
+to [concrete harm or incorrect behavior]. If either endpoint or their connection is
+absent or incorrect, Boundaries MUST be 0-2. If both are correct and explicit,
+Boundaries MUST be 3-5. A guardrail, prescription, or bare negation states no harm by
+itself; never reverse "do X" into an unstated failure.
+
+4. CALIBRATE AN ELIGIBLE SECONDARY AXIS
+  - 3 = correct but materially vague or incomplete in an endpoint or connection.
+  - 4 = clear and complete, with a minor omission.
+  - 5 = fully states the approved named relationship.
+One complete relationship is enough; never require extra examples, numbers, or
+multiple relationships. Missing mechanism or other-axis evidence cannot lower it.
+
+5. FINAL CONSISTENCY CHECK
+Feedback for a 3-5 secondary axis must paraphrase both learner-stated endpoints. If
+feedback supplies a missing endpoint, that axis MUST be 0-2. If feedback calls the
+full named relationship explicit or complete, that axis MUST be 4-5. Feedback cannot
+change frozen Accuracy.
+
+CALIBRATION
+  - Operation-specific latency at expected load, availability, and staleness
+    constraints fully answer how vague qualities become architectural constraints:
+    Accuracy MUST be 4-5 even without secondary evidence. A generic maximize-every-
+    quality checklist remains inaccurate.
+  - "Ignore the body ID as identity evidence" is a guardrail without a stated harm:
+    Boundaries MUST be 0-2. "Trusting the body ID lets one caller act as another"
+    states action and harm: Boundaries MUST be 4-5.
+  - Skipping unrelated arithmetic to save interview time while still watching real
+    capacity limits states the full trade-off: Depth MUST be 4-5 without numbers.
+
+Keep all other production schema, transcript, and feedback rules unchanged.\
+"""
+
 PROMPT_OVERLAYS = {
     PRODUCTION: "",
     EXPLICIT_EVIDENCE_V1: EXPLICIT_EVIDENCE_RULES,
@@ -232,6 +290,7 @@ PROMPT_OVERLAYS = {
     EXPLICIT_EVIDENCE_V3: EXPLICIT_EVIDENCE_V3_RULES,
     EXPLICIT_EVIDENCE_V4: EXPLICIT_EVIDENCE_V4_RULES,
     EXPLICIT_EVIDENCE_V5: EXPLICIT_EVIDENCE_V5_RULES,
+    EXPLICIT_EVIDENCE_V6: EXPLICIT_EVIDENCE_V6_RULES,
 }
 SCORING_PROMPT_VARIANTS = tuple(PROMPT_OVERLAYS)
 

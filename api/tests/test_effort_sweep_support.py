@@ -18,6 +18,9 @@ from scripts.scoring_prompt_variants import (
     EXPLICIT_EVIDENCE_V3,
     EXPLICIT_EVIDENCE_V4,
     EXPLICIT_EVIDENCE_V5,
+    EXPLICIT_EVIDENCE_V5_RULES,
+    EXPLICIT_EVIDENCE_V6,
+    EXPLICIT_EVIDENCE_V6_RULES,
     PRODUCTION,
     apply_scoring_prompt_variant,
 )
@@ -559,7 +562,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         [case],
         levels=["low"],
         model="claude-sonnet-5",
-        prompt_variant=EXPLICIT_EVIDENCE_V5,
+        prompt_variant=EXPLICIT_EVIDENCE_V6,
     )[0]
     openai_candidate = openai_bakeoff.prepare_cases(
         [case],
@@ -567,7 +570,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         levels=["low"],
         model="gpt-5.6-terra",
         max_output_tokens=1024,
-        prompt_variant=EXPLICIT_EVIDENCE_V5,
+        prompt_variant=EXPLICIT_EVIDENCE_V6,
     )[0]
     v1_candidate = effort_sweep.prepare_cases(
         [case],
@@ -593,6 +596,12 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         model="claude-sonnet-5",
         prompt_variant=EXPLICIT_EVIDENCE_V4,
     )[0]
+    v5_candidate = effort_sweep.prepare_cases(
+        [case],
+        levels=["low"],
+        model="claude-sonnet-5",
+        prompt_variant=EXPLICIT_EVIDENCE_V5,
+    )[0]
 
     assert production.completion["rubric"] == effort_sweep.llm.SCORING_RUBRIC
     assert claude_candidate.completion["rubric"] == openai_candidate.completion["rubric"]
@@ -601,8 +610,9 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
     assert claude_candidate.fingerprint != v2_candidate.fingerprint
     assert claude_candidate.fingerprint != v3_candidate.fingerprint
     assert claude_candidate.fingerprint != v4_candidate.fingerprint
-    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V5
-    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V5
+    assert claude_candidate.fingerprint != v5_candidate.fingerprint
+    assert claude_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V6
+    assert openai_candidate.scoring_prompt_variant == EXPLICIT_EVIDENCE_V6
 
     record = support.make_result_record(
         claude_candidate,
@@ -610,7 +620,7 @@ def test_prompt_candidate_is_shared_and_cannot_resume_production_results() -> No
         result={"score": 3},
         usage=support.Usage(),
     )
-    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V5
+    assert record["scoring_prompt_variant"] == EXPLICIT_EVIDENCE_V6
 
 
 def test_explicit_evidence_candidate_maps_axes_and_forbids_context_credit() -> None:
@@ -734,6 +744,35 @@ def test_v5_calibrates_complete_secondary_relationships_above_three() -> None:
     assert "One complete relationship is enough" in rubric
     assert "this axis MUST be 4-5" in rubric
     assert "capacity limits is Depth 4-5" in rubric
+
+
+def test_v6_unifies_the_contract_and_is_shorter_than_v5() -> None:
+    case = {
+        "topic": "Topic",
+        "question": "Question?",
+        "answer": "Ignore the body ID as identity evidence.",
+    }
+
+    rubric = effort_sweep.build_completion(
+        case,
+        model="claude-sonnet-5",
+        effort="low",
+        prompt_variant=EXPLICIT_EVIDENCE_V6,
+    )["rubric"]
+
+    assert "UNIFIED AXIS CONTRACT V6" in rubric
+    assert "1. ACCURACY — SCORE AND FREEZE" in rubric
+    assert "2. DEPTH — TRADE-OFF RELATIONSHIP" in rubric
+    assert "3. BOUNDARIES — FAILURE RELATIONSHIP" in rubric
+    assert "4. CALIBRATE AN ELIGIBLE SECONDARY AXIS" in rubric
+    assert "5. FINAL CONSISTENCY CHECK" in rubric
+    assert "Accuracy MUST be 4-5 even without secondary evidence" in rubric
+    assert "Boundaries MUST be 0-2" in rubric
+    assert "Depth MUST be 4-5 without numbers" in rubric
+    assert "BIDIRECTIONAL EVIDENCE ELIGIBILITY V3" not in EXPLICIT_EVIDENCE_V6_RULES
+    assert len(EXPLICIT_EVIDENCE_V6_RULES.encode()) < len(
+        EXPLICIT_EVIDENCE_V5_RULES.encode()
+    )
 
 
 def test_reviewed_gate_accepts_results_within_one_on_every_signal() -> None:
