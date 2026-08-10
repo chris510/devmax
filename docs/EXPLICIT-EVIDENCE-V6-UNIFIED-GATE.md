@@ -1,6 +1,7 @@
 # Explicit-evidence V6 unified-contract gate
 
-**Status:** Prepared and free-preflighted; no paid V6 calls made
+**Status:** Passed all nine targeted cases; see
+`CLAUDE-EXPLICIT-EVIDENCE-V6-RESULTS.md`.
 
 ## Objective
 
@@ -136,3 +137,11 @@ blocker and all axis-isolation controls while materially reducing prompt cost. I
 would still not authorize production, Terra, or prompt distillation. The next
 steps would be the four remaining follow-up-anchored cases, then repeatability on
 the critical subset before broader release families or a provider decision.
+
+## Run outcome
+
+G1 and G2 both passed their automatic gates and manual feedback/evidence audits.
+All nine composites and axes were within one of reviewed labels, all Accuracy
+buckets were correct, and the three historical blockers passed together. Actual
+calculated spend was $0.079706. Production remained unchanged. The full audit is
+in `CLAUDE-EXPLICIT-EVIDENCE-V6-RESULTS.md`.
