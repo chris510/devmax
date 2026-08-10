@@ -114,3 +114,8 @@ The audited case set, three-stage stop policy, variance classification, and
 free-counted $0.1136 maximum are prepared in
 `EXPLICIT-EVIDENCE-V6-FOLLOWUP-REPEATABILITY-GATE.md`. No paid calls were made
 during preparation.
+
+That follow-up gate later stopped at H1 when decision-driven estimation promoted
+an option-selection threshold to unsupported Boundaries 4 and composite 5. R1
+and R2 were not run. The durable failure audit is in
+`CLAUDE-EXPLICIT-EVIDENCE-V6-FOLLOWUP-REPEATABILITY-RESULTS.md`.
