@@ -100,3 +100,7 @@ The remaining evidence sequence is:
 Only after all five evidence groups pass should V8 or its matched winner be
 proposed for production. Every paid group retains free counting, a hard cap,
 manual feedback audit, durable results, and stop-on-failure behavior.
+
+The no-spend preparation for M1-M3, including its exact derived counts, staged
+caps, repeatability classification, and external-data boundary, is documented
+in `EXPLICIT-EVIDENCE-V8-FOLLOWUP-REPEATABILITY-GATE.md`.
