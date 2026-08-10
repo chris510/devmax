@@ -213,6 +213,40 @@ def _accuracy_errors(results: list[Result]) -> tuple[int, int]:
     return false_pass, false_fail
 
 
+def reviewed_gate_failures(by_level: dict[str, list[Result]]) -> list[str]:
+    """Return every frozen-label violation that must stop a staged paid run."""
+    failures: list[str] = []
+    axis_names = ("accuracy", "depth", "boundaries")
+    for level, results in by_level.items():
+        for result in results:
+            if result.expected_score is None or any(
+                expected is None for expected in result.expected_axes
+            ):
+                failures.append(f"{level}/{result.case}: missing reviewed label")
+                continue
+            if abs(result.score - result.expected_score) > 1:
+                failures.append(
+                    f"{level}/{result.case}: composite {result.score} is more than "
+                    f"one from {result.expected_score}"
+                )
+            for axis_name, actual, expected in zip(
+                axis_names, result.axes, result.expected_axes, strict=True
+            ):
+                assert expected is not None
+                if abs(actual - expected) > 1:
+                    failures.append(
+                        f"{level}/{result.case}: {axis_name} {actual} is more than "
+                        f"one from {expected}"
+                    )
+            expected_accuracy = result.expected_axes[0]
+            assert expected_accuracy is not None
+            if expected_accuracy <= 2 < result.axes[0]:
+                failures.append(f"{level}/{result.case}: false Accuracy pass")
+            if expected_accuracy >= 3 > result.axes[0]:
+                failures.append(f"{level}/{result.case}: false Accuracy failure")
+    return failures
+
+
 def level_label(level: str | None) -> str:
     return level or "none"
 
@@ -262,6 +296,11 @@ async def main() -> int:
         help="approved cards manifest that owns each case's question, basis, and rubric",
     )
     parser.add_argument("--verbose", action="store_true", help="print feedback per case")
+    parser.add_argument(
+        "--enforce-reviewed-gate",
+        action="store_true",
+        help="exit nonzero after recording if any reviewed score/axis gate fails",
+    )
     parser.add_argument(
         "--scoring-prompt-variant",
         choices=SCORING_PROMPT_VARIANTS,
@@ -412,6 +451,14 @@ async def main() -> int:
     print_summary(by_level)
     print(f"\nnew paid-call cost: ${actual_cost(new_records, rate):.4f}")
     print(f"results: {output_path}")
+    if args.enforce_reviewed_gate:
+        failures = reviewed_gate_failures(by_level)
+        if failures:
+            print("\nreviewed gate failed:", file=sys.stderr)
+            for failure in failures:
+                print(f"  - {failure}", file=sys.stderr)
+            return 1
+        print("reviewed gate passed")
     return 0
 
 

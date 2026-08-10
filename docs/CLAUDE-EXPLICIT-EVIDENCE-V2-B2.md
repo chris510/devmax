@@ -133,3 +133,7 @@ eligibility rule:
 V3 must remain evaluation-only, add deterministic prompt/fingerprint tests, and
 start with the single failed decision-driven-estimation case. It needs a fresh
 free preflight and separate authorization before any paid call.
+
+That candidate, its automatic stop gate, full 60-case regression, compact-prompt
+reserve, and one cumulative cost cap are now prepared in
+`EXPLICIT-EVIDENCE-V3-WORKSTREAM.md`. No V3 paid call has been made.

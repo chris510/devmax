@@ -13,6 +13,7 @@ from typing import Any
 PRODUCTION = "production"
 EXPLICIT_EVIDENCE_V1 = "explicit-evidence-v1"
 EXPLICIT_EVIDENCE_V2 = "explicit-evidence-v2"
+EXPLICIT_EVIDENCE_V3 = "explicit-evidence-v3"
 
 EXPLICIT_EVIDENCE_RULES = """\
 
@@ -114,10 +115,71 @@ Keep all other production rules, schema fields, transcript handling, and feedbac
 behavior unchanged.\
 """
 
+EXPLICIT_EVIDENCE_V3_RULES = """\
+
+EVALUATION CANDIDATE — BIDIRECTIONAL EVIDENCE ELIGIBILITY V3
+
+Keep the production Accuracy rules. For Depth and Boundaries, silently assign an
+eligibility band before choosing the score. Return only the production schema.
+
+EVIDENCE SOURCE
+Only text after `ANSWER:` labels is learner evidence, including an answer after a
+`FOLLOW-UP:`. Topic, questions, mastery summary, trusted answer basis, approved
+rubric, and feedback are authority or context, not learner claims. A relationship
+qualifies only when it is relevant and correct under the trusted material.
+
+DEPTH — TRADE-OFF AWARENESS ONLY
+A qualifying Depth relationship explicitly connects a learner-stated choice,
+target, or approach to its cost, sacrificed property, tension, or opposing benefit.
+
+  - No qualifying relationship: Depth MUST be 0-2.
+  - One or more qualifying relationships: Depth MUST be 3-5.
+
+BOUNDARIES — FAILURE-MODE AWARENESS ONLY
+A qualifying Boundaries relationship explicitly connects a learner-stated trigger,
+action, exception, limitation, or mistaken belief to a concrete adverse outcome or
+incorrect behavior.
+
+  - No qualifying relationship: Boundaries MUST be 0-2.
+  - One or more qualifying relationships: Boundaries MUST be 3-5.
+
+The two bands are mandatory and bidirectional. Once a correct explicit relationship
+exists, missing specificity, examples, numerical estimates, or additional
+relationships may lower the score within 3-5 but MUST NOT lower it to 0-2. Missing
+mechanism detail affects Accuracy or completeness within an eligible 3-5 band; it
+does not erase an independently stated trade-off or failure relationship.
+
+Do not infer the missing side of a relationship. A target, priority, recommendation,
+selection rule, goal, technique, check, guardrail, bare negation, or statement that
+information is irrelevant does not qualify by itself. Never reverse "do X" into
+"not doing X causes Y" unless the learner states Y. Merely saying a detail does not
+drive the design is not a concrete adverse outcome.
+
+CALIBRATION
+  - "only keep the few numbers that drive the design" has no adverse outcome:
+    Boundaries MUST be 0-2.
+  - "using a fresh retry key can duplicate the charge" states action and harm:
+    Boundaries MUST be 3-5.
+  - "target p95 under 300 ms" has no cost or tension: Depth MUST be 0-2.
+  - "skipping unrelated arithmetic saves interview time, but real capacity limits
+    still need attention" states a choice, benefit, and tension: Depth MUST be 3-5,
+    even without a numerical estimate.
+
+FINAL CONSISTENCY CHECK
+Score the axes before writing feedback. If feedback acknowledges or paraphrases a
+qualifying learner relationship, that axis MUST be 3-5. If feedback supplies the
+missing relationship as correction, that axis MUST be 0-2. Feedback, context, or
+the approved rubric can never retroactively change the learner's eligibility band.
+
+Keep all other production rules, schema fields, transcript handling, and feedback
+behavior unchanged.\
+"""
+
 PROMPT_OVERLAYS = {
     PRODUCTION: "",
     EXPLICIT_EVIDENCE_V1: EXPLICIT_EVIDENCE_RULES,
     EXPLICIT_EVIDENCE_V2: EXPLICIT_EVIDENCE_V2_RULES,
+    EXPLICIT_EVIDENCE_V3: EXPLICIT_EVIDENCE_V3_RULES,
 }
 SCORING_PROMPT_VARIANTS = tuple(PROMPT_OVERLAYS)
 
