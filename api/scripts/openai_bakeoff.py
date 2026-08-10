@@ -53,6 +53,7 @@ from scripts.openai_eval_support import (  # noqa: E402
     OpenAIEvalError,
     complete,
     conservative_input_bound,
+    count_input_tokens,
     response_request,
 )
 from scripts.scoring_prompt_variants import (  # noqa: E402
@@ -241,6 +242,19 @@ async def main() -> int:
     parser.add_argument("--max-output-tokens", type=positive_int)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
+        "--exact-input-counts",
+        action="store_true",
+        help=(
+            "send prepared payloads to OpenAI's non-generating input-token endpoint "
+            "instead of using the local byte ceiling"
+        ),
+    )
+    parser.add_argument(
+        "--enforce-reviewed-gate",
+        action="store_true",
+        help="exit nonzero after recording if any reviewed scoring gate fails",
+    )
+    parser.add_argument(
         "--scoring-prompt-variant",
         choices=SCORING_PROMPT_VARIANTS,
         default=PRODUCTION,
@@ -254,6 +268,8 @@ async def main() -> int:
     args = parser.parse_args()
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
+    if args.enforce_reviewed_gate and args.kind != "scoring":
+        parser.error("--enforce-reviewed-gate is available only for scoring")
 
     cases = select_cases(
         load_cases(args.cases, parser),
@@ -314,10 +330,38 @@ async def main() -> int:
         call.fingerprint: response_request(call.completion, kind=call.kind)
         for call in pending_calls
     }
-    input_counts = {
-        fingerprint: conservative_input_bound(request)
-        for fingerprint, request in requests.items()
-    }
+    api_key = (
+        os.environ.get("OPENAI_API_KEY", "").strip()
+        or EvalSettings().openai_api_key.strip()
+    )
+    if args.exact_input_counts and pending_calls and not api_key:
+        print(
+            "OPENAI_API_KEY is unset — exact input counts transmit prepared payloads to OpenAI.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.exact_input_counts:
+        try:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+                counts = await run_bounded(
+                    pending_calls,
+                    args.concurrency,
+                    lambda _index, call: count_input_tokens(
+                        requests[call.fingerprint], api_key=api_key, client=client
+                    ),
+                )
+        except OpenAIEvalError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        input_counts = {
+            call.fingerprint: count
+            for call, count in zip(pending_calls, counts, strict=True)
+        }
+    else:
+        input_counts = {
+            fingerprint: conservative_input_bound(request)
+            for fingerprint, request in requests.items()
+        }
     estimate = estimate_cost(
         pending_calls,
         input_counts=input_counts,
@@ -330,9 +374,12 @@ async def main() -> int:
         selected=len(prepared),
         resumed=len(resumed_calls),
         rate=rate,
-        input_label="bounded input",
+        input_label="counted input" if args.exact_input_counts else "bounded input",
     )
-    print("  input method       UTF-8 byte ceiling plus provider-framing allowance")
+    if args.exact_input_counts:
+        print("  input method       OpenAI Responses input-token endpoint")
+    else:
+        print("  input method       UTF-8 byte ceiling plus provider-framing allowance")
     enforce_budget(
         estimate,
         budget=args.max_cost_usd,
@@ -343,10 +390,6 @@ async def main() -> int:
         print("  dry run complete — no paid Responses calls were made")
         return 0
 
-    api_key = (
-        os.environ.get("OPENAI_API_KEY", "").strip()
-        or EvalSettings().openai_api_key.strip()
-    )
     if pending_calls and not api_key:
         print(
             "OPENAI_API_KEY is unset — ChatGPT credits cannot authorize API calls.",
@@ -406,6 +449,14 @@ async def main() -> int:
         effort_sweep.print_summary(by_level)
     print(f"\nnew paid-call cost: ${actual_cost(new_records, rate):.4f}")
     print(f"results: {output_path}")
+    if args.enforce_reviewed_gate:
+        failures = effort_sweep.reviewed_gate_failures(by_level)
+        if failures:
+            print("\nreviewed gate failed:", file=sys.stderr)
+            for failure in failures:
+                print(f"  - {failure}", file=sys.stderr)
+            return 1
+        print("reviewed gate passed")
     return 0
 
 

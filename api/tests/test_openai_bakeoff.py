@@ -6,11 +6,19 @@ import pytest
 
 from app.services import llm
 from scripts import openai_bakeoff
-from scripts.effort_sweep_support import rate_for_model
+from scripts.effort_sweep_support import (
+    JsonlRecorder,
+    Usage,
+    make_result_record,
+    rate_for_model,
+)
 from scripts.openai_eval_support import (
     INPUT_FRAMING_ALLOWANCE,
+    INPUT_TOKENS_URL,
     complete,
     conservative_input_bound,
+    count_input_tokens,
+    input_token_count_request,
     parse_response,
     response_request,
 )
@@ -81,6 +89,49 @@ def test_local_input_bound_is_above_every_visible_request_byte() -> None:
     ).encode("utf-8")
 
     assert conservative_input_bound(request) == len(visible) + INPUT_FRAMING_ALLOWANCE
+
+
+def test_token_count_request_excludes_generation_only_fields() -> None:
+    request = response_request(scoring_completion(), kind="scoring")
+
+    counted = input_token_count_request(request)
+
+    assert counted == {
+        "model": request["model"],
+        "instructions": request["instructions"],
+        "input": request["input"],
+        "reasoning": request["reasoning"],
+        "text": request["text"],
+    }
+    assert "max_output_tokens" not in counted
+    assert "store" not in counted
+
+
+@pytest.mark.anyio
+async def test_exact_input_counter_sends_one_non_generating_request() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={"object": "response.input_tokens", "input_tokens": 987},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        count = await count_input_tokens(
+            response_request(scoring_completion(), kind="scoring"),
+            api_key="test-key",
+            client=client,
+        )
+
+    assert count == 987
+    assert len(seen) == 1
+    assert str(seen[0].url) == INPUT_TOKENS_URL
+    assert seen[0].headers["authorization"] == "Bearer test-key"
+    payload = json.loads(seen[0].content)
+    assert "max_output_tokens" not in payload
+    assert "store" not in payload
 
 
 def test_openai_luna_rate_is_versioned_in_the_shared_guard() -> None:
@@ -171,6 +222,121 @@ async def test_dry_run_needs_no_openai_key_or_network(monkeypatch, tmp_path, cap
     output = capsys.readouterr().out
     assert "new paid calls     1" in output
     assert "no paid Responses calls were made" in output
+
+
+@pytest.mark.anyio
+async def test_exact_count_dry_run_uses_provider_counts_without_generation(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_scoring_case(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    counted: list[dict] = []
+
+    async def exact_count(request, *, api_key, client):
+        counted.append(request)
+        assert api_key == "test-key"
+        return 321
+
+    async def forbidden_complete(*_args, **_kwargs):
+        raise AssertionError("dry-run reached a paid Responses call")
+
+    monkeypatch.setattr(openai_bakeoff, "count_input_tokens", exact_count)
+    monkeypatch.setattr(openai_bakeoff, "complete", forbidden_complete)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "scoring",
+            str(cases),
+            "--exact-input-counts",
+            "--dry-run",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 0
+    output = capsys.readouterr().out
+    assert len(counted) == 1
+    assert "counted input      321" in output
+    assert "OpenAI Responses input-token endpoint" in output
+    assert "no paid Responses calls were made" in output
+
+
+@pytest.mark.anyio
+async def test_exact_count_dry_run_refuses_without_api_key(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_scoring_case(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "scoring",
+            str(cases),
+            "--exact-input-counts",
+            "--dry-run",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 1
+    assert "exact input counts transmit prepared payloads" in capsys.readouterr().err
+
+
+@pytest.mark.anyio
+async def test_scoring_replay_can_enforce_the_shared_reviewed_gate(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_scoring_case(tmp_path)
+    case = json.loads(cases.read_text())[0]
+    prepared = openai_bakeoff.prepare_cases(
+        [case],
+        kind="scoring",
+        levels=[openai_bakeoff.DEFAULT_EFFORT],
+        model=openai_bakeoff.DEFAULT_MODEL,
+        max_output_tokens=openai_bakeoff.DEFAULT_OUTPUT_CAPS["scoring"],
+    )[0]
+    record = make_result_record(
+        prepared,
+        model=openai_bakeoff.DEFAULT_MODEL,
+        result={
+            "expected_score": 5,
+            "score": 1,
+            "expected_axes": [5, 4, 4],
+            "axes": [1, 0, 0],
+            "feedback": "The answer was incorrect.",
+        },
+        usage=Usage(),
+    )
+    resume = tmp_path / "failed.jsonl"
+    with JsonlRecorder(resume) as recorder:
+        recorder.append(record)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "scoring",
+            str(cases),
+            "--resume",
+            str(resume),
+            "--output",
+            str(tmp_path / "replay.jsonl"),
+            "--enforce-reviewed-gate",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 1
+    output = capsys.readouterr()
+    assert "new paid calls     0" in output.out
+    assert "reviewed gate failed" in output.err
+    assert "false Accuracy failure" in output.err
 
 
 @pytest.mark.anyio
