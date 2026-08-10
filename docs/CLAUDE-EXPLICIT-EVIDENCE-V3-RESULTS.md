@@ -149,4 +149,6 @@ broad prompt expansion:
 
 That targeted sequence tests the two observed defects directly while minimizing
 spend. It still requires deterministic prompt/fingerprint tests, a fresh free
-token count, and explicit authorization before any new paid calls.
+token count, and explicit authorization before any new paid calls. The prepared
+candidate and six-case gate are documented in
+`EXPLICIT-EVIDENCE-V4-TARGETED-GATE.md`.

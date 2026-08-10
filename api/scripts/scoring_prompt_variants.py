@@ -14,6 +14,7 @@ PRODUCTION = "production"
 EXPLICIT_EVIDENCE_V1 = "explicit-evidence-v1"
 EXPLICIT_EVIDENCE_V2 = "explicit-evidence-v2"
 EXPLICIT_EVIDENCE_V3 = "explicit-evidence-v3"
+EXPLICIT_EVIDENCE_V4 = "explicit-evidence-v4"
 
 EXPLICIT_EVIDENCE_RULES = """\
 
@@ -175,11 +176,41 @@ Keep all other production rules, schema fields, transcript handling, and feedbac
 behavior unchanged.\
 """
 
+EXPLICIT_EVIDENCE_V4_RULES = EXPLICIT_EVIDENCE_V3_RULES + """\
+
+EVALUATION CANDIDATE — AXIS INDEPENDENCE AND TWO-ENDPOINT EVIDENCE V4
+
+Apply after V3. First choose and freeze Accuracy from only the correctness and
+completeness of the essential mechanism. Then score Depth and Boundaries. Missing
+cost, tension, trigger, or harm MUST NOT lower frozen Accuracy. Operation-specific
+latency, load, availability, and staleness constraints can fully answer how vague
+qualities become architectural constraints without secondary evidence. A generic
+maximize-every-quality list remains inaccurate.
+
+Before returning a secondary axis at 3-5, silently fill both brackets using only
+learner words:
+
+  - Depth: [choice/target/approach] trades against [cost/sacrifice/tension/benefit].
+  - Boundaries: [trigger/action/exception/limitation/mistake] causes [concrete harm
+    or incorrect behavior].
+
+Both endpoints and their connection MUST appear in learner `ANSWER:` text; otherwise
+the axis MUST be 0-2. "Ignore/reject/do not trust client-supplied identity" is only a
+guardrail, not a stated harm. "Trusting the body ID lets one caller act as another"
+states both endpoints.
+
+For every secondary axis at 3-5, feedback must paraphrase both learner-stated
+endpoints. If it cannot, lower the axis to 0-2. Feedback is never evidence.
+
+Keep every other V3 and production rule unchanged.\
+"""
+
 PROMPT_OVERLAYS = {
     PRODUCTION: "",
     EXPLICIT_EVIDENCE_V1: EXPLICIT_EVIDENCE_RULES,
     EXPLICIT_EVIDENCE_V2: EXPLICIT_EVIDENCE_V2_RULES,
     EXPLICIT_EVIDENCE_V3: EXPLICIT_EVIDENCE_V3_RULES,
+    EXPLICIT_EVIDENCE_V4: EXPLICIT_EVIDENCE_V4_RULES,
 }
 SCORING_PROMPT_VARIANTS = tuple(PROMPT_OVERLAYS)
 
