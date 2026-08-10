@@ -15,6 +15,7 @@ EXPLICIT_EVIDENCE_V1 = "explicit-evidence-v1"
 EXPLICIT_EVIDENCE_V2 = "explicit-evidence-v2"
 EXPLICIT_EVIDENCE_V3 = "explicit-evidence-v3"
 EXPLICIT_EVIDENCE_V4 = "explicit-evidence-v4"
+EXPLICIT_EVIDENCE_V5 = "explicit-evidence-v5"
 
 EXPLICIT_EVIDENCE_RULES = """\
 
@@ -205,12 +206,32 @@ endpoints. If it cannot, lower the axis to 0-2. Feedback is never evidence.
 Keep every other V3 and production rule unchanged.\
 """
 
+EXPLICIT_EVIDENCE_V5_RULES = EXPLICIT_EVIDENCE_V4_RULES + """\
+
+EVALUATION CANDIDATE — WITHIN-BAND SECONDARY CALIBRATION V5
+
+After V4 establishes 3-5 eligibility:
+
+  - 3 = correct but materially vague or incomplete in an endpoint or connection.
+  - 4 = clear and complete, with a minor omission.
+  - 5 = fully states the approved named relationship.
+
+One complete relationship is enough; never require extra examples, numbers, or
+multiple relationships. Missing mechanism or other-secondary evidence cannot lower
+this axis. If feedback calls the named relationship explicit or complete and
+criticizes only another axis, this axis MUST be 4-5. The choice between saving
+interview time and still noticing real capacity limits is Depth 4-5 without numbers.
+
+Keep every V4 and production rule unchanged.\
+"""
+
 PROMPT_OVERLAYS = {
     PRODUCTION: "",
     EXPLICIT_EVIDENCE_V1: EXPLICIT_EVIDENCE_RULES,
     EXPLICIT_EVIDENCE_V2: EXPLICIT_EVIDENCE_V2_RULES,
     EXPLICIT_EVIDENCE_V3: EXPLICIT_EVIDENCE_V3_RULES,
     EXPLICIT_EVIDENCE_V4: EXPLICIT_EVIDENCE_V4_RULES,
+    EXPLICIT_EVIDENCE_V5: EXPLICIT_EVIDENCE_V5_RULES,
 }
 SCORING_PROMPT_VARIANTS = tuple(PROMPT_OVERLAYS)
 

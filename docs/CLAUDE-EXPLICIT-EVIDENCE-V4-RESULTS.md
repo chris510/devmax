@@ -113,3 +113,5 @@ should the other five axis-isolation cases run to distinguish genuine 4s from 5s
 and protect both secondary axes. The two V4 repair cases should then serve as
 low-band regression controls before any broader family resumes. This needs an
 offline prompt/test PR, fresh free counts, and a new explicit paid authorization.
+The prepared candidate and eight-case gate are documented in
+`EXPLICIT-EVIDENCE-V5-CALIBRATION-GATE.md`.
