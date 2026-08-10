@@ -1,6 +1,7 @@
 # Explicit-evidence V3 continuous workstream
 
-**Status:** Prepared and free-preflighted; no paid V3 calls made
+**Status:** Stopped at C5b after a reviewed-gate failure; see
+`CLAUDE-EXPLICIT-EVIDENCE-V3-RESULTS.md`
 
 ## Objective
 
@@ -145,3 +146,12 @@ A 60-case V3 pass plus a 12-case compact pass would establish that Claude can:
 It would not yet authorize Terra or a production change. The consolidated result
 would support the next decision: repeatability on the risk subset, followed by a
 same-contract Terra comparison or initial Claude prompt promotion.
+
+## Run outcome
+
+The authorized run stopped after 24 calls when C5b failed the reviewed gate.
+C1 through C5a passed. C5b produced one Accuracy error greater than one point
+and one unsupported Boundaries activation that moved the composite two points.
+C5c through C6 and compact distillation did not run. Production remained
+unchanged. The full audit, cost accounting, and next recommendation are in
+`CLAUDE-EXPLICIT-EVIDENCE-V3-RESULTS.md`.
