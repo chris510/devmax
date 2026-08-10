@@ -1,6 +1,7 @@
 # Explicit-evidence V8 follow-up and repeatability gate
 
-**Status:** Prepared; no new external transmission or paid call made
+**Status:** Stopped at M1 after one automatic and manual gate failure; see
+`CLAUDE-EXPLICIT-EVIDENCE-V8-FOLLOWUP-RESULTS.md`
 
 ## Objective
 
@@ -210,3 +211,13 @@ Only after those gates pass should the winning prompt/provider be proposed for
 production. Each future phase retains its own preparation PR, free count,
 destination-specific paid authorization, manual audit, durable result PR, and
 stop policy.
+
+## Run outcome
+
+M1 spent $0.050366 across its five authorized calls. Four cases passed, but the
+NFR follow-up returned Boundaries 4 and composite 5 against reviewed 1 and 3.
+Its feedback identified correct mechanism evidence and a missing trade-off but
+no learner-stated failure relationship, so the manual audit failed as well.
+The experiment stopped before M2 and M3, leaving $0.078834 of the cumulative
+authorization unspent. A keyless replay reproduced the failure with zero new
+calls. Production remained unchanged.

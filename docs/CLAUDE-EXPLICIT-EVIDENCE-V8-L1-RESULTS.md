@@ -104,3 +104,7 @@ manual feedback audit, durable results, and stop-on-failure behavior.
 The no-spend preparation for M1-M3, including its exact derived counts, staged
 caps, repeatability classification, and external-data boundary, is documented
 in `EXPLICIT-EVIDENCE-V8-FOLLOWUP-REPEATABILITY-GATE.md`.
+
+M1 subsequently stopped after the NFR follow-up failed both the reviewed and
+manual evidence gates. M2 and M3 were not run; the durable audit is in
+`CLAUDE-EXPLICIT-EVIDENCE-V8-FOLLOWUP-RESULTS.md`.
