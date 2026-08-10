@@ -12,6 +12,7 @@ import httpx
 from scripts.effort_sweep_support import Usage
 
 RESPONSES_URL = "https://api.openai.com/v1/responses"
+INPUT_TOKENS_URL = "https://api.openai.com/v1/responses/input_tokens"
 REQUEST_TIMEOUT_SECONDS = 45.0
 INPUT_FRAMING_ALLOWANCE = 2048
 
@@ -66,6 +67,15 @@ def conservative_input_bound(request: dict[str, Any]) -> int:
     return len(
         json.dumps(counted, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ) + INPUT_FRAMING_ALLOWANCE
+
+
+def input_token_count_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Keep only fields accepted by the Responses input-token endpoint."""
+    return {
+        key: request[key]
+        for key in ("model", "instructions", "input", "reasoning", "text")
+        if key in request
+    }
 
 
 def _output_text(response: dict[str, Any]) -> str:
@@ -123,6 +133,39 @@ def _api_error(response: httpx.Response) -> OpenAIEvalError:
         message = None
     detail = str(message or response.reason_phrase)
     return OpenAIEvalError(f"OpenAI API returned HTTP {response.status_code}: {detail}")
+
+
+async def count_input_tokens(
+    request: dict[str, Any],
+    *,
+    api_key: str,
+    client: httpx.AsyncClient | None = None,
+) -> int:
+    """Ask OpenAI for the exact input count without generating a response."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    async def send(active_client: httpx.AsyncClient) -> int:
+        try:
+            response = await active_client.post(
+                INPUT_TOKENS_URL,
+                headers=headers,
+                json=input_token_count_request(request),
+            )
+        except httpx.HTTPError as exc:
+            raise OpenAIEvalError(f"OpenAI token-count request failed: {exc}") from exc
+        if not response.is_success:
+            raise _api_error(response)
+        try:
+            return int(response.json()["input_tokens"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OpenAIEvalError(
+                "OpenAI token-count response contained no usable input_tokens"
+            ) from exc
+
+    if client is not None:
+        return await send(client)
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as active_client:
+        return await send(active_client)
 
 
 async def complete(

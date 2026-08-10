@@ -122,3 +122,7 @@ That preparation should audit shared Claude/OpenAI prompt bytes, use only
 approved synthetic cases, calculate both caps before any paid call, and select
 one smallest discriminating experiment. It must not reopen broader gates until
 the local failure and three-sample blocker repeatability both pass.
+
+The no-spend comparison selected the unchanged-V8 Terra diagnostic before V9.
+Its six-case symmetric matrix, exact-count control, staged authorization, and
+stop policy are documented in `OPENAI-V8-PROVIDER-DIAGNOSTIC.md`.
