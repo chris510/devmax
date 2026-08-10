@@ -1,6 +1,7 @@
 # Explicit-evidence V7 decision-boundary gate
 
-**Status:** Prepared, tested, and free-counted; no paid Message calls made
+**Status:** Stopped at K1 after one automatic and manual gate failure; see
+`CLAUDE-EXPLICIT-EVIDENCE-V7-RESULTS.md`
 
 ## Objective
 
@@ -180,3 +181,12 @@ would not authorize production. The remaining sequence is:
 Only after those gates pass should the winning prompt/provider be proposed for
 production. Each future phase needs its own free count, paid cap, durable result
 PR, and stop policy.
+
+## Run outcome
+
+K1 spent $0.050376 across five approved calls. V7 fixed the original
+decision-threshold Boundary leak, but decision-driven self-correction returned
+Depth 3 against reviewed 1 while its feedback supplied the missing trade-off.
+The experiment stopped before K2-K4, leaving $0.114524 unspent. Production
+remained unchanged; the durable audit is in
+`CLAUDE-EXPLICIT-EVIDENCE-V7-RESULTS.md`.
