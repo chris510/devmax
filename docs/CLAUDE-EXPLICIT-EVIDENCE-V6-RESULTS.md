@@ -109,3 +109,8 @@ Those stages need reviewed automatic gates, manual feedback audits, fresh free
 counts, and a new paid authorization. Only after they pass should V6 resume the
 remaining release families and frozen baseline. Production remains unchanged
 until the broader regression and repeatability both pass.
+
+The audited case set, three-stage stop policy, variance classification, and
+free-counted $0.1136 maximum are prepared in
+`EXPLICIT-EVIDENCE-V6-FOLLOWUP-REPEATABILITY-GATE.md`. No paid calls were made
+during preparation.
