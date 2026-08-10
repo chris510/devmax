@@ -1,6 +1,7 @@
 # Explicit-evidence V5 within-band calibration gate
 
-**Status:** Prepared and free-preflighted; no paid V5 calls made
+**Status:** F1 and F2 passed; F3 failed the reviewed Accuracy tolerance. See
+`CLAUDE-EXPLICIT-EVIDENCE-V5-RESULTS.md`.
 
 ## Objective
 
@@ -128,3 +129,11 @@ distinguishes reviewed 4/5 controls within tolerance, and preserves both V4
 repairs. It would still not authorize production, Terra, or prompt distillation.
 The next step would be the four remaining follow-up-anchored cases, then the
 unrun release families behind the same stop gates.
+
+## Run outcome
+
+F1 fixed the V4 Depth blocker and F2 passed all five remaining axis-isolation
+controls. F3 then stopped the experiment because V5 reopened the NFR Accuracy
+leak: feedback called the mechanism correct and criticized only missing secondary
+evidence, but Accuracy was 3 against reviewed 5. Production remained unchanged.
+The full audit is in `CLAUDE-EXPLICIT-EVIDENCE-V5-RESULTS.md`.
