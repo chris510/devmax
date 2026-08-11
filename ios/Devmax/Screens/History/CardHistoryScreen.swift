@@ -117,6 +117,13 @@ struct CardHistoryScreen: View {
                     .foregroundStyle(Theme.textSecondary)
                 MetaText(text: "FIRST REVIEW · TODAY, NEXT IN QUEUE",
                          font: TypeRole.metaBody, tracking: 1.0, color: Theme.metaFaint)
+
+                if state.queue.contains(where: { $0.id == cardID }) {
+                    PrimaryButton(title: "Start review") {
+                        state.beginReviewFromHistory(cardID: cardID)
+                    }
+                    .padding(.top, 8)
+                }
             }
             .wcFade()
         } else {
