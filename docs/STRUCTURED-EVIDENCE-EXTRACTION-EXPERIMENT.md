@@ -1,7 +1,7 @@
 # Structured evidence extraction experiment
 
-**Status:** Prepared and locally tested. No evaluation payload has been
-transmitted and no provider call has been made.
+**Status:** Executed and stopped after the first frozen run failed. See
+[`OPENAI-STRUCTURED-EVIDENCE-V1-RESULTS.md`](OPENAI-STRUCTURED-EVIDENCE-V1-RESULTS.md).
 
 ## Decision under test
 
@@ -170,7 +170,11 @@ uv run python scripts/openai_bakeoff.py evidence \
 
 Exact counting adds `--exact-input-counts`. The paid command then removes
 `--dry-run`, writes a new ignored JSONL file, and acknowledges only the freshly
-printed exact ceiling.
+printed exact ceiling. When the count authorization does not permit sending the
+same payloads to the count endpoint again, `--reuse-exact-input-total TOKENS`
+reuses that immediately preceding exact total without making another count
+request. It is valid only for an unchanged, fresh selection with no resumed
+calls.
 
 ## Decisions after the result
 
