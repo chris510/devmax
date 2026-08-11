@@ -35,6 +35,25 @@ def test_scoring_v2_is_dark_by_default_and_only_known_versions_are_valid() -> No
         build(scoring_contract_version=3)
 
 
+@pytest.mark.parametrize(("raw", "expected"), [("1", 1), ("2", 2), (" 2 ", 2)])
+def test_scoring_contract_version_accepts_text_environment_values(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: int
+) -> None:
+    monkeypatch.setenv("SCORING_CONTRACT_VERSION", raw)
+
+    assert Settings(_env_file=None, **GOOD).scoring_contract_version == expected
+
+
+@pytest.mark.parametrize("raw", ["", "0", "3", "v2", "2.0"])
+def test_scoring_contract_version_rejects_invalid_environment_values(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    monkeypatch.setenv("SCORING_CONTRACT_VERSION", raw)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **GOOD)
+
+
 @pytest.mark.parametrize("missing", ["database_url", "api_key", "cron_secret"])
 def test_the_three_required_settings_have_no_default(
     monkeypatch: pytest.MonkeyPatch, missing: str
