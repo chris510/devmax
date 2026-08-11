@@ -310,6 +310,11 @@ async def main() -> int:
         help="exit nonzero after recording if any reviewed scoring gate fails",
     )
     parser.add_argument(
+        "--enforce-secondary-bucket-gate",
+        action="store_true",
+        help="exit nonzero on any reviewed Depth/Boundaries 2/3 bucket crossing",
+    )
+    parser.add_argument(
         "--enforce-evidence-gate",
         action="store_true",
         help="exit nonzero unless exact learner-span eligibility matches review",
@@ -330,6 +335,8 @@ async def main() -> int:
         parser.error("--concurrency must be at least 1")
     if args.enforce_reviewed_gate and args.kind != "scoring":
         parser.error("--enforce-reviewed-gate is available only for scoring")
+    if args.enforce_secondary_bucket_gate and args.kind != "scoring":
+        parser.error("--enforce-secondary-bucket-gate is available only for scoring")
     if args.enforce_evidence_gate and args.kind != "evidence":
         parser.error("--enforce-evidence-gate is available only for evidence")
     if args.exact_input_counts and args.reuse_exact_input_total is not None:
@@ -542,6 +549,14 @@ async def main() -> int:
                 print(f"  - {failure}", file=sys.stderr)
             return 1
         print("reviewed gate passed")
+    if args.enforce_secondary_bucket_gate:
+        failures = effort_sweep.secondary_bucket_gate_failures(by_level)
+        if failures:
+            print("\nsecondary bucket gate failed:", file=sys.stderr)
+            for failure in failures:
+                print(f"  - {failure}", file=sys.stderr)
+            return 1
+        print("secondary bucket gate passed")
     if args.enforce_evidence_gate:
         failures = structured_evidence_eval.gate_failures(by_level)
         if failures:

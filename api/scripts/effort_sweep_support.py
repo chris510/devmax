@@ -40,6 +40,7 @@ MODEL_RATES: dict[str, tuple[tuple[date, Decimal, Decimal], ...]] = {
     "claude-opus-5": ((date.max, Decimal("5"), Decimal("25")),),
     "gpt-5.6-luna": ((date.max, Decimal("0.2"), Decimal("1.2")),),
     "gpt-5.6-terra": ((date.max, Decimal("2"), Decimal("12")),),
+    "gpt-5.6-sol": ((date.max, Decimal("5"), Decimal("30")),),
 }
 
 BATCH_MODEL_RATES: dict[str, tuple[tuple[date, Decimal, Decimal], ...]] = {

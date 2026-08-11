@@ -247,6 +247,35 @@ def reviewed_gate_failures(by_level: dict[str, list[Result]]) -> list[str]:
     return failures
 
 
+def secondary_bucket_gate_failures(
+    by_level: dict[str, list[Result]],
+) -> list[str]:
+    """Return Depth/Boundaries high-low classification violations.
+
+    The composite branches at 2/3 on both secondary axes. A one-point move across
+    that boundary can therefore change the displayed score and follow-up behavior
+    even though the shared reviewed gate otherwise permits a one-point deviation.
+    """
+    failures: list[str] = []
+    for level, results in by_level.items():
+        for result in results:
+            for axis_name, actual, expected in zip(
+                ("Depth", "Boundaries"),
+                result.axes[1:],
+                result.expected_axes[1:],
+                strict=True,
+            ):
+                if expected is None:
+                    failures.append(
+                        f"{level}/{result.case}: missing reviewed {axis_name} label"
+                    )
+                elif expected <= 2 < actual:
+                    failures.append(f"{level}/{result.case}: false {axis_name} pass")
+                elif expected >= 3 > actual:
+                    failures.append(f"{level}/{result.case}: false {axis_name} failure")
+    return failures
+
+
 def level_label(level: str | None) -> str:
     return level or "none"
 
