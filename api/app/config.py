@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Values that ship in this repo, in .env.example, or in the docs. They are public,
@@ -104,6 +104,16 @@ class Settings(BaseSettings):
     review_poll_interval_seconds: int = Field(default=15 * 60, ge=60, le=30 * 60)
 
     log_level: str = "INFO"
+
+    @field_validator("scoring_contract_version", mode="before")
+    @classmethod
+    def _parse_scoring_contract_version(cls, value: object) -> object:
+        """Accept the integer literals when they arrive through text-only env vars."""
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized in {"1", "2"}:
+                return int(normalized)
+        return value
 
     @model_validator(mode="after")
     def _reject_placeholder_secrets(self) -> "Settings":
