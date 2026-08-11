@@ -110,13 +110,17 @@ struct PlanItemScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        if !item.sourceExcerpt.isEmpty || !item.sourceLabel.isEmpty {
+        if !item.sourceExcerpt.isEmpty || !displaySourceLabel(item).isEmpty
+            || !item.actionableResources.isEmpty {
             Block(label: "SOURCE") {
-                VStack(alignment: .leading, spacing: 5) {
-                    if !item.sourceLabel.isEmpty {
-                        Text(item.sourceLabel)
+                VStack(alignment: .leading, spacing: 10) {
+                    if item.actionableResources.isEmpty, !displaySourceLabel(item).isEmpty {
+                        Text(displaySourceLabel(item))
                             .font(WCFont.sans(14))
                             .foregroundStyle(Theme.textSecondary)
+                    }
+                    ForEach(item.actionableResources) { resource in
+                        resourceRow(resource)
                     }
                     if !item.sourceExcerpt.isEmpty {
                         Text("“\(item.sourceExcerpt)”")
@@ -174,25 +178,10 @@ struct PlanItemScreen: View {
                             ?? "SAVED",
                         font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
                     )
-                    if item.recallSupported {
-                        Button {
-                            plan.prepareCardProposals()
-                            state.path.append(.planCards(planID, item.id))
-                        } label: {
-                            let count = max(item.linkedCardIds.count, debrief.proposalCount)
-                            Text(count > 0
-                                ? "Review \(count) source-based suggestion\(count == 1 ? "" : "s") →"
-                                : "Check for source-based suggestions →")
-                            .font(TypeRole.secondaryAction)
-                            .foregroundStyle(Theme.accent)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
-                    }
                 }
             }
         } else if item.recallSupported, item.practiceDebriefEligible {
-            Block(label: "RETRIEVAL SUPPORT") {
+            Block(label: "DEBRIEF") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Turn what broke down into focused recall cards.")
                         .font(WCFont.sans(14))
@@ -209,37 +198,12 @@ struct PlanItemScreen: View {
                     .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
                 }
             }
-        } else if item.recallSupported,
-                  item.cardProposalsAvailable || !item.linkedCardIds.isEmpty {
-            Block(label: "RETRIEVAL SUPPORT") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(
-                        item.linkedCardIds.isEmpty
-                            ? "No recall cards yet"
-                            : "\(item.linkedCardIds.count) recall card"
-                                + (item.linkedCardIds.count == 1 ? "" : "s") + " available"
-                    )
-                    .font(WCFont.sans(14))
-                    .foregroundStyle(Theme.textSecondary)
+        }
 
-                    if item.isComplete, item.cardProposalsAvailable {
-                        Button {
-                            plan.prepareCardProposals()
-                            state.path.append(.planCards(planID, item.id))
-                        } label: {
-                            Text("Review source-based suggestions →")
-                                .font(TypeRole.secondaryAction)
-                                .foregroundStyle(Theme.accent)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
-                    }
-                    MetaText(
-                        text: "THEIR REVIEWS RUN IN TODAY AND DON'T CHANGE THIS PLAN",
-                        font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
-                    )
-                }
-            }
+        unpromptedBlock(item)
+
+        if !item.advisoryStretchActions.isEmpty {
+            moreTimeBlock(item.advisoryStretchActions)
         }
 
         if !item.notes.isEmpty {
@@ -249,6 +213,289 @@ struct PlanItemScreen: View {
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func resourceRow(_ resource: PlanItemResource) -> some View {
+        let title = resource.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? resource.provider : resource.label
+        let action = resource.actionLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Open source" : resource.actionLabel
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(WCFont.sans(14))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !resource.metaLine.isEmpty {
+                MetaText(
+                    text: resource.metaLine, font: WCFont.mono(10), tracking: 0.6,
+                    color: Theme.metaDim, uppercased: true
+                )
+            }
+            if let url = SafeExternalURL.parse(resource.url) {
+                Link(destination: url) {
+                    Text("\(action) ↗")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.meta)
+                        .underline()
+                        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+                }
+                .accessibilityLabel("\(action). \(title).")
+                .accessibilityHint("Opens in your browser. Returning does not mark the item complete.")
+            } else {
+                MetaText(
+                    text: "LINK UNAVAILABLE", font: WCFont.mono(10), tracking: 0.6,
+                    color: Theme.metaFaint
+                )
+                .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+                .accessibilityLabel("\(title). Link unavailable.")
+            }
+        }
+    }
+
+    private func displaySourceLabel(_ item: PlanItemDetail) -> String {
+        let value = item.sourceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.caseInsensitiveCompare("Curated first-party curriculum activity.") != .orderedSame,
+              value.caseInsensitiveCompare("Curated first-party curriculum activity") != .orderedSame
+        else { return "" }
+        return value
+    }
+
+    private func unpromptedBlock(_ item: PlanItemDetail) -> some View {
+        Block(label: "UNPROMPTED") {
+            VStack(alignment: .leading, spacing: 8) {
+                if !item.isComplete,
+                   item.recallSupported || !item.recallMappings.isEmpty {
+                    Text(
+                        item.type == "practice"
+                            ? "Finish the practice first. Then debrief a specific gap before choosing any recall card."
+                            : "Finish the lesson first. Then review the mapped recall cards before they enter Today."
+                    )
+                    .font(WCFont.sans(14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    ForEach(item.recallMappings) { mapping in
+                        mappedRecallRow(mapping, itemComplete: false)
+                    }
+                    MetaText(
+                        text: "NOT READY · COMPLETE THE ITEM FIRST", font: WCFont.mono(10),
+                        tracking: 0.6, color: Theme.metaFaint
+                    )
+                } else if !item.recallMappings.isEmpty {
+                    Text("These concepts are mapped to delayed active recall.")
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textSecondary)
+                    ForEach(item.recallMappings) { mapping in
+                        mappedRecallRow(mapping, itemComplete: true)
+                    }
+                    if item.isComplete, item.cardProposalsAvailable {
+                        cardProposalButton
+                    }
+                    recallBoundary
+                } else if !item.linkedCardIds.isEmpty {
+                    Text(
+                        "\(item.linkedCardIds.count) recall card"
+                            + (item.linkedCardIds.count == 1 ? " is" : "s are")
+                            + " linked to this item."
+                    )
+                    .font(WCFont.sans(14))
+                    .foregroundStyle(Theme.textSecondary)
+                    ForEach(Array(item.linkedCardIds.enumerated()), id: \.element) { index, id in
+                        Button {
+                            state.path.append(.history(id))
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("Open recall card \(index + 1)")
+                                    .font(TypeRole.secondaryAction)
+                                    .foregroundStyle(Theme.meta)
+                                Text("→")
+                                    .font(WCFont.mono(11))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+                    }
+                    recallBoundary
+                } else if !item.recallSupported {
+                    Text(
+                        "This work does not create an Unprompted card automatically. "
+                            + "Capture a specific gap only if it earns future review time."
+                    )
+                    .font(WCFont.sans(14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    MetaText(
+                        text: "NO AUTOMATIC CARD", font: WCFont.mono(10),
+                        tracking: 0.6, color: Theme.metaFaint
+                    )
+                } else if item.practiceDebriefEligible,
+                          item.practiceDebrief?.isSubmitted != true {
+                    Text("Debrief the practice gap before choosing a recall card.")
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textSecondary)
+                    MetaText(
+                        text: "NOT READY · DEBRIEF FIRST", font: WCFont.mono(10),
+                        tracking: 0.6, color: Theme.metaFaint
+                    )
+                } else if item.cardProposalsAvailable {
+                    Text("The source-backed recall suggestions are ready for your review.")
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textSecondary)
+                    cardProposalButton
+                    recallBoundary
+                } else {
+                    Text("This item is complete, but no mapped recall card is ready yet.")
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textSecondary)
+                    MetaText(
+                        text: "CARD NOT READY", font: WCFont.mono(10),
+                        tracking: 0.6, color: Theme.metaFaint
+                    )
+                }
+            }
+        }
+    }
+
+    private func mappedRecallRow(
+        _ mapping: PlanMappedRecallCard, itemComplete: Bool
+    ) -> some View {
+        let actionable = itemComplete && mapping.cardId != nil
+        let unavailableLabel = itemComplete ? "Card not ready." : "Complete item first."
+        return Group {
+            if actionable {
+                Button {
+                    state.openMappedRecallCard(mapping, itemComplete: itemComplete)
+                } label: {
+                    mappedRecallLabel(
+                        mapping, actionable: true, itemComplete: itemComplete
+                    )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: Metrics.minTapTarget)
+                .accessibilityLabel(
+                    "\(mapping.topic). \(mapping.availabilityLabel). Opens card history."
+                )
+            } else {
+                mappedRecallLabel(
+                    mapping, actionable: false, itemComplete: itemComplete
+                )
+                    .frame(minHeight: Metrics.minTapTarget)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(
+                        "\(mapping.topic). \(unavailableLabel) \(mapping.availabilityLabel)"
+                    )
+            }
+        }
+    }
+
+    private func mappedRecallLabel(
+        _ mapping: PlanMappedRecallCard, actionable: Bool, itemComplete: Bool
+    ) -> some View {
+        let unavailableLabel = itemComplete ? "CARD NOT READY" : "COMPLETE ITEM FIRST"
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(mapping.topic)
+                    .font(WCFont.sans(14))
+                    .foregroundStyle(actionable ? Theme.textSecondary : Theme.textDim)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if actionable {
+                    Text("→")
+                        .font(WCFont.mono(11))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            MetaText(
+                text: actionable
+                    ? mapping.availabilityLabel
+                    : unavailableLabel
+                        + (mapping.availabilityLabel.isEmpty
+                            ? "" : " · \(mapping.availabilityLabel)"),
+                font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint,
+                uppercased: true
+            )
+        }
+    }
+
+    private var cardProposalButton: some View {
+        Button {
+            plan.prepareCardProposals()
+            state.path.append(.planCards(planID, itemID))
+        } label: {
+            Text("Review source-based suggestions →")
+                .font(TypeRole.secondaryAction)
+                .foregroundStyle(Theme.accent)
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+    }
+
+    private var recallBoundary: some View {
+        MetaText(
+            text: "REVIEWS RUN IN TODAY AND DON'T CHANGE THIS PLAN",
+            font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
+        )
+    }
+
+    private func moreTimeBlock(_ actions: [PlanStretchAction]) -> some View {
+        Block(label: "MORE TIME") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(
+                    "Optional extra work. It is not scheduled or tracked, and it never "
+                        + "blocks this plan."
+                )
+                .font(WCFont.sans(14))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(actions) { action in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(action.title)
+                            .font(WCFont.sans(14, weight: 500))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        MetaText(
+                            text: "\(action.minutes) MIN · NOT SCHEDULED",
+                            font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
+                        )
+                        if !action.doneWhen.isEmpty {
+                            Text(action.doneWhen)
+                                .font(WCFont.sans(13))
+                                .foregroundStyle(Theme.textDim)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        stretchResourceLink(action)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func stretchResourceLink(_ action: PlanStretchAction) -> some View {
+        let rawURL = action.resourceUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawLabel = action.resourceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rawURL.isEmpty, rawLabel.isEmpty {
+            EmptyView()
+        } else if let url = SafeExternalURL.parse(rawURL) {
+            Link(destination: url) {
+                Text("\(rawLabel.isEmpty ? "Open resource" : rawLabel) ↗")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.meta)
+                    .underline()
+                    .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+            }
+            .accessibilityHint("Opens in your browser. This extra work is not tracked.")
+        } else {
+            MetaText(
+                text: "RESOURCE LINK UNAVAILABLE", font: WCFont.mono(10),
+                tracking: 0.6, color: Theme.metaFaint
+            )
         }
     }
 

@@ -2,6 +2,14 @@
 
 Status: **structural implementation merged; Week 1 grounding approved and live-evaluated**
 
+> **2026-08-11 curriculum update:** The first-party plan now has 116 concrete
+> activities with direct external resources, specific `done_when` checks,
+> Python coding work, and read-only mappings to all 54 recall topics. Its
+> `source_excerpt` values remain empty by design: a Premium URL is navigation,
+> not permission to copy lesson text or use it as scoring authority. Six Week 1
+> cards are approved; future mappings remain `Not ready` until their own trusted
+> answer bases and rubrics are reviewed.
+
 Claude Design artifact: [Study Quality Improvements v1](https://claude.ai/design/p/25258e0c-5891-401c-9690-88790421a788?file=Study+Quality+Improvements+v1.dc.html)
 
 The artifact lives in the existing private `devmax` Claude Design project beside

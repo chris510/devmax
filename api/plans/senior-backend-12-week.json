@@ -1,207 +1,3007 @@
 {
-  "seed_key": "devmax.senior-backend-12-week.v3",
-  "version": 3,
+  "seed_key": "devmax.senior-backend-12-week.v4",
+  "legacy_seed_keys": [
+    "devmax.senior-backend-12-week.v2",
+    "devmax.senior-backend-12-week.v3"
+  ],
+  "version": 4,
   "source_guide_path": "../../docs/CURRICULUM.md",
-  "source_guide_sha256": "40310ed805d5ae00ac53fcd7f4dbae0238052efeeda6c0f6eeffc55c6b9e2986",
-  "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Work is ordered by transfer value: delivery and system-design foundations in Weeks 1–3; reusable architecture patterns and full-design application in Weeks 4–6; concrete backend technologies in Weeks 7–9; interview simulation and target-company calibration in Weeks 10–12.\n\nEach week reserves twelve focused hours across system design, coding-mechanism understanding, behavioral preparation, plan-local closed-book retrieval, and optional desk implementation. Global Unprompted card reviews continue separately in Today and never determine Study Plan progress. Coding-pattern recognition, invariants, state transitions, complexity, and failure modes are core; writing code is optional and desk-only. Full system designs happen outside the conversational review flow. Every external practice session ends with a gap harvest, and readiness is based on observed external performance rather than card scores.",
-  "guide_sha256": "82add1246cccc9058a2704ad9d691abfa6f91309df9ea82fd0dbd38a8799bde2",
+  "source_guide_sha256": "bd7228463f6cec47206578822eba677d2c62d1a39f4df92d80835e31f04269f5",
+  "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Each week schedules twenty dependable hours: Hello Interview teaches the material, every coding exercise is implemented in Python, full designs and mocks happen outside Unprompted, and short closed-book retrieval makes gaps visible. Global Unprompted reviews remain separate from plan capacity and begin only after the source lesson has been studied.\n\nAn additional stretch menu offers up to twenty hours each week without blocking advancement or changing the forecast. Stretch work deepens the current week through unseen Python problems, additional designs, case studies, behavioral rehearsal, and sourced gap repair; it never pre-teaches the next week or creates generic card volume. Resume work, job applications, and professional networking are intentionally deferred.",
+  "guide_sha256": "fb3ae13e8182be904a2330926177e425c4f9f68ee4ec83816516e4f481c479ad",
   "title": "Senior backend interview preparation",
   "subject": "Senior backend interview preparation",
   "subject_slug": "senior-backend-interview-prep",
   "supports_technical_recall_cards": true,
   "requested_weeks": 12,
-  "weekly_capacity_minutes": 720,
+  "weekly_capacity_minutes": 1200,
+  "stretch_capacity_minutes": 1200,
+  "coding_language": "Python",
   "mode": "flexible",
   "phases": [
     {
       "index": 1,
       "full_title": "Delivery and system design foundations",
       "overview_title": "Foundations",
-      "description": "Build the delivery method and core mechanisms that every later design uses."
+      "description": "Build the delivery method, data foundations, and coding patterns that later designs depend on."
     },
     {
       "index": 2,
       "full_title": "Reusable architecture patterns and application",
       "overview_title": "Patterns and application",
-      "description": "Apply reusable scaling, resilience, workflow, and realtime patterns in full designs."
+      "description": "Apply scaling, resilience, workflow, realtime, and storage patterns in complete designs."
     },
     {
       "index": 3,
       "full_title": "Backend technologies and coordination",
       "overview_title": "Technologies",
-      "description": "Map concrete data, messaging, search, and coordination systems onto the reusable mechanisms."
+      "description": "Choose concrete data, messaging, search, stream, and coordination systems from their mechanics."
     },
     {
       "index": 4,
       "full_title": "Interview simulation and target-company calibration",
       "overview_title": "Simulation",
-      "description": "Convert knowledge into repeatable performance through mocks and focused gap repair."
+      "description": "Convert knowledge into repeatable performance through named mocks and focused repair."
     }
   ],
   "weeks": [
     {
       "index": 1,
       "phase_index": 1,
-      "full_title": "Delivery framework and decision-driving requirements",
+      "full_title": "Delivery, APIs, and network boundaries",
       "overview_title": "Delivery",
       "items": [
-        {"key": "W1-L1", "type": "learn", "priority": "core", "title": "Complete the system design delivery framework lesson", "minutes": 180},
-        {"key": "W1-L2", "type": "learn", "priority": "core", "title": "Turn functional and non-functional requirements into design constraints", "minutes": 90},
-        {"key": "W1-P1", "type": "learn", "priority": "core", "title": "Understand two-pointer, sliding-window, and interval recognition cues, invariants, complexity, and failure modes", "minutes": 90},
-        {"key": "W1-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve one representative problem from each Week 1 coding family", "minutes": 90},
-        {"key": "W1-P2", "type": "practice", "priority": "core", "title": "Deliver one requirements-to-deep-dives system design", "minutes": 150},
-        {"key": "W1-P3", "type": "practice", "priority": "core", "title": "Review the design and harvest specific mechanism gaps", "minutes": 90},
-        {"key": "W1-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the delivery framework closed-book", "minutes": 30, "source_item_key": "W1-L1"}
+        {
+          "key": "V4-W1-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Learn the system design delivery framework",
+          "minutes": 180,
+          "why": "A stable sequence prevents premature deep dives and gets a complete design on the board.",
+          "done_when": "Finish the lesson, write the sequence from memory, and speak one ten-minute requirements-to-deep-dives walkthrough without notes.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Delivery Framework",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+            "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+            "Decision-driven estimation: calculating only the bound that can change an architectural choice"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen Week 1 Python problems",
+              "done_when": "Complete up to eight additional problems from the same three families and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional delivery-framework designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one current-week source or case study",
+              "done_when": "Study one source and write the decision, trade-off, and failure it clarifies.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+              "resource_label": "Delivery Framework"
+            },
+            {
+              "title": "Rehearse one evidence-backed behavioral story",
+              "done_when": "Draft, speak, and revise one story with individual actions and a measurable result.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record the stretch gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Design APIs with trusted identity and stable pagination",
+          "minutes": 90,
+          "why": "Identity and traversal mistakes turn otherwise sound backend designs into security or correctness failures.",
+          "done_when": "Finish the lesson and draft one resource API that derives the caller from trusted context and pages a changing collection with a stable cursor.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "API Design",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/api-design",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+            "Cursor pagination: preserving stable traversal while new rows are inserted"
+          ]
+        },
+        {
+          "key": "V4-W1-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Handle timeouts, retries, and ambiguous outcomes",
+          "minutes": 90,
+          "why": "A timeout does not reveal whether a remote write happened, so safe retries require explicit semantics.",
+          "done_when": "Finish the lesson and explain one timed-out write from client deadline through retry, idempotency, and final reconciliation.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Networking Essentials",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/networking-essentials",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Timeouts, retries, and idempotency across a partial network failure"
+          ]
+        },
+        {
+          "key": "V4-W1-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement two-pointer invariants in Python",
+          "minutes": 120,
+          "why": "Two-pointer interviews depend on proving why one pointer can move without discarding the answer.",
+          "done_when": "Study the overview, solve both problems in Python, and state the movement invariant, time complexity, and one failure mode without notes.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Two Pointers",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/two-pointers/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "167 · Two Sum II",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/two-sum-ii-input-array-is-sorted/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "11 · Container With Most Water",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/container-with-most-water/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement sliding-window state in Python",
+          "minutes": 120,
+          "why": "Sliding-window problems test whether changing state can be updated without rescanning the whole range.",
+          "done_when": "Study the lesson, solve both problems in Python, and explain the validity condition, expansion, contraction, and complexity without notes.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Sliding Window",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/sliding-window/fixed-length",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "3 · Longest Substring Without Repeating Characters",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/longest-substring-without-repeating-characters/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "209 · Minimum Size Subarray Sum",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/minimum-size-subarray-sum/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-C3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement interval sweeps in Python",
+          "minutes": 120,
+          "why": "Interval questions test ordering, boundary semantics, and whether one active range summarizes processed work.",
+          "done_when": "Study the overview, solve both problems in Python, and explain sorting, the active boundary, overlap semantics, and complexity without notes.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Intervals",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/intervals/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "56 · Merge Intervals",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/merge-intervals/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "57 · Insert Interval",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/insert-interval/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design Bitly blind before opening the breakdown",
+          "minutes": 240,
+          "why": "A simple product exposes delivery discipline without hiding behind advanced infrastructure.",
+          "done_when": "Spend 15 minutes scoping, 45 minutes designing blind, then open the breakdown, compare for 90 minutes, redraw for 60 minutes, and record three concrete differences in the final 30 minutes.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design Bitly",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 1 gap",
+          "minutes": 120,
+          "why": "Observed failures should outrank generic catalog breadth.",
+          "done_when": "Debrief the Bitly and Python work, name the highest-impact gap, repair it from a cited source, and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Week 1 source library",
+              "action_label": "Return to sources",
+              "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Build a behavioral evidence inventory",
+          "minutes": 60,
+          "why": "Strong behavioral answers begin with real evidence, not polished generic scripts.",
+          "done_when": "Create eight rows for scope, ownership, ambiguity, perseverance, conflict, growth, communication, and leadership, each tied to one real event or explicitly marked missing.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W1-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct Week 1 decisions closed-book",
+          "minutes": 60,
+          "source_item_key": "V4-W1-P2",
+          "why": "Retrieval distinguishes usable knowledge from recognition immediately after study.",
+          "done_when": "Without notes, reconstruct the delivery sequence, one API trust boundary, one retry path, and the recognition cue for each coding family; record every miss.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 2,
       "phase_index": 1,
-      "full_title": "Request paths, network failures, identity, and data access",
-      "overview_title": "Request and data",
+      "full_title": "Data models, indexes, and request state",
+      "overview_title": "Data access",
       "items": [
-        {"key": "W2-L1", "type": "learn", "priority": "core", "title": "Trace request paths and network failure handling", "minutes": 150},
-        {"key": "W2-L2", "type": "learn", "priority": "core", "title": "Study API mechanics, authentication, and authorization boundaries", "minutes": 120},
-        {"key": "W2-P1", "type": "learn", "priority": "core", "title": "Understand stack, linked-list, and binary-search recognition cues, invariants, complexity, and failure modes", "minutes": 90},
-        {"key": "W2-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve one representative problem from each Week 2 coding family", "minutes": 90},
-        {"key": "W2-P2", "type": "practice", "priority": "core", "title": "Model entities and access patterns for one backend design", "minutes": 150},
-        {"key": "W2-P3", "type": "practice", "priority": "core", "title": "Review failure paths and harvest mechanism gaps", "minutes": 90},
-        {"key": "W2-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the request path and trust boundaries closed-book", "minutes": 30, "source_item_key": "W2-L1"}
+        {
+          "key": "V4-W2-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Derive data models from access patterns",
+          "minutes": 90,
+          "why": "Schema decisions should follow required reads and writes rather than entity diagrams alone.",
+          "done_when": "Finish the lesson and derive entities, relationships, read paths, write paths, and one justified denormalization for a sample service.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Data Modeling",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/data-modeling",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Data modeling from access patterns: deriving entities, relationships, and query shapes",
+            "Denormalization: duplicating data for a read path without losing update correctness"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen Week 2 Python problems",
+              "done_when": "Complete up to eight additional current-week problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional data-heavy designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one Week 2 database question",
+              "done_when": "Study one current-week source and write the mechanism, trade-off, and failure it resolves.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/core-concepts/data-modeling",
+              "resource_label": "Data Modeling"
+            },
+            {
+              "title": "Rehearse scope and ownership follow-ups",
+              "done_when": "Speak both stories and answer at least five probing questions.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Choose indexes from query shape",
+          "minutes": 90,
+          "why": "Indexes help only when their ordering and coverage match the actual access path.",
+          "done_when": "Finish the lesson and choose one single-column and one composite index, explaining ordering, coverage, and write cost.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Database Indexing",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/db-indexing",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "B-tree lookup and range scans: how page locality shapes read cost",
+            "Composite indexes: left-prefix matching, column order, and covering a query"
+          ]
+        },
+        {
+          "key": "V4-W2-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Trace PostgreSQL writes and concurrent snapshots",
+          "minutes": 120,
+          "why": "A backend engineer should connect durability and isolation claims to the database write path.",
+          "done_when": "Finish the relevant lesson sections and trace one commit and one overlapping reader/writer timeline through recovery and visibility.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "PostgreSQL",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Write-ahead logging: committing before data pages and recovering after a crash",
+            "MVCC snapshots: letting readers and writers proceed while isolation anomalies remain bounded"
+          ]
+        },
+        {
+          "key": "V4-W2-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement stack state in Python",
+          "minutes": 120,
+          "why": "Stacks encode unresolved work and nested structure with explicit state.",
+          "done_when": "Study the overview, solve both problems in Python, and state what each stack entry means at every step.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Stacks",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/stack/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "20 · Valid Parentheses",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/valid-parentheses/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "739 · Daily Temperatures",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/daily-temperatures/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement linked-list pointer changes in Python",
+          "minutes": 120,
+          "why": "Pointer updates test whether state can change without losing the remaining structure.",
+          "done_when": "Study the overview, solve both problems in Python, and narrate each pointer update before executing it.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Linked Lists",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/linked-list/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "206 · Reverse Linked List",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/reverse-linked-list/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "141 · Linked List Cycle",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/linked-list-cycle/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-C3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement binary-search boundaries in Python",
+          "minutes": 120,
+          "why": "Binary search succeeds only when the retained half and termination condition are proved.",
+          "done_when": "Study the overview, solve both problems in Python, and state the search invariant and boundary convention before coding.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Binary Search",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/binary-search/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "704 · Binary Search",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/binary-search/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "875 · Koko Eating Bananas",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/koko-eating-bananas/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design LeetCode blind before opening the breakdown",
+          "minutes": 240,
+          "why": "The prompt connects APIs, submission state, access patterns, and indexes in one backend system.",
+          "done_when": "Complete a 45-minute blind design, compare it with the breakdown, redraw the data and request paths, and name three changed decisions.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design LeetCode",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/leetcode",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 2 gap",
+          "minutes": 120,
+          "why": "Data-access mistakes compound in every later design.",
+          "done_when": "Debrief the week, repair one observed mechanism from its cited lesson, and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Data Modeling",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/data-modeling",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Develop scope and ownership evidence",
+          "minutes": 90,
+          "why": "Senior behavioral signal depends on individual decisions and consequences.",
+          "done_when": "Choose one scope and one ownership example, write the situation, your individual decisions, measurable result, and likely follow-up questions.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W2-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct Week 2 data decisions closed-book",
+          "minutes": 90,
+          "source_item_key": "V4-W2-P2",
+          "why": "Closed-book reconstruction exposes whether storage vocabulary is connected to actual query behavior.",
+          "done_when": "Derive a model and index set for a fresh prompt, trace one commit and snapshot, and identify all three coding patterns without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 3,
       "phase_index": 1,
-      "full_title": "Caching, partitioning, replication, and consistency",
+      "full_title": "Caching, partitioning, and consistency",
       "overview_title": "Caching and partitions",
       "items": [
-        {"key": "W3-L1", "type": "learn", "priority": "core", "title": "Study caching, invalidation, and cache failure modes", "minutes": 120},
-        {"key": "W3-L2", "type": "learn", "priority": "core", "title": "Study sharding, consistent hashing, replication, and CAP", "minutes": 150},
-        {"key": "W3-P1", "type": "learn", "priority": "core", "title": "Understand heap, depth-first-search, and breadth-first-search recognition cues, invariants, complexity, and failure modes", "minutes": 90},
-        {"key": "W3-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve one representative problem from each Week 3 coding family", "minutes": 90},
-        {"key": "W3-P2", "type": "practice", "priority": "core", "title": "Design a partitioned and replicated storage path", "minutes": 150},
-        {"key": "W3-P3", "type": "practice", "priority": "core", "title": "Review consistency decisions and harvest mechanism gaps", "minutes": 90},
-        {"key": "W3-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct partitioning and consistency trade-offs closed-book", "minutes": 30, "source_item_key": "W3-L2"}
+        {
+          "key": "V4-W3-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Design cache-aside paths and contain hot keys",
+          "minutes": 120,
+          "why": "Caching improves latency only when population, invalidation, and overload behavior are explicit.",
+          "done_when": "Finish the lesson and trace a hit, miss, invalidation, stampede, negative lookup, and hot-key response.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Caching",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/caching",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Cache-aside reads: miss handling, population, invalidation, and stale-data windows",
+            "Cache stampede and hot keys: request coalescing, jitter, replication, and negative caching"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen Week 3 Python problems",
+              "done_when": "Complete up to eight current-week problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional cache or partition designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one Week 3 failure mode",
+              "done_when": "Study one source and write the mechanism, trade-off, and failure it resolves.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/core-concepts/caching",
+              "resource_label": "Caching"
+            },
+            {
+              "title": "Rehearse ambiguity and perseverance follow-ups",
+              "done_when": "Speak both examples and answer at least five probes.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Partition, rebalance, and choose partition behavior",
+          "minutes": 180,
+          "why": "Partitioning decisions determine routing, movement during growth, scan support, and failure semantics.",
+          "done_when": "Finish all three lessons and compare hash, range, and ring ownership, then choose the allowed behavior during one partition.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Sharding",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/sharding",
+              "language": ""
+            },
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Consistent Hashing",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/consistent-hashing",
+              "language": ""
+            },
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "CAP Theorem",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/cap-theorem",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Hash sharding: routing a key, adding capacity, and migrating ownership",
+            "Range sharding: preserving scans while detecting and splitting hot ranges",
+            "Consistent hashing: ring ownership, virtual nodes, and bounded key movement",
+            "CAP during a partition: choosing which operations remain available and which must reject"
+          ]
+        },
+        {
+          "key": "V4-W3-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement heap selection in Python",
+          "minutes": 120,
+          "why": "Heap problems test whether only candidates that can still affect the answer are retained.",
+          "done_when": "Study the overview, solve both problems in Python, and justify heap contents, size, and complexity.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Heaps",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/heap/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "215 · Kth Largest Element",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/kth-largest-element-in-an-array/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "23 · Merge k Sorted Lists",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/merge-k-sorted-lists/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement depth-first search in Python",
+          "minutes": 120,
+          "why": "DFS requires precise recursive state, visited ownership, and return meaning.",
+          "done_when": "Study the lesson, solve both problems in Python, and state the frame state and return value before coding.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Depth-First Search",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/depth-first-search/introduction",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "200 · Number of Islands",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/number-of-islands/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "112 · Path Sum",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/path-sum/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-C3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement breadth-first search in Python",
+          "minutes": 120,
+          "why": "BFS derives shortest unweighted distance and level order from queue discipline.",
+          "done_when": "Study the lesson, solve both problems in Python, and explain enqueue-time visitation and level boundaries.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Breadth-First Search",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/breadth-first-search/introduction",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "102 · Binary Tree Level Order Traversal",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/binary-tree-level-order-traversal/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "994 · Rotting Oranges",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/rotting-oranges/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design a distributed cache blind",
+          "minutes": 240,
+          "why": "The prompt forces routing, replication, consistency, hot-key, and failure decisions to work together.",
+          "done_when": "Complete a 45-minute blind design, compare with the breakdown, redraw it, and defend partitioning plus failure behavior.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design a Distributed Cache",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-cache",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 3 gap",
+          "minutes": 120,
+          "why": "Caching and partition gaps propagate into every later architecture.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Caching",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/caching",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Develop ambiguity and perseverance evidence",
+          "minutes": 90,
+          "why": "Senior signal includes making progress when facts or resources are incomplete.",
+          "done_when": "Draft one ambiguity and one perseverance example with the uncertainty, your decision, result, and learning.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W3-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct Week 3 trade-offs closed-book",
+          "minutes": 90,
+          "source_item_key": "V4-W3-P2",
+          "why": "Retrieval verifies that partition and cache vocabulary can drive a fresh decision.",
+          "done_when": "Design the routing and cache path for a fresh scenario, choose partition behavior, and identify all three coding families without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 4,
       "phase_index": 2,
-      "full_title": "Scaling reads, writes, replicas, and fan-out",
-      "overview_title": "Scaling patterns",
+      "full_title": "Scaling reads, writes, and fan-out",
+      "overview_title": "Scaling paths",
       "items": [
-        {"key": "W4-L1", "type": "learn", "priority": "core", "title": "Study read scaling, write scaling, replica lag, fan-out, backpressure, and queues", "minutes": 120},
-        {"key": "W4-P1", "type": "practice", "priority": "core", "title": "Complete a historical Twitter home-timeline design with hybrid high-fanout handling", "why": "Tests a skew-driven architecture split instead of a one-size-fits-all feed.", "done_when": "Deliver the complete feed design, explain ordinary write-time materialization and the high-fanout read-time merge, and identify one lag, ordering, or overload failure.", "minutes": 120},
-        {"key": "W4-P2", "type": "practice", "priority": "core", "title": "Complete a write-heavy full system design", "minutes": 120},
-        {"key": "W4-P3", "type": "learn", "priority": "core", "title": "Understand graph, topological-ordering, and shortest-path recognition cues, invariants, complexity, and failure modes", "minutes": 120},
-        {"key": "W4-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve graph, dependency-ordering, and shortest-path problems", "minutes": 150},
-        {"key": "W4-P4", "type": "practice", "priority": "core", "title": "Start the behavioral story catalog with scope and ownership", "minutes": 60},
-        {"key": "W4-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct scaling gaps", "minutes": 30, "source_item_key": "W4-L1"}
+        {
+          "key": "V4-W4-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Scale reads, replicas, and feed fan-out",
+          "minutes": 90,
+          "why": "Read paths need different materialization and consistency choices under skew.",
+          "done_when": "Finish the lesson, study the historical Twitter case, and compare read-time, write-time, and hybrid feed materialization including replica lag.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Scaling Reads",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "InfoQ",
+              "label": "Twitter Timelines at Scale",
+              "action_label": "Open historical case",
+              "url": "https://www.infoq.com/presentations/Twitter-Timeline-Scalability/",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Scaling reads: composing caches, read replicas, and denormalized views",
+            "Replica lag: preserving read-your-writes and monotonic reads after a write",
+            "Fan-out mechanics: choosing write-time materialization or read-time aggregation"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen graph problems in Python",
+              "done_when": "Complete up to eight current-week problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional scaling designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen the historical Twitter case",
+              "done_when": "Study the case and write three architectural constraints and their consequences.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
+              "resource_label": "Scaling Reads"
+            },
+            {
+              "title": "Rehearse conflict and growth follow-ups",
+              "done_when": "Speak both examples and answer at least five probes.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Scale writes and contain overload",
+          "minutes": 90,
+          "why": "Write systems fail when skew and backlog grow faster than bounded consumers can absorb.",
+          "done_when": "Finish the lesson and trace partitioning, batching, backpressure, and load shedding through one burst scenario.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Scaling Writes",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-writes",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Scaling writes: partitioning, batching, and asynchronous ingestion under skew",
+            "Backpressure and load shedding: keeping overload from becoming a cascading failure"
+          ]
+        },
+        {
+          "key": "V4-W4-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Operate bounded queue workers",
+          "minutes": 60,
+          "why": "Queues move work; worker concurrency, retries, and poison handling determine whether it completes safely.",
+          "done_when": "Finish the lesson and specify concurrency, ordering, retry, dead-letter, and observability behavior for one worker pool.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Managing Long Running Tasks",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/long-running-tasks",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Queue workers: controlling concurrency, ordering, retries, and dead-letter handling"
+          ]
+        },
+        {
+          "key": "V4-W4-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement graph dependency ordering in Python",
+          "minutes": 150,
+          "why": "Dependency problems require converting constraints into an explicit processing frontier.",
+          "done_when": "Study topological sorting, solve both problems in Python, and explain indegrees, cycle detection, and complexity.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Topological Sort",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/graphs/topological-sort",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "207 · Course Schedule",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/course-schedule/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "210 · Course Schedule II",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/course-schedule-ii/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement shortest paths in Python",
+          "minutes": 150,
+          "why": "Shortest-path interviews test when a distance becomes final and how edge assumptions change the algorithm.",
+          "done_when": "Study the lesson, solve both problems in Python, and justify the frontier, relaxation rule, and complexity.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Shortest Path Algorithms",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/graphs/shortest-path-algorithms",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "743 · Network Delay Time",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/network-delay-time/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "787 · Cheapest Flights Within K Stops",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/cheapest-flights-within-k-stops/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design a Twitter-style home timeline blind",
+          "minutes": 240,
+          "why": "Power-user skew forces a hybrid rather than one-size-fits-all fan-out decision.",
+          "done_when": "Design blind for 45 minutes before opening the breakdown; then explain ordinary-account materialization, high-follower merging, lag, ordering, and overload.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "FB News Feed",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/fb-news-feed",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "InfoQ",
+              "label": "Twitter Timelines at Scale",
+              "action_label": "Open historical case",
+              "url": "https://www.infoq.com/presentations/Twitter-Timeline-Scalability/",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design an ad-click aggregator",
+          "minutes": 180,
+          "why": "A write-heavy pipeline makes batching, partitions, backpressure, and late processing observable.",
+          "done_when": "Run a timed design, compare it with the breakdown, and revise the ingestion and aggregation paths around one overload failure.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Ad Click Aggregator",
+              "action_label": "Open after timed attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/ad-click-aggregator",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 4 gap",
+          "minutes": 90,
+          "why": "Scaling depth should follow observed bottlenecks.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Scaling Reads",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Develop conflict and growth evidence",
+          "minutes": 90,
+          "why": "Senior behavior includes productive disagreement and changed future behavior.",
+          "done_when": "Draft one conflict and one growth example with your choice, other perspectives, result, and learning.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W4-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct scaling decisions closed-book",
+          "minutes": 60,
+          "source_item_key": "V4-W4-P3",
+          "why": "Retrieval tests whether skew and failure can drive architecture without a memorized feed diagram.",
+          "done_when": "Reconstruct both designs, state the fan-out split, and identify graph versus shortest-path cues without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 5,
       "phase_index": 2,
-      "full_title": "Backpressure, contention, workflows, and resilience",
-      "overview_title": "Resilience patterns",
+      "full_title": "Contention, workflows, and resilience",
+      "overview_title": "Resilience",
       "items": [
-        {"key": "W5-L1", "type": "learn", "priority": "core", "title": "Study contention, distributed locks, and overload containment", "minutes": 60},
-        {"key": "W5-L2", "type": "learn", "priority": "core", "title": "Study sagas, durable workflows, circuit breakers, and exactly-once effects", "minutes": 60},
-        {"key": "W5-P1", "type": "practice", "priority": "core", "title": "Complete a workflow-heavy full system design", "minutes": 120},
-        {"key": "W5-P2", "type": "practice", "priority": "core", "title": "Complete a failure-heavy full system design", "minutes": 120},
-        {"key": "W5-P3", "type": "learn", "priority": "core", "title": "Understand backtracking, dynamic-programming, and greedy invariants; add ambiguity and perseverance stories", "minutes": 210},
-        {"key": "W5-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve representative backtracking, dynamic-programming, and greedy problems", "minutes": 120},
-        {"key": "W5-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct resilience gaps", "minutes": 30, "source_item_key": "W5-L2"}
+        {
+          "key": "V4-W5-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Protect invariants under contention",
+          "minutes": 120,
+          "why": "The right concurrency control follows the invariant and failure model, not a favorite lock.",
+          "done_when": "Finish the lesson and choose among a conditional write, pessimistic lock, OCC, serializable transaction, and lease for two scenarios.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Dealing with Contention",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/dealing-with-contention",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Contention control: choosing a conditional write, pessimistic lock, OCC, or serializable isolation for one invariant",
+            "Distributed locks: leases, TTL expiry, fencing tokens, and stale owners"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen Week 5 Python problems",
+              "done_when": "Complete up to eight current-week problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional workflow designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one contention or workflow mechanism",
+              "done_when": "Study one source and write the invariant, trade-off, and failure it resolves.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/patterns/dealing-with-contention",
+              "resource_label": "Dealing with Contention"
+            },
+            {
+              "title": "Rehearse communication and leadership follow-ups",
+              "done_when": "Speak both examples and answer at least five probes.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Recover multi-step workflows and dependency failures",
+          "minutes": 120,
+          "why": "Distributed workflows need explicit progress, retry, compensation, containment, and effect semantics.",
+          "done_when": "Finish the lesson and trace one partial workflow through retry, compensation, durable progress, dependency isolation, and deduplication.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Multi-step Processes",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Saga compensation: recovering a partially completed multi-service workflow",
+            "Durable workflow orchestration: persisting progress across retries, crashes, and long waits",
+            "Circuit breakers, bulkheads, and jittered retries: containing a dependency failure",
+            "Exactly-once effects: combining at-least-once delivery with deduplication and idempotency"
+          ]
+        },
+        {
+          "key": "V4-W5-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement backtracking in Python",
+          "minutes": 90,
+          "why": "Backtracking correctness depends on precise choose, recurse, undo, and pruning behavior.",
+          "done_when": "Study the overview, solve both problems in Python, and narrate the search state and undo step.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Backtracking",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/backtracking/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "78 · Subsets",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/subsets/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "39 · Combination Sum",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/combination-sum/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement dynamic programming in Python",
+          "minutes": 150,
+          "why": "DP tests whether state, transition, base cases, and evaluation order form one complete recurrence.",
+          "done_when": "Study the fundamentals, solve both problems in Python, and implement one solution both top-down and bottom-up.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Dynamic Programming",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/dynamic-programming/fundamentals",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "198 · House Robber",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/house-robber/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "322 · Coin Change",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/coin-change/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-C3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement greedy choices in Python",
+          "minutes": 90,
+          "why": "A greedy answer is credible only when the local choice cannot damage the global optimum.",
+          "done_when": "Study the overview, solve both problems in Python, and give an exchange argument or counterexample to a tempting alternative.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Greedy Algorithms",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/greedy/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "55 · Jump Game",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/jump-game/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "435 · Non-overlapping Intervals",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/non-overlapping-intervals/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design Ticketmaster under contention",
+          "minutes": 240,
+          "why": "Seat inventory exposes the difference between protecting an invariant and merely retrying conflicts.",
+          "done_when": "Complete a blind design before the breakdown, then revise reservation, expiry, purchase, and oversell failure paths.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design Ticketmaster",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/ticketmaster",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design a payment workflow",
+          "minutes": 180,
+          "why": "Payments make partial completion, idempotency, reconciliation, and auditability non-negotiable.",
+          "done_when": "Run a timed design, compare with the breakdown, and repair one ambiguous or partially completed transaction path.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design a Payment System",
+              "action_label": "Open after timed attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/payment-system",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 5 gap",
+          "minutes": 90,
+          "why": "Workflow reliability improves by repairing a concrete failed path.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Multi-step Processes",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Develop communication and leadership evidence",
+          "minutes": 60,
+          "why": "Senior scope includes aligning people and improving outcomes without relying on authority.",
+          "done_when": "Choose one communication and one leadership example and outline your decision, influence, result, and learning.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W5-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct resilience decisions closed-book",
+          "minutes": 60,
+          "source_item_key": "V4-W5-P3",
+          "why": "Retrieval tests whether invariants and partial failures drive the mechanism choice.",
+          "done_when": "Reconstruct both designs, choose contention and workflow mechanisms, and identify all three coding families without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 6,
       "phase_index": 2,
-      "full_title": "Realtime delivery, large jobs, and reliable events",
+      "full_title": "Realtime delivery, blobs, and durable jobs",
       "overview_title": "Realtime and jobs",
       "items": [
-        {"key": "W6-L1", "type": "learn", "priority": "core", "title": "Study realtime updates, large blobs, and long-running jobs", "minutes": 60},
-        {"key": "W6-L2", "type": "learn", "priority": "core", "title": "Study transactional outboxes and recovery after interrupted delivery", "minutes": 60},
-        {"key": "W6-P1", "type": "practice", "priority": "core", "title": "Complete a realtime full system design", "minutes": 120},
-        {"key": "W6-P2", "type": "practice", "priority": "core", "title": "Complete a platform-control-plane full system design", "minutes": 120},
-        {"key": "W6-P3", "type": "learn", "priority": "core", "title": "Understand trie, prefix-sum, and matrix-traversal invariants; complete the behavioral story catalog", "minutes": 210},
-        {"key": "W6-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve representative trie, prefix-sum, and matrix problems", "minutes": 120},
-        {"key": "W6-R1", "type": "retrieve", "priority": "recurring", "title": "Harvest and reconstruct platform mechanism gaps", "minutes": 30, "source_item_key": "W6-L2"}
+        {
+          "key": "V4-W6-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Choose realtime delivery and reconnect recovery",
+          "minutes": 90,
+          "why": "Persistent delivery requires both protocol choice and recovery after the connection inevitably breaks.",
+          "done_when": "Finish the lesson and compare polling, long polling, SSE, and WebSockets, then design heartbeats, missed-event cursors, and backfill.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Real-time Updates",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/realtime-updates",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Real-time delivery: server polling, long-polling, SSE, and WebSocket connection state",
+            "Reconnect recovery: heartbeats, sticky routing, missed-event cursors, and backfill"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen Week 6 Python problems",
+              "done_when": "Complete up to eight current-week problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional realtime or job designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one realtime, blob, or job mechanism",
+              "done_when": "Study one source and write the state, trade-off, and failure it resolves.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/patterns/realtime-updates",
+              "resource_label": "Real-time Updates"
+            },
+            {
+              "title": "Rehearse the Big Three with follow-ups",
+              "done_when": "Speak all three and answer at least five probes.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Upload, process, and deliver large blobs",
+          "minutes": 90,
+          "why": "Large payloads need resumability and object-storage paths that avoid application-server bottlenecks.",
+          "done_when": "Finish the lesson and trace presigned multipart upload, integrity checking, asynchronous processing, origin storage, and delivery.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Handling Large Blobs",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/large-blobs",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Large-object upload: presigned URLs, multipart chunks, checksums, and resumability",
+            "Large-blob delivery: resumable upload, asynchronous processing, object storage, and CDN origin"
+          ]
+        },
+        {
+          "key": "V4-W6-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Publish reliable events and expose durable job state",
+          "minutes": 60,
+          "why": "A committed write and its asynchronous work must survive crashes without becoming two unrelated truths.",
+          "done_when": "Trace a transactional outbox through publication and design submission, status, cancellation, retry, and completion for one long job.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Multi-step Processes",
+              "action_label": "Open outbox source",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
+              "language": ""
+            },
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Managing Long Running Tasks",
+              "action_label": "Open jobs source",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/long-running-tasks",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Transactional outbox: atomically committing business data before reliable publication",
+            "Long-running jobs: submission tokens, status polling, cancellation, and webhook completion"
+          ]
+        },
+        {
+          "key": "V4-W6-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement tries in Python",
+          "minutes": 90,
+          "why": "Tries make shared prefix state and traversal costs explicit.",
+          "done_when": "Study the overview, solve both problems in Python, and explain node state, branching, terminal markers, and complexity.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Tries",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/trie/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "208 · Implement Trie",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/implement-trie-prefix-tree/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "212 · Word Search II",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/word-search-ii/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement prefix sums in Python",
+          "minutes": 90,
+          "why": "Prefix state turns repeated range work into constant-time differences or frequency lookups.",
+          "done_when": "Study the overview, solve both problems in Python, and define exactly what each prefix entry contains.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Prefix Sums",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/prefix-sum/overview",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "303 · Range Sum Query",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/range-sum-query-immutable/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "560 · Subarray Sum Equals K",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/subarray-sum-equals-k/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-C3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Implement matrix traversal in Python",
+          "minutes": 90,
+          "why": "Matrix questions test coordinate transforms, boundaries, and preservation of unread state.",
+          "done_when": "Study the lesson, solve both problems in Python, and state boundary changes before each traversal or rotation.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Matrices",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/code/matrices/spiral-matrix",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "54 · Spiral Matrix",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/spiral-matrix/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "48 · Rotate Image",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/rotate-image/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design WhatsApp realtime delivery",
+          "minutes": 240,
+          "why": "Messaging combines connection state, ordering, offline recovery, and durable delivery.",
+          "done_when": "Complete a blind design before the breakdown, then revise connection, message, acknowledgement, and reconnect paths.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design WhatsApp",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/whatsapp",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design Dropbox blob processing",
+          "minutes": 180,
+          "why": "File synchronization connects resumable blobs, metadata, background processing, and conflict behavior.",
+          "done_when": "Run a timed design, compare with the breakdown, and repair upload, change propagation, and interrupted-work paths.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design Dropbox",
+              "action_label": "Open after timed attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/dropbox",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 6 gap",
+          "minutes": 90,
+          "why": "Realtime and long-running failures are best learned from the path that actually broke.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Real-time Updates",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/realtime-updates",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Finish the story catalog and draft the Big Three",
+          "minutes": 120,
+          "why": "A complete evidence pool makes common prompts specific instead of generic.",
+          "done_when": "Fill every missing evidence row and draft tell-me-about-yourself, proud-project, and conflict answers using real examples.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Preparing for the Big Three",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/behavioral/course/preparing-for-the-big-three-questions",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W6-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct realtime and job recovery closed-book",
+          "minutes": 60,
+          "source_item_key": "V4-W6-P3",
+          "why": "Retrieval verifies that connection and job recovery are understood beyond protocol names.",
+          "done_when": "Reconstruct both designs, trace one reconnect and crash, and identify all three coding families without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 7,
       "phase_index": 3,
-      "full_title": "Relational, cache, and wide-column data systems",
+      "full_title": "Database technologies and selection",
       "overview_title": "Databases",
       "items": [
-        {"key": "W7-L1", "type": "learn", "priority": "core", "title": "Study PostgreSQL and Redis mechanics and failure modes", "minutes": 150},
-        {"key": "W7-L2", "type": "learn", "priority": "core", "title": "Study DynamoDB and Cassandra data modeling trade-offs", "minutes": 120},
-        {"key": "W7-P1", "type": "learn", "priority": "core", "title": "Reconstruct coding-pattern choices, invariants, complexity, and edge cases from representative prompts", "minutes": 90},
-        {"key": "W7-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete two timed coding sessions", "minutes": 120},
-        {"key": "W7-P2", "type": "practice", "priority": "core", "title": "Choose and defend storage technologies in one full design", "minutes": 120},
-        {"key": "W7-P3", "type": "practice", "priority": "core", "title": "Practice the Big Three behavioral answers", "minutes": 90},
-        {"key": "W7-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct database selection trade-offs closed-book", "minutes": 30, "source_item_key": "W7-L1"}
+        {
+          "key": "V4-W7-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Choose PostgreSQL from its query and write path",
+          "minutes": 90,
+          "why": "Technology selection should connect workload to indexes, transactions, replicas, and bottlenecks.",
+          "done_when": "Finish the lesson and defend PostgreSQL for one workload while naming the first write or scale limit that changes the choice.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "PostgreSQL",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "PostgreSQL query path: indexes, transactions, replicas, and the write bottleneck"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen mixed Python problems",
+              "done_when": "Complete up to eight unseen problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional storage-heavy designs",
+              "done_when": "Run two blind designs and defend each technology against an alternative.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one database technology",
+              "done_when": "Study one source and write its mechanics, limit, and failure behavior.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
+              "resource_label": "PostgreSQL"
+            },
+            {
+              "title": "Run a Big Three follow-up drill",
+              "done_when": "Answer at least ten follow-ups across the three prompts.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W7-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Choose Redis structures and failure behavior",
+          "minutes": 90,
+          "why": "Redis is useful only when the data structure, durability, and eviction behavior match the role.",
+          "done_when": "Finish the lesson, choose structures for three access patterns, and trace one memory-pressure or restart failure.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Redis",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/redis",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Redis data structures: choosing strings, hashes, sorted sets, streams, and HyperLogLog by access pattern",
+            "Redis durability and eviction: reconstructing failure behavior under memory pressure"
+          ]
+        },
+        {
+          "key": "V4-W7-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Model DynamoDB keys without hot partitions",
+          "minutes": 90,
+          "why": "DynamoDB performance follows key distribution and access patterns.",
+          "done_when": "Finish the lesson and design a partition key, sort key, and secondary index for one workload, including a hot-key mitigation.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "DynamoDB",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/dynamodb",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "DynamoDB keys and indexes: distributing access without creating a hot partition"
+          ]
+        },
+        {
+          "key": "V4-W7-L4",
+          "type": "learn",
+          "priority": "core",
+          "title": "Trace Cassandra writes, reads, compaction, and repair",
+          "minutes": 90,
+          "why": "Wide-column trade-offs emerge from the full storage path rather than the API alone.",
+          "done_when": "Finish the lesson and trace one write and read through commit log, memtable, SSTables, compaction, and repair.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Cassandra",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/cassandra",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Cassandra write and read paths: commit log, memtable, SSTables, compaction, and repair"
+          ]
+        },
+        {
+          "key": "V4-W7-L5",
+          "type": "learn",
+          "priority": "core",
+          "title": "Place authentication, quotas, and routing at an API gateway",
+          "minutes": 60,
+          "why": "Gateway policy centralizes cross-cutting controls but can become a bottleneck and trust boundary.",
+          "done_when": "Finish the lesson and trace one request through authentication, quota, routing, policy, and gateway failure.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "API Gateway",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/api-gateway",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "API gateway request handling: authentication, quotas, routing, and policy enforcement"
+          ]
+        },
+        {
+          "key": "V4-W7-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Complete a mixed Python data-structure set",
+          "minutes": 240,
+          "why": "Mixed prompts test recognition after the family label disappears.",
+          "done_when": "Solve both problems in Python under time limits, narrate the state invariant, and write a postmortem for every miss.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "146 · LRU Cache",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/lru-cache/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "981 · Time Based Key-Value Store",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/time-based-key-value-store/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W7-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design an online auction and defend storage choices",
+          "minutes": 240,
+          "why": "Auctions combine read/write skew, ordering, contention, and durable state.",
+          "done_when": "Complete a blind design before the breakdown and defend each storage technology against one rejected alternative.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design an Online Auction",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/online-auction",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W7-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 7 gap",
+          "minutes": 90,
+          "why": "Technology depth is useful only when it changes a workload decision.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "PostgreSQL",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W7-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Rehearse the Big Three with evidence",
+          "minutes": 120,
+          "why": "Common prompts should select the right evidence quickly without sounding memorized.",
+          "done_when": "Speak all three answers twice, tighten each to its intended length, and answer five follow-ups.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Preparing for the Big Three",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/behavioral/course/preparing-for-the-big-three-questions",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W7-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Choose databases closed-book",
+          "minutes": 90,
+          "source_item_key": "V4-W7-P2",
+          "why": "Retrieval tests selection from workload rather than technology name recognition.",
+          "done_when": "Choose and reject storage options for three fresh workloads, then reconstruct the auction bottleneck without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 8,
       "phase_index": 3,
-      "full_title": "Messaging, search, gateways, and content delivery",
+      "full_title": "Messaging, search, delivery, and rate limits",
       "overview_title": "Messaging and search",
       "items": [
-        {"key": "W8-L1", "type": "learn", "priority": "core", "title": "Study Kafka, API gateway, and asynchronous delivery mechanics", "minutes": 150},
-        {"key": "W8-L2", "type": "learn", "priority": "core", "title": "Study Elasticsearch, blob storage, CDN, rate limiting, and time-series behavior", "minutes": 120},
-        {"key": "W8-P1", "type": "learn", "priority": "core", "title": "Compare coding-pattern solution strategies and explain their invariants, complexity, and failure modes", "minutes": 90},
-        {"key": "W8-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete two timed coding sessions", "minutes": 120},
-        {"key": "W8-P2", "type": "practice", "priority": "core", "title": "Design a searchable media or document delivery system", "minutes": 120},
-        {"key": "W8-P3", "type": "practice", "priority": "core", "title": "Practice the Big Three behavioral answers with follow-ups", "minutes": 90},
-        {"key": "W8-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct messaging and search trade-offs closed-book", "minutes": 30, "source_item_key": "W8-L1"}
+        {
+          "key": "V4-W8-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Operate Kafka partitions and at-least-once consumers",
+          "minutes": 90,
+          "why": "Ordering, offsets, rebalances, retries, and poison records determine event correctness.",
+          "done_when": "Finish the lesson and trace one record through partitioning, consumption, retry, rebalance, deduplication, and dead-letter handling.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Kafka",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/kafka",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Kafka partition mechanics: ordering, offsets, consumer groups, and rebalancing",
+            "At-least-once event processing: retries, idempotent consumers, and poison-message handling"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen mixed Python problems",
+              "done_when": "Complete up to eight unseen problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional messaging or search designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one messaging, search, or delivery technology",
+              "done_when": "Study one source and write its mechanics, limit, and failure behavior.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/deep-dives/kafka",
+              "resource_label": "Kafka"
+            },
+            {
+              "title": "Run a senior behavioral follow-up drill",
+              "done_when": "Answer at least ten follow-ups across two stories.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W8-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Trace Elasticsearch indexing and refresh",
+          "minutes": 90,
+          "why": "Search latency and freshness follow immutable segments, refresh, and merge behavior.",
+          "done_when": "Finish the lesson and trace one document from indexing through refresh, search visibility, merge, and update.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Elasticsearch",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/elasticsearch",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Elasticsearch indexing: inverted indexes, immutable segments, refresh, merge, and near-real-time search"
+          ]
+        },
+        {
+          "key": "V4-W8-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Deliver cached content through a CDN",
+          "minutes": 60,
+          "why": "CDNs shift latency and origin load only when hierarchy, invalidation, and access control are designed.",
+          "done_when": "Trace one object through edge miss, shield, origin, invalidation, and signed access, including an origin failure.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Scaling Reads",
+              "action_label": "Open CDN source",
+              "url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "CDN delivery: cache hierarchy, origin shielding, invalidation, and signed access"
+          ]
+        },
+        {
+          "key": "V4-W8-L4",
+          "type": "learn",
+          "priority": "core",
+          "title": "Coordinate distributed rate limits",
+          "minutes": 60,
+          "why": "A rate limit needs atomic local state and an explicit answer to regional drift.",
+          "done_when": "Study the breakdown and compare token bucket and window counters, then define atomic update and multi-region behavior.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Distributed Rate Limiter",
+              "action_label": "Open breakdown",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Distributed rate limiting: token buckets, window counters, atomic updates, and regional drift"
+          ]
+        },
+        {
+          "key": "V4-W8-L5",
+          "type": "learn",
+          "priority": "core",
+          "title": "Store time-series data under cardinality pressure",
+          "minutes": 60,
+          "why": "Time-series design follows append rate, time partitions, compression, rollups, and label cardinality.",
+          "done_when": "Finish the lesson and design ingestion, partitioning, rollups, retention, and a response to label explosion.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Time Series Databases",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/time-series-databases",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Time-series storage: append-only writes, time partitioning, compression, rollups, and label-cardinality limits"
+          ]
+        },
+        {
+          "key": "V4-W8-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Complete a mixed Python priority-queue set",
+          "minutes": 240,
+          "why": "Mixed timed problems test candidate retention and streaming order without pattern labels.",
+          "done_when": "Solve both problems in Python under time limits and postmortem state, complexity, and edge-case misses.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "347 · Top K Frequent Elements",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/top-k-frequent-elements/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "295 · Find Median from Data Stream",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/find-median-from-data-stream/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W8-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design a distributed rate limiter blind",
+          "minutes": 240,
+          "why": "The prompt connects algorithm choice, atomic state, distribution, and regional failure.",
+          "done_when": "Complete a blind design before the breakdown, then revise state ownership, atomicity, drift, and fail-open or fail-closed behavior.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Distributed Rate Limiter",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W8-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design Facebook post search",
+          "minutes": 150,
+          "why": "Search combines ingestion, indexing freshness, query serving, ranking, and failure behavior.",
+          "done_when": "Run a timed design, compare with the breakdown, and repair one indexing or freshness bottleneck.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "FB Post Search",
+              "action_label": "Open after timed attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/fb-post-search",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W8-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 8 gap",
+          "minutes": 90,
+          "why": "Messaging and search gaps should be repaired from the path that failed.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Kafka",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/kafka",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W8-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Practice behavioral answers with senior follow-ups",
+          "minutes": 60,
+          "why": "Senior evaluation probes scope, alternatives, influence, and learning beyond the first answer.",
+          "done_when": "Practice two stories and answer follow-ups about trade-offs, disagreement, personal contribution, and changed behavior.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W8-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct messaging and search paths closed-book",
+          "minutes": 60,
+          "source_item_key": "V4-W8-P3",
+          "why": "Retrieval tests mechanics across write, index, and delivery paths.",
+          "done_when": "Trace one event, one indexed document, one CDN miss, and one regional rate-limit decision without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 9,
       "phase_index": 3,
-      "full_title": "Coordination, stream processing, and specialized indexes",
-      "overview_title": "Coordination and indexes",
+      "full_title": "Streams, coordination, and specialized indexes",
+      "overview_title": "Streams and indexes",
       "items": [
-        {"key": "W9-L1", "type": "learn", "priority": "core", "title": "Study Flink, ZooKeeper, and coordination guarantees", "minutes": 150},
-        {"key": "W9-L2", "type": "learn", "priority": "core", "title": "Study approximate structures, proximity search, and vector indexes", "minutes": 120},
-        {"key": "W9-P1", "type": "learn", "priority": "core", "title": "Decompose unfamiliar coding prompts into recognition cues, state, invariants, complexity, and edge cases", "minutes": 90},
-        {"key": "W9-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete two timed coding sessions", "minutes": 120},
-        {"key": "W9-P2", "type": "practice", "priority": "core", "title": "Design a streaming or proximity-search system", "minutes": 120},
-        {"key": "W9-P3", "type": "practice", "priority": "core", "title": "Practice senior-scope behavioral follow-ups", "minutes": 90},
-        {"key": "W9-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct coordination and index trade-offs closed-book", "minutes": 30, "source_item_key": "W9-L1"}
+        {
+          "key": "V4-W9-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Process event time with Flink",
+          "minutes": 90,
+          "why": "Correct stream results depend on event time, watermarks, late data, state, and recovery.",
+          "done_when": "Finish the lesson and trace one late event through watermarking, state update, checkpoint, and recovery.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Flink",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/flink",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Flink event-time processing: watermarks, late data, state, and checkpoints"
+          ],
+          "stretch_actions": [
+            {
+              "title": "Solve additional unseen mixed Python problems",
+              "done_when": "Complete up to eight unseen problems and postmortem every miss.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Complete two additional stream or search designs",
+              "done_when": "Run two blind designs and compare each with a trusted breakdown.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen one advanced mechanism",
+              "done_when": "Study one source and write its mechanics, error or consistency model, and limit.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/deep-dives/flink",
+              "resource_label": "Flink"
+            },
+            {
+              "title": "Run a senior behavioral follow-up drill",
+              "done_when": "Answer at least ten follow-ups across two stories.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W9-L2",
+          "type": "learn",
+          "priority": "core",
+          "title": "Coordinate ephemeral ownership with ZooKeeper",
+          "minutes": 90,
+          "why": "Coordination guarantees come from sessions, ephemeral state, watches, and failure detection.",
+          "done_when": "Finish the lesson and trace one lease-like ownership decision through session loss, watch notification, and reacquisition.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "ZooKeeper",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/zookeeper",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "ZooKeeper coordination: ephemeral nodes, watches, leases, and session failure"
+          ]
+        },
+        {
+          "key": "V4-W9-L3",
+          "type": "learn",
+          "priority": "core",
+          "title": "Trade bounded memory for approximate answers",
+          "minutes": 90,
+          "why": "Approximate structures are valuable only when their error model fits the decision.",
+          "done_when": "Finish the lesson and choose Bloom filter, Count-Min Sketch, or HyperLogLog for three workloads, naming each error guarantee.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Data Structures for Big Data",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/data-structures-for-big-data",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Bloom filters: sizing the bitset and accepting false positives to avoid expensive reads",
+            "Count-Min Sketch and HyperLogLog: approximate frequency and cardinality under bounded memory"
+          ]
+        },
+        {
+          "key": "V4-W9-L4",
+          "type": "learn",
+          "priority": "core",
+          "title": "Index geographic proximity",
+          "minutes": 90,
+          "why": "Proximity search turns coordinates into bounded candidate regions before exact ranking.",
+          "done_when": "Finish the lesson and trace one nearby query through cell mapping, neighboring candidates, filtering, and hot-region behavior.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Proximity Search",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/proximity-search",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Geospatial indexing: mapping coordinates into cells for nearby-candidate retrieval"
+          ]
+        },
+        {
+          "key": "V4-W9-L5",
+          "type": "learn",
+          "priority": "core",
+          "title": "Tune vector search recall, latency, and memory",
+          "minutes": 90,
+          "why": "Approximate nearest-neighbor indexes trade accuracy for serving cost and speed.",
+          "done_when": "Finish the lesson and explain HNSW traversal plus one tuning change that moves recall, latency, and memory.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Vector Databases",
+              "action_label": "Open lesson",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/vector-databases",
+              "language": ""
+            }
+          ],
+          "mapped_recall_topics": [
+            "Vector index search: HNSW traversal and the recall, latency, and memory trade-off"
+          ]
+        },
+        {
+          "key": "V4-W9-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Complete a mixed Python graph set",
+          "minutes": 240,
+          "why": "Mixed graph prompts test state, visited ownership, and frontier choice without family labels.",
+          "done_when": "Solve both problems in Python under time limits and postmortem state, complexity, and edge-case misses.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "127 · Word Ladder",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/word-ladder/",
+              "language": "Python"
+            },
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "133 · Clone Graph",
+              "action_label": "Solve in Python",
+              "url": "https://leetcode.com/problems/clone-graph/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W9-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Design Uber proximity search",
+          "minutes": 240,
+          "why": "The prompt connects geospatial indexing, realtime updates, matching, and regional scale.",
+          "done_when": "Complete a blind design before the breakdown, then revise candidate retrieval, driver updates, matching, and hot-region behavior.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design Uber",
+              "action_label": "Open after blind attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/uber",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W9-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Walk through a ChatGPT system design",
+          "minutes": 120,
+          "why": "The design connects streaming delivery, model-serving constraints, history, and reliability.",
+          "done_when": "Run a focused timed design, compare with the breakdown, and repair one serving, streaming, or conversation-state decision.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design ChatGPT",
+              "action_label": "Open after timed attempt",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/chatgpt",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W9-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact Week 9 gap",
+          "minutes": 60,
+          "why": "Advanced structures should remain tied to an observed decision.",
+          "done_when": "Repair one observed gap from a cited source and propose no more than three focused recall cards.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Proximity Search",
+              "action_label": "Return to source",
+              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/proximity-search",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W9-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Practice senior-scope behavioral follow-ups",
+          "minutes": 60,
+          "why": "Target roles require clear evidence of scope, judgment, influence, and learning.",
+          "done_when": "Practice two stories and answer follow-ups that challenge scope, alternatives, and personal contribution.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W9-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct specialized mechanisms closed-book",
+          "minutes": 30,
+          "source_item_key": "V4-W9-P3",
+          "why": "A short final retrieval checks that advanced names still connect to mechanisms.",
+          "done_when": "Choose one stream, coordination, approximate, proximity, and vector mechanism for fresh scenarios without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 10,
       "phase_index": 4,
-      "full_title": "Baseline interview simulations and gap diagnosis",
+      "full_title": "Baseline interview simulations and diagnosis",
       "overview_title": "Baseline mocks",
       "items": [
-        {"key": "W10-P1", "type": "practice", "priority": "core", "title": "Complete two full system design mocks", "minutes": 240},
-        {"key": "W10-P2", "type": "practice", "priority": "core", "title": "Walk through three coding prompts verbally: choose the pattern, maintain its invariant, analyze complexity, and test edge cases", "minutes": 150},
-        {"key": "W10-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete one timed coding mock", "minutes": 120},
-        {"key": "W10-P3", "type": "practice", "priority": "core", "title": "Complete two behavioral practices with follow-ups", "minutes": 120},
-        {"key": "W10-L1", "type": "learn", "priority": "core", "title": "Compare mock performance with the senior readiness gates", "minutes": 30},
-        {"key": "W10-P4", "type": "practice", "priority": "core", "title": "Repair the highest-impact observed gap", "minutes": 30},
-        {"key": "W10-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the repaired mechanism closed-book", "minutes": 30, "source_item_key": "W10-P4"}
+        {
+          "key": "V4-W10-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Notification System design mock",
+          "minutes": 180,
+          "why": "A named mock provides comparable evidence across delivery, depth, trade-offs, and failure handling.",
+          "done_when": "Run 45 minutes with no solution aids, then self-grade, compare with the breakdown, and write the highest-impact miss.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design a Notification System",
+              "action_label": "Open after mock",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/notification-system",
+              "language": ""
+            }
+          ],
+          "stretch_actions": [
+            {
+              "title": "Run additional unseen Python mocks",
+              "done_when": "Complete up to three additional mocks with full postmortems.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Run two additional system design mocks",
+              "done_when": "Complete two mocks with no solution aids and grade both.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen the top baseline gap",
+              "done_when": "Study one source and rerun the failed section in a changed scenario.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/notification-system",
+              "resource_label": "Design a Notification System"
+            },
+            {
+              "title": "Run an additional behavioral mock",
+              "done_when": "Complete one recorded mock with at least ten follow-ups.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Job Scheduler design mock",
+          "minutes": 180,
+          "why": "Scheduling exposes ownership, durability, fairness, retries, and recovery in one system.",
+          "done_when": "Run 45 minutes with no solution aids, then self-grade, compare with the breakdown, and write the highest-impact miss.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design a Job Scheduler",
+              "action_label": "Open after mock",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/job-scheduler",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Python coding mock on tree serialization",
+          "minutes": 180,
+          "why": "A timed mock measures implementation and narration rather than pattern recognition alone.",
+          "done_when": "Solve in Python under interview conditions, manually test edge cases, and complete a written postmortem.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "297 · Serialize and Deserialize Binary Tree",
+              "action_label": "Start Python mock",
+              "url": "https://leetcode.com/problems/serialize-and-deserialize-binary-tree/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Python coding mock on a minimum window",
+          "minutes": 180,
+          "why": "A second timed mock checks state correctness under pressure.",
+          "done_when": "Solve in Python under interview conditions, manually test edge cases, and complete a written postmortem.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "76 · Minimum Window Substring",
+              "action_label": "Start Python mock",
+              "url": "https://leetcode.com/problems/minimum-window-substring/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run two behavioral practices with follow-ups",
+          "minutes": 180,
+          "why": "Simulation reveals whether stories survive interruption and probing.",
+          "done_when": "Record two practices, answer follow-ups, and identify one evidence or clarity gap in each.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Establish the external readiness baseline",
+          "minutes": 120,
+          "why": "Readiness comes from mock performance, not recall-card averages.",
+          "done_when": "Grade every mock against delivery, correctness, depth, communication, and recovery; rank the top three gaps.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Open practice hub",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact baseline gap",
+          "minutes": 120,
+          "why": "The first simulation week should change the plan through observed evidence.",
+          "done_when": "Repair the top gap from a trusted source and create no more than three focused recall prompts.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Open practice hub",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W10-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct the repaired baseline mechanism",
+          "minutes": 60,
+          "source_item_key": "V4-W10-P3",
+          "why": "A repaired gap should be retrievable after the correction is no longer visible.",
+          "done_when": "Explain the repaired mechanism and apply it to one changed scenario without notes.",
+          "resources": []
+        }
       ]
     },
     {
       "index": 11,
       "phase_index": 4,
-      "full_title": "Target-company simulations and constrained practice",
+      "full_title": "Target-company simulations and calibration",
       "overview_title": "Target simulations",
       "items": [
-        {"key": "W11-P1", "type": "practice", "priority": "core", "title": "Complete two target-shaped system design mocks", "minutes": 240},
-        {"key": "W11-P2", "type": "practice", "priority": "core", "title": "Walk through three target-shaped coding prompts verbally, including complexity and manual edge-case testing", "minutes": 150},
-        {"key": "W11-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete one plain-editor coding mock", "minutes": 120},
-        {"key": "W11-P3", "type": "practice", "priority": "core", "title": "Complete two behavioral practices with senior-scope follow-ups", "minutes": 120},
-        {"key": "W11-L1", "type": "learn", "priority": "core", "title": "Review evidence for the active target-company loop", "minutes": 30},
-        {"key": "W11-P4", "type": "practice", "priority": "core", "title": "Repair the highest-impact observed gap", "minutes": 30},
-        {"key": "W11-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the repaired mechanism closed-book", "minutes": 30, "source_item_key": "W11-P4"}
+        {
+          "key": "V4-W11-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run an OpenAI-shaped ChatGPT design mock",
+          "minutes": 180,
+          "why": "A target-shaped prompt tests product, serving, realtime, and reliability judgment together.",
+          "done_when": "Run 45 minutes with no solution aids, compare with the breakdown and current role evidence, and write the highest-impact miss.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design ChatGPT",
+              "action_label": "Open after mock",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/chatgpt",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "OpenAI L5 Guide",
+              "action_label": "Open role guide",
+              "url": "https://www.hellointerview.com/guides/openai/l5",
+              "language": ""
+            }
+          ],
+          "stretch_actions": [
+            {
+              "title": "Run additional target-shaped Python mocks",
+              "done_when": "Complete up to three additional mocks with full postmortems.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Run two additional target-shaped design mocks",
+              "done_when": "Complete two mocks with no solution aids and grade both.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen the top target-company gap",
+              "done_when": "Study one source and rerun the failed section in a changed scenario.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/chatgpt",
+              "resource_label": "Design ChatGPT"
+            },
+            {
+              "title": "Run an additional target behavioral mock",
+              "done_when": "Complete one recorded mock with at least ten follow-ups.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest stretch-session gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Google-shaped collaborative-docs mock",
+          "minutes": 180,
+          "why": "Collaborative editing tests delivery, realtime state, conflict handling, and depth.",
+          "done_when": "Run 45 minutes with no solution aids, compare with the breakdown and current role evidence, and write the highest-impact miss.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Design Google Docs",
+              "action_label": "Open after mock",
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/google-docs",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Google L5 Guide",
+              "action_label": "Open role guide",
+              "url": "https://www.hellointerview.com/guides/google/l5",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Python coding mock on a maximum path",
+          "minutes": 180,
+          "why": "A difficult tree mock tests recursive return meaning under pressure.",
+          "done_when": "Solve in Python under interview conditions, manually test edge cases, and complete a written postmortem.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "124 · Binary Tree Maximum Path Sum",
+              "action_label": "Start Python mock",
+              "url": "https://leetcode.com/problems/binary-tree-maximum-path-sum/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a Python coding mock on task scheduling",
+          "minutes": 180,
+          "why": "Scheduling tests greedy state and complexity under time pressure.",
+          "done_when": "Solve in Python under interview conditions, manually test edge cases, and complete a written postmortem.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "621 · Task Scheduler",
+              "action_label": "Start Python mock",
+              "url": "https://leetcode.com/problems/task-scheduler/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run two target-company behavioral practices",
+          "minutes": 180,
+          "why": "Company calibration should change emphasis while keeping claims grounded in real evidence.",
+          "done_when": "Run two recorded practices with senior-scope follow-ups and revise only where the evidence supports it.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "OpenAI L5 Guide",
+              "action_label": "Open OpenAI guide",
+              "url": "https://www.hellointerview.com/guides/openai/l5",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Google L5 Guide",
+              "action_label": "Open Google guide",
+              "url": "https://www.hellointerview.com/guides/google/l5",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Anthropic Questions",
+              "action_label": "Open Anthropic evidence",
+              "url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Calibrate against active target-company evidence",
+          "minutes": 120,
+          "why": "Target preparation should follow an actual role or loop, not generic company mythology.",
+          "done_when": "Compare the active role with current OpenAI, Google, or Anthropic evidence and write the three preparation changes it justifies.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "OpenAI L5 Guide",
+              "action_label": "Open OpenAI guide",
+              "url": "https://www.hellointerview.com/guides/openai/l5",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Google L5 Guide",
+              "action_label": "Open Google guide",
+              "url": "https://www.hellointerview.com/guides/google/l5",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Anthropic Questions",
+              "action_label": "Open Anthropic evidence",
+              "url": "https://www.hellointerview.com/community/questions/company/Anthropic",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the highest-impact target-company gap",
+          "minutes": 120,
+          "why": "Target calibration matters only when it changes observed performance.",
+          "done_when": "Repair the top gap from a trusted source and create no more than three focused recall prompts.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Open practice hub",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W11-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct the repaired target mechanism",
+          "minutes": 60,
+          "source_item_key": "V4-W11-P3",
+          "why": "A repaired target gap should transfer to a changed scenario.",
+          "done_when": "Explain the repaired mechanism and apply it to one altered target-company prompt without notes.",
+          "resources": []
+        }
       ]
     },
     {
@@ -210,15 +3010,438 @@
       "full_title": "Final simulations and readiness evidence",
       "overview_title": "Final simulations",
       "items": [
-        {"key": "W12-P1", "type": "practice", "priority": "core", "title": "Complete two final full system design mocks", "minutes": 240},
-        {"key": "W12-P2", "type": "practice", "priority": "core", "title": "Walk through three final coding prompts verbally and explain pattern choice, invariants, complexity, and edge cases", "minutes": 150},
-        {"key": "W12-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: complete one final timed coding mock", "minutes": 120},
-        {"key": "W12-P3", "type": "practice", "priority": "core", "title": "Complete two final behavioral practices", "minutes": 120},
-        {"key": "W12-L1", "type": "learn", "priority": "core", "title": "Evaluate external performance against every readiness gate", "minutes": 30},
-        {"key": "W12-P4", "type": "practice", "priority": "core", "title": "Write the remaining-gap plan for scheduled interviews", "minutes": 30},
-        {"key": "W12-R1", "type": "retrieve", "priority": "recurring", "title": "Reconstruct the final repaired mechanism closed-book", "minutes": 30, "source_item_key": "W12-P4"}
+        {
+          "key": "V4-W12-P1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run an unseen guided system design mock",
+          "minutes": 180,
+          "why": "An unseen prompt is stronger readiness evidence than rehearsing a known breakdown.",
+          "done_when": "Choose an unseen prompt, run 45 minutes with no solution aids, then grade and debrief it.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Choose unseen prompt",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ],
+          "stretch_actions": [
+            {
+              "title": "Run additional final Python mocks",
+              "done_when": "Complete up to three additional mocks with full postmortems.",
+              "minutes": 480,
+              "resource_url": "https://leetcode.com/problemset/",
+              "resource_label": "LeetCode problem set"
+            },
+            {
+              "title": "Run two additional final design mocks",
+              "done_when": "Complete two mocks with no solution aids and grade both.",
+              "minutes": 360,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Hello Interview Guided Practice"
+            },
+            {
+              "title": "Deepen the top remaining gap",
+              "done_when": "Study one source and rerun the failed section in a changed scenario.",
+              "minutes": 180,
+              "resource_url": "https://www.hellointerview.com/practice/overview",
+              "resource_label": "Guided Practice"
+            },
+            {
+              "title": "Run one additional behavioral mock",
+              "done_when": "Complete one recorded mock with at least ten follow-ups.",
+              "minutes": 120,
+              "resource_url": "https://www.hellointerview.com/learn/behavioral",
+              "resource_label": "Hello Interview Behavioral"
+            },
+            {
+              "title": "Harvest final stretch gaps",
+              "done_when": "Record gaps and add no more than three source-grounded recall prompts.",
+              "minutes": 60,
+              "resource_url": "",
+              "resource_label": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-P2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a second unseen guided system design mock",
+          "minutes": 180,
+          "why": "A second unseen prompt checks repeatability rather than one good performance.",
+          "done_when": "Choose a different unseen prompt, run 45 minutes with no solution aids, then grade and debrief it.",
+          "resources": [
+            {
+              "kind": "prompt",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Choose second prompt",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-C1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a final Python coding mock on parsing",
+          "minutes": 180,
+          "why": "A final difficult mock measures implementation, narration, and testing together.",
+          "done_when": "Solve in Python under interview conditions, manually test edge cases, and complete a written postmortem.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "224 · Basic Calculator",
+              "action_label": "Start Python mock",
+              "url": "https://leetcode.com/problems/basic-calculator/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-C2",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run a final Python coding mock on dynamic programming",
+          "minutes": 180,
+          "why": "A second final mock checks repeatable state derivation under pressure.",
+          "done_when": "Solve in Python under interview conditions, manually test edge cases, and complete a written postmortem.",
+          "resources": [
+            {
+              "kind": "problem",
+              "provider": "LeetCode",
+              "label": "139 · Word Break",
+              "action_label": "Start Python mock",
+              "url": "https://leetcode.com/problems/word-break/",
+              "language": "Python"
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-B1",
+          "type": "practice",
+          "priority": "core",
+          "title": "Run the final behavioral mock",
+          "minutes": 180,
+          "why": "A complete mock tests story selection, evidence, clarity, and follow-up resilience.",
+          "done_when": "Record a full behavioral mock, answer follow-ups, and preserve only evidence-backed revisions.",
+          "resources": [
+            {
+              "kind": "lesson",
+              "provider": "Hello Interview",
+              "label": "Behavioral Interview Guide",
+              "action_label": "Open guide",
+              "url": "https://www.hellointerview.com/learn/behavioral",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-L1",
+          "type": "learn",
+          "priority": "core",
+          "title": "Evaluate readiness from external evidence",
+          "minutes": 120,
+          "why": "Scores inside Unprompted cannot certify coding, full-design, or behavioral performance.",
+          "done_when": "Evaluate every readiness gate using mock artifacts, list evidence for each claim, and mark every unsupported claim as a remaining gap.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Open practice hub",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-P3",
+          "type": "practice",
+          "priority": "core",
+          "title": "Repair the final highest-impact gap",
+          "minutes": 120,
+          "why": "The closing plan should follow evidence rather than force artificial completion.",
+          "done_when": "Repair the top remaining gap from a trusted source and write the next-step plan for any scheduled interview.",
+          "resources": [
+            {
+              "kind": "reference",
+              "provider": "Hello Interview",
+              "label": "Guided Practice",
+              "action_label": "Open practice hub",
+              "url": "https://www.hellointerview.com/practice/overview",
+              "language": ""
+            }
+          ]
+        },
+        {
+          "key": "V4-W12-R1",
+          "type": "retrieve",
+          "priority": "recurring",
+          "title": "Reconstruct the final repaired mechanism",
+          "minutes": 60,
+          "source_item_key": "V4-W12-P3",
+          "why": "The final repair should remain usable after its source is closed.",
+          "done_when": "Explain the repaired mechanism and apply it to one altered scenario without notes.",
+          "resources": []
+        }
       ]
     }
   ],
-  "dependencies": []
+  "dependencies": [
+    {
+      "prerequisite_key": "V4-W1-L1",
+      "dependent_key": "V4-W1-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The blind design practices the delivery framework."
+    },
+    {
+      "prerequisite_key": "V4-W1-L2",
+      "dependent_key": "V4-W1-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The design requires an API boundary."
+    },
+    {
+      "prerequisite_key": "V4-W1-L3",
+      "dependent_key": "V4-W1-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The design must handle request failure."
+    },
+    {
+      "prerequisite_key": "V4-W1-P1",
+      "dependent_key": "V4-W1-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W2-L1",
+      "dependent_key": "V4-W2-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The design applies access-pattern modeling."
+    },
+    {
+      "prerequisite_key": "V4-W2-L2",
+      "dependent_key": "V4-W2-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The design applies index selection."
+    },
+    {
+      "prerequisite_key": "V4-W2-P1",
+      "dependent_key": "V4-W2-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W3-L1",
+      "dependent_key": "V4-W3-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The design applies caching mechanics."
+    },
+    {
+      "prerequisite_key": "V4-W3-L2",
+      "dependent_key": "V4-W3-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The design applies partition mechanics."
+    },
+    {
+      "prerequisite_key": "V4-W3-P1",
+      "dependent_key": "V4-W3-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W4-L1",
+      "dependent_key": "V4-W4-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The timeline design applies fan-out and read scaling."
+    },
+    {
+      "prerequisite_key": "V4-W4-L2",
+      "dependent_key": "V4-W4-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The aggregator applies write scaling."
+    },
+    {
+      "prerequisite_key": "V4-W4-P1",
+      "dependent_key": "V4-W4-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W5-L1",
+      "dependent_key": "V4-W5-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Ticket inventory requires contention control."
+    },
+    {
+      "prerequisite_key": "V4-W5-L2",
+      "dependent_key": "V4-W5-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Payment recovery applies workflow mechanics."
+    },
+    {
+      "prerequisite_key": "V4-W5-P1",
+      "dependent_key": "V4-W5-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W6-L1",
+      "dependent_key": "V4-W6-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Messaging applies realtime recovery."
+    },
+    {
+      "prerequisite_key": "V4-W6-L2",
+      "dependent_key": "V4-W6-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "File sync applies blob mechanics."
+    },
+    {
+      "prerequisite_key": "V4-W6-P1",
+      "dependent_key": "V4-W6-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W7-L1",
+      "dependent_key": "V4-W7-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The auction requires an explicit storage choice."
+    },
+    {
+      "prerequisite_key": "V4-W7-L2",
+      "dependent_key": "V4-W7-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The auction may use cache structures deliberately."
+    },
+    {
+      "prerequisite_key": "V4-W7-P1",
+      "dependent_key": "V4-W7-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W8-L4",
+      "dependent_key": "V4-W8-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The full design applies rate-limit mechanics."
+    },
+    {
+      "prerequisite_key": "V4-W8-L2",
+      "dependent_key": "V4-W8-P2",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The search design applies index mechanics."
+    },
+    {
+      "prerequisite_key": "V4-W8-P1",
+      "dependent_key": "V4-W8-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W9-L4",
+      "dependent_key": "V4-W9-P1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The Uber design applies proximity indexing."
+    },
+    {
+      "prerequisite_key": "V4-W9-P1",
+      "dependent_key": "V4-W9-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Gap repair follows observed practice."
+    },
+    {
+      "prerequisite_key": "V4-W10-P1",
+      "dependent_key": "V4-W10-L1",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "The baseline uses completed mock evidence."
+    },
+    {
+      "prerequisite_key": "V4-W10-L1",
+      "dependent_key": "V4-W10-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Repair follows ranked baseline gaps."
+    },
+    {
+      "prerequisite_key": "V4-W11-L1",
+      "dependent_key": "V4-W11-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Target repair follows explicit calibration."
+    },
+    {
+      "prerequisite_key": "V4-W12-L1",
+      "dependent_key": "V4-W12-P3",
+      "kind": "hard",
+      "source": "imported",
+      "confidence": "high",
+      "rationale": "Final repair follows the evidence review."
+    }
+  ]
 }

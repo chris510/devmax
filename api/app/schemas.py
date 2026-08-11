@@ -540,6 +540,29 @@ class PracticeDebriefSubmitIn(BaseModel):
     text: str = Field(min_length=1, max_length=12_000)
 
 
+class StudyPlanResource(BaseModel):
+    kind: str
+    provider: str
+    label: str
+    action_label: str
+    url: str
+    language: str = ""
+
+
+class StudyPlanStretchAction(BaseModel):
+    title: str
+    done_when: str
+    minutes: int = Field(gt=0)
+    resource_url: str = ""
+    resource_label: str = ""
+
+
+class MappedRecallCard(BaseModel):
+    topic: str
+    card_id: uuid.UUID | None = None
+    availability_label: str
+
+
 class ItemDetail(BaseModel):
     id: uuid.UUID
     plan_id: uuid.UUID
@@ -557,6 +580,9 @@ class ItemDetail(BaseModel):
     source_excerpt: str
     source_label: str
     recall_supported: bool = False
+    resources: list[StudyPlanResource] = Field(default_factory=list)
+    mapped_recall_cards: list[MappedRecallCard] = Field(default_factory=list)
+    stretch_actions: list[StudyPlanStretchAction] = Field(default_factory=list)
     notes: str
     study_block_label: str
     study_block_weekday: int | None

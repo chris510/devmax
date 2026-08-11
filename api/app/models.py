@@ -610,6 +610,14 @@ class StudyPlanItem(SQLModel, table=True):
     __table_args__ = (
         Index("ix_study_plan_items_week", "week_id", "guide_order"),
         Index("ix_study_plan_items_plan", "plan_id"),
+        Index(
+            "uq_study_plan_items_curriculum_key",
+            "plan_id",
+            "curriculum_key",
+            unique=True,
+            postgresql_where=text("curriculum_key IS NOT NULL"),
+            sqlite_where=text("curriculum_key IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -622,6 +630,11 @@ class StudyPlanItem(SQLModel, table=True):
     # Original order within the phase, from the guide. Rule 4 of the scheduler
     # preserves it, so it survives every replan.
     guide_order: int
+
+    # Stable only within a plan. First-party manifests use this to update the
+    # same item in place across curriculum versions without relying on an
+    # editable title. Generic imports leave it null.
+    curriculum_key: str | None = None
 
     type: str
     priority: str
@@ -653,6 +666,21 @@ class StudyPlanItem(SQLModel, table=True):
     # What the importer understood this line of the guide to mean. Shown in the
     # estimate and retrieval audits so a wrong reading is correctable.
     parser_interpretation: str = ""
+    # Actionable external study material. These are navigation/provenance only:
+    # a URL to paid material is never treated as an answer basis.
+    resources: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    # Exact card topics associated with this activity. Resolution is read-only;
+    # Study Plan never creates a link to or mutates an existing card.
+    mapped_recall_topics: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    # Optional extra work shown outside the scheduled-capacity calculation.
+    # It has no completion state and cannot create carry-forward debt.
+    stretch_actions: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
     # Generated retrieval only: when the user approved it during Preview. A
     # generated retrieval item with no approval never reaches a created plan.
     approved_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)

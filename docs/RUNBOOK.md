@@ -228,23 +228,32 @@ production. Note the guard sits *inside* the `--fixtures` branch
 `--start-date` but the dedupe.
 
 The base manifest contains 54 conversational cards: six in each of nine teaching
-weeks. After the launch cohort, progress in the app: completing a supported Learn
-item opens its recall-card proposal gate automatically. Completing an eligible
-Practice item first offers an optional, unscored debrief; only a submitted debrief
-plus the trusted source excerpt can open its proposal gate. The user reviews and
-accepts useful cards before any are created. Do not activate later cohorts just
-because their calendar week arrived. Coding patterns live in `api/library/` and
-company overlays live in `api/modules/`; neither is part of the base seed.
+weeks. The first-party Study Plan maps every topic to the exact Learn item that
+teaches it. An owned, active, grounded card opens through Card History after the
+item is complete; a missing or unapproved future card displays `Not ready` and is
+not created or activated. Completing an eligible Practice item can still offer an
+optional, unscored debrief; only a submitted debrief plus trusted answer authority
+can open its proposal gate. Do not activate later cohorts just because their
+calendar week arrived. Coding patterns live in `api/library/` and company overlays
+live in `api/modules/`; neither is part of the base seed.
 
-The second command bootstraps the separate first-party Study Plan that powers
-Today's plan line and the phase/week timeline. It makes no LLM call and never
-reads or writes cards, sessions, scores, mastery, or SM-2 state. The committed
-manifest is 12 weeks, four phases, 84 plan items, and 12 hours per week. Its
-stable seed key makes the command idempotent. `--activate` refuses to displace
-another active plan; pause that plan in the app first if switching is intentional.
-Use the Monday containing the first practice day so Week 1 aligns with the
-timeline's calendar labels. It is a one-time deployment action; ongoing study and
-card creation happen in the app.
+The second command bootstraps or upgrades the separate first-party Study Plan
+that powers Today's plan line and the phase/week timeline. It makes no LLM call
+and never writes cards, sessions, scores, mastery, or SM-2 state. The committed
+version-4 manifest is 12 weeks, four phases, 116 scheduled items, and exactly 20
+scheduled hours per week, plus an untracked 20-hour stretch menu. Its stable seed
+key and reviewed version-2/version-3 aliases identify the existing lineage; the
+manifest version makes a same-version rerun a no-op. The one-time legacy→v4
+content overhaul upgrades in place only when the old plan is still pristine—
+Week 1/revision 1 with no progress, notes,
+reminders, overrides, or advancement—and otherwise fails without changing it.
+This prevents old item keys from attaching history to unrelated new work. On
+that pristine legacy upgrade only, the explicit `--start-date` becomes the
+corrected plan start; later version upgrades preserve it.
+`--activate`
+refuses to displace another active plan when creating a new one; pause that plan
+in the app first if switching is intentional. Use the Monday containing the first
+practice day so Week 1 aligns with the timeline's calendar labels.
 
 There is no combined wipe-and-seed operation. Card retirement is explicit and
 destructive; Study Plan bootstrap is additive and independent.

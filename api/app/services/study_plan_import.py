@@ -488,6 +488,11 @@ def _read_items(
                 "week_index": week_index,
                 "phase_index": phase_of_week[week_index],
                 "guide_order": int(entry.get("guide_order", len(items) + 1)),
+                # Stable first-party identity. The generic model importer does
+                # not emit this field, so imported user plans remain null.
+                "curriculum_key": (
+                    str(entry.get("curriculum_key", "")).strip() or None
+                ),
                 "type": str(entry.get("type", "learn")),
                 "priority": str(entry.get("priority", PRIORITY_CORE)),
                 "full_title": str(entry.get("full_title", "")).strip(),
@@ -510,6 +515,11 @@ def _read_items(
                 "recall_supported": bool(entry.get("recall_supported")) and bool(quoted),
                 "source_offsets_ok": offsets_ok,
                 "parser_interpretation": str(entry.get("parser_interpretation", "")).strip(),
+                "resources": _read_resources(entry.get("resources")),
+                "mapped_recall_topics": _read_mapped_topics(
+                    entry.get("mapped_recall_topics")
+                ),
+                "stretch_actions": _read_stretch_actions(entry.get("stretch_actions")),
             }
         )
 
@@ -526,6 +536,65 @@ def _read_items(
 
     items.sort(key=lambda i: (i["week_index"], i["guide_order"], i["key"]))
     return items
+
+
+def _read_resources(value: Any) -> list[dict[str, str]]:
+    """Normalize optional navigation metadata without granting it authority."""
+    if not isinstance(value, list):
+        return []
+    resources: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, Mapping):
+            continue
+        resource = {
+            "kind": str(entry.get("kind", "")).strip(),
+            "provider": str(entry.get("provider", "")).strip(),
+            "label": str(entry.get("label", "")).strip(),
+            "action_label": str(entry.get("action_label", "")).strip(),
+            "url": str(entry.get("url", "")).strip(),
+            "language": str(entry.get("language", "")).strip(),
+        }
+        if resource["label"] and resource["url"]:
+            resources.append(resource)
+    return resources
+
+
+def _read_mapped_topics(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    topics: list[str] = []
+    seen: set[str] = set()
+    for entry in value:
+        topic = str(entry).strip()
+        folded = topic.casefold()
+        if topic and folded not in seen:
+            topics.append(topic)
+            seen.add(folded)
+    return topics
+
+
+def _read_stretch_actions(value: Any) -> list[dict[str, Any]]:
+    """Advisory work only; these minutes never enter scheduler arithmetic."""
+    if not isinstance(value, list):
+        return []
+    actions: list[dict[str, Any]] = []
+    for entry in value:
+        if not isinstance(entry, Mapping):
+            continue
+        try:
+            minutes = int(entry.get("minutes", 0))
+        except (TypeError, ValueError):
+            continue
+        action = {
+            "title": str(entry.get("title", "")).strip(),
+            "done_when": str(entry.get("done_when", "")).strip(),
+            "minutes": minutes,
+            "resource_url": str(entry.get("resource_url", "")).strip(),
+            "resource_label": str(entry.get("resource_label", "")).strip(),
+        }
+        if action["title"] and action["done_when"] and minutes > 0:
+            actions.append(action)
+    return actions
 
 
 def _read_dependencies(raw: Mapping[str, Any], item_keys: set[str]) -> list[dict[str, Any]]:
@@ -877,6 +946,7 @@ def build_plan_rows(preview: Mapping[str, Any], *, start_date: date) -> dict[str
             phase_id=week.phase_id,
             week_id=week.id,
             guide_order=entry["guide_order"],
+            curriculum_key=entry["curriculum_key"],
             type=entry["type"],
             priority=entry["priority"],
             full_title=entry["full_title"],
@@ -891,6 +961,9 @@ def build_plan_rows(preview: Mapping[str, Any], *, start_date: date) -> dict[str
             source_excerpt=entry["source_excerpt"],
             recall_supported=entry["recall_supported"],
             parser_interpretation=entry["parser_interpretation"],
+            resources=entry["resources"],
+            mapped_recall_topics=entry["mapped_recall_topics"],
+            stretch_actions=entry["stretch_actions"],
             approved_at=now_approved if entry["origin"] == ORIGIN_GENERATED else None,
         )
 

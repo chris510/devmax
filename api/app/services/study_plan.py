@@ -33,6 +33,7 @@ from app.models import (
     FOUNDER_USER_ID,
     ITEM_COMPLETE,
     ITEM_PENDING,
+    ITEM_REMOVED,
     MODE_FIXED,
     PLAN_ACTIVE,
     PLAN_ARCHIVED,
@@ -728,12 +729,14 @@ def duplicate_plan(source: StudyPlan, graph: PlanGraph, *, start_date: date) -> 
         week_map[week.id] = copy
 
     item_map: dict[uuid.UUID, StudyPlanItem] = {}
-    for item in graph.items:
+    copyable_items = [item for item in graph.items if item.status != ITEM_REMOVED]
+    for item in copyable_items:
         copy = StudyPlanItem(
             plan_id=new_plan.id,
             phase_id=phase_map[item.phase_id].id,
             week_id=week_map[item.week_id].id,
             guide_order=item.guide_order,
+            curriculum_key=item.curriculum_key,
             type=item.type,
             priority=item.priority,
             full_title=item.full_title,
@@ -752,6 +755,9 @@ def duplicate_plan(source: StudyPlan, graph: PlanGraph, *, start_date: date) -> 
             source_excerpt=item.source_excerpt,
             recall_supported=item.recall_supported,
             parser_interpretation=item.parser_interpretation,
+            resources=list(item.resources),
+            mapped_recall_topics=list(item.mapped_recall_topics),
+            stretch_actions=list(item.stretch_actions),
             approved_at=item.approved_at,
             notes=item.notes,
             # Reset reminders: a copy must not start firing notifications.
@@ -763,7 +769,7 @@ def duplicate_plan(source: StudyPlan, graph: PlanGraph, *, start_date: date) -> 
         item_map[item.id] = copy
 
     # Second pass: self-references resolve only once every copy exists.
-    for item in graph.items:
+    for item in copyable_items:
         if item.source_item_id and item.source_item_id in item_map:
             item_map[item.id].source_item_id = item_map[item.source_item_id].id
 
@@ -831,7 +837,9 @@ def week_status(week_index: int, current_week_index: int, all_complete: bool) ->
 
 
 def core_progress(items: Iterable[StudyPlanItem]) -> tuple[int, int]:
-    core = [i for i in items if i.priority == PRIORITY_CORE]
+    core = [
+        i for i in items if i.priority == PRIORITY_CORE and i.status != ITEM_REMOVED
+    ]
     return sum(1 for i in core if i.status == ITEM_COMPLETE), len(core)
 
 

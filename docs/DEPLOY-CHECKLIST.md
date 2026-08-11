@@ -119,11 +119,15 @@ curriculum week metadata. **Use `--file`, never
 renders a bogus resume banner on a real card.
 
 The Study Plan command is a second, independent seed: 12 weeks, four phases,
-84 plan items, no LLM call, and no card or SM-2 writes. It is idempotent and
-refuses to replace an already-active plan. After bootstrap, completing a supported
-lesson in the app opens its recall-card gate automatically. The user reviews and
-accepts the useful proposals there; no weekly activation script or calendar-driven
-card creation is part of the normal workflow.
+116 scheduled items, exactly 20 scheduled hours per week, an untracked optional
+20-hour stretch menu, no LLM call, and no card or SM-2 writes. A same-version
+rerun is a no-op. The one-time version-2/version-3→v4 upgrade preserves the same
+plan id but requires the old plan to be pristine; any progress, personalization,
+override, or advancement makes it fail closed rather than misattach history. Its
+explicit `--start-date` becomes the corrected start for that legacy upgrade. Completing a
+mapped Learn item makes its already-owned, grounded cards actionable through Card
+History. Missing or unapproved future cards remain `Not ready`; they are never
+created or activated by elapsed calendar time.
 
 **`APNS_USE_SANDBOX` and the app's `aps-environment` must flip together.**
 Development ↔ `true`, production ↔ `false`. A TestFlight build gets a *production*

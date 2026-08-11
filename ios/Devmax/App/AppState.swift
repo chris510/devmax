@@ -528,6 +528,26 @@ final class AppState: ObservableObject {
         path.append(.learning(cardID))
     }
 
+    /// A Study Plan mapping can name the recall card before the Card row has
+    /// been created. Only a committed mapping gets a History destination; a
+    /// pending mapping stays visible but inert on the item screen.
+    @discardableResult
+    func openMappedRecallCard(
+        _ mapping: PlanMappedRecallCard, itemComplete: Bool
+    ) -> Bool {
+        guard itemComplete, let cardID = mapping.cardId else { return false }
+        path.append(.history(cardID))
+        return true
+    }
+
+    /// History is normally entered from Today, but Study Plan mappings push it
+    /// on top of an item. Keep the label honest without changing pop behavior.
+    var historyBackLabel: String {
+        guard path.count > 1 else { return "← Today" }
+        if case .planItem = path[path.count - 2] { return "← Plan item" }
+        return "← Today"
+    }
+
     func recallNotBefore(cardID: UUID, fallback: String?) -> String? {
         learningRecallNotBefore[cardID] ?? fallback
     }
@@ -1024,10 +1044,32 @@ final class AppState: ObservableObject {
             path.append(.planOverview(planID))
             path.append(.planWeek(planID, 4))
 
-        case "study-plan-item":
+        case "study-plan-item", "study-plan-item-actionable",
+             "study-plan-item-python", "study-plan-item-linked":
+            let routedWeekIndex = route == "study-plan-item" ? 4 : 1
+            let routedItemID: UUID
+            switch route {
+            case "study-plan-item-actionable", "study-plan-item-linked":
+                routedItemID = StudyPlanFixtures.week1DeliveryItemID
+            case "study-plan-item-python":
+                routedItemID = StudyPlanFixtures.week1PythonItemID
+            default:
+                routedItemID = itemID
+            }
             path.append(.planOverview(planID))
-            path.append(.planWeek(planID, 4))
-            path.append(.planItem(planID, itemID))
+            path.append(.planWeek(planID, routedWeekIndex))
+            path.append(.planItem(planID, routedItemID))
+            await waitUntil { plan.itemLoad == .ready }
+            switch route {
+            case "study-plan-item-actionable":
+                plan.item = StudyPlanFixtures.actionableItemDetail(planID: planID)
+            case "study-plan-item-python":
+                plan.item = StudyPlanFixtures.pythonItemDetail(planID: planID)
+            case "study-plan-item-linked":
+                plan.item = StudyPlanFixtures.linkedItemDetail(planID: planID)
+            default:
+                break
+            }
 
         case "study-plan-debrief-offer", "study-plan-debrief-idle",
              "study-plan-debrief-mic-unavailable", "study-plan-debrief-recording",

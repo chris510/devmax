@@ -159,6 +159,54 @@ struct PracticeDebrief: Codable, Equatable, Identifiable {
     var isSubmitted: Bool { submittedAt != nil }
 }
 
+/// One exact place to do the work described by a Study Plan item.
+///
+/// Resources are additive on the wire so an updated client can still read a
+/// server while it rolls forward. `language` is present for coding work (for
+/// example, Python) and omitted for ordinary lessons and references.
+struct PlanItemResource: Codable, Equatable, Identifiable {
+    var id: String { [kind, provider, label, url].joined(separator: "|") }
+    let kind: String
+    let provider: String
+    let label: String
+    let actionLabel: String
+    let url: String
+    let language: String?
+
+    var metaLine: String {
+        [provider, language]
+            .compactMap { value in
+                guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { return nil }
+                return value
+            }
+            .joined(separator: " · ")
+    }
+}
+
+/// Optional work for a high-capacity week. These rows are advice, not plan
+/// items: they have no status, reminder, estimate accounting, or completion
+/// write, and therefore can never block progress.
+struct PlanStretchAction: Codable, Equatable, Identifiable {
+    var id: String { [title, resourceUrl].joined(separator: "|") }
+    let title: String
+    let doneWhen: String
+    let minutes: Int
+    let resourceUrl: String
+    let resourceLabel: String
+}
+
+/// The explicit edge from completed learning to Unprompted recall.
+///
+/// A mapping may exist before its Card row does. `cardId == nil` is rendered as
+/// not ready and is never turned into a dead navigation target.
+struct PlanMappedRecallCard: Codable, Equatable, Identifiable {
+    var id: String { cardId?.uuidString ?? topic }
+    let topic: String
+    let cardId: UUID?
+    let availabilityLabel: String
+}
+
 struct PlanItemDetail: Codable, Equatable, Identifiable {
     let id: UUID
     let planId: UUID
@@ -189,7 +237,17 @@ struct PlanItemDetail: Codable, Equatable, Identifiable {
     let practiceDebrief: PracticeDebrief?
     let blockedBy: [String]
 
+    // Optional for a safe rolling deploy. The server sends [] once it owns the
+    // new contract; an older server omits these keys entirely.
+    var resources: [PlanItemResource]?
+    var stretchActions: [PlanStretchAction]?
+    var mappedRecallCards: [PlanMappedRecallCard]?
+
     var isComplete: Bool { status == "complete" }
+
+    var actionableResources: [PlanItemResource] { resources ?? [] }
+    var advisoryStretchActions: [PlanStretchAction] { stretchActions ?? [] }
+    var recallMappings: [PlanMappedRecallCard] { mappedRecallCards ?? [] }
 
     /// `WEEK 4 · TECHNOLOGIES · CORE · COMPLETE`. No internal id, ever.
     var metaLine: String {

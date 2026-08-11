@@ -577,3 +577,23 @@ Study Plan is consistent with the rest of the app, and the density budget it was
 designed against is a default-type budget. Making the app scale is a typography
 change affecting all 29 existing screenshot comparisons and is deliberately not
 bundled into this feature.
+
+## 29. First-party resources, mapped cards, and Stretch are additive item metadata
+
+V3.4 models generic imported work and counts Core, Optional, and Recurring rows
+inside one weekly capacity. The reviewed first-party curriculum also needs to
+name the exact Premium lesson or coding problem, reveal which approved recall
+concepts follow that lesson, and offer up to twenty extra hours without turning a
+motivated week into permanent overdue debt.
+
+Those concerns are therefore item metadata, not new scheduler lanes:
+`resources` opens external work without completing it; `mapped_recall_topics`
+resolves existing active cards read-only after completion; and
+`stretch_actions` has no status, reminder, progress, forecast, or carry-forward
+semantics. The dependable 1,200 minutes remain ordinary scheduled rows and obey
+all V3.4 allocation rules. The additional 1,200 minutes are explicitly advisory.
+
+This also keeps the card boundary intact. A mapped topic is not a
+`study_plan_card_link`, never creates or activates a card, and cannot make an
+unapproved card actionable. External Premium URLs are navigation and provenance,
+not trusted answer text.

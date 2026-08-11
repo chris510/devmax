@@ -235,4 +235,99 @@ final class WireFormatTests: XCTestCase {
         XCTAssertEqual(ScoreStyle.Tier.of(4), .solid)
         XCTAssertEqual(ScoreStyle.Tier.of(5), .solid)
     }
+
+    // MARK: - Actionable Study Plan items
+
+    private static let actionablePlanItem = Data(#"""
+    {"id":"00000000-0000-0000-0000-000000000010",
+     "plan_id":"00000000-0000-0000-0000-000000000001",
+     "full_title":"Practice sliding window in Python","phase_title":"Foundations",
+     "week_index":1,"type":"practice","priority":"core","status":"pending",
+     "why_it_matters":"State the invariant before coding.",
+     "done_when":"Solve one problem in Python without a hint.",
+     "estimate_minutes":90,"estimate_source":"imported","estimate_confidence":"high",
+     "source_excerpt":"","source_label":"","recall_supported":true,"notes":"",
+     "study_block_label":"","study_block_weekday":null,
+     "study_block_minute_of_day":null,"study_block_reminder_on":false,
+     "completed_at":null,"reopened_at":null,"linked_card_ids":[],
+     "card_proposals_available":false,"practice_debrief_eligible":false,
+     "practice_debrief":null,"blocked_by":[],
+     "resources":[{"kind":"lesson","provider":"Hello Interview",
+       "label":"Sliding window","action_label":"Open pattern",
+       "url":"https://www.hellointerview.com/learn/code/sliding-window/overview",
+       "language":"Python"}],
+     "stretch_actions":[{"title":"Solve an unseen medium",
+       "done_when":"Write the invariant first.","minutes":45,
+       "resource_url":"https://leetcode.com/problemset/",
+       "resource_label":"LeetCode · Problemset"}],
+     "mapped_recall_cards":[{"topic":"Sliding-window invariant","card_id":null,
+       "availability_label":"available after practice"}]}
+    """#.utf8)
+
+    func testActionableStudyPlanFieldsDecodeFromSnakeCase() throws {
+        let item = try LiveAPI.decoder.decode(
+            PlanItemDetail.self, from: Self.actionablePlanItem
+        )
+
+        XCTAssertEqual(item.actionableResources.first?.provider, "Hello Interview")
+        XCTAssertEqual(item.actionableResources.first?.language, "Python")
+        XCTAssertEqual(item.advisoryStretchActions.first?.minutes, 45)
+        XCTAssertNil(item.recallMappings.first?.cardId)
+        XCTAssertEqual(item.recallMappings.first?.topic, "Sliding-window invariant")
+    }
+
+    func testActionableStudyPlanFieldsRemainOptionalDuringRollout() throws {
+        let json = Data(#"""
+        {"id":"00000000-0000-0000-0000-000000000010",
+         "plan_id":"00000000-0000-0000-0000-000000000001",
+         "full_title":"Legacy item","phase_title":"Foundations","week_index":1,
+         "type":"learn","priority":"core","status":"pending",
+         "why_it_matters":"","done_when":"","estimate_minutes":30,
+         "estimate_source":"imported","estimate_confidence":"high",
+         "source_excerpt":"","source_label":"","recall_supported":false,"notes":"",
+         "study_block_label":"","study_block_weekday":null,
+         "study_block_minute_of_day":null,"study_block_reminder_on":false,
+         "completed_at":null,"reopened_at":null,"linked_card_ids":[],
+         "card_proposals_available":false,"practice_debrief_eligible":false,
+         "practice_debrief":null,"blocked_by":[]}
+        """#.utf8)
+
+        let item = try LiveAPI.decoder.decode(PlanItemDetail.self, from: json)
+
+        XCTAssertTrue(item.actionableResources.isEmpty)
+        XCTAssertTrue(item.advisoryStretchActions.isEmpty)
+        XCTAssertTrue(item.recallMappings.isEmpty)
+    }
+
+    func testExternalStudyLinksRejectExecutableAndFileSchemes() {
+        XCTAssertNotNil(SafeExternalURL.parse("https://www.hellointerview.com/learn/code"))
+        XCTAssertNotNil(SafeExternalURL.parse("http://localhost:8083/source"))
+        XCTAssertNil(SafeExternalURL.parse("javascript:alert(1)"))
+        XCTAssertNil(SafeExternalURL.parse("file:///tmp/answer.txt"))
+        XCTAssertNil(SafeExternalURL.parse("not a url"))
+    }
+
+    func testActionableRoutesMirrorWeekOneCurriculumMetadata() {
+        let lesson = StudyPlanFixtures.actionableItemDetail()
+        let python = StudyPlanFixtures.pythonItemDetail()
+        let week = StudyPlanFixtures.week1Detail()
+
+        XCTAssertEqual(lesson.weekIndex, 1)
+        XCTAssertEqual(lesson.phaseTitle, "Foundations")
+        XCTAssertEqual(lesson.estimateMinutes, 180)
+        XCTAssertEqual(lesson.estimateSource, "imported")
+        XCTAssertTrue(lesson.recallSupported)
+        XCTAssertEqual(lesson.recallMappings.count, 3)
+
+        XCTAssertEqual(python.weekIndex, 1)
+        XCTAssertEqual(python.phaseTitle, "Foundations")
+        XCTAssertEqual(python.estimateMinutes, 120)
+        XCTAssertFalse(python.recallSupported)
+        XCTAssertTrue(python.recallMappings.isEmpty)
+        XCTAssertEqual(python.actionableResources.count, 3)
+
+        XCTAssertEqual(week.index, 1)
+        XCTAssertEqual(week.plannedMinutes, 1_200)
+        XCTAssertEqual(week.capacityMinutes, 1_200)
+    }
 }
