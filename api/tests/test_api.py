@@ -140,6 +140,56 @@ async def test_score_of_two_returns_a_follow_up(client, db, stub_llm):
     assert session.follow_up_used is True
 
 
+async def test_exact_initial_answer_replay_returns_the_committed_probe_without_rescoring(
+    client, db, stub_llm
+):
+    """A lost follow-up response cannot turn one answer into two scored turns."""
+    score, calls = stub_llm
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    card = make_card(repetitions=1, interval_days=6, ease_factor=2.36)
+    db.add(card)
+    await db.commit()
+    schedule_before = (
+        card.ease_factor,
+        card.interval_days,
+        card.repetitions,
+        card.next_review_at,
+    )
+
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{start['session_id']}/answers"
+    payload = {"text": "the exact saved initial answer"}
+    first = await client.post(endpoint, headers=API_HEADERS, json=payload)
+    replay = await client.post(endpoint, headers=API_HEADERS, json=payload)
+
+    assert first.json() == replay.json() == {
+        "status": "follow_up",
+        "question": "One more — why?",
+    }
+    assert len(calls) == 1
+    session = await db.get(Session, uuid.UUID(start["session_id"]))
+    await db.refresh(session)
+    await db.refresh(card)
+    assert session.status == STATUS_AWAITING_FOLLOW_UP
+    assert session.answer_text == payload["text"]
+    assert session.follow_up_answer == ""
+    assert (
+        card.ease_factor,
+        card.interval_days,
+        card.repetitions,
+        card.next_review_at,
+    ) == schedule_before
+
+    # A genuinely new turn still follows the existing V1 completion path.
+    score.result = completed(3, mastery_summary="recovered after one probe")
+    completed_response = await client.post(
+        endpoint, headers=API_HEADERS, json={"text": "the missing causal link"}
+    )
+    assert completed_response.json()["status"] == "complete"
+    assert len(calls) == 2
+    assert calls[1]["follow_up_answer"] == "the missing causal link"
+
+
 async def test_follow_up_used_is_passed_so_a_second_probe_cannot_happen(client, db, stub_llm):
     """Maximum one follow-up per session, enforced by the server."""
     score, calls = stub_llm

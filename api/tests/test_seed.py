@@ -191,7 +191,18 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     # seed.py raises KeyError without a topic, and dedupes on it.
     assert all(e.get("topic") and e.get("target_week") for e in entries)
     assert len({e["topic"] for e in entries}) == len(entries)
-    assert all(e["source_url"].startswith("https://www.hellointerview.com/") for e in entries)
+    practitioner_sources = [
+        entry
+        for entry in entries
+        if entry["source_url"].startswith("https://www.infoq.com/")
+    ]
+    assert len(practitioner_sources) == 1
+    assert practitioner_sources[0]["evidence"] == "primary_practitioner_talk"
+    assert all(
+        entry["source_url"].startswith("https://www.hellointerview.com/")
+        or entry in practitioner_sources
+        for entry in entries
+    )
     assert all(e.get("activation_prerequisite") for e in entries)
     assert all(
         e["category"] == "System Design Pattern" for e in entries if 4 <= e["target_week"] <= 6
@@ -214,12 +225,27 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
 def test_the_week_one_grounding_pack_is_approved_and_complete() -> None:
     entries = study_plan()
     approved = [entry for entry in entries if entry.get("grounding_status") == "approved"]
-    remaining = [entry for entry in entries if entry.get("grounding_status") != "approved"]
+    drafts = [entry for entry in entries if entry.get("grounding_status") == "draft_review"]
+    remaining = [entry for entry in entries if "grounding_status" not in entry]
 
     assert len(approved) == 6
     assert {entry["target_week"] for entry in approved} == {1}
     assert all(_validated_grounding(entry) is not None for entry in approved)
-    assert all("grounding_status" not in entry for entry in remaining)
+    assert len(drafts) == 1
+    assert drafts[0]["target_week"] == 4
+    assert drafts[0]["topic"].startswith("Fan-out mechanics")
+    assert all(
+        drafts[0].get(field)
+        for field in (
+            "canonical_question",
+            "source_url",
+            "source_section",
+            "source_label",
+            "answer_basis",
+            "answer_rubric",
+        )
+    )
+    assert len(remaining) == 47
 
 
 def test_an_approved_conversational_seed_still_requires_every_grounding_field() -> None:

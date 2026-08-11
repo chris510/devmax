@@ -2,7 +2,7 @@
   "seed_key": "devmax.senior-backend-12-week.v3",
   "version": 3,
   "source_guide_path": "../../docs/CURRICULUM.md",
-  "source_guide_sha256": "bee8d445876700928de6b17efa890a248f1345dd3bdffa5b5a22e861cf1dc2ec",
+  "source_guide_sha256": "803835cc6782cde79f922979bb6aa1fc10efeeca813886f8ed9cdb5ebe3e8c3a",
   "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Work is ordered by transfer value: delivery and system-design foundations in Weeks 1–3; reusable architecture patterns and full-design application in Weeks 4–6; concrete backend technologies in Weeks 7–9; interview simulation and target-company calibration in Weeks 10–12.\n\nEach week reserves twelve focused hours across system design, coding-mechanism understanding, behavioral preparation, plan-local closed-book retrieval, and optional desk implementation. Global Unprompted card reviews continue separately in Today and never determine Study Plan progress. Coding-pattern recognition, invariants, state transitions, complexity, and failure modes are core; writing code is optional and desk-only. Full system designs happen outside the conversational review flow. Every external practice session ends with a gap harvest, and readiness is based on observed external performance rather than card scores.",
   "guide_sha256": "82add1246cccc9058a2704ad9d691abfa6f91309df9ea82fd0dbd38a8799bde2",
   "title": "Senior backend interview preparation",
@@ -91,7 +91,7 @@
       "overview_title": "Scaling patterns",
       "items": [
         {"key": "W4-L1", "type": "learn", "priority": "core", "title": "Study read scaling, write scaling, replica lag, fan-out, backpressure, and queues", "minutes": 120},
-        {"key": "W4-P1", "type": "practice", "priority": "core", "title": "Complete a read-heavy full system design", "minutes": 120},
+        {"key": "W4-P1", "type": "practice", "priority": "core", "title": "Complete a historical Twitter home-timeline design with hybrid high-fanout handling", "why": "Tests a skew-driven architecture split instead of a one-size-fits-all feed.", "done_when": "Deliver the complete feed design, explain ordinary write-time materialization and the high-fanout read-time merge, and identify one lag, ordering, or overload failure.", "minutes": 120},
         {"key": "W4-P2", "type": "practice", "priority": "core", "title": "Complete a write-heavy full system design", "minutes": 120},
         {"key": "W4-P3", "type": "learn", "priority": "core", "title": "Understand graph, topological-ordering, and shortest-path recognition cues, invariants, complexity, and failure modes", "minutes": 120},
         {"key": "W4-O1", "type": "practice", "priority": "optional", "title": "Optional desk implementation: solve graph, dependency-ordering, and shortest-path problems", "minutes": 150},

@@ -411,10 +411,21 @@
     "topic": "Fan-out mechanics: choosing write-time materialization or read-time aggregation",
     "category": "System Design Pattern",
     "target_week": 4,
-    "source_url": "https://www.hellointerview.com/learn/system-design/patterns/scaling-reads",
-    "source_section": "Scaling Reads",
-    "activation_prerequisite": "Complete Scaling Reads",
-    "evidence": "official_course"
+    "source_url": "https://www.infoq.com/presentations/Twitter-Timeline-Scalability/",
+    "source_section": "Timelines at Scale — home-timeline fan-out and high-fanout read-time merge",
+    "activation_prerequisite": "Watch Timelines at Scale and complete the historical Twitter home-timeline practice",
+    "evidence": "primary_practitioner_talk",
+    "grounding_status": "draft_review",
+    "source_label": "Twitter · Timelines at Scale (Raffi Krikorian, 2013)",
+    "answer_basis": "Historical Twitter used fan-out-on-write for ordinary authors: the fan-out path materialized Tweet references into followers' home-timeline caches, making ordinary reads cheap. When an author's fan-out made per-follower writes pathological, that author was excluded from ordinary write-time materialization. At read time, the Timeline Service retrieved the cached timeline and merged in recent Tweets from followed high-fanout authors. This hybrid bounds exceptional publish work and keeps the common read path materialized, but adds read-time fetch and merge work plus a freshness and availability boundary for that secondary path.",
+    "answer_rubric": {
+      "mechanism": "Retains write-time materialization for ordinary authors, skips per-follower fan-out for the exceptional high-fanout author, and merges that author's recent posts into the materialized timeline at read time.",
+      "acceptable_alternative": "Hybrid push/pull, fan-out-on-write/fan-out-on-read, or precompute-plus-read-merge terminology is equivalent if both the high-fanout write exclusion and read-time merge are explicit.",
+      "trade_off": "Explains that the split bounds pathological write amplification while adding read latency and computation, and that the operating point should come from observed workload and SLOs rather than a universal follower count.",
+      "failure_mode": "Recognizes that a slow or unavailable secondary fetch can make the timeline stale or incomplete, and that the server-side merge must preserve ordering while materialization or fan-out is lagging.",
+      "misconception": "Putting every per-follower write behind an asynchronous queue does not remove the exceptional total work; queueing and hybrid fan-out selection solve different problems."
+    },
+    "canonical_question": "In Twitter's historical home-timeline design, ordinary posts were fanned into followers' cached timelines. A very high-fanout author posts. How should the publish and timeline-read paths change, and what trade-off does that make?"
   },
   {
     "topic": "Scaling writes: partitioning, batching, and asynchronous ingestion under skew",

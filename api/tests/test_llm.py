@@ -381,6 +381,8 @@ def make_response(payload=None, *, text: str | None = None):
             cache_read_input_tokens=0,
             cache_creation_input_tokens=0,
         ),
+        stop_reason="end_turn",
+        _request_id="msg_test",
     )
 
 
@@ -444,6 +446,40 @@ async def test_v2_parse_failure_makes_exactly_one_transmission(monkeypatch):
         )
 
     assert len(client.calls) == 1
+
+
+async def test_v2_usage_and_outcome_logs_are_attributed_to_the_contract(
+    monkeypatch, caplog
+):
+    client = FakeClient([make_response(recalled(4))])
+    monkeypatch.setattr(llm, "_no_retry_client", lambda: client)
+
+    with caplog.at_level("INFO", logger="app.services.llm"):
+        await llm.score_answer(
+            **SCORE_ARGS, follow_up_used=True, scoring_contract_version=2
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    usage = next(message for message in messages if message.startswith("llm model="))
+    assert "purpose=score_v2" in usage
+    assert "stop=end_turn" in usage
+    assert "request_id=msg_test" in usage
+    assert "llm purpose=score_v2 event=scoring_outcome status=complete" in messages
+
+
+async def test_v2_contract_failure_is_attributed_for_invalid_rate(monkeypatch, caplog):
+    client = FakeClient([make_response(recalled(2, probe=""))])
+    monkeypatch.setattr(llm, "_no_retry_client", lambda: client)
+
+    with caplog.at_level("WARNING", logger="app.services.llm"):
+        with pytest.raises(llm.LLMError):
+            await llm.score_answer(
+                **SCORE_ARGS, follow_up_used=False, scoring_contract_version=2
+            )
+
+    assert "llm purpose=score_v2 event=invalid_contract" in [
+        record.getMessage() for record in caplog.records
+    ]
 
 
 async def test_effort_is_omitted_when_unset(fake_client, monkeypatch):
