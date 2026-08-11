@@ -2,9 +2,9 @@ import uuid
 from datetime import date, datetime, time
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from app.services.scoring_contract import ScoreKind, ScoringContractVersion
+from app.services.scoring_contract import CoachingFocus, ScoreKind, ScoringContractVersion
 
 
 class DueCard(BaseModel):
@@ -76,6 +76,9 @@ class TierCard(BaseModel):
     topic: str
     mastery_summary: str
     last_score: int | None = None
+    recall_score: int | None = None
+    score_kind: ScoreKind = "unrated"
+    scoring_contract_version: ScoringContractVersion | None = None
     days_overdue: int | None = None
 
 
@@ -86,10 +89,22 @@ class Overview(BaseModel):
 
 
 class AnswerRubric(BaseModel):
-    mechanism: str = Field(min_length=1, max_length=4000)
+    mechanism: str = Field(
+        min_length=1,
+        max_length=4000,
+        validation_alias=AliasChoices("mechanism", "essential_account"),
+    )
     acceptable_alternative: str = Field(min_length=1, max_length=4000)
-    trade_off: str = Field(min_length=1, max_length=4000)
-    failure_mode: str = Field(min_length=1, max_length=4000)
+    trade_off: str = Field(
+        min_length=1,
+        max_length=4000,
+        validation_alias=AliasChoices("trade_off", "depth_extension"),
+    )
+    failure_mode: str = Field(
+        min_length=1,
+        max_length=4000,
+        validation_alias=AliasChoices("failure_mode", "boundary_extension"),
+    )
     misconception: str = Field(min_length=1, max_length=4000)
 
 
@@ -205,6 +220,9 @@ class CompleteOut(BaseModel):
     # will be graded against, and the client cannot reliably reconstruct it — on a
     # resumed follow-up session the client's copy of "the question" is the probe.
     reattempt_prompt: str | None = None
+    coaching_offered: bool = False
+    coaching_focus: CoachingFocus | None = None
+    coaching_question: str | None = None
 
 
 class ReattemptOut(BaseModel):
@@ -216,6 +234,12 @@ class ReattemptOut(BaseModel):
     """
 
     mastery_summary: str
+
+
+class CoachingOut(BaseModel):
+    focus: CoachingFocus
+    question: str
+    feedback: str
 
 
 class DeviceTokenIn(BaseModel):

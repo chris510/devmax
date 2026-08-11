@@ -371,11 +371,22 @@ struct PublicOnboardingView: View {
     }
 
     private var scoring: some View {
-        PublicPage(kicker: "YOUR FIRST SCORE", title: "One number, three checks.") {
-            Text("The 0–5 score summarizes this answer. Devmax always checks Accuracy, Depth, and Boundaries; only Accuracy changes the spaced-repetition interval.").publicBody()
-            PublicMaterialCard(title: "Accuracy", meta: "WAS THE ESSENTIAL IDEA CORRECT?")
-            PublicMaterialCard(title: "Depth", meta: "DID YOU EXPLAIN HOW OR WHY?")
-            PublicMaterialCard(title: "Boundaries", meta: "DID YOU RECOGNIZE CONDITIONS OR LIMITS?")
+        PublicPage(
+            kicker: "YOUR FIRST SCORE",
+            title: app.usesRecallContract
+                ? "One recall score. Coaching without grades."
+                : "One number, three checks."
+        ) {
+            if app.usesRecallContract {
+                Text("Recall measures whether the essential account was correct. It is the only signal that schedules the topic. When useful, you can practice going deeper or testing a boundary — without turning those answers into mastery scores.").publicBody()
+                PublicMaterialCard(title: "Recall", meta: "DID YOU RETRIEVE THE ESSENTIAL IDEA?")
+                PublicMaterialCard(title: "Go deeper", meta: "OPTIONAL QUALITATIVE PRACTICE AFTER A PASS")
+            } else {
+                Text("The 0–5 score summarizes this answer. Devmax always checks Accuracy, Depth, and Boundaries; only Accuracy changes the spaced-repetition interval.").publicBody()
+                PublicMaterialCard(title: "Accuracy", meta: "WAS THE ESSENTIAL IDEA CORRECT?")
+                PublicMaterialCard(title: "Depth", meta: "DID YOU EXPLAIN HOW OR WHY?")
+                PublicMaterialCard(title: "Boundaries", meta: "DID YOU RECOGNIZE CONDITIONS OR LIMITS?")
+            }
             PublicNote("Your answer and relevant study material are sent for scoring. Devmax receives the transcript, not an audio recording.")
         } footer: {
             PrimaryButton(title: "Set my review pace") { flow.step = .pace }

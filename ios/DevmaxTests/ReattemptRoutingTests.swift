@@ -26,18 +26,26 @@ final class ReattemptRoutingTests: XCTestCase {
 
         var answerCalls: [String] = []
         var reattemptCalls: [String] = []
+        var coachingCalls: [String] = []
         var startStubs: [UUID: [StartStub]] = [:]
 
         func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome {
             answerCalls.append(text)
             return .complete(
-                score: 1, feedback: "", nextReviewAt: "2026-07-30", intervalDays: 1,
-                practice: false, reattemptOffered: true, reattemptPrompt: "In your words — why?"
+                score: 1, recallScore: 1, scoringContractVersion: 1,
+                feedback: "", nextReviewAt: "2026-07-30", intervalDays: 1,
+                practice: false, reattemptOffered: true, reattemptPrompt: "In your words — why?",
+                coachingOffered: false, coachingFocus: nil, coachingQuestion: nil
             )
         }
 
         func submitReattempt(sessionID: UUID, text: String) async throws {
             reattemptCalls.append(text)
+        }
+
+        func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome {
+            coachingCalls.append(text)
+            return CoachingOutcome(focus: "depth", question: "Why?", feedback: "Grounded.")
         }
 
         func due() async throws -> [DueCard] { [] }
@@ -197,6 +205,22 @@ final class ReattemptRoutingTests: XCTestCase {
         XCTAssertTrue(api.reattemptCalls.isEmpty)
     }
 
+    @MainActor
+    func testSpokenQualitativeCoachingUsesOnlyTheCoachingEndpoint() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        state.sessionID = UUID()
+        state.stage = .recordingCoaching
+
+        await state.submit("the deeper causal link")
+
+        XCTAssertEqual(api.coachingCalls, ["the deeper causal link"])
+        XCTAssertTrue(api.answerCalls.isEmpty)
+        XCTAssertTrue(api.reattemptCalls.isEmpty)
+        XCTAssertEqual(state.stage, .result)
+        XCTAssertEqual(state.thread.last?.role, .coachingFeedback)
+    }
+
     /// The stage carries which turn an answer belongs to. Flattening it before
     /// `submit` reads it is what the routing bug did.
     func testRecordingStagesCarryTheirTurn() {
@@ -205,11 +229,14 @@ final class ReattemptRoutingTests: XCTestCase {
         XCTAssertFalse(Stage.recording.isReattempt)
         XCTAssertFalse(Stage.recordingFollowUp.isReattempt)
         XCTAssertFalse(Stage.processing.isReattempt, "the flattened stage loses turn 3")
+        XCTAssertTrue(Stage.recordingCoaching.isCoaching)
+        XCTAssertFalse(Stage.recordingCoaching.isReattempt)
 
         // And the failure rewind lands back on the right turn.
         XCTAssertEqual(Stage.recordingReattempt.answeringTwin, .reattempt)
         XCTAssertEqual(Stage.recordingFollowUp.answeringTwin, .followUp)
         XCTAssertEqual(Stage.recording.answeringTwin, .idle)
+        XCTAssertEqual(Stage.recordingCoaching.answeringTwin, .coaching)
     }
 
     // MARK: - A question that never loaded

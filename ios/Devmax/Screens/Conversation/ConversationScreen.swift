@@ -228,7 +228,7 @@ struct ConversationScreen: View {
                 .lineSpacing(25 * 1.32 - 25 * 1.2)
                 .foregroundStyle(Theme.textStrong)
                 .fixedSize(horizontal: false, vertical: true)
-        case .followUpQuestion, .reattemptQuestion:
+        case .followUpQuestion, .reattemptQuestion, .coachingQuestion:
             // Both are prefaced so they read as probes rather than new cards, and
             // both use the same serif 21 — the preface carries the distinction,
             // not a new type role.
@@ -237,6 +237,12 @@ struct ConversationScreen: View {
                 .tracking(-0.21)
                 .lineSpacing(21 * 1.32 - 21 * 1.2)
                 .foregroundStyle(Theme.textStrong)
+                .fixedSize(horizontal: false, vertical: true)
+        case .coachingFeedback:
+            Text(entry.text)
+                .font(TypeRole.scoreFeedback)
+                .lineSpacing(18.5 * 1.5 - 18.5 * 1.2)
+                .foregroundStyle(Theme.textSerif)
                 .fixedSize(horizontal: false, vertical: true)
         case .answer:
             Text(entry.text)
@@ -383,6 +389,16 @@ struct ConversationScreen: View {
             if state.result?.reattemptOffered == true {
                 Button { state.beginReattempt() } label: {
                     Text("Say it back in your own words")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.meta)
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: Metrics.minTapTarget)
+            }
+
+            if state.result?.coachingOffered == true {
+                Button { state.beginCoaching() } label: {
+                    Text("Go one level deeper")
                         .font(TypeRole.secondaryAction)
                         .foregroundStyle(Theme.meta)
                 }

@@ -14,7 +14,8 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from app.config import get_settings
-from app.services.card_lifecycle import RUBRIC_FIELDS
+from app.services.card_lifecycle import RUBRIC_FIELDS, scoring_rubric
+from app.services.scoring_contract import SCORING_CONTRACT_V1, SCORING_CONTRACT_V2
 
 # The gate is a product rule, not a prompt detail, so it is owned by the domain
 # module and interpolated into the rubric below. One source of truth for the five
@@ -116,6 +117,62 @@ that would fit any answer to this question is a failure.
 Return only the structured fields. No preamble, no code fences, no commentary.\
 """
 
+SCORING_V2_RUBRIC = f"""\
+You are grading a short, source-grounded spaced-repetition recall session. The \
+supplied answer basis, excerpt, and approved rubric are the authority; do not \
+replace them with unsupported outside knowledge.
+
+Return one numeric learning signal: `recall_score`, an integer 0-5 measuring \
+whether the learner reconstructed the essential account:
+  0 no recall attempted or fundamentally wrong
+  1 names the topic but the essential account is incorrect
+  2 partial account with major gaps or a confidently wrong detail
+  3 essential account correct after allowing one bounded omission
+  4 correct and substantially complete essential account
+  5 precise, complete essential account in the learner's own framing
+
+Do not grade Depth or Boundaries. Do not derive a composite. Do not score \
+fluency, length, confidence, enthusiasm, trade-off detail, exceptions, or failure \
+cases unless the canonical question makes one part of the essential account.
+
+{VOICE_TRANSCRIPT_RULE}
+
+`feedback` is one to three direct sentences:
+  - recall_score <= 2: state the correct essential account plainly.
+  - recall_score >= 3: identify what essential account was successfully recalled \
+and, if needed, the single bounded omission that kept it from the next score.
+Never congratulate and never imply a numeric Depth or Boundaries grade.
+
+`follow_up_question` is non-empty only when recall_score is 1-3 and the transcript \
+says no follow-up has been used. In that case, write one short probe prefaced \
+"One more — " at the single missing essential link. For recall_score 0 or 4-5, \
+or after a follow-up was already used, return an empty string. The server validates \
+this policy and structurally caps the session at one scored follow-up.
+
+`mastery_summary` replaces the prior rolling summary. Write one or two sentences \
+in lowercase fragment style describing essential-account recall only: unaided, \
+recovered after one probe, or still missing. Never claim strong/weak Depth or \
+Boundaries.
+
+Return only the structured fields. No preamble, no code fences, no commentary.\
+"""
+
+COACHING_RUBRIC = f"""\
+You are responding to one optional, post-result qualitative practice turn. The \
+learner's Recall score is already final and the schedule is already written. This \
+turn must never produce a score, pass/fail label, mastery claim, or scheduling \
+recommendation.
+
+Use only the trusted answer basis and approved rubric. Give one or two concise \
+sentences of `coaching_feedback` about what the learner's answer usefully explains \
+and the single most important grounded point it still misses. Never congratulate. \
+Never call the answer strong/weak mastery.
+
+{VOICE_TRANSCRIPT_RULE}
+
+Return only the structured field. No preamble, no code fences, no commentary.\
+"""
+
 QUESTION_RUBRIC = """\
 You are running a short, source-grounded spaced-repetition recall session. The \
 subject may be software engineering, law, medicine, anatomy, or another field that \
@@ -189,13 +246,18 @@ Return only the structured fields. No preamble, no code fences, no commentary.\
 
 
 def _grounding_context(
-    answer_basis: str = "", answer_rubric: dict[str, str] | None = None
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
+    *,
+    v2_aliases: bool = False,
 ) -> list[str]:
     """Stable labels for trusted, card-specific authority in LLM user turns."""
     lines: list[str] = []
     if answer_basis.strip():
         lines.append(f"TRUSTED ANSWER BASIS: {answer_basis.strip()}")
-    rubric = answer_rubric or {}
+    # Keep the active V1 prompt byte-for-byte compatible during dark launch.
+    # V2 scoring and qualitative coaching opt into the subject-agnostic aliases.
+    rubric = scoring_rubric(answer_rubric) if v2_aliases else (answer_rubric or {})
     if any(str(value).strip() for value in rubric.values()):
         lines.append("APPROVED ANSWER RUBRIC:")
         lines.extend(
@@ -585,6 +647,30 @@ SCORE_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+SCORE_V2_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "recall_score": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+        "feedback": {"type": "string"},
+        "follow_up_question": {"type": "string"},
+        "mastery_summary": {"type": "string"},
+    },
+    "required": [
+        "recall_score",
+        "feedback",
+        "follow_up_question",
+        "mastery_summary",
+    ],
+    "additionalProperties": False,
+}
+
+COACHING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"coaching_feedback": {"type": "string"}},
+    "required": ["coaching_feedback"],
+    "additionalProperties": False,
+}
+
 
 # Stray wrappers the model occasionally leaves on `mastery_summary` — matched
 # straight quotes, curly quotes, and CJK brackets have all shown up in live output
@@ -649,9 +735,10 @@ class ScoreResult:
     feedback: str = ""
     follow_up_question: str | None = None
     mastery_summary: str = ""
+    scoring_contract_version: int = SCORING_CONTRACT_V1
 
     def __post_init__(self) -> None:
-        """A completed result always carries all three axes.
+        """A completed result carries exactly the numeric signals its contract owns.
 
         Enforced here so `submit_answer` can read `accuracy` without a
         fallback. The fallback it replaces was a path where the composite reached
@@ -661,9 +748,15 @@ class ScoreResult:
         """
         if self.status != "complete":
             return
-        missing = [axis for axis in AXES if getattr(self, axis) is None]
+        required = AXES if self.scoring_contract_version == SCORING_CONTRACT_V1 else ("accuracy",)
+        missing = [axis for axis in required if getattr(self, axis) is None]
         if missing:
             raise ValueError(f"a complete ScoreResult is missing {', '.join(missing)}")
+        if self.scoring_contract_version == SCORING_CONTRACT_V2:
+            if self.depth is not None or self.boundaries is not None:
+                raise ValueError("a V2 ScoreResult cannot carry numeric secondary axes")
+            if self.score != self.accuracy:
+                raise ValueError("a V2 ScoreResult score must equal Recall/Accuracy")
 
 
 @dataclass(frozen=True)
@@ -679,6 +772,11 @@ class ReattemptResult:
     mastery_summary: str
 
 
+@dataclass(frozen=True)
+class CoachingResult:
+    feedback: str
+
+
 @lru_cache
 def _client() -> AsyncAnthropic:
     """One client per process — each construction opens its own connection pool.
@@ -690,6 +788,16 @@ def _client() -> AsyncAnthropic:
     return AsyncAnthropic(
         api_key=get_settings().anthropic_api_key,
         max_retries=SDK_MAX_RETRIES,
+        timeout=SDK_TIMEOUT_SECONDS,
+    )
+
+
+@lru_cache
+def _no_retry_client() -> AsyncAnthropic:
+    """V2 scoring/coaching client: one transmission, no hidden SDK retry."""
+    return AsyncAnthropic(
+        api_key=get_settings().anthropic_api_key,
+        max_retries=0,
         timeout=SDK_TIMEOUT_SECONDS,
     )
 
@@ -752,8 +860,9 @@ async def _complete(
     max_tokens: int,
     cache_rubric: bool = False,
     stream: bool = False,
+    retry: bool = True,
 ) -> dict[str, Any]:
-    """One structured-output call, with a single retry on a parse failure.
+    """One structured-output call, optionally retrying one parse failure.
 
     ``output_config.format`` constrains the response to the schema, so the parse
     below should never fail — the retry is a backstop for a model or config that
@@ -782,10 +891,11 @@ async def _complete(
         cache_rubric=cache_rubric,
     )
 
-    client = _client()
+    client = _client() if retry else _no_retry_client()
     last_error: Exception | None = None
 
-    for attempt in (1, 2):
+    attempts = (1, 2) if retry else (1,)
+    for attempt in attempts:
         started = time.monotonic()
         try:
             if stream:
@@ -818,7 +928,7 @@ async def _complete(
                 "llm model=%s attempt=%d unparseable output: %r", model, attempt, text[:200]
             )
 
-    raise LLMError(f"{model} returned unparseable output twice") from last_error
+    raise LLMError(f"{model} returned unparseable output") from last_error
 
 
 async def generate_question(
@@ -910,6 +1020,48 @@ def build_score_answer_completion(
     }
 
 
+def build_score_v2_completion(
+    *,
+    model: str,
+    effort: str | None,
+    topic: str,
+    mastery_summary: str,
+    question_asked: str,
+    answer_text: str,
+    follow_up_question: str | None,
+    follow_up_answer: str,
+    follow_up_used: bool,
+    answer_anchor: str = "",
+    source_excerpt: str = "",
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Prepare the single-signal V2 call without sending it."""
+    transcript = [
+        f"Topic: {topic}",
+        f"Rolling Recall summary: {mastery_summary}" if mastery_summary else None,
+        f"A good answer should include: {answer_anchor}" if answer_anchor else None,
+        f"Source excerpt: {source_excerpt}" if source_excerpt else None,
+        *_grounding_context(answer_basis, answer_rubric, v2_aliases=True),
+        f"FOLLOW-UP ALREADY USED: {'yes' if follow_up_used else 'no'}",
+        "",
+        f"QUESTION: {question_asked}",
+        f"ANSWER: {answer_text}",
+    ]
+    if follow_up_used and follow_up_question:
+        transcript += [f"FOLLOW-UP: {follow_up_question}", f"ANSWER: {follow_up_answer}"]
+
+    return {
+        "model": model,
+        "effort": effort,
+        "rubric": SCORING_V2_RUBRIC,
+        "user_content": "\n".join(t for t in transcript if t is not None),
+        "schema": SCORE_V2_SCHEMA,
+        "max_tokens": 2048,
+        "retry": False,
+    }
+
+
 async def score_answer(
     *,
     topic: str,
@@ -923,10 +1075,16 @@ async def score_answer(
     source_excerpt: str = "",
     answer_basis: str = "",
     answer_rubric: dict[str, str] | None = None,
+    scoring_contract_version: int = SCORING_CONTRACT_V1,
 ) -> ScoreResult:
     """Score the session so far, or return a probe if the answer was partial."""
     settings = get_settings()
-    completion = build_score_answer_completion(
+    builder = (
+        build_score_v2_completion
+        if scoring_contract_version == SCORING_CONTRACT_V2
+        else build_score_answer_completion
+    )
+    completion = builder(
         model=settings.scoring_model,
         effort=settings.scoring_effort,
         topic=topic,
@@ -943,6 +1101,8 @@ async def score_answer(
     )
     data = await _complete(**completion)
 
+    if scoring_contract_version == SCORING_CONTRACT_V2:
+        return parse_score_v2_result(data, follow_up_used=follow_up_used)
     return parse_score_result(data, follow_up_used=follow_up_used)
 
 
@@ -973,6 +1133,100 @@ def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreRe
         feedback=str(data.get("feedback", "")).strip(),
         mastery_summary=clean_summary(str(data.get("mastery_summary", ""))),
     )
+
+
+def parse_score_v2_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreResult:
+    """Apply the Recall-only V2 contract to provider-structured data."""
+    try:
+        recall = int(data["recall_score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LLMError(f"V2 scoring response had no usable Recall score: {data!r}") from exc
+    if recall not in range(6):
+        raise LLMError(f"V2 scoring response had out-of-range Recall: {recall}")
+
+    probe = str(data.get("follow_up_question", "")).strip()
+    should_probe = not follow_up_used and FOLLOW_UP_LOW <= recall <= FOLLOW_UP_HIGH
+    if should_probe and not probe:
+        raise LLMError("V2 scoring response omitted its required Recall follow-up")
+    if not should_probe and probe:
+        raise LLMError("V2 scoring response returned a forbidden Recall follow-up")
+    if should_probe:
+        return ScoreResult(
+            status="follow_up",
+            follow_up_question=probe,
+            scoring_contract_version=SCORING_CONTRACT_V2,
+        )
+
+    feedback = str(data.get("feedback", "")).strip()
+    mastery_summary = clean_summary(str(data.get("mastery_summary", "")))
+    if not feedback or not mastery_summary:
+        raise LLMError("V2 scoring response omitted required completion text")
+    return ScoreResult(
+        status="complete",
+        score=recall,
+        accuracy=recall,
+        feedback=feedback,
+        mastery_summary=mastery_summary,
+        scoring_contract_version=SCORING_CONTRACT_V2,
+    )
+
+
+def build_coaching_completion(
+    *,
+    model: str,
+    effort: str | None,
+    topic: str,
+    focus: str,
+    question: str,
+    answer: str,
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    transcript = [
+        f"Topic: {topic}",
+        f"Qualitative focus: {focus}",
+        *_grounding_context(answer_basis, answer_rubric, v2_aliases=True),
+        "",
+        f"COACHING QUESTION: {question}",
+        f"LEARNER ANSWER: {answer}",
+    ]
+    return {
+        "model": model,
+        "effort": effort,
+        "rubric": COACHING_RUBRIC,
+        "user_content": "\n".join(transcript),
+        "schema": COACHING_SCHEMA,
+        "max_tokens": 512,
+        "retry": False,
+    }
+
+
+async def coach_answer(
+    *,
+    topic: str,
+    focus: str,
+    question: str,
+    answer: str,
+    answer_basis: str = "",
+    answer_rubric: dict[str, str] | None = None,
+) -> CoachingResult:
+    settings = get_settings()
+    data = await _complete(
+        **build_coaching_completion(
+            model=settings.scoring_model,
+            effort=settings.scoring_effort,
+            topic=topic,
+            focus=focus,
+            question=question,
+            answer=answer,
+            answer_basis=answer_basis,
+            answer_rubric=answer_rubric,
+        )
+    )
+    feedback = str(data.get("coaching_feedback", "")).strip()
+    if not feedback:
+        raise LLMError("qualitative coaching returned empty feedback")
+    return CoachingResult(feedback=feedback)
 
 
 async def import_guide(

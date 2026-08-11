@@ -143,7 +143,9 @@ final class WireFormatTests: XCTestCase {
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
 
-        guard case .complete(let score, _, _, let interval, let practice, _, _) = outcome else {
+        guard case .complete(
+            let score, _, _, _, _, let interval, let practice, _, _, _, _, _
+        ) = outcome else {
             return XCTFail("expected a completed outcome, got \(outcome)")
         }
         XCTAssertEqual(score, 4)
@@ -162,7 +164,9 @@ final class WireFormatTests: XCTestCase {
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
 
-        guard case .complete(_, _, _, _, let practice, let reattempt, let prompt) = outcome else {
+        guard case .complete(
+            _, _, _, _, _, _, let practice, let reattempt, let prompt, _, _, _
+        ) = outcome else {
             return XCTFail("expected a completed outcome, got \(outcome)")
         }
         XCTAssertFalse(practice)
@@ -184,7 +188,9 @@ final class WireFormatTests: XCTestCase {
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
 
-        guard case .complete(let score, _, _, _, _, let reattempt, let prompt) = outcome else {
+        guard case .complete(
+            let score, _, _, _, _, _, _, let reattempt, let prompt, _, _, _
+        ) = outcome else {
             return XCTFail("expected a completed outcome, got \(outcome)")
         }
         XCTAssertEqual(score, 1)
@@ -192,6 +198,28 @@ final class WireFormatTests: XCTestCase {
         // The server composes the prompt: on a resumed follow-up session the client
         // cannot reconstruct it, because its only `.question` entry is the probe.
         XCTAssertEqual(prompt, "In your words — What moves?")
+    }
+
+    func testAV2OutcomeCarriesRecallAndQualitativeCoaching() throws {
+        let json = Data(#"""
+        {"status":"complete","score":4,"recall_score":4,
+         "scoring_contract_version":2,"feedback":"Essential idea recalled.",
+         "next_review_at":"2026-07-30","interval_days":6,"practice":false,
+         "coaching_offered":true,"coaching_focus":"depth",
+         "coaching_question":"One level deeper — why does it work?"}
+        """#.utf8)
+
+        let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
+        guard case .complete(
+            let score, let recall, let version, _, _, _, _, _, _, let offered,
+            let focus, let question
+        ) = outcome else { return XCTFail("expected V2 completion") }
+        XCTAssertEqual(score, 4)
+        XCTAssertEqual(recall, 4)
+        XCTAssertEqual(version, 2)
+        XCTAssertTrue(offered)
+        XCTAssertEqual(focus, "depth")
+        XCTAssertEqual(question, "One level deeper — why does it work?")
     }
 
     // MARK: - Coverage's tier vocabulary

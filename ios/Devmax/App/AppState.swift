@@ -135,6 +135,19 @@ final class AppState: ObservableObject {
 
     init(api: DevmaxAPI = APIConfig.client) {
         self.api = api
+        if DebugFlags.shared.scoringV2 {
+            settings.activeScoringContractVersion = 2
+        }
+    }
+
+    var usesRecallContract: Bool { settings.usesRecallContract }
+
+    func displayScore(_ card: DueCard) -> Int? {
+        usesRecallContract ? card.recallScore : card.lastScore
+    }
+
+    func displayScore(_ card: CardSummary) -> Int? {
+        usesRecallContract ? card.recallScore : card.lastScore
     }
 
     // MARK: - Today
@@ -142,13 +155,13 @@ final class AppState: ObservableObject {
     /// The cards Start will walk, honouring the active mastery-band filter.
     var visibleQueue: [DueCard] {
         guard let filter else { return queue }
-        return queue.filter { ScoreStyle.Band.of($0.lastScore) == filter }
+        return queue.filter { ScoreStyle.Band.of(displayScore($0)) == filter }
     }
 
     /// Bands present in the queue, in fixed order, with zero-count bands omitted.
     var bands: [(band: ScoreStyle.Band, count: Int)] {
         ScoreStyle.Band.allCases.compactMap { band in
-            let count = queue.filter { ScoreStyle.Band.of($0.lastScore) == band }.count
+            let count = queue.filter { ScoreStyle.Band.of(displayScore($0)) == band }.count
             return count > 0 ? (band, count) : nil
         }
     }
@@ -291,6 +304,7 @@ final class AppState: ObservableObject {
     }
 
     private var sprintBase: [CardSummary] {
+        if usesRecallContract { return library }
         switch sprintKind {
         case .review:
             return library
@@ -321,7 +335,7 @@ final class AppState: ObservableObject {
             let wb: Int
             switch sprintKind {
             case .review:
-                (wa, wb) = (a.lastScore ?? -1, b.lastScore ?? -1)
+                (wa, wb) = (displayScore(a) ?? -1, displayScore(b) ?? -1)
             case .depth(let axis):
                 (wa, wb) = (depthValue(a, axis: axis) ?? 5, depthValue(b, axis: axis) ?? 5)
             }
@@ -359,12 +373,12 @@ final class AppState: ObservableObject {
             return "\(count) depth gap\(count == 1 ? "" : "s")"
         }
         let cards = library.filter { $0.category == category }
-        let weak = Self.tally(cards, [.cold, .shaky])
+        let weak = tally(cards, [.cold, .shaky])
         if weak > 0 { return "\(weak) shaky" }
-        for tier in [ScoreStyle.Tier.untested, .developing] where Self.tally(cards, [tier]) > 0 {
-            return "\(Self.tally(cards, [tier])) \(tier.rawValue)"
+        for tier in [ScoreStyle.Tier.untested, .developing] where tally(cards, [tier]) > 0 {
+            return "\(tally(cards, [tier])) \(tier.rawValue)"
         }
-        return "\(Self.tally(cards, [.solid])) solid"
+        return "\(tally(cards, [.solid])) solid"
     }
 
     func toggleCategory(_ name: String) {
@@ -377,6 +391,7 @@ final class AppState: ObservableObject {
     }
 
     func enterDepthRepair(_ axis: DepthAxis) {
+        guard !usesRecallContract else { return }
         sprintKind = .depth(axis)
         sprintExcluded = []
         setupCats = []
@@ -407,9 +422,9 @@ final class AppState: ObservableObject {
         categories
             .map { name in (category: name, cards: library.filter { $0.category == name }) }
             .sorted { a, b in
-                let (wa, wb) = (Self.tally(a.cards, [.cold, .shaky]), Self.tally(b.cards, [.cold, .shaky]))
+                let (wa, wb) = (tally(a.cards, [.cold, .shaky]), tally(b.cards, [.cold, .shaky]))
                 if wa != wb { return wa > wb }
-                let (ua, ub) = (Self.tally(a.cards, [.untested]), Self.tally(b.cards, [.untested]))
+                let (ua, ub) = (tally(a.cards, [.untested]), tally(b.cards, [.untested]))
                 if ua != ub { return ua > ub }
                 return a.category < b.category
             }
@@ -423,6 +438,10 @@ final class AppState: ObservableObject {
         cards.filter { tiers.contains(ScoreStyle.Tier.of($0.lastScore)) }.count
     }
 
+    func tally(_ cards: [CardSummary], _ tiers: [ScoreStyle.Tier]) -> Int {
+        cards.filter { tiers.contains(ScoreStyle.Tier.of(displayScore($0))) }.count
+    }
+
     var coverageStatus: String {
         libraryLoad.status { "\(library.count) CARDS · \(categories.count) CATEGORIES" }
     }
@@ -433,7 +452,7 @@ final class AppState: ObservableObject {
     /// decomposition surfaces, because "which axis is systemically weak" is the
     /// question Coverage exists to answer. Empty until something has been scored.
     var axisRollup: [AxisRollupItem] {
-        guard libraryLoad == .ready else { return [] }
+        guard libraryLoad == .ready, !usesRecallContract else { return [] }
         let axes: [(String, DepthAxis?, (CardSummary) -> Int?)] = [
             ("ACCURACY", nil, \.lastAccuracy),
             ("DEPTH", .depth, \.lastDepth),
@@ -734,6 +753,10 @@ final class AppState: ObservableObject {
             await submitReattempt(text)
             return
         }
+        if stage.isCoaching {
+            await submitCoaching(text)
+            return
+        }
 
         guard let outcome = await sendAnswer(
             text, via: { id, body in try await self.api.submitAnswer(sessionID: id, text: body) }
@@ -744,23 +767,30 @@ final class AppState: ObservableObject {
             thread.append(ThreadEntry(role: .followUpQuestion, text: question))
             stage = .followUp
         case .complete(
-            let score, let feedback, let nextReviewAt, let intervalDays, let wasPractice,
-            let reattemptOffered, let reattemptPrompt
+            let score, let recallScore, let scoringContractVersion, let feedback,
+            let nextReviewAt, let intervalDays, let wasPractice,
+            let reattemptOffered, let reattemptPrompt, let coachingOffered,
+            let coachingFocus, let coachingQuestion
         ):
+            let displayedScore = scoringContractVersion == 2 ? recallScore : score
             result = SessionResult(
-                score: score,
+                score: displayedScore,
+                scoringContractVersion: scoringContractVersion,
                 feedback: feedback,
                 scheduleLine: wasPractice
                     ? Self.practiceScheduleLine
                     : Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays),
                 reattemptOffered: reattemptOffered,
-                reattemptPrompt: reattemptPrompt
+                reattemptPrompt: reattemptPrompt,
+                coachingOffered: coachingOffered,
+                coachingFocus: coachingFocus,
+                coachingQuestion: coachingQuestion
             )
             if let card = currentCard {
                 run.append(
                     RunEntry(
                         id: card.id, topic: card.topic, category: card.category,
-                        score: score, feedback: feedback, practice: wasPractice
+                        score: displayedScore, feedback: feedback, practice: wasPractice
                     )
                 )
             }
@@ -799,6 +829,30 @@ final class AppState: ObservableObject {
         // Back to the score block, with the re-attempt now in the thread above it.
         // The affordance is gone because the server refuses a second one.
         result?.reattemptOffered = false
+        stage = .result
+    }
+
+    /// Open V2's optional qualitative practice. It is mutually exclusive with
+    /// the failed-Recall re-attempt and keeps the scored result visible as the
+    /// only numeral associated with the session.
+    func beginCoaching() {
+        guard let result, result.coachingOffered, stage == .result,
+              let question = result.coachingQuestion
+        else { return }
+        thread.append(ThreadEntry(role: .coachingQuestion, text: question))
+        draft = ""
+        submitError = false
+        stage = .coaching
+    }
+
+    private func submitCoaching(_ text: String) async {
+        guard let outcome = await sendAnswer(
+            text, via: { id, body in
+                try await self.api.submitCoaching(sessionID: id, text: body)
+            }
+        ) else { return }
+        thread.append(ThreadEntry(role: .coachingFeedback, text: outcome.feedback))
+        result?.coachingOffered = false
         stage = .result
     }
 
@@ -1050,7 +1104,7 @@ final class AppState: ObservableObject {
             if route == "coverage-expanded",
                let section = coverageSections.first,
                let tier = ScoreStyle.Tier.allCases.first(where: { tier in
-                   Self.tally(section.cards, [tier]) > 0
+                   tally(section.cards, [tier]) > 0
                }) {
                 covOpen = OpenTier(category: section.category, tier: tier)
             }
@@ -1114,7 +1168,9 @@ final class AppState: ObservableObject {
         case "processing":
             thread.append(ThreadEntry(role: .answer, text: answer))
             stage = .processing
-        case "followup", "score", "submit-failure", "reattempt", "reattempt-answered":
+        case "followup", "score", "submit-failure", "reattempt", "reattempt-answered",
+             "coaching", "coaching-answered", "coaching-boundary",
+             "coaching-boundary-answered":
             await submit(answer)
             if route == "followup" { return }
             if route == "submit-failure" {
@@ -1123,6 +1179,12 @@ final class AppState: ObservableObject {
             }
             await submit("Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes.")
             await submit("Right — and replication follows the successor list.")
+            if route.hasPrefix("coaching") {
+                beginCoaching()
+                if route == "coaching" || route == "coaching-boundary" { return }
+                await submit("The deeper causal link is that virtual nodes spread ownership changes across many small arcs.")
+                return
+            }
             guard route.hasPrefix("reattempt") else { return }
             beginReattempt()
             if route == "reattempt" { return }

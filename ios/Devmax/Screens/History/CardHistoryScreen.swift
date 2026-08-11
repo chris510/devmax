@@ -88,9 +88,16 @@ struct CardHistoryScreen: View {
 
     private func metaLine(_ detail: CardDetail) -> String {
         guard !detail.sessions.isEmpty else { return "New card" }
-        let scores = detail.sessions.compactMap(\.score)
-        let average = scores.isEmpty ? 0 : Double(scores.reduce(0, +)) / Double(scores.count)
-        var parts = ["\(detail.sessions.count) sessions", String(format: "avg %.1f", average)]
+        let scores = detail.sessions.compactMap { session in
+            state.usesRecallContract ? session.recallScore : session.score
+        }
+        var parts = ["\(detail.sessions.count) sessions"]
+        if !scores.isEmpty {
+            let average = Double(scores.reduce(0, +)) / Double(scores.count)
+            parts.append(String(
+                format: state.usesRecallContract ? "avg recall %.1f" : "avg %.1f", average
+            ))
+        }
 
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd"
@@ -118,6 +125,10 @@ struct CardHistoryScreen: View {
                 ForEach(detail.sessions) { session in
                     SessionRow(
                         session: session,
+                        score: state.usesRecallContract ? session.recallScore : session.score,
+                        legacyOnly: state.usesRecallContract
+                            && session.recallScore == nil
+                            && session.legacyCompositeScore != nil,
                         isExpanded: expanded == session.id,
                         toggle: {
                             withAnimation(Motion.fadeFast) {
@@ -254,6 +265,8 @@ private struct CardMaintenanceSheet: View {
 
 private struct SessionRow: View {
     let session: SessionHistory
+    let score: Int?
+    let legacyOnly: Bool
     let isExpanded: Bool
     let toggle: () -> Void
 
@@ -261,15 +274,20 @@ private struct SessionRow: View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: toggle) {
                 HStack(alignment: .top, spacing: 14) {
-                    Text(ScoreStyle.label(for: session.score))
+                    Text(ScoreStyle.label(for: score))
                         .font(TypeRole.historyScoreNumeral)
                         .monospacedDigit()
-                        .foregroundStyle(ScoreStyle.color(for: session.score))
+                        .foregroundStyle(ScoreStyle.color(for: score))
                         .frame(width: 16, alignment: .leading)
 
                     VStack(alignment: .leading, spacing: 6) {
                         MetaText(text: Self.dateLabel(session.date), font: TypeRole.metaRow,
                                  tracking: 1.0, uppercased: true)
+                        if legacyOnly {
+                            MetaText(text: "LEGACY COMPOSITE · EXCLUDED FROM RECALL AVERAGE",
+                                     font: TypeRole.metaLabel, tracking: 0.8,
+                                     color: Theme.metaFaint)
+                        }
                         Text(session.feedback)
                             .font(TypeRole.historyNote)
                             .foregroundStyle(Theme.textMuted)
@@ -297,6 +315,11 @@ private struct SessionRow: View {
                             transcriptText(turn)
                         }
                     }
+                    if let question = session.coachingQuestion,
+                       let answer = session.coachingAnswer,
+                       let feedback = session.coachingFeedback {
+                        coachingTurn(question: question, answer: answer, feedback: feedback)
+                    }
                 }
                 .padding(.leading, 30)
                 .padding(.bottom, 22)
@@ -304,6 +327,28 @@ private struct SessionRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .wcFade(Motion.fadeFast)
             }
+        }
+    }
+
+    private func coachingTurn(question: String, answer: String, feedback: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            MetaText(
+                text: session.coachingFocus == "boundaries"
+                    ? "BOUNDARY PRACTICE" : "DEPTH PRACTICE",
+                font: TypeRole.metaLabel, tracking: 1.2, color: Theme.metaFaintAlt
+            )
+            Text(question)
+                .font(TypeRole.historyTranscriptQuestion)
+                .foregroundStyle(Theme.textSerif)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(answer)
+                .font(TypeRole.historyAnswer)
+                .foregroundStyle(Theme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(feedback)
+                .font(TypeRole.historyAnswer)
+                .foregroundStyle(Theme.textSerif)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

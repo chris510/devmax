@@ -197,3 +197,10 @@ an `APNS_PRIVATE_KEY is unset` warning and no tracebacks.
 not measured. `scripts/effort_sweep.py` is hardwired to `settings.scoring_effort` and
 `run_case`, so it needs a re-attempt path before the value is calibrated. Flagged in
 `app/config.py`. Independent of the deploy — it can happen before or after.
+
+**Scoring Contract V2 is implemented but deliberately inactive.** Keep
+`SCORING_CONTRACT_VERSION=1` until the compatible iOS build has been deployed and
+the activation checks in RUNBOOK §Scoring Contract V2 activation and rollback
+have been completed. Activation changes only that setting; do not combine it
+with a model or provider change. Rollback returns the setting to `1` and leaves
+all versioned history intact.

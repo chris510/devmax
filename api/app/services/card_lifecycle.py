@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
+from app.config import get_settings
 from app.models import (
     CAPTURE_ACTIVATED,
     CAPTURE_PENDING_SOURCE,
@@ -27,6 +28,17 @@ RUBRIC_FIELDS = (
     "misconception",
 )
 
+SCORING_RUBRIC_ALIASES = {
+    "essential_account": "mechanism",
+    "acceptable_alternative": "acceptable_alternative",
+    "depth_extension": "trade_off",
+    "boundary_extension": "failure_mode",
+    "misconception": "misconception",
+}
+LEGACY_RUBRIC_ALIASES = {
+    legacy: target for target, legacy in SCORING_RUBRIC_ALIASES.items()
+}
+
 
 class GroundingError(ValueError):
     def __init__(self, missing: list[str]) -> None:
@@ -39,8 +51,37 @@ def _clean(value: str | None) -> str:
 
 
 def clean_rubric(value: dict[str, str] | None) -> dict[str, str]:
+    """Normalize either public vocabulary to the historical internal keys."""
     raw = value or {}
-    return {field: _clean(raw.get(field)) for field in RUBRIC_FIELDS}
+    return {
+        legacy: _clean(raw.get(legacy) or raw.get(LEGACY_RUBRIC_ALIASES[legacy]))
+        for legacy in RUBRIC_FIELDS
+    }
+
+
+def scoring_rubric(value: dict[str, str] | None) -> dict[str, str]:
+    """Read historical technical keys or the V2 subject-agnostic aliases.
+
+    Stored JSON is never rewritten. The LLM sees one stable V2 vocabulary while
+    activation and manual-entry clients can migrate independently.
+    """
+    raw = value or {}
+    return {
+        target: _clean(raw.get(target) or raw.get(legacy))
+        for target, legacy in SCORING_RUBRIC_ALIASES.items()
+    }
+
+
+def storage_rubric(value: dict[str, str] | None) -> dict[str, str]:
+    """Store new authority in the active contract's vocabulary.
+
+    V1 stays byte-compatible during the dark launch. After activation, every
+    card-creation path writes the subject-agnostic keys while readers continue
+    accepting both forms, so existing JSON is never rewritten.
+    """
+    if get_settings().scoring_contract_version == 2:
+        return scoring_rubric(value)
+    return clean_rubric(value)
 
 
 @dataclass(frozen=True)
@@ -129,7 +170,7 @@ def build_grounded_card(
         source_section=value.source_section,
         source_label=value.source_label,
         answer_basis=value.answer_basis,
-        answer_rubric=value.answer_rubric or {},
+        answer_rubric=storage_rubric(value.answer_rubric),
         replaces_card_id=replaces_card_id,
         next_review_at=today if schedule == "now" else today + timedelta(days=1),
     )

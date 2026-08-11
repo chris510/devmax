@@ -15,9 +15,14 @@ extension MockAPI {
 
     func accountProfile() async throws -> AccountProfile {
         let route = await MainActor.run { DebugFlags.shared.route }
+        let isPublicRoute = await MainActor.run {
+            PublicOnboardingState.handlesDebugRoute(route)
+        }
         return AccountProfile(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-            onboardingCompleted: !route.hasPrefix("public-") && route.isEmpty,
+            // Private screenshot routes still need the authenticated app shell.
+            // Only routes owned by PublicOnboardingState should force setup.
+            onboardingCompleted: !isPublicRoute && !route.hasPrefix("public-"),
             isFounder: route == "returning",
             displayName: "Casey", email: "casey@privaterelay.appleid.com"
         )

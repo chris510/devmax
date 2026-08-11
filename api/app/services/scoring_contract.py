@@ -8,18 +8,37 @@ coincidentally equal integer.
 from dataclasses import dataclass
 from typing import Literal
 
+from app.config import get_settings
 from app.models import Card, Session
 
 SCORING_CONTRACT_V1 = 1
 SCORING_CONTRACT_V2 = 2
 
-# Stage 1 is compatibility-only. This stays a constant until the V2 scorer and
-# rollback path exist; making it an environment switch now would expose a product
-# mode the backend cannot honor.
-ACTIVE_SCORING_CONTRACT_VERSION: Literal[1] = SCORING_CONTRACT_V1
-
 ScoreKind = Literal["recall", "legacy_composite", "unrated"]
 ScoringContractVersion = Literal[1, 2]
+CoachingFocus = Literal["depth", "boundaries"]
+
+
+def active_scoring_contract_version() -> ScoringContractVersion:
+    """The one activation switch shared by session creation and capability reads."""
+    return get_settings().scoring_contract_version
+
+
+def next_coaching_focus(completed_turns: int) -> CoachingFocus:
+    """Alternate only after a completed qualitative turn."""
+    return "depth" if completed_turns % 2 == 0 else "boundaries"
+
+
+def coaching_question(focus: CoachingFocus) -> str:
+    if focus == "depth":
+        return (
+            "One level deeper — what reasoning, causal link, application, "
+            "or trade-off matters here?"
+        )
+    return (
+        "One level deeper — what condition, exception, limitation, "
+        "or failure case matters here?"
+    )
 
 
 @dataclass(frozen=True)
@@ -66,3 +85,10 @@ def project_session_score(session: Session) -> SessionScoreProjection:
         legacy_composite_score=session.score if version == SCORING_CONTRACT_V1 else None,
         scoring_contract_version=version,
     )
+
+
+def active_card_score(card: Card) -> int | None:
+    """The score value current product consumers may rank or tier."""
+    if active_scoring_contract_version() == SCORING_CONTRACT_V2:
+        return card.last_accuracy
+    return card.last_score

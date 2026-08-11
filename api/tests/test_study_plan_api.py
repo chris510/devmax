@@ -13,6 +13,7 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     Card,
     StudyPlan,
@@ -855,6 +856,31 @@ async def test_an_exact_normalized_duplicate_is_never_proposed(client, stub_impo
     ).json()
     assert body["suggested_count"] == 0
     assert body["proposals"][0]["disposition"] == "existing"
+
+
+async def test_v2_card_proposals_select_and_describe_weak_recall(
+    client, stub_import, stub_cards, db, monkeypatch
+):
+    monkeypatch.setattr(get_settings(), "scoring_contract_version", 2)
+    weak_recall = make_card(topic="Weak Recall", last_score=5, last_accuracy=1)
+    weak_recall.last_score_contract_version = 1
+    composite_only_weak = make_card(topic="Weak Composite", last_score=1, last_accuracy=None)
+    composite_only_weak.last_score_contract_version = 1
+    db.add(weak_recall)
+    db.add(composite_only_weak)
+    await db.commit()
+    stub_cards.candidates = []
+
+    plan = await make_plan(client)
+    item_id = await _complete_first_item(client, plan)
+    response = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/card-proposals", headers=API_HEADERS
+    )
+
+    assert response.status_code == 200
+    weak_context = stub_cards.last_kwargs["existing_weak_topics"]
+    assert "Weak Recall" in weak_context
+    assert "Weak Composite" not in weak_context
 
 
 # --- acceptance -------------------------------------------------------------

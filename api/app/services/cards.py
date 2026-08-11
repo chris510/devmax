@@ -4,6 +4,7 @@ from datetime import date, tzinfo
 
 from app.models import Card, Session
 from app.schemas import Turn
+from app.services.scoring_contract import active_card_score
 
 UNTESTED = "untested"
 SHAKY = "shaky"
@@ -46,15 +47,16 @@ def classify_tier(card: Card, today: date) -> str:
     "knew it cold three weeks ago and let it lapse" are different problems, and
     nothing else in the API distinguishes them.
     """
-    is_solid = card.repetitions >= 3 and card.ease_factor >= 2.5 and (card.last_score or 0) >= 4
+    score = active_card_score(card)
+    is_solid = card.repetitions >= 3 and card.ease_factor >= 2.5 and (score or 0) >= 4
     lapse_cutoff = (today - card.next_review_at).days > 2 * card.interval_days
     if is_solid and lapse_cutoff:
         return COLD
-    if (card.last_score is not None and card.last_score <= 2) or card.ease_factor < 2.0:
+    if (score is not None and score <= 2) or card.ease_factor < 2.0:
         return SHAKY
     if card.repetitions == 0:
         return UNTESTED
-    if card.repetitions in (1, 2) and card.last_score is not None and 3 <= card.last_score <= 4:
+    if card.repetitions in (1, 2) and score is not None and 3 <= score <= 4:
         return DEVELOPING
     if is_solid:
         return SOLID

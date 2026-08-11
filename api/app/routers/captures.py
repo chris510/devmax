@@ -22,9 +22,9 @@ from app.services import llm
 from app.services.card_lifecycle import (
     GroundingError,
     build_grounded_card,
-    clean_rubric,
     grounding_from_capture,
     refresh_capture_status,
+    storage_rubric,
 )
 from app.services.study_plan import normalize_topic, normalized_card_index
 
@@ -126,7 +126,7 @@ async def update_capture(
     for name, value in changes.items():
         setattr(capture, name, (value or "").strip())
     if rubric is not None:
-        capture.answer_rubric = clean_rubric(rubric)
+        capture.answer_rubric = storage_rubric(rubric)
     capture.updated_at = datetime.now(UTC)
     refresh_capture_status(capture)
     db.add(capture)
