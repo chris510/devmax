@@ -263,6 +263,15 @@ System design:
 - real-time updates
 - large blobs and long-running jobs
 
+Named practice:
+
+- Complete a historical Twitter home-timeline design. Start with write-time
+  materialization for ordinary authors, then handle a very high-fanout author by
+  skipping per-follower fan-out and merging that author's recent posts at timeline
+  read. Defend the write-amplification, read-latency, ordering/freshness, and
+  failure-recovery trade-offs. Derive any cutoff from observed workload and SLOs;
+  do not assume a fixed follower threshold.
+
 Coding mechanisms:
 
 - graphs and shortest paths

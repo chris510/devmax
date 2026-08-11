@@ -861,6 +861,7 @@ async def _complete(
     cache_rubric: bool = False,
     stream: bool = False,
     retry: bool = True,
+    purpose: str = "unknown",
 ) -> dict[str, Any]:
     """One structured-output call, optionally retrying one parse failure.
 
@@ -904,12 +905,25 @@ async def _complete(
             else:
                 response = await client.messages.create(**kwargs)
         except Exception as exc:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            log.warning(
+                "llm model=%s attempt=%d ms=%d purpose=%s "
+                "event=transport_error error_type=%s",
+                model,
+                attempt,
+                elapsed_ms,
+                purpose,
+                type(exc).__name__,
+            )
             raise LLMError(f"{model} call failed: {exc}") from exc
 
         elapsed_ms = int((time.monotonic() - started) * 1000)
         usage = response.usage
+        stop_reason = getattr(response, "stop_reason", "") or ""
+        request_id = getattr(response, "_request_id", "") or ""
         log.info(
-            "llm model=%s attempt=%d ms=%d in=%d out=%d cache_read=%d cache_write=%d",
+            "llm model=%s attempt=%d ms=%d in=%d out=%d cache_read=%d cache_write=%d "
+            "purpose=%s stop=%s request_id=%s",
             model,
             attempt,
             elapsed_ms,
@@ -917,6 +931,9 @@ async def _complete(
             usage.output_tokens,
             usage.cache_read_input_tokens or 0,
             usage.cache_creation_input_tokens or 0,
+            purpose,
+            stop_reason,
+            request_id,
         )
 
         text = next((b.text for b in response.content if b.type == "text"), "")
@@ -925,7 +942,13 @@ async def _complete(
         except json.JSONDecodeError as exc:
             last_error = exc
             log.warning(
-                "llm model=%s attempt=%d unparseable output: %r", model, attempt, text[:200]
+                "llm model=%s attempt=%d purpose=%s stop=%s request_id=%s "
+                "event=invalid_json",
+                model,
+                attempt,
+                purpose,
+                stop_reason,
+                request_id,
             )
 
     raise LLMError(f"{model} returned unparseable output") from last_error
@@ -969,6 +992,7 @@ async def generate_question(
         user_content="\n".join(c for c in context if c),
         schema=QUESTION_SCHEMA,
         max_tokens=1024,
+        purpose="question",
     )
     question = str(data.get("question", "")).strip()
     if not question:
@@ -1099,11 +1123,22 @@ async def score_answer(
         answer_basis=answer_basis,
         answer_rubric=answer_rubric,
     )
-    data = await _complete(**completion)
+    purpose = (
+        "score_v2" if scoring_contract_version == SCORING_CONTRACT_V2 else "score_v1"
+    )
+    data = await _complete(**completion, purpose=purpose)
 
-    if scoring_contract_version == SCORING_CONTRACT_V2:
-        return parse_score_v2_result(data, follow_up_used=follow_up_used)
-    return parse_score_result(data, follow_up_used=follow_up_used)
+    try:
+        result = (
+            parse_score_v2_result(data, follow_up_used=follow_up_used)
+            if scoring_contract_version == SCORING_CONTRACT_V2
+            else parse_score_result(data, follow_up_used=follow_up_used)
+        )
+    except LLMError:
+        log.warning("llm purpose=%s event=invalid_contract", purpose)
+        raise
+    log.info("llm purpose=%s event=scoring_outcome status=%s", purpose, result.status)
+    return result
 
 
 def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreResult:
@@ -1212,6 +1247,7 @@ async def coach_answer(
 ) -> CoachingResult:
     settings = get_settings()
     data = await _complete(
+        purpose="coaching_v2",
         **build_coaching_completion(
             model=settings.scoring_model,
             effort=settings.scoring_effort,
@@ -1225,6 +1261,7 @@ async def coach_answer(
     )
     feedback = str(data.get("coaching_feedback", "")).strip()
     if not feedback:
+        log.warning("llm purpose=coaching_v2 event=invalid_contract")
         raise LLMError("qualitative coaching returned empty feedback")
     return CoachingResult(feedback=feedback)
 
@@ -1287,6 +1324,7 @@ async def import_guide(
         # request it estimates will outlive the HTTP timeout.
         stream=True,
         cache_rubric=True,
+        purpose="guide_import",
     )
 
 
@@ -1334,6 +1372,7 @@ async def propose_cards(
         schema=CARD_PROPOSAL_SCHEMA,
         # At most three candidates, each a question plus five gate answers.
         max_tokens=4000,
+        purpose="card_proposal",
     )
     candidates = data.get("candidates")
     if not isinstance(candidates, list):
@@ -1411,9 +1450,13 @@ async def score_reattempt(
         answer_basis=answer_basis,
         answer_rubric=answer_rubric,
     )
-    data = await _complete(**completion)
+    data = await _complete(**completion, purpose="reattempt")
 
-    return parse_reattempt_result(data)
+    try:
+        return parse_reattempt_result(data)
+    except LLMError:
+        log.warning("llm purpose=reattempt event=invalid_contract")
+        raise
 
 
 def parse_reattempt_result(data: dict[str, Any]) -> ReattemptResult:

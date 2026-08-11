@@ -82,6 +82,19 @@ def test_coding_mechanisms_are_core_and_implementation_is_optional() -> None:
     )
 
 
+def test_week_four_names_the_historical_twitter_high_fanout_practice() -> None:
+    _manifest, result = validate_bundle(DEFAULT_MANIFEST, start_date=START)
+    item = next(
+        item
+        for item in result.preview["items"]
+        if item["full_title"].startswith("Complete a historical Twitter")
+    )
+
+    assert item["week_index"] == 4
+    assert "high-fanout read-time merge" in item["done_when"]
+    assert "skew-driven architecture split" in item["why_it_matters"]
+
+
 async def test_the_seed_creates_an_active_week_one_plan_graph(db) -> None:
     seeded = await load_first_party_plan(start_date=START, activate=True, db=db)
 

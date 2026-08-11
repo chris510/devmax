@@ -64,6 +64,25 @@ def _reattempt_eligible(session: Session) -> bool:
     return session.accuracy is not None and session.accuracy <= REATTEMPT_MAX_ACCURACY
 
 
+def _replayed_initial_answer(session: Session, submitted_text: str) -> FollowUpOut | None:
+    """Return the already-committed probe for an exact turn-1 replay.
+
+    The client deliberately retries a failed submission with the same saved text.
+    If the server committed a follow-up but its response was lost, the session is
+    already awaiting turn 2 when that retry arrives. Treating the duplicate text as
+    the follow-up answer would let one piece of recall evidence occupy both scored
+    turns. Returning the stored probe is both idempotent and free of another model
+    call; an actual turn-2 answer must differ from the stored turn-1 transcript.
+    """
+    if (
+        session.status == STATUS_AWAITING_FOLLOW_UP
+        and session.answer_text == submitted_text
+        and session.follow_up_question
+    ):
+        return FollowUpOut(question=session.follow_up_question)
+    return None
+
+
 async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
     return (
         await db.exec(
@@ -209,9 +228,13 @@ async def submit_answer(
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     # The card lock serializes reviews without blocking PATCH /draft, which only
-    # touches the session row. Refresh after any wait and reject a replay whose
-    # turn changed while the first request was scoring.
+    # touches the session row. Refresh after any wait. An exact initial-answer
+    # replay may observe the committed follow-up either before the lock or after
+    # waiting on it; in both cases return that same probe without scoring again.
     await db.refresh(session)
+    replay = _replayed_initial_answer(session, body.text)
+    if replay is not None:
+        return replay
     if session.status != observed_status:
         raise HTTPException(status_code=409, detail="session advanced during submission")
     if session.status == STATUS_COMPLETE:

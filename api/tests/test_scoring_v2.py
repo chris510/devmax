@@ -104,6 +104,36 @@ async def test_v2_failed_recall_offers_reattempt_not_qualitative_coaching(
     ).status_code == 409
 
 
+async def test_v2_exact_initial_answer_replay_is_not_scored_as_the_follow_up(
+    client, db, monkeypatch
+):
+    calls = await install_v2(
+        monkeypatch,
+        v2_result(2, status="follow_up", probe="One more — name the missing link?"),
+    )
+    card = make_card(canonical_question="What is the essential account?")
+    db.add(card)
+    await db.commit()
+
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{started['session_id']}/answers"
+    payload = {"text": "the same partial recall"}
+    first = await client.post(endpoint, headers=API_HEADERS, json=payload)
+    replay = await client.post(endpoint, headers=API_HEADERS, json=payload)
+
+    assert first.json() == replay.json() == {
+        "status": "follow_up",
+        "question": "One more — name the missing link?",
+    }
+    assert len(calls) == 1
+    session = await db.get(Session, uuid.UUID(started["session_id"]))
+    await db.refresh(session)
+    assert session.status == "awaiting_follow_up"
+    assert session.scoring_contract_version == 2
+    assert session.follow_up_answer == ""
+    assert session.score is None
+
+
 async def test_qualitative_coaching_changes_only_its_four_session_fields(
     client, db, monkeypatch
 ):
