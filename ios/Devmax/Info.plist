@@ -25,6 +25,8 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
 	<!-- The design draws its own 44px mono status row (clock left, UNPROMPTED /
 	     READING ALOUD right). Without this the system bar sits above it and the
 	     clock appears twice. -->

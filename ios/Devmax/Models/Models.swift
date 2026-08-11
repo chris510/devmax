@@ -336,7 +336,4 @@ enum Preferences {
     /// product is built for answering half-awake or in line, where hearing the
     /// question beats reading it.
     static let readAloudKey = "wc.readAloud"
-    /// Device-local appearance choice. `system` is the default so the app
-    /// follows the phone until the user explicitly pins an appearance.
-    static let appearanceKey = "wc.appearance"
 }
