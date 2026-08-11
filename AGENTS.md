@@ -275,7 +275,8 @@ silently opening a card: `study-plan-overview` `-overview-expanded`
 `-overview-future` `-week` `-item` `-capacity` `-build` `-preview`
 `-import-failure` `-replan` `-replan-invalid` `-fixed-recovery` `-reopen`
 `-reopen-invalid` `-plans` `-no-active` `-complete` `-updates` `-retrieval-audit`
-`-estimate-audit` `-dependency-audit` `-card-proposal` `-card-failure`
+`-item-actionable` `-item-python` `-item-linked` `-estimate-audit`
+`-dependency-audit` `-card-proposal` `-card-failure`
 `-card-existing` `-debrief-offer` `-debrief-idle` `-debrief-mic-unavailable`
 `-debrief-recording` `-debrief-text` `-debrief-resume` `-debrief-save-failure`
 `-debrief-checking` `-debrief-check-failure` `-debrief-completed`. Their flags are
@@ -306,7 +307,7 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **Study Plan is built and green, but its importer is verified by one live run.**
+- **The generic Study Plan importer is verified by one live run.**
   `docs/CURRICULUM.md` was imported end to end against the real API — 12 weeks, 4
   phases, 72 items, good concise titles, and a capacity check that correctly
   reported the real curriculum needs ~15h/week rather than the 12 it was asked
@@ -314,6 +315,9 @@ change faster than this file does — do not write Anthropic calls from memory.
   trusted, token-matched subject eligibility, `max_tokens` sized for thinking
   *plus* output). **The post-fix re-run did not happen: the Anthropic account ran
   out of credit.** The fixes are unit-tested; they are not live-tested.
+  The deterministic first-party plan does not use that model path: its reviewed
+  version-4 manifest has 116 items, exact resources, dependencies, and mapped
+  topics, and its create/upgrade path makes no LLM call.
 - **The import takes about 11 minutes** at `effort: high` on a 10k-character
   guide. Fine for a once-a-quarter action, but the client needs to expect it, and
   `studyplan_effort` is the lever if that is too slow — `medium` is untested here.
@@ -328,8 +332,10 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 - **The curriculum is lesson-gated.** `api/cards.json` is a 54-card system-design recall
   spine: six cards in each of nine teaching weeks, followed by three weeks of mocks and
-  gap-driven additions. Activate one cohort with `--activate-week N` only after its Hello
-  Interview source lessons are complete. The retired 126-card plan lives at
+  gap-driven additions. The first-party plan maps every topic to its source Learn item;
+  missing or unapproved cards remain `Not ready`. Activate one cohort with
+  `--activate-week N` only after its Hello Interview source lessons are complete and the
+  cards have approved answer authority. The retired 126-card plan lives at
   `api/archive/cards-legacy-126.json`; coding is a desk-only reference library, and
   company material is on demand. `docs/CURRICULUM.md` is authoritative for content.
 - **Production is live on Railway.** `docs/DEPLOY-CHECKLIST.md` records the current state;

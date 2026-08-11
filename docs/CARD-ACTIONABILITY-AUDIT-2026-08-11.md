@@ -1,5 +1,13 @@
 # Card actionability audit — 2026-08-11
 
+> **Resolution update:** Curriculum v4 replaces the 84 generic first-party
+> activities with 116 concrete, source-linked items at 20 scheduled hours per
+> week, uses Python throughout coding practice, and maps all 54 topics exactly
+> once to their teaching lesson. The user confirmed Hello Interview Premium
+> access. These changes close the plan-navigation and prerequisite-linkage
+> findings below; they do not change the content-approval result: six cards are
+> ready, one is a reviewed draft candidate, and 47 remain blocked until grounded.
+
 ## Verdict
 
 The 54-card base deck is a credible recall spine, but only Week 1 is ready for
@@ -32,13 +40,11 @@ cases.
   cites a primary practitioner talk.
 - The six Week 1 cards are approved. The historical Twitter fan-out card is a
   complete draft. The remaining 47 have no approved answer authority.
-- The curated Study Plan has 84 items, but its seed path supplies an empty
-  source excerpt and sets recall support to false for every item.
-- Only the Twitter practice has a specific why and done-when condition. The
-  other 83 items receive generic defaults.
-- A card's activation-prerequisite text is not a machine-enforced link to a
-  Study Plan item. Manual week activation does not prove that the lesson was
-  completed.
+- At audit time, the curated Study Plan had 84 generic items, empty source
+  excerpts, no actionable source links, and no explicit card mapping. Curriculum
+  v4 resolves those structural findings with direct resources, specific
+  completion conditions, and read-only mapped topics. It deliberately does not
+  treat Premium URLs as answer authority or activate a card on completion.
 - None of the 18 Anthropic, Google, or OpenAI overlay cards is grounded. They
   are not activation-ready.
 
@@ -46,8 +52,8 @@ cases.
 
 Hello Interview is the provenance for 53 cards. In this audit, 13 of the 31
 distinct source pages displayed an explicit Premium gate; those pages support 28
-cards. The user's access has not been recorded. A link that opens a paywall is
-not an actionable learning step.
+cards. The user subsequently confirmed Premium access, so those links are usable
+for this private plan.
 
 Before a card is exposed, the product must either confirm that its complete
 source is accessible or provide a concise, human-approved, internally authored

@@ -275,6 +275,20 @@ actor MockAPI: DevmaxAPI {
 
     func card(_ id: UUID) async throws -> CardDetail {
         try await Task.sleep(nanoseconds: 200_000_000)
+        if id == StudyPlanFixtures.mappedCardID {
+            return CardDetail(
+                id: id,
+                topic: "System design delivery: requirements to entities, APIs, "
+                    + "high-level design, and deep dives",
+                category: "Delivery", masterySummary: "", lastScore: nil,
+                easeFactor: 2.5, intervalDays: 1, repetitions: 0,
+                nextReviewAt: "2026-08-12", missedCount: 0, sessions: [],
+                recallNotBeforeAt: "2026-08-12T08:00:00-07:00",
+                learningAvailable: false,
+                sourceLabel: "Hello Interview · Delivery Framework",
+                sourceSection: "Delivery sequence"
+            )
+        }
         if id == Self.raftID {
             return CardDetail(
                 id: id, topic: "Raft leader election", category: "Distributed Systems",

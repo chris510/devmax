@@ -15,7 +15,7 @@ struct CardHistoryScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Button { state.path.removeLast() } label: {
-                        Text("← Today")
+                        Text(state.historyBackLabel)
                             .font(TypeRole.secondaryAction)
                             .foregroundStyle(Theme.meta)
                     }

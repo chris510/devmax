@@ -6,7 +6,7 @@ network call is fake. No test here reaches Anthropic.
 """
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -21,6 +21,7 @@ from app.models import (
     StudyPlanCardProposalAcceptance,
     StudyPlanItem,
     StudyPlanPracticeDebrief,
+    User,
 )
 from app.services import llm
 from tests.conftest import API_HEADERS, GUIDE, _item, gate, import_payload, make_card
@@ -45,6 +46,112 @@ async def make_plan(client: AsyncClient, *, activate=True, **preview_overrides) 
     )
     assert created.status_code == 201, created.text
     return created.json()
+
+
+async def test_item_resources_stretch_and_existing_recall_cards_are_actionable_read_only(
+    client, stub_import, db
+):
+    topics = [
+        "Learn",
+        "Waiting",
+        "Ready",
+        "Rotation",
+        "Ungrounded",
+        "Archived",
+        "Other user",
+        "Missing",
+    ]
+    payload = import_payload()
+    payload["items"][0] = {
+        **payload["items"][0],
+        "resources": [
+            {
+                "kind": "lesson",
+                "provider": "Hello Interview",
+                "label": "Delivery Framework",
+                "action_label": "Open lesson",
+                "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+                "language": "",
+            }
+        ],
+        "mapped_recall_topics": topics,
+        "stretch_actions": [
+            {
+                "title": "Run one extra design",
+                "done_when": "Deliver it in 35 minutes and write the largest gap.",
+                "minutes": 60,
+                "resource_url": "https://www.hellointerview.com/practice/overview",
+                "resource_label": "Hello Interview practice",
+            }
+        ],
+    }
+    stub_import.response = payload
+    plan = await make_plan(client)
+    week = (await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)).json()
+    item_id = week["sections"][0]["rows"][0]["id"]
+
+    rubric = {
+        "mechanism": "State the essential mechanism.",
+        "acceptable_alternative": "An equivalent account is valid.",
+        "trade_off": "Name the central trade-off.",
+        "failure_mode": "Name the central failure.",
+        "misconception": "Reject the common misconception.",
+    }
+
+    def grounded(topic, **overrides):
+        return make_card(
+            topic=topic,
+            canonical_question=f"Explain {topic}?",
+            source_url="https://example.com/source",
+            answer_basis="A trusted answer basis.",
+            answer_rubric=rubric,
+            **overrides,
+        )
+
+    other_user = User()
+    db.add(other_user)
+    await db.flush()
+    cards = [
+        grounded("Learn"),
+        grounded(
+            "Waiting",
+            last_learning_exposure_at=datetime.now(UTC),
+            recall_not_before_at=datetime.now(UTC) + timedelta(hours=8),
+        ),
+        grounded("Ready", last_learning_exposure_at=datetime.now(UTC)),
+        grounded("Rotation", last_score=4, repetitions=1),
+        make_card(topic="Ungrounded"),
+        grounded(
+            "Archived",
+            lifecycle_status="archived",
+            archived_at=datetime.now(UTC),
+        ),
+        grounded("Other user", user_id=other_user.id),
+    ]
+    db.add_all(cards)
+    await db.commit()
+    before = [card.model_dump() for card in cards]
+
+    response = await client.get(
+        f"/study-plans/{plan['id']}/items/{item_id}", headers=API_HEADERS
+    )
+
+    assert response.status_code == 200
+    item = response.json()
+    assert item["resources"][0]["action_label"] == "Open lesson"
+    assert item["stretch_actions"][0]["minutes"] == 60
+    assert [entry["availability_label"] for entry in item["mapped_recall_cards"]] == [
+        "Learn first",
+        "Waiting for delayed recall",
+        "Ready for recall",
+        "In review rotation",
+        "Not ready",
+        "Not ready",
+        "Not ready",
+        "Not ready",
+    ]
+    assert all(entry["card_id"] is None for entry in item["mapped_recall_cards"][-4:])
+    assert [card.model_dump() for card in cards] == before
 
 
 # --- preview ----------------------------------------------------------------
@@ -299,6 +406,31 @@ async def test_completed_is_not_archived(client, stub_import):
 
 
 async def test_duplicating_copies_structure_and_resets_progress(client, stub_import, db):
+    payload = import_payload()
+    payload["items"][0] = {
+        **payload["items"][0],
+        "resources": [
+            {
+                "kind": "lesson",
+                "provider": "Hello Interview",
+                "label": "Request path",
+                "action_label": "Open lesson",
+                "url": "https://example.com/request-path",
+                "language": "",
+            }
+        ],
+        "mapped_recall_topics": ["Request path failures"],
+        "stretch_actions": [
+            {
+                "title": "Trace another request",
+                "done_when": "Explain every boundary.",
+                "minutes": 30,
+                "resource_url": "",
+                "resource_label": "",
+            }
+        ],
+    }
+    stub_import.response = payload
     plan = await make_plan(client)
     week = (await client.get(f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS)).json()
     item_id = week["sections"][0]["rows"][0]["id"]
@@ -318,12 +450,113 @@ async def test_duplicating_copies_structure_and_resets_progress(client, stub_imp
     assert all(i.status == "pending" for i in copied_items)
     assert all(i.completed_at is None for i in copied_items)
     assert all(not i.study_block_reminder_on for i in copied_items)
+    copied_metadata = next(item for item in copied_items if item.full_title == "Item L1")
+    assert copied_metadata.resources[0]["provider"] == "Hello Interview"
+    assert copied_metadata.mapped_recall_topics == ["Request path failures"]
+    assert copied_metadata.stretch_actions[0]["minutes"] == 30
 
     # It copies no plan history: the duplicate starts with an empty revision log.
     revisions = (
         await client.get(f"/study-plans/{body['id']}/revisions", headers=API_HEADERS)
     ).json()
     assert revisions == []
+
+
+async def test_retired_items_stay_out_of_progress_recap_and_duplicates(
+    client, stub_import, db
+):
+    plan = await make_plan(client)
+    plan_id = uuid.UUID(plan["id"])
+    live = (
+        await db.exec(
+            select(StudyPlanItem)
+            .where(StudyPlanItem.plan_id == plan_id)
+            .order_by(StudyPlanItem.guide_order)
+        )
+    ).first()
+    completed = await client.post(
+        f"/study-plans/{plan['id']}/items/{live.id}/complete", headers=API_HEADERS
+    )
+    assert completed.status_code == 200
+
+    retired = StudyPlanItem(
+        plan_id=plan_id,
+        phase_id=live.phase_id,
+        week_id=live.week_id,
+        guide_order=0,
+        curriculum_key="retired-v3-item",
+        type="learn",
+        priority="core",
+        full_title="Retired historical curriculum item",
+        estimate_minutes=720,
+        status="removed",
+        notes="Historical context stays stored.",
+    )
+    db.add(retired)
+    await db.commit()
+    retired_before = (
+        await db.exec(select(StudyPlanItem).where(StudyPlanItem.id == retired.id))
+    ).one().model_dump()
+
+    stale_paths = [
+        ("GET", f"/study-plans/{plan['id']}/items/{retired.id}", None),
+        ("POST", f"/study-plans/{plan['id']}/items/{retired.id}/complete", None),
+        (
+            "PATCH",
+            f"/study-plans/{plan['id']}/items/{retired.id}",
+            {"notes": "Do not resurrect this row."},
+        ),
+        (
+            "GET",
+            f"/study-plans/{plan['id']}/items/{retired.id}/practice-debrief",
+            None,
+        ),
+        (
+            "GET",
+            f"/study-plans/{plan['id']}/items/{retired.id}/card-proposals",
+            None,
+        ),
+        (
+            "POST",
+            f"/study-plans/{plan['id']}/items/{retired.id}/card-proposals",
+            None,
+        ),
+    ]
+    for method, path, body in stale_paths:
+        response = await client.request(method, path, json=body, headers=API_HEADERS)
+        assert response.status_code == 404
+    assert (
+        await db.exec(select(StudyPlanItem).where(StudyPlanItem.id == retired.id))
+    ).one().model_dump() == retired_before
+
+    overview = (await client.get(f"/study-plans/{plan['id']}", headers=API_HEADERS)).json()
+    assert overview["phases"][0]["weeks"][0]["status"] == "Complete"
+
+    recap = (
+        await client.get(f"/study-plans/{plan['id']}/recap", headers=API_HEADERS)
+    ).json()
+    assert recap["core_complete"] == 1
+    assert recap["core_total"] == 4
+    assert "Retired historical curriculum item" not in recap["remaining_gaps"]
+
+    await client.post(f"/study-plans/{plan['id']}/complete", headers=API_HEADERS)
+    listed = (await client.get("/study-plans", headers=API_HEADERS)).json()
+    assert listed["completed"][0]["meta"].endswith("· 1 of 4 Core")
+
+    copied = (
+        await client.post(f"/study-plans/{plan['id']}/duplicate", headers=API_HEADERS)
+    ).json()
+    copied_items = (
+        await db.exec(
+            select(StudyPlanItem).where(
+                StudyPlanItem.plan_id == uuid.UUID(copied["id"])
+            )
+        )
+    ).all()
+    assert len(copied_items) == 5
+    assert "Retired historical curriculum item" not in {
+        item.full_title for item in copied_items
+    }
 
 
 async def test_a_duplicate_is_not_active_until_it_is_made_active(client, stub_import):

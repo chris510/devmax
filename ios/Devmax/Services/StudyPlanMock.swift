@@ -186,6 +186,11 @@ enum StudyPlanFixtures {
 
     static let firstItemID = id(0x10)
     static let openItemID = id(0x12)
+    static let week1DeliveryItemID = id(0x30)
+    static let week1PythonItemID = id(0x31)
+    static let mappedCardID = UUID(
+        uuidString: "00000000-0000-0000-0000-0000000000d1"
+    )!
 
     static func weekDetail(planID: UUID = backendPlanID) -> WeekDetail {
         func rows(_ kind: String) -> [WeekItemRow] {
@@ -228,35 +233,238 @@ enum StudyPlanFixtures {
         )
     }
 
+    static func week1Detail(planID: UUID = backendPlanID) -> WeekDetail {
+        func row(_ id: UUID, _ title: String, _ minutes: Int) -> WeekItemRow {
+            WeekItemRow(
+                id: id, title: title, estimateMinutes: minutes,
+                complete: false, optional: false, blockedBy: nil
+            )
+        }
+        let learn = [
+            row(week1DeliveryItemID, "Learn the system design delivery framework", 180),
+            row(id(0x32), "Design APIs with trusted identity and stable pagination", 90),
+            row(id(0x33), "Handle timeouts, retries, and ambiguous outcomes", 90)
+        ]
+        let practice = [
+            row(id(0x34), "Implement two-pointer invariants in Python", 120),
+            row(week1PythonItemID, "Implement sliding-window state in Python", 120),
+            row(id(0x35), "Implement interval sweeps in Python", 120),
+            row(id(0x36), "Design Bitly blind before opening the breakdown", 240),
+            row(id(0x37), "Repair the highest-impact Week 1 gap", 120),
+            row(id(0x38), "Build a behavioral evidence inventory", 60)
+        ]
+        let retrieve = [
+            row(id(0x39), "Reconstruct Week 1 decisions closed-book", 60)
+        ]
+        return WeekDetail(
+            planId: planID, index: 1, phaseTitle: "Foundations",
+            fullTitle: "Delivery, APIs, and network boundaries", displayTitle: "Delivery",
+            coreComplete: 0, coreTotal: 9,
+            plannedMinutes: 1200, capacityMinutes: 1200,
+            coreLine: "0 of 9 Core complete", capacityLine: "20h of 20h planned",
+            sections: [
+                WeekSection(
+                    type: "learn", label: "LEARN", aside: "Core · 360 min",
+                    note: "", rows: learn
+                ),
+                WeekSection(
+                    type: "practice", label: "PRACTICE", aside: "Core · 780 min",
+                    note: "", rows: practice
+                ),
+                WeekSection(
+                    type: "retrieve", label: "RETRIEVE",
+                    aside: "0 of 1 done · Doesn't block the week",
+                    note: "Reviews continue separately in Today. Retrieval time still "
+                        + "counts toward this week's 20h.",
+                    rows: retrieve
+                )
+            ]
+        )
+    }
+
     static func itemDetail(
         _ itemID: UUID = firstItemID, planID: UUID = backendPlanID, complete: Bool = true,
-        debrief: PracticeDebrief? = nil
+        debrief: PracticeDebrief? = nil, fullTitle: String? = nil,
+        itemType: String? = nil, why: String? = nil, doneWhen: String? = nil,
+        sourceLabel: String? = nil, sourceExcerpt: String? = nil,
+        phaseTitle: String? = nil, weekIndex: Int? = nil,
+        estimateMinutes: Int? = nil, estimateSource: String? = nil,
+        notes: String? = nil,
+        recallSupported: Bool? = nil, linkedCardIds: [UUID] = [],
+        cardProposalsAvailable: Bool? = nil,
+        resources: [PlanItemResource]? = nil,
+        stretchActions: [PlanStretchAction]? = nil,
+        mappedRecallCards: [PlanMappedRecallCard]? = nil
     ) -> PlanItemDetail {
         let row = week4Rows.first { id($0.0) == itemID } ?? week4Rows[0]
+        let resolvedType = itemType ?? row.2
+        let resolvedRecallSupport = recallSupported ?? true
         return PlanItemDetail(
-            id: itemID, planId: planID, fullTitle: row.1, phaseTitle: "Technologies",
-            weekIndex: 4, type: row.2, priority: row.3 ? "optional" : "core",
+            id: itemID, planId: planID, fullTitle: fullTitle ?? row.1,
+            phaseTitle: phaseTitle ?? "Technologies",
+            weekIndex: weekIndex ?? 4,
+            type: resolvedType, priority: row.3 ? "optional" : "core",
             status: complete ? "complete" : "pending",
-            whyItMatters: "Connects indexing, transactions, replication, and write "
-                + "bottlenecks into one system-level model.",
-            doneWhen: "Explain the read and write paths closed-book in under two "
-                + "minutes, including one scaling limit and one failure mode.",
-            estimateMinutes: row.4, estimateSource: "user_edited",
+            whyItMatters: why ?? "Connects indexing, transactions, replication, and "
+                + "write bottlenecks into one system-level model.",
+            doneWhen: doneWhen ?? "Explain the read and write paths closed-book in under "
+                + "two minutes, including one scaling limit and one failure mode.",
+            estimateMinutes: estimateMinutes ?? row.4,
+            estimateSource: estimateSource ?? "user_edited",
             estimateConfidence: "high",
-            sourceExcerpt: "PostgreSQL: query planning, indexes, MVCC, WAL, and "
-                + "replication.",
-            sourceLabel: "Hello Interview · PostgreSQL",
-            recallSupported: true,
-            notes: "Write out the WAL path once — that's the part I lose under pressure.",
+            sourceExcerpt: sourceExcerpt ?? "PostgreSQL: query planning, indexes, MVCC, "
+                + "WAL, and replication.",
+            sourceLabel: sourceLabel ?? "Hello Interview · PostgreSQL",
+            recallSupported: resolvedRecallSupport,
+            notes: notes ?? "Write out the WAL path once — that's the part I lose under pressure.",
             studyBlockLabel: "Tue 19:00", studyBlockWeekday: 2,
             studyBlockMinuteOfDay: 1140, studyBlockReminderOn: true,
             completedAt: complete ? Date(timeIntervalSince1970: 1_755_388_800) : nil,
             reopenedAt: nil,
-            linkedCardIds: [],
-            cardProposalsAvailable: complete && (row.2 != "practice" || debrief?.isSubmitted == true),
-            practiceDebriefEligible: complete && row.2 == "practice",
+            linkedCardIds: linkedCardIds,
+            cardProposalsAvailable: cardProposalsAvailable
+                ?? (complete && (resolvedType != "practice" || debrief?.isSubmitted == true)),
+            practiceDebriefEligible: complete && resolvedType == "practice",
             practiceDebrief: debrief,
-            blockedBy: []
+            blockedBy: [],
+            resources: resources,
+            stretchActions: stretchActions,
+            mappedRecallCards: mappedRecallCards
+        )
+    }
+
+    static func actionableItemDetail(planID: UUID = backendPlanID) -> PlanItemDetail {
+        itemDetail(
+            week1DeliveryItemID, planID: planID, complete: false,
+            fullTitle: "Learn the system design delivery framework",
+            itemType: "learn",
+            why: "A stable sequence prevents premature deep dives and gets a complete design "
+                + "on the board.",
+            doneWhen: "Finish the lesson, write the sequence from memory, and speak one "
+                + "ten-minute requirements-to-deep-dives walkthrough without notes.",
+            sourceLabel: "", sourceExcerpt: "",
+            phaseTitle: "Foundations", weekIndex: 1,
+            estimateMinutes: 180, estimateSource: "imported", notes: "",
+            recallSupported: true,
+            cardProposalsAvailable: false,
+            resources: [
+                PlanItemResource(
+                    kind: "lesson", provider: "Hello Interview",
+                    label: "Delivery Framework",
+                    actionLabel: "Open lesson",
+                    url: "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+                    language: nil
+                )
+            ],
+            stretchActions: [
+                PlanStretchAction(
+                    title: "Complete two additional delivery-framework designs",
+                    doneWhen: "Run two blind designs and compare each with a trusted breakdown.",
+                    minutes: 360,
+                    resourceUrl: "https://www.hellointerview.com/practice/overview",
+                    resourceLabel: "Hello Interview Guided Practice"
+                )
+            ],
+            mappedRecallCards: [
+                PlanMappedRecallCard(
+                    topic: "System design delivery: requirements to entities, APIs, "
+                        + "high-level design, and deep dives",
+                    cardId: nil, availabilityLabel: "AVAILABLE AFTER LESSON"
+                ),
+                PlanMappedRecallCard(
+                    topic: "Non-functional requirements: turning scale, latency, availability, "
+                        + "and durability into design constraints",
+                    cardId: nil, availabilityLabel: "AVAILABLE AFTER LESSON"
+                ),
+                PlanMappedRecallCard(
+                    topic: "Decision-driven estimation: calculating only the bound that can "
+                        + "change an architectural choice",
+                    cardId: nil, availabilityLabel: "AVAILABLE AFTER LESSON"
+                )
+            ]
+        )
+    }
+
+    static func pythonItemDetail(planID: UUID = backendPlanID) -> PlanItemDetail {
+        itemDetail(
+            week1PythonItemID, planID: planID, complete: false,
+            fullTitle: "Implement sliding-window state in Python",
+            itemType: "practice",
+            why: "Sliding-window problems test whether changing state can be updated without "
+                + "rescanning the whole range.",
+            doneWhen: "Study the lesson, solve both problems in Python, and explain the "
+                + "validity condition, expansion, contraction, and complexity without notes.",
+            sourceLabel: "", sourceExcerpt: "",
+            phaseTitle: "Foundations", weekIndex: 1,
+            estimateMinutes: 120, estimateSource: "imported", notes: "",
+            recallSupported: false,
+            cardProposalsAvailable: false,
+            resources: [
+                PlanItemResource(
+                    kind: "lesson", provider: "Hello Interview", label: "Sliding Window",
+                    actionLabel: "Open lesson",
+                    url: "https://www.hellointerview.com/learn/code/sliding-window/fixed-length",
+                    language: "Python"
+                ),
+                PlanItemResource(
+                    kind: "problem", provider: "LeetCode",
+                    label: "3 · Longest Substring Without Repeating Characters",
+                    actionLabel: "Solve in Python",
+                    url: "https://leetcode.com/problems/longest-substring-without-repeating-characters/",
+                    language: "Python"
+                ),
+                PlanItemResource(
+                    kind: "problem", provider: "LeetCode",
+                    label: "209 · Minimum Size Subarray Sum",
+                    actionLabel: "Solve in Python",
+                    url: "https://leetcode.com/problems/minimum-size-subarray-sum/",
+                    language: "Python"
+                )
+            ],
+            stretchActions: [], mappedRecallCards: []
+        )
+    }
+
+    static func linkedItemDetail(planID: UUID = backendPlanID) -> PlanItemDetail {
+        itemDetail(
+            week1DeliveryItemID, planID: planID, complete: true,
+            fullTitle: "Learn the system design delivery framework",
+            itemType: "learn",
+            why: "A stable sequence prevents premature deep dives and gets a complete design "
+                + "on the board.",
+            doneWhen: "Finish the lesson, write the sequence from memory, and speak one "
+                + "ten-minute requirements-to-deep-dives walkthrough without notes.",
+            sourceLabel: "", sourceExcerpt: "",
+            phaseTitle: "Foundations", weekIndex: 1,
+            estimateMinutes: 180, estimateSource: "imported", notes: "",
+            recallSupported: true,
+            linkedCardIds: [mappedCardID], cardProposalsAvailable: false,
+            resources: [
+                PlanItemResource(
+                    kind: "lesson", provider: "Hello Interview",
+                    label: "Delivery Framework",
+                    actionLabel: "Open lesson",
+                    url: "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery",
+                    language: nil
+                )
+            ],
+            mappedRecallCards: [
+                PlanMappedRecallCard(
+                    topic: "System design delivery: requirements to entities, APIs, "
+                        + "high-level design, and deep dives",
+                    cardId: mappedCardID, availabilityLabel: "FIRST REVIEW · TOMORROW MORNING"
+                ),
+                PlanMappedRecallCard(
+                    topic: "Non-functional requirements: turning scale, latency, availability, "
+                        + "and durability into design constraints",
+                    cardId: nil, availabilityLabel: "NOT ADDED"
+                ),
+                PlanMappedRecallCard(
+                    topic: "Decision-driven estimation: calculating only the bound that can "
+                        + "change an architectural choice",
+                    cardId: nil, availabilityLabel: "NOT ADDED"
+                )
+            ]
         )
     }
 
@@ -697,7 +905,9 @@ extension MockAPI {
 
     func planWeek(_ id: UUID, index: Int) async throws -> WeekDetail {
         await settle()
-        return StudyPlanFixtures.weekDetail(planID: id)
+        return index == 1
+            ? StudyPlanFixtures.week1Detail(planID: id)
+            : StudyPlanFixtures.weekDetail(planID: id)
     }
 
     func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {

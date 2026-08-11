@@ -39,6 +39,7 @@ from app.models import (
     ITEM_LEARN,
     ITEM_PENDING,
     ITEM_PRACTICE,
+    ITEM_REMOVED,
     ITEM_RETRIEVE,
     MODE_FIXED,
     PLAN_ACTIVE,
@@ -115,6 +116,7 @@ from app.services.card_lifecycle import (
     clean_rubric,
     storage_rubric,
 )
+from app.services.cards import recall_is_available
 from app.services.scoring_contract import (
     SCORING_CONTRACT_V2,
     active_scoring_contract_version,
@@ -154,6 +156,14 @@ async def _get_plan(db: AsyncSession, plan_id: uuid.UUID) -> StudyPlan:
 
 async def _get_graph(db: AsyncSession, plan_id: uuid.UUID) -> sp.PlanGraph:
     return await sp.load_plan_graph(db, await _get_plan(db, plan_id))
+
+
+def _available_item(graph: sp.PlanGraph, item_id: uuid.UUID) -> StudyPlanItem:
+    """A retired curriculum row is history, never an addressable activity."""
+    item = graph.item_by_id.get(item_id)
+    if item is None or item.status == ITEM_REMOVED:
+        raise HTTPException(status_code=404, detail="item not found")
+    return item
 
 
 async def _commit_activation(db: AsyncSession) -> None:
@@ -223,6 +233,7 @@ async def _debrief_context(
             select(StudyPlanItem)
             .where(col(StudyPlanItem.id) == item_id)
             .where(col(StudyPlanItem.plan_id) == plan_id)
+            .where(col(StudyPlanItem.status) != ITEM_REMOVED)
         )
     ).first()
     if item is None:
@@ -693,7 +704,7 @@ async def _overview(db: AsyncSession, plan_id: uuid.UUID) -> PlanOverview:
         owned = [w for w in graph.weeks if w.phase_id == phase.id]
         week_rows = []
         for week in owned:
-            items = graph.items_in(week)
+            items = [i for i in graph.items_in(week) if i.status != ITEM_REMOVED]
             all_done = bool(items) and all(i.status == ITEM_COMPLETE for i in items)
             week_rows.append(
                 PlanWeekRow(
@@ -834,6 +845,8 @@ async def get_week(
 
 
 async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanItem) -> ItemDetail:
+    if item.status == ITEM_REMOVED:
+        raise HTTPException(status_code=404, detail="item not found")
     week = graph.week_by_id.get(item.week_id)
     phase = graph.phase_by_id.get(item.phase_id)
     debrief = await _debrief_for(db, item.id)
@@ -842,6 +855,66 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
             select(StudyPlanCardLink).where(col(StudyPlanCardLink.plan_item_id) == item.id)
         )
     ).all()
+    card_index: dict[str, Card] = {}
+    if item.mapped_recall_topics:
+        cards = (
+            await db.exec(
+                select(Card).where(
+                    Card.user_id == current_user_id(),
+                    active_card_filter(),
+                )
+            )
+        ).all()
+        for card in cards:
+            card_index.setdefault(sp.normalize_topic(card.topic), card)
+
+    mapped_cards = []
+    for topic in item.mapped_recall_topics:
+        card = card_index.get(sp.normalize_topic(topic))
+        if card is None:
+            mapped_cards.append(
+                {
+                    "topic": topic,
+                    "card_id": None,
+                    "availability_label": "Not ready",
+                }
+            )
+            continue
+        grounding = Grounding(
+            source_url=card.source_url,
+            source_section=card.source_section,
+            source_label=card.source_label,
+            answer_basis=card.answer_basis or card.answer_anchor,
+            answer_rubric=card.answer_rubric,
+            canonical_question=card.canonical_question or "",
+        )
+        grounded = not grounding.missing()
+        mapped_cards.append(
+            {
+                "topic": topic,
+                # An incomplete legacy row is intentionally not a navigation
+                # target. The client treats a non-null id as actionable.
+                "card_id": card.id if grounded else None,
+                "availability_label": (
+                    "Not ready"
+                    if not grounded
+                    else (
+                        "Waiting for delayed recall"
+                        if card.recall_not_before_at is not None
+                        and not recall_is_available(card, _now())
+                        else (
+                            "In review rotation"
+                            if card.last_score is not None or card.repetitions > 0
+                            else (
+                                "Ready for recall"
+                                if card.last_learning_exposure_at is not None
+                                else "Learn first"
+                            )
+                        )
+                    )
+                ),
+            }
+        )
     return ItemDetail(
         id=item.id,
         plan_id=item.plan_id,
@@ -859,6 +932,9 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
         source_excerpt=item.source_excerpt,
         source_label=item.parser_interpretation,
         recall_supported=item.recall_supported,
+        resources=item.resources,
+        mapped_recall_cards=mapped_cards,
+        stretch_actions=item.stretch_actions,
         notes=item.notes,
         study_block_label=_block_label(item) or item.study_block_label,
         study_block_weekday=item.study_block_weekday,
@@ -886,9 +962,7 @@ async def get_item(
     plan_id: uuid.UUID, item_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> ItemDetail:
     graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    item = _available_item(graph, item_id)
     return await _item_detail(db, graph, item)
 
 
@@ -940,7 +1014,7 @@ async def get_recap(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session))
         practice_completed=sum(1 for i in practice if i.status == ITEM_COMPLETE),
         remaining_gaps=[
             i.full_title
-            for i in graph.items
+            for i in scheduled
             if i.priority == PRIORITY_CORE and i.status != ITEM_COMPLETE
         ][:5],
     )
@@ -1076,6 +1150,8 @@ async def apply_replan(
     headline, text = _replan_copy(proposal)
     for item_id in body.deferred_item_ids:
         item = graph.item_by_id.get(item_id)
+        if item is not None and item.status == ITEM_REMOVED:
+            raise HTTPException(status_code=404, detail="item not found")
         if item is not None:
             item.status = ITEM_DEFERRED
             item.updated_at = _now()
@@ -1155,9 +1231,7 @@ async def complete_item(
 ) -> ItemDetail:
     """Plan progress only. No card, score, session, or SM-2 field is read here."""
     graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    item = _available_item(graph, item_id)
     if item.status == ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is already complete")
 
@@ -1271,9 +1345,7 @@ async def preview_reopen(
     still a confirmation away.
     """
     graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    item = _available_item(graph, item_id)
     if item.status != ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is not complete")
 
@@ -1308,9 +1380,7 @@ async def reopen_item(
 ) -> ItemDetail:
     graph = await _get_graph(db, plan_id)
     _require_current(graph.plan, base_plan_revision)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    item = _available_item(graph, item_id)
     if item.status != ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is not complete")
 
@@ -1350,9 +1420,7 @@ async def edit_item(
     db: AsyncSession = Depends(get_session),
 ) -> ItemDetail:
     graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    item = _available_item(graph, item_id)
 
     before = sp.plan_snapshot(graph)
     changed_estimate = (
@@ -1558,9 +1626,7 @@ async def create_card_proposals(
     already have proposals.
     """
     graph = await _get_graph(db, plan_id)
-    item = graph.item_by_id.get(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="item not found")
+    item = _available_item(graph, item_id)
     if item.status != ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is not complete")
 
@@ -1723,7 +1789,9 @@ async def list_card_proposals(
     plan_id: uuid.UUID, item_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardProposalList:
     """Read stored proposals. Never calls the model."""
-    plan = await _get_plan(db, plan_id)
+    graph = await _get_graph(db, plan_id)
+    _available_item(graph, item_id)
+    plan = graph.plan
     rows = (
         await db.exec(
             select(StudyPlanCardProposal).where(
@@ -1760,7 +1828,8 @@ async def accept_card_proposals(
     appeared, the batch aborts and that candidate refreshes as EXISTING rather
     than the rest being created while claiming atomic success.
     """
-    plan = await _get_plan(db, plan_id)
+    graph = await _get_graph(db, plan_id)
+    plan = graph.plan
     today = await local_today(db)
 
     prior = (
@@ -1784,6 +1853,16 @@ async def accept_card_proposals(
                 status_code=409, detail="idempotency key reused with a different request"
             )
         if prior.status == ACCEPTANCE_COMMITTED:
+            prior_proposal = (
+                await db.exec(
+                    select(StudyPlanCardProposal).where(
+                        StudyPlanCardProposal.id == prior.proposal_id
+                    )
+                )
+            ).first()
+            if prior_proposal is None:
+                raise HTTPException(status_code=404, detail="proposal not found")
+            _available_item(graph, prior_proposal.source_plan_item_id)
             return CardAcceptOut(
                 status="committed",
                 created_card_ids=[uuid.UUID(i) for i in prior.created_card_ids],
@@ -1805,6 +1884,7 @@ async def accept_card_proposals(
             raise HTTPException(status_code=404, detail="proposal not found")
         if row.plan_id != plan_id:
             raise HTTPException(status_code=404, detail="proposal not found")
+        _available_item(graph, row.source_plan_item_id)
         if row.revision != body.proposal_revision:
             raise HTTPException(status_code=409, detail="proposal has been edited")
         if not sp.selectable(row):
@@ -1912,7 +1992,7 @@ async def resolve_duplicate(
     plan_id: uuid.UUID, body: DuplicateResolution, db: AsyncSession = Depends(get_session)
 ) -> Response:
     """Record the user's call on a possible overlap. Never decides it for them."""
-    await _get_plan(db, plan_id)
+    graph = await _get_graph(db, plan_id)
     row = (
         await db.exec(
             select(StudyPlanCardProposal).where(col(StudyPlanCardProposal.id) == body.proposal_id)
@@ -1920,6 +2000,7 @@ async def resolve_duplicate(
     ).first()
     if row is None or row.plan_id != plan_id:
         raise HTTPException(status_code=404, detail="proposal not found")
+    _available_item(graph, row.source_plan_item_id)
 
     if body.action == "keep_new":
         row.duplicate_check_result = "none"

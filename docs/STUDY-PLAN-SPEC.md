@@ -46,7 +46,8 @@ plan progress: a card's review completing is not a plan item completing.
 ## Data model
 
 Twelve tables, all prefixed `study_plan`. Migrations `0005` (core), `0006`
-(card proposals), and `0007` (Practice Debrief). Handwritten;
+(card proposals), `0007` (Practice Debrief), and `0013` (first-party curriculum
+metadata). Handwritten;
 `alembic revision --autogenerate` stays disabled.
 
 | Table | Holds |
@@ -54,7 +55,7 @@ Twelve tables, all prefixed `study_plan`. Migrations `0005` (core), `0006`
 | `study_plans` | title, subject, `subject_slug`, verbatim `guide_text`, status, mode, deadline, `start_date`, default weekly capacity, `current_week_index`, `forecast_end_plan_week`, `revision`, lifecycle timestamps |
 | `study_plan_phases` | index, `full_title`, `overview_title`, description |
 | `study_plan_weeks` | index, phase, `full_title`, `overview_title`, `override_capacity_minutes`, `advanced_at` |
-| `study_plan_items` | week, phase, `guide_order`, type, priority, titles, `why_it_matters`, `done_when`, estimate + source + confidence, status, origin, `source_item_id`, source span and excerpt, `parser_interpretation`, `approved_at`, completion timestamps, notes, study-block metadata |
+| `study_plan_items` | week, phase, `guide_order`, optional stable `curriculum_key`, type, priority, titles, `why_it_matters`, `done_when`, estimate + source + confidence, status, origin, `source_item_id`, source span and excerpt, `parser_interpretation`, external `resources`, read-only `mapped_recall_topics`, advisory `stretch_actions`, `approved_at`, completion timestamps, notes, study-block metadata |
 | `study_plan_item_dependencies` | prerequisite, dependent, kind, source, confidence, rationale, excerpt, `confirmed_at` |
 | `study_plan_revisions` | kind, `base_plan_revision`, before/after JSON, reversible, summary |
 | `study_plan_guide_drafts` | the pasted guide and its import attempt, before any plan exists |
@@ -79,6 +80,10 @@ Twelve tables, all prefixed `study_plan`. Migrations `0005` (core), `0006`
 - `(status = 'committed') = (committed_at IS NOT NULL)` on acceptances, so the
   idempotent-replay lookup is never ambiguous.
 - `uq_study_plan_acceptance_key` — unique idempotency key.
+- `uq_study_plan_items_curriculum_key` — partial unique index on
+  `(plan_id, curriculum_key)` where the key is non-null. Generic imports keep a
+  null key; the first-party manifest uses it to update the same activity across
+  reviewed curriculum versions without trusting a user-editable title.
 
 ### Ordering caveat
 
@@ -286,6 +291,59 @@ never uses SM-2 completion as plan-item completion. **Generated retrieval must b
 approved during Preview** — an unapproved activity has no row built for it in
 `build_plan_rows`, which is the enforcement point.
 
+## First-party actionable curriculum
+
+The committed senior-backend plan is a versioned, deterministic curriculum. It
+adds navigation and recall handoff metadata without turning a paid lesson into
+answer authority:
+
+- `resources` is an ordered list of direct HTTPS destinations. Each entry has a
+  kind, provider, label, action label, URL, and optional language. Opening one
+  never marks the item complete.
+- `mapped_recall_topics` contains exact canonical topics from `cards.json`.
+  Item reads resolve those topics against the current user's active cards. This
+  is a read-only lookup; it writes no `study_plan_card_links`, calls no model,
+  and changes no card or plan state.
+- A resolved card is `Learn first`, `Waiting for delayed recall`, `Ready for
+  recall`, or `In review rotation`. Missing or incompletely grounded cards are
+  `Not ready` and carry no destination.
+- Pending items may name the future recall concepts, but they are inert until
+  the item is complete. The completed item opens the existing Card History
+  route, where the card-owned Learn/review rules remain authoritative.
+- `stretch_actions` is advisory work only. It has no status, reminder,
+  scheduling row, forecast input, progress credit, or carry-forward debt.
+
+External URLs are provenance and navigation, not permission to copy Premium
+text. They never populate `source_excerpt`, `answer_basis`, or an answer rubric.
+The 54-card spine remains cohort-gated: a future mapping stays `Not ready` until
+that card has reviewed authority and is deliberately activated. Coding work and
+full designs create no broad card automatically; a sourced debrief may still
+propose zero to three focused gaps through the ordinary acceptance path.
+
+### Versioned seed upgrades
+
+The manifest's canonical `seed_key` names its current lineage, while reviewed
+`legacy_seed_keys` let an upgrade find an older deployed lineage without
+claiming unrelated plans. `version` is the content revision. Rerunning the same
+version is a no-op. A newer version updates that same plan in one transaction; a
+lower version is refused. More than one founder plan matching the canonical key
+or any legacy alias is an ambiguity and fails closed.
+
+The deployed version-2 72-row plan and later version-3 84-row plan predate stable
+item identity; their keys were reused for unrelated activities, so version 4
+uses a distinct key namespace. The one-time legacy→v4 upgrader first verifies
+one of the exact reviewed 72- or 84-row global-order shapes and requires that
+plan to be pristine: Week 1, revision 1, no completed,
+deferred, or removed work, no notes or study-block personalization, and no week
+override or advancement. Any mismatch refuses the whole upgrade. On success the
+old pending rows become `removed` and 116 fresh v4 rows are created. Imported
+dependencies are rebuilt; inferred and user-added historical edges survive.
+Plan id and active state survive; the pristine legacy plan takes the explicit
+Monday supplied to the seed command as its corrected start date. Cards,
+sessions, and all SM-2 fields are unchanged. Later v4+ revisions use stable keys
+normally, preserve completed rows, and do not reset the start date. A
+`curriculum_update` revision records the before/after versions.
+
 ## Practice Debrief
 
 Practice completion diverges deliberately from Learn completion. Completing an
@@ -426,6 +484,13 @@ database. `/study-plans/active/summary` is declared before `/{plan_id}` so
 `active` is never parsed as an id, and it returns `{"active": false}` rather than
 404 when there is no active plan.
 
+`GET /study-plans/{id}/items/{item_id}` additionally returns `resources`,
+`mapped_recall_cards`, and `stretch_actions`. These fields are additive and
+default to empty arrays. `mapped_recall_cards.card_id` is nullable; the server
+returns it only for an owned, active, fully grounded card. Its human-readable
+availability label is server-shaped so the client does not duplicate learning
+gate or review-state logic.
+
 ## iOS
 
 Navigation is Today → Plan overview → Week detail → Item detail, through the
@@ -440,6 +505,17 @@ It holds domain state only and never pushes a screen.
 with `due()`, and swallows the failure into an optional. A Study Plan outage
 degrades one line to `PLAN · UNAVAILABLE →`; the due cards are untouched. One
 compact line, no capacity, no progress paragraph, accent on the caret only.
+
+### Actionable item detail
+
+Item detail keeps the existing explicit `Mark complete` action. `SOURCE` renders
+the ordered external resources as validated HTTP(S) links; opening a link has no
+progress side effect. `UNPROMPTED` names mapped concepts while the item is
+pending, but only completed items can navigate to a resolved Card History.
+Unresolved or ungrounded mappings stay visible as `Not ready`. `MORE TIME`
+renders advisory stretch work and states that it is neither scheduled nor
+tracked. Unsafe or malformed URLs remain visible as unavailable metadata rather
+than becoming tappable.
 
 ### Density budget
 
@@ -477,7 +553,8 @@ client-side on disk.
 Conversation fall-through:
 
 `study-plan-overview` · `-overview-expanded` · `-overview-future` · `-week` ·
-`-item` · `-capacity` · `-build` · `-preview` · `-import-failure` · `-replan` ·
+`-item` · `-item-actionable` · `-item-python` · `-item-linked` · `-capacity` ·
+`-build` · `-preview` · `-import-failure` · `-replan` ·
 `-replan-invalid` · `-fixed-recovery` · `-reopen` · `-reopen-invalid` · `-plans` ·
 `-no-active` · `-complete` · `-updates` · `-retrieval-audit` · `-estimate-audit` ·
 `-dependency-audit` · `-card-proposal` · `-card-failure` · `-card-existing` ·
@@ -512,6 +589,9 @@ Flags: `WC_PLAN_NO_ACTIVE`, `WC_PLAN_SUMMARY_FAIL`, `WC_PLAN_FAIL_IMPORT`,
 | Network loss editing a guide | Disk copy survives; the draft row survives |
 | Network loss completing an item | Inline notice; nothing changed |
 | Today summary failure | `PLAN · UNAVAILABLE`; due cards load normally |
+| Same first-party seed version | No-op; existing ids and progress are returned |
+| Older first-party manifest | Refused as a curriculum downgrade |
+| Unexpected pre-key v3 shape | Whole upgrade rolls back; no plan or card state changes |
 
 ## Out of scope — do not build
 

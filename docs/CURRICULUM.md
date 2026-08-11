@@ -1,9 +1,10 @@
 # Curriculum — 12-week senior-backend interview plan
 
 `api/cards.json` is a recall spine, not a complete interview-preparation
-program. Devmax tests whether a mechanism can be reconstructed out loud in
-under two minutes. Coding execution, full system designs, and behavioral story
-authoring happen outside the app.
+program. The Study Plan is the complete program: Hello Interview teaches the
+material, coding is implemented in Python, and full designs, coding mocks, and
+behavioral practice produce the external evidence. Unprompted retains focused
+mechanisms after learning; it does not replace the work.
 
 This document governs curriculum content and activation. `spec.md` governs
 backend behavior. The retired 126-card deck is preserved at
@@ -15,12 +16,20 @@ backend behavior. The retired 126-card deck is preserved at
 - Mid-level is an acceptable fallback; preparation is calibrated to the senior
   bar.
 - Initial target companies: Anthropic, OpenAI, and Google.
-- Twelve weeks at 12–15 focused hours per week. If an interview is scheduled
-  sooner, compress the same dependency order rather than activating everything.
+- Twelve weeks at 20 dependable hours per week, with an advisory stretch menu
+  of up to 20 more. Stretch work never blocks advancement or changes the
+  forecast. If an interview is scheduled sooner, compress the same dependency
+  order rather than activating everything.
+- Python is the implementation language for every coding exercise and mock.
+- Resume work, job applications, and professional networking are intentionally
+  deferred from this version of the plan.
 
 The foundation is product/backend system design because it transfers across the
 widest set of roles. Platform, AI-infrastructure, and company-shaped depth are
 on-demand overlays.
+
+The immediately runnable first week is in
+[Week 1 — start here](WEEK-1-START-HERE.md).
 
 The current card-by-card readiness, prerequisite gaps, source-access risks, and
 migration order are recorded in the
@@ -128,8 +137,8 @@ such as “fan-out recovery when a publish partially succeeds.”
 Seventeen mechanism prompts covering Hello Interview's sixteen coding families
 live in a desk-only reference file (graphs contributes both dependency ordering
 and shortest paths). They are not part of the production seed. Mechanism
-understanding is core Study Plan work; writing code is optional and happens only
-in an editor. A pattern card is seeded when explaining its recognition cue,
+understanding and Python implementation are core Study Plan work. A pattern card
+is seeded only when practice shows that explaining its recognition cue,
 invariant, state transition, complexity, or failure mode would help.
 
 ### Company overlays — `api/modules/company-*.json`
@@ -167,18 +176,25 @@ the right story can be selected under ambiguity.
 
 ## Learning-to-review handoff
 
-**A card enters production only after its `activation_prerequisite` is complete.**
+**A card enters production only after its `activation_prerequisite` is complete
+and its answer authority has been reviewed.**
 
-The normal product flow does not require an operator to activate weekly cohorts:
+The learner flow is:
 
-1. Complete a lesson item in Study Plan.
-2. The app opens that item's recall-card gate automatically.
-3. Review the suggestions and explicitly add the useful cards.
+1. Open the item's direct source and satisfy its concrete `done_when`.
+2. Complete the lesson item in Study Plan.
+3. The app resolves that item's reviewed `mapped_recall_topics` against owned,
+   active, fully grounded cards. This lookup is read-only.
+4. Open each resolved card and use its card-owned Learn action before the first
+   scored recall. The first
+   review waits until the later of eight hours and the next local day.
 
-Completion remains a plan-only write. Opening the gate may generate proposals,
-but no card exists until the acceptance request commits it. This keeps advancement
-lesson-gated rather than calendar-gated: seven elapsed days never imply that the
-next material was learned.
+Completion remains a plan-only write. The versioned first-party mapping makes no
+model call and never copies Premium lesson text. A missing or incompletely
+grounded future card remains `Not ready`; completing the item does not create or
+activate it. A reviewed cohort must still be released deliberately through the
+curated seed, while a personal sourced gap may use the ordinary proposal and
+acceptance path. Neither path is triggered by elapsed calendar time.
 
 The curated `cards.json` cohort command is retained for first-deploy bootstrap,
 recovery, and clean-room verification:
@@ -214,12 +230,14 @@ uv run python -m app.seed_study_plan \
   --start-date <monday-of-this-week>
 ```
 
-`api/plans/senior-backend-12-week.json` is the deterministic 12-week manifest.
-It is validated through the same gate as a pasted guide, makes no model call,
-and records a stable seed key so rerunning is a no-op. It never touches cards or
-sessions. After bootstrap, progress happens in the app: card reviews continue
-in Today, item completion remains an explicit plan-only signal, and completing a
-supported lesson opens the proposal gate for the user to approve its cards.
+`api/plans/senior-backend-12-week.json` is the deterministic version-4 manifest.
+Its canonical version-4 seed key declares the reviewed version-2 and version-3
+keys as legacy aliases, so the upgrader finds the saved plan rather than
+creating an unrelated duplicate. It is validated through the same gate as a
+pasted guide, makes no model call, and never touches cards or sessions. After
+bootstrap, progress happens in the app: card reviews continue in Today, item
+completion remains an explicit plan-only signal, and a completed mapped lesson
+opens each owned, active, grounded card through Card History.
 
 ## Retirement rule
 
@@ -246,124 +264,48 @@ covers `cards.json`, `library/`, and `modules/` together.
 
 ## Twelve-week program
 
-### Weeks 1–3 — delivery and core concepts
+Every scheduled week is exactly 1,200 minutes on the 30-minute planning grid.
+The manifest owns the individual source links, exercises, estimates, completion
+conditions, and hard dependencies; this table is the journey-level map.
 
-System design:
+| Week | System design and practice | Python coding | Behavioral and retrieval |
+|---|---|---|---|
+| 1 | Delivery, API design, networking, then a blind-first Bitly design | Two pointers, sliding window, intervals | Evidence inventory, sourced repair, closed-book reconstruction |
+| 2 | Data modeling, indexing, PostgreSQL internals, then Design LeetCode | Stacks, linked lists, binary search | Scope and ownership stories |
+| 3 | Caching, sharding, consistent hashing, CAP, then Distributed Cache | Heaps, DFS, BFS | Ambiguity and perseverance stories |
+| 4 | Scaling reads/writes, queue workers, Twitter-style timeline, ad-click aggregation | Topological ordering and shortest paths | Conflict and growth stories |
+| 5 | Contention, workflows, Ticketmaster, payments | Backtracking, dynamic programming, greedy | Communication and leadership stories |
+| 6 | Realtime recovery, blobs, outbox, jobs, WhatsApp, Dropbox | Tries, prefix sums, matrices | Finish story catalog and Big Three |
+| 7 | PostgreSQL, Redis, DynamoDB, Cassandra, API gateways, online auction | Mixed timed data-structure set | Big Three rehearsal |
+| 8 | Kafka, Elasticsearch, CDN, rate limiting, time series, post search | Mixed timed priority-queue set | Senior behavioral follow-ups |
+| 9 | Flink, ZooKeeper, approximate structures, proximity and vector indexes | Mixed timed graph set | Senior-scope follow-ups |
+| 10 | Notification System and Job Scheduler baseline mocks | Two named Python mocks | Behavioral mocks and evidence baseline |
+| 11 | OpenAI-shaped ChatGPT and Google-shaped collaborative-docs mocks | Two named Python mocks | Target-company calibration and mocks |
+| 12 | Two unseen guided design mocks | Two final named Python mocks | Final behavioral mock and evidence review |
 
-- delivery framework
-- non-functional requirements and decision-driven estimation
-- network failure handling, API mechanics, and identity boundaries
-- data modeling and indexing
-- caching, sharding, consistent hashing, and CAP
-
-Coding mechanisms:
-
-- two pointers
-- sliding window
-- intervals
-- stacks
-- linked lists
-- binary search
-- heaps
-- DFS and BFS
-
-For each family, explain the recognition cue, maintained invariant, state
-transition, complexity, and common failure mode. Representative implementation
-is optional, desk-only work.
-
-### Weeks 4–6 — reusable patterns and application
-
-System design:
-
-- scaling reads and writes
-- replica lag and fan-out
-- backpressure and queues
-- contention and distributed locks
-- sagas, transactional outboxes, and durable workflows
-- circuit breakers, retries, and exactly-once effects
-- real-time updates
-- large blobs and long-running jobs
-
-Named practice:
-
-- Complete a historical Twitter home-timeline design. Start with write-time
-  materialization for ordinary authors, then handle a very high-fanout author by
-  skipping per-follower fan-out and merging that author's recent posts at timeline
-  read. Defend the write-amplification, read-latency, ordering/freshness, and
-  failure-recovery trade-offs. Derive any cutoff from observed workload and SLOs;
-  do not assume a fixed follower threshold.
-
-Coding mechanisms:
-
-- graphs and shortest paths
-- backtracking
-- dynamic programming
-- greedy algorithms
-- tries
-- prefix sums
-- matrices
-
-Begin the behavioral story catalog by the end of week 6. Representative
-implementation is optional, desk-only work.
-
-### Weeks 7–9 — technologies and application
-
-System design:
-
-- PostgreSQL
-- Redis
-- DynamoDB
-- Cassandra
-- API gateways
-- Kafka
-- Elasticsearch
-- blob storage and CDNs
-- rate limiting and time-series storage
-- Flink, ZooKeeper, approximate structures, proximity search, and vector indexes
-
-External practice:
-
-- two complete system designs per week
-- verbal coding-prompt walkthroughs focused on pattern choice, invariants,
-  complexity, and edge cases
-- up to two optional timed coding sessions per week, desk-only
-- story catalog completed and Big Three drafted
-
-Every external session ends with a gap harvest. Add at most one to three focused
-cards for mechanisms that could not be reconstructed.
-
-### Weeks 10–12 — simulation and target overlays
-
-No automatic generic cards.
-
-Each week:
-
-- two full system-design mocks
-- three verbal coding-prompt walkthroughs
-- one optional desk-only coding mock
-- two behavioral practices
-- due Devmax reviews
-- company modules selected for actual roles
-- gap cards only
-
-If optional implementation is chosen, Google-style practice uses a plain editor
-with no execution, while OpenAI-style practice uses practical,
-production-shaped implementation and testing. Company-specific full designs
-remain external even when their focused mechanisms become cards.
+Weeks 1–9 map all 54 base recall topics exactly once to source Learn items.
+Coding activities and full designs never create broad cards automatically.
+Every external session ends with a gap harvest; add zero to three focused cards
+only when a mechanism could not be reconstructed and trusted answer authority
+exists. Weeks 10–12 contain no generic mappings.
 
 ## Weekly time budget
 
-| Phase | Core coding mechanisms | Optional desk implementation | Other plan work |
-|---|---:|---:|---:|
-| Weeks 1–3 | 1.5h | 1.5h | 9h |
-| Week 4 | 2h | 2.5h | 7.5h |
-| Weeks 5–6 | 2h | 2h | 8h |
-| Weeks 7–9 | 1.5h | 2h | 8.5h |
-| Weeks 10–12 | 2.5h | 2h | 7.5h |
+The dependable budget is 20 hours. Its mix changes with the phase:
 
-Optional implementation consumes capacity when chosen but never blocks week
-advancement. If fewer hours are available, drop it first and reduce breadth
-next. Do not increase passive card volume to compensate.
+| Phase | Source learning | Python coding | Designs or mocks | Behavioral, repair, retrieval | Total |
+|---|---:|---:|---:|---:|---:|
+| Weeks 1–3 | 5–6h | 6h | 4h | 4–5h | 20h |
+| Weeks 4–6 | 4h | 4.5–5.5h | 7h | 3.5–4.5h | 20h |
+| Weeks 7–9 | 6–7.5h | 4h | 6–6.5h | 2.5–4h | 20h |
+| Weeks 10–12 | 2h calibration | 6h | 6h | 6h | 20h |
+
+Each week also exposes an advisory 20-hour stretch menu: eight hours of unseen
+Python work, six hours of extra designs or mocks, three hours of a current-week
+deep dive, two hours of behavioral rehearsal, and one hour of gap harvest. It is
+not scheduled capacity, does not block advancement, and must not pre-teach the
+next week or increase generic card volume. If only 20 hours are available, do
+the scheduled plan and ignore Stretch without replanning.
 
 ## Readiness gates
 
@@ -379,7 +321,7 @@ Devmax scores are diagnostic, not readiness gates.
 
 ### Coding execution readiness
 
-This is optional plan work and can be claimed only from external implementation:
+This can be claimed only from external Python implementation:
 
 - Two unseen problems in 45 minutes.
 - Correct or nearly correct implementation.
