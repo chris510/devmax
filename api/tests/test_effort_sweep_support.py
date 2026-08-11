@@ -123,6 +123,24 @@ def test_release_pack_has_seven_approved_families_per_card() -> None:
     assert Counter(
         tag for case in cases for tag in case["tags"] if tag in family_tags
     ) == {tag: 6 for tag in family_tags}
+    sol_held_out = [case for case in cases if "sol-secondary-heldout" in case["tags"]]
+    sol_canary = [case for case in cases if "sol-secondary-canary" in case["tags"]]
+    sol_remainder = [case for case in cases if "sol-secondary-remainder" in case["tags"]]
+    assert len(sol_held_out) == 24
+    assert len(sol_canary) == 6
+    assert len(sol_remainder) == 18
+    assert {case["name"] for case in sol_canary}.isdisjoint(
+        case["name"] for case in sol_remainder
+    )
+    assert Counter(case["topic"] for case in sol_canary) == {
+        topic: 1 for topic in {case["topic"] for case in cases}
+    }
+    assert Counter(case["expected_accuracy"] >= 3 for case in sol_canary) == {
+        True: 3,
+        False: 3,
+    }
+    assert sum(case["expected_depth"] >= 3 for case in sol_canary) == 2
+    assert sum(case["expected_boundaries"] >= 3 for case in sol_canary) == 2
     for case in cases:
         axes = (
             case["expected_accuracy"],
@@ -960,6 +978,33 @@ def test_reviewed_gate_reports_axis_composite_bucket_and_label_failures() -> Non
     assert any("depth 2 is more than one from 5" in failure for failure in failures)
     assert any("false Accuracy failure" in failure for failure in failures)
     assert any("missing reviewed label" in failure for failure in failures)
+
+
+def test_secondary_bucket_gate_reports_both_crossing_directions() -> None:
+    result = effort_sweep.Result(
+        index=0,
+        case="crossed buckets",
+        expected_score=3,
+        score=4,
+        expected_axes=(5, 2, 3),
+        axes=(5, 3, 2),
+        usage=support.Usage(),
+    )
+
+    failures = effort_sweep.secondary_bucket_gate_failures({"medium": [result]})
+
+    assert failures == [
+        "medium/crossed buckets: false Depth pass",
+        "medium/crossed buckets: false Boundaries failure",
+    ]
+
+
+def test_openai_sol_price_is_versioned_in_the_shared_guard() -> None:
+    rate = support.rate_for_model("gpt-5.6-sol")
+
+    assert rate.input_per_million == Decimal("5")
+    assert rate.output_per_million == Decimal("30")
+    assert rate.label == "published standard rate"
 
 
 @pytest.mark.anyio

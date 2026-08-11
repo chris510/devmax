@@ -137,6 +137,13 @@ depend on Depth and Boundaries.
 
 ## Recommended next decision
 
+**Resolved:** The repository-wide consumer audit keeps the three-axis product
+contract and selects a direct GPT-5.6 Sol whole-scorer canary instead of an
+Accuracy-only display redesign. See
+[`SECONDARY-AXIS-ARCHITECTURE-DECISION.md`](SECONDARY-AXIS-ARCHITECTURE-DECISION.md)
+and
+[`OPENAI-SOL-SECONDARY-AXIS-CANARY.md`](OPENAI-SOL-SECONDARY-AXIS-CANARY.md).
+
 Stop prompt-level iteration on this six-case set. Claude and Terra have now
 failed the same general secondary-axis attribution contract in different ways,
 and V1 shows that requiring quotes alone does not fix it.

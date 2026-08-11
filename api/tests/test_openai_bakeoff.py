@@ -488,6 +488,79 @@ async def test_scoring_replay_can_enforce_the_shared_reviewed_gate(
 
 
 @pytest.mark.anyio
+async def test_secondary_bucket_gate_is_scoring_only(monkeypatch, tmp_path) -> None:
+    cases = write_scoring_case(tmp_path)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "evidence",
+            str(cases),
+            "--enforce-secondary-bucket-gate",
+            "--dry-run",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        await openai_bakeoff.main()
+
+
+@pytest.mark.anyio
+async def test_scoring_replay_enforces_secondary_bucket_gate(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_scoring_case(tmp_path)
+    case = json.loads(cases.read_text())[0]
+    prepared = openai_bakeoff.prepare_cases(
+        [case],
+        kind="scoring",
+        levels=[openai_bakeoff.DEFAULT_EFFORT],
+        model=openai_bakeoff.DEFAULT_MODEL,
+        max_output_tokens=openai_bakeoff.DEFAULT_OUTPUT_CAPS["scoring"],
+    )[0]
+    record = make_result_record(
+        prepared,
+        model=openai_bakeoff.DEFAULT_MODEL,
+        result={
+            "expected_score": 3,
+            "score": 4,
+            "expected_axes": [5, 2, 2],
+            "axes": [5, 3, 2],
+            "feedback": "The answer was correct.",
+        },
+        usage=Usage(),
+    )
+    resume = tmp_path / "crossed.jsonl"
+    with JsonlRecorder(resume) as recorder:
+        recorder.append(record)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "scoring",
+            str(cases),
+            "--resume",
+            str(resume),
+            "--output",
+            str(tmp_path / "replay.jsonl"),
+            "--enforce-reviewed-gate",
+            "--enforce-secondary-bucket-gate",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 1
+    output = capsys.readouterr()
+    assert "reviewed gate passed" in output.out
+    assert "secondary bucket gate failed" in output.err
+    assert "false Depth pass" in output.err
+
+
+@pytest.mark.anyio
 async def test_paid_run_stops_after_preflight_when_api_key_is_missing(
     monkeypatch, tmp_path, capsys
 ) -> None:

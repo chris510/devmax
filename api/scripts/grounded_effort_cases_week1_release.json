@@ -1,7 +1,7 @@
 [
   {
     "name": "delivery sequence — self-corrected",
-    "tags": ["partial-self-correction", "release-pack"],
+    "tags": ["partial-self-correction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "answer": "I usually pick the database first—actually, no, that is backwards once the requirements are agreed. I should identify the core entities, define the external API, draw the simplest end-to-end design that serves those calls, and only then spend the remaining time on the constraints and bottlenecks worth a deep dive.",
     "expected_score": 5,
@@ -13,7 +13,7 @@
   },
   {
     "name": "delivery sequence — contracts-first alternative",
-    "tags": ["source-compatible-alternative", "release-pack"],
+    "tags": ["source-compatible-alternative", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "answer": "After narrowing the requirements, I turn the user flows into contracts and the minimum data model behind them. Then I connect those contracts through one complete architecture before hardening the parts most threatened by scale or reliability. Calling that contracts and data instead of entities and APIs is just a different framing of the same progression.",
     "expected_score": 4,
@@ -49,7 +49,7 @@
   },
   {
     "name": "delivery sequence — follow-up supplies ordering",
-    "tags": ["follow-up-anchored", "release-pack"],
+    "tags": ["follow-up-anchored", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "answer": "I would sketch the architecture and discuss scaling.",
     "follow_up_question": "Before scaling, what concrete sequence gets the agreed user actions into a complete working design?",
@@ -63,7 +63,7 @@
   },
   {
     "name": "delivery sequence — stale mastery contradicted",
-    "tags": ["prior-summary-contradiction", "release-pack"],
+    "tags": ["prior-summary-contradiction", "release-pack", "sol-secondary-heldout", "sol-secondary-canary"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "mastery_summary": "Previously gave the requirement-to-contract-to-complete-design sequence and understood why deep dives come last.",
     "answer": "This time I would immediately choose Cassandra and Kafka, work out their partitions, and fit the entities and API around them later.",
@@ -76,7 +76,7 @@
   },
   {
     "name": "delivery sequence — trade-off only",
-    "tags": ["axis-isolation", "depth-only", "release-pack"],
+    "tags": ["axis-isolation", "depth-only", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
     "answer": "After requirements, I identify entities, define the API, and draw the simplest complete end-to-end design before deep dives. Deferring detail protects enough interview time to finish the system, though it means I must choose the later deep dives carefully.",
     "expected_score": 4,
@@ -89,7 +89,7 @@
 
   {
     "name": "non-functional requirements — self-corrected",
-    "tags": ["partial-self-correction", "release-pack"],
+    "tags": ["partial-self-correction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
     "answer": "It should maximize consistency, availability, and partition tolerance—sorry, that generic list does not decide anything. For feed reads I would bound p95 latency at the expected QPS, state the availability target, and say how much stale data is acceptable, keeping only constraints that can change the architecture.",
     "expected_score": 5,
@@ -101,7 +101,7 @@
   },
   {
     "name": "non-functional requirements — SLO alternative",
-    "tags": ["source-compatible-alternative", "release-pack"],
+    "tags": ["source-compatible-alternative", "release-pack", "sol-secondary-heldout", "sol-secondary-canary"],
     "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
     "answer": "I would express the important qualities as operation-specific SLOs: a feed-read latency percentile under a stated load, an availability objective, and a freshness or consistency allowance during failure. Tighter objectives cost more replication and caching, so I would not promote a quality unless it changes a design choice.",
     "expected_score": 4,
@@ -151,7 +151,7 @@
   },
   {
     "name": "non-functional requirements — stale mastery contradicted",
-    "tags": ["prior-summary-contradiction", "release-pack"],
+    "tags": ["prior-summary-contradiction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
     "mastery_summary": "Previously quantified operation-specific latency, load, availability, and consistency constraints.",
     "answer": "Every design needs maximum availability, consistency, durability, scalability, and performance, so I list all of them without choosing numbers until implementation.",
@@ -177,7 +177,7 @@
 
   {
     "name": "identity boundary — self-corrected",
-    "tags": ["partial-self-correction", "release-pack"],
+    "tags": ["partial-self-correction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
     "answer": "The body user ID tells us who is cancelling—no, it only names client-controlled input. Verify the bearer token to derive the principal, load the booking, and authorize that principal as the owner or an allowed administrator. Trusting the body field would let one authenticated user target another user's booking.",
     "expected_score": 5,
@@ -189,7 +189,7 @@
   },
   {
     "name": "identity boundary — signed gateway alternative",
-    "tags": ["source-compatible-alternative", "release-pack"],
+    "tags": ["source-compatible-alternative", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
     "answer": "A trusted gateway may verify the credential and forward signed identity context. The service must derive the caller from that trusted context, load the booking, and authorize the caller for the cancellation; the body user ID still cannot override identity. This avoids repeated token verification downstream but makes the gateway signature boundary critical.",
     "expected_score": 4,
@@ -239,7 +239,7 @@
   },
   {
     "name": "identity boundary — stale mastery contradicted",
-    "tags": ["prior-summary-contradiction", "release-pack"],
+    "tags": ["prior-summary-contradiction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
     "mastery_summary": "Previously separated authentication from resource-level authorization and rejected client-controlled identity.",
     "answer": "Because the token is valid, the body user ID is safe to treat as the caller and the service may cancel that user's booking directly.",
@@ -252,7 +252,7 @@
   },
   {
     "name": "identity boundary — failure boundary only",
-    "tags": ["axis-isolation", "boundaries-only", "release-pack"],
+    "tags": ["axis-isolation", "boundaries-only", "release-pack", "sol-secondary-heldout", "sol-secondary-canary"],
     "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
     "answer": "Derive the caller from verified authentication context, load the booking, and authorize that principal for the cancellation. If the service trusts a body or path user ID instead, any authenticated caller can cancel another user's booking through an IDOR.",
     "expected_score": 5,
@@ -265,7 +265,7 @@
 
   {
     "name": "timeout retry — self-corrected",
-    "tags": ["partial-self-correction", "release-pack"],
+    "tags": ["partial-self-correction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
     "answer": "A timeout means the charge failed, so send a new request—wait, the server may have completed it. Treat the outcome as unknown, retry transiently with the same operation-scoped idempotency key and bounded backoff, and have the server return or await the one recorded result so a new key cannot create a second charge.",
     "expected_score": 5,
@@ -277,7 +277,7 @@
   },
   {
     "name": "timeout retry — request identifier alternative",
-    "tags": ["source-compatible-alternative", "release-pack"],
+    "tags": ["source-compatible-alternative", "release-pack", "sol-secondary-heldout", "sol-secondary-canary"],
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
     "answer": "The caller cannot infer the outcome from a timeout. Reuse a unique operation identifier when retrying; the server checks completed and in-flight operations and returns or waits for the original result. Keeping that registry costs state and coordination, but it prevents a replay from charging twice.",
     "expected_score": 5,
@@ -313,7 +313,7 @@
   },
   {
     "name": "timeout retry — follow-up supplies idempotency",
-    "tags": ["follow-up-anchored", "release-pack"],
+    "tags": ["follow-up-anchored", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
     "answer": "Retry the timed-out payment with exponential backoff.",
     "follow_up_question": "What outcome should the client assume, and how do both sides prevent a second charge?",
@@ -327,7 +327,7 @@
   },
   {
     "name": "timeout retry — stale mastery contradicted",
-    "tags": ["prior-summary-contradiction", "release-pack"],
+    "tags": ["prior-summary-contradiction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
     "mastery_summary": "Previously treated timeouts as unknown and reused one operation-scoped idempotency key.",
     "answer": "The timeout proves the server rolled back. Send fresh payment requests with new keys in a tight loop until one returns success.",
@@ -340,7 +340,7 @@
   },
   {
     "name": "timeout retry — trade-off only",
-    "tags": ["axis-isolation", "depth-only", "release-pack"],
+    "tags": ["axis-isolation", "depth-only", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Timeouts, retries, and idempotency across a partial network failure",
     "answer": "Treat the timeout as unknown, retry with the same operation id, and let the server return or await the single recorded result. Tracking completed and in-flight keys adds state and coordination, while backoff reduces pressure but delays recovery.",
     "expected_score": 4,
@@ -353,7 +353,7 @@
 
   {
     "name": "cursor pagination — self-corrected",
-    "tags": ["partial-self-correction", "release-pack"],
+    "tags": ["partial-self-correction", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
     "answer": "The cursor can be a base64 page number—actually encoding an offset does not stop rows shifting. It should identify the last record or ordered position returned, and the next query resumes after that boundary, so new rows inserted ahead do not duplicate or skip the traversal.",
     "expected_score": 5,
@@ -365,7 +365,7 @@
   },
   {
     "name": "cursor pagination — keyset alternative",
-    "tags": ["source-compatible-alternative", "release-pack"],
+    "tags": ["source-compatible-alternative", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
     "answer": "Use keyset pagination over a defined stable ordering. Return the final row's ordered key and ask for rows after it on the next request. Insertions before that key do not move the continuation boundary, although direct jumps to numbered pages become difficult.",
     "expected_score": 4,
@@ -401,7 +401,7 @@
   },
   {
     "name": "cursor pagination — follow-up supplies boundary",
-    "tags": ["follow-up-anchored", "release-pack"],
+    "tags": ["follow-up-anchored", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
     "answer": "Return an opaque cursor for the next page.",
     "follow_up_question": "What must that cursor identify so an insertion ahead of page one does not shift page two?",
@@ -415,7 +415,7 @@
   },
   {
     "name": "cursor pagination — stale mastery contradicted",
-    "tags": ["prior-summary-contradiction", "release-pack"],
+    "tags": ["prior-summary-contradiction", "release-pack", "sol-secondary-heldout", "sol-secondary-canary"],
     "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
     "mastery_summary": "Previously used the last ordered record as the continuation boundary and rejected encoded offsets.",
     "answer": "The cursor should be the next page number encoded in base64; decoding it to an offset keeps the pages stable when new rows arrive.",
@@ -428,7 +428,7 @@
   },
   {
     "name": "cursor pagination — failure boundary only",
-    "tags": ["axis-isolation", "boundaries-only", "release-pack"],
+    "tags": ["axis-isolation", "boundaries-only", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
     "answer": "Carry the final record's ordered key and resume after it. If the cursor merely hides an offset, insertions shift later positions and the client can duplicate or miss rows; opacity does not fix that failure.",
     "expected_score": 5,
@@ -453,7 +453,7 @@
   },
   {
     "name": "decision-driven estimation — memory-bound alternative",
-    "tags": ["source-compatible-alternative", "release-pack"],
+    "tags": ["source-compatible-alternative", "release-pack", "sol-secondary-heldout", "sol-secondary-remainder"],
     "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
     "answer": "State the competing designs first: one in-memory Top-K worker or a sharded aggregation. Estimate the topic cardinality and resulting heap footprint, then compare that bound with one worker's capacity. This adds only the memory conversion needed to make the same decision and avoids unrelated traffic arithmetic.",
     "expected_score": 4,
@@ -503,7 +503,7 @@
   },
   {
     "name": "decision-driven estimation — stale mastery contradicted",
-    "tags": ["prior-summary-contradiction", "release-pack"],
+    "tags": ["prior-summary-contradiction", "release-pack", "sol-secondary-heldout", "sol-secondary-canary"],
     "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
     "mastery_summary": "Previously estimated topic cardinality specifically to choose one heap or sharded aggregation.",
     "answer": "Always calculate DAU, QPS, bandwidth, and long-term storage first. A large product automatically requires distributed aggregation, so the number of topics does not matter.",
