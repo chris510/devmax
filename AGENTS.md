@@ -23,7 +23,7 @@ against the real API on simulator and on a physical device, and a real APNs push
 delivered to that device. Not yet deployed. `docs/RUNBOOK.md` is the path from here to a
 push on a phone.
 
-## The two source documents (both authoritative)
+## Authoritative source documents
 
 | Document | Owns |
 |---|---|
@@ -31,6 +31,7 @@ push on a phone.
 | `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 29 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
 | `docs/STUDY-PLAN-SPEC.md` | Study Plan, end to end. Extends `spec.md` rather than amending it; `design_handoff_study_plan/` is its design source (V3.4 owns behaviour, V3.5 owns presentation). |
 | `docs/PUBLIC-APP-SPEC.md` | Accounts, authentication, per-user ownership, onboarding, public guide ingestion, and subject-agnostic vocabulary. Approved for implementation 2026-08-07. |
+| `docs/SCORING-CONTRACT-V2-SPEC.md` | Approved target for Recall-only numeric scoring, qualitative coaching, historical compatibility, and the staged migration. V1 remains the runtime contract until its activation gate is complete. |
 
 **Where the first two disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
@@ -41,18 +42,23 @@ a new one, resolve it there, not in a screen.
 
 Break any of these and the product is subtly wrong in a way tests won't always catch.
 
+- **The scoring contract is versioned during the V2 migration.** Production is
+  still on the V1 three-axis contract. `docs/SCORING-CONTRACT-V2-SPEC.md` owns
+  the approved target and the activation sequence; do not partially introduce
+  V2 semantics, relabel a V1 composite as Recall, or mix composite-only history
+  into a Recall average.
 - **`missed_count` never touches `ease_factor`.** Missing a review is a *compliance* signal,
   not a *retention* signal. Conflating them means a busy week at work trashes the ease factor
   on topics the user knows cold, and the scheduler then over-drills the wrong things.
-- **Scoring returns three axes; the 0–5 composite is derived in code.** The model returns
-  `mechanism_accuracy`, `trade_off_awareness`, and `failure_mode_awareness`;
+- **V1 scoring returns three axes; the 0–5 composite is derived in code.** The model returns
+  `accuracy`, `depth`, and `boundaries`;
   `llm.derive_composite` turns them into the number the app displays. Never ask the model for
   the composite — that was a source of scores that disagreed with the model's own reasoning.
-- **Only `mechanism_accuracy` reaches the scheduler, in two buckets.** Not volunteering the
-  failure modes is a depth gap; getting the mechanism wrong is a retention failure, and only
-  the second should move the interval. The composite is a display concern — if you find it
-  feeding SM-2 again, that's the regression.
-- **Composite 2 fails SM-2; composite 3 passes.** Both trigger a follow-up in the app. These
+- **Only Accuracy/Recall reaches the scheduler, in two buckets.** Not volunteering the
+  secondary details is a coaching gap; getting the essential account wrong is a retention
+  failure, and only the second should move the interval. The V1 composite is a display
+  concern — if you find it feeding SM-2 again, that's the regression.
+- **In V1, composite 2 fails SM-2 and composite 3 passes.** Both trigger a follow-up in the app. These
   are two independent thresholds — do not collapse them into one constant.
 - **A card's question is generated once and then reused.** `cards.canonical_question` is the
   same retrieval every review; regenerating per session puts every review in the
@@ -74,9 +80,9 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   based on `follow_up_used`. This is structural, not prompt-dependent — keep it that way.
   At most one further *coached re-attempt* may follow, and it never reaches SM-2 or the
   displayed score — see the next invariant.
-- **No turn that happens after the model has stated the correct mechanism may reach the
+- **No turn that happens after the model has stated the correct essential account may reach the
   scheduler.** Turn 3 (`POST /sessions/{id}/reattempt`) is offered only when
-  `mechanism_accuracy <= 2`, is user-initiated, and runs *after* the session is already
+  `accuracy <= 2`, is user-initiated, and runs *after* the session is already
   `complete` and SM-2 already applied. It writes exactly three `reattempt_*` columns plus
   `card.mastery_summary` — never `score`, never the three axis columns, never the four SM-2
   fields. A post-correction turn measures coached performance, not retention; feeding one to
@@ -171,9 +177,10 @@ exact value rather than eyeballing the PNG — that is how the real fidelity bug
   `/cards/overview` tiers share Coverage's *names* but not its definitions — they fold in
   ease factor and lapse timing. Do not merge them; `overview` still has no screen and is
   intentionally unconsumed.
-- **The three scoring axes surface in exactly one place**: Coverage's rollup line. Everywhere
+- **In the V1 design, the three scoring axes surface in exactly one place**: Coverage's rollup line. Everywhere
   else a session is a single 0–5 numeral. Adding an axis breakdown to the score block or Card
-  History is a change to what the product claims to measure, not a display tweak.
+  History is a change to what the product claims to measure, not a display tweak. V2 removes
+  that rollup rather than moving it; follow the V2 design-amendment gates before changing it.
 
 ## Repo map
 

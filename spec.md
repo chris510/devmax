@@ -6,6 +6,12 @@
 > original release and are superseded only in those areas. This file continues to
 > own review, scoring, scheduling, and the existing endpoints.
 
+> **Approved scoring target:** `docs/SCORING-CONTRACT-V2-SPEC.md` owns the
+> approved Recall-only numeric contract, qualitative-coaching boundary,
+> historical compatibility rules, and staged consumer migration. The three-axis
+> contract below remains the production runtime until V2's activation gate is
+> complete. Do not implement a partial semantic migration.
+
 Handoff spec for scaffolding the Devmax backend. Build exactly what's
 described here. Anything not specified is out of scope — see "Out of
 scope" at the bottom before adding anything.

@@ -1,5 +1,11 @@
 # Secondary-axis architecture decision
 
+**Historical status:** superseded as product direction by
+[`SCORING-CONTRACT-V2-SPEC.md`](SCORING-CONTRACT-V2-SPEC.md) after the stronger
+whole-scorer experiment failed to establish dependable numeric secondary-axis
+signals. This document remains the decision and evaluation record for the V1
+contract; it no longer defines the implementation target.
+
 **Decision:** Keep Accuracy, Depth, Boundaries, and the derived composite as the
 product contract. Do not replace the displayed score with Accuracy alone and do
 not add structured-evidence V1 as a preprocessing stage.
