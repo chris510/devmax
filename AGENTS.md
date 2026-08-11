@@ -75,6 +75,15 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **A practice session scores and writes history but never moves the schedule.** `ease_factor`,
   `interval_days`, `repetitions`, and `next_review_at` are the four fields a Review Sprint
   must leave alone. Mastery signal is written normally.
+- **Showing trusted learning material creates a recall boundary before it returns the
+  answer.** `POST /cards/{id}/learning` records `last_learning_exposure_at` and
+  `recall_not_before_at` in one transaction before returning the answer basis, source,
+  or rubric. Until that instant, the card is excluded from due, push, and Review Sprint,
+  and session creation rejects both scheduled and practice reviews. The boundary is the
+  later of the next local calendar day and eight hours after exposure. Learning changes
+  none of the four SM-2 fields, any score, or history; it counts as engagement for a push
+  so it cannot become a false missed review. The exact canonical question is never part
+  of the learning response.
 - **Maximum one *scored* follow-up per session, enforced server-side.** The model always
   writes a probe and returns a provisional score; `submit_answer` decides whether to use it
   based on `follow_up_used`. This is structural, not prompt-dependent — keep it that way.
@@ -242,7 +251,7 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 
 `WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup` `score` `resume`
 `submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
-`filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
+`learning` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
 An unrecognised
 value falls through to the conversation question state rather than erroring, so check the

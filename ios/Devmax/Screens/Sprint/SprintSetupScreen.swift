@@ -182,7 +182,11 @@ struct SprintSetupScreen: View {
     }
 
     private var emptyPool: some View {
-        Text("Not enough cards in these categories yet.")
+        Text(
+            state.setupWaitingOnRecall
+                ? "Not enough cards ready for recall yet."
+                : "Not enough cards in these categories yet."
+        )
             .font(WCFont.serif(20))
             .lineSpacing(20 * 1.4 - 20 * 1.2)
             .foregroundStyle(Theme.textSecondary)

@@ -22,6 +22,11 @@ The foundation is product/backend system design because it transfers across the
 widest set of roles. Platform, AI-infrastructure, and company-shaped depth are
 on-demand overlays.
 
+The current card-by-card readiness, prerequisite gaps, source-access risks, and
+migration order are recorded in the
+[card actionability audit](CARD-ACTIONABILITY-AUDIT-2026-08-11.md). Topic
+coverage alone is not activation approval.
+
 ## Evidence hierarchy
 
 Cards are justified by one of these sources, in descending order:
@@ -46,9 +51,10 @@ Every base card in `api/cards.json` records:
 - `activation_prerequisite`
 - `evidence`
 
-These fields make the repository auditable. The seed loader deliberately stores
-only the app's existing card fields; source metadata is curriculum provenance,
-not runtime state.
+These fields make the repository auditable. A grounded activation persists the
+trusted source and answer authority on the card. The prerequisite and evidence
+remain curriculum provenance until a versioned Study Plan explicitly maps the
+lesson to that card.
 
 ## The modality boundary
 
@@ -63,7 +69,7 @@ not runtime state.
 
 ### Devmax does not do
 
-- First exposure to a new topic.
+- Scored review as first exposure to a new topic.
 - Timed coding or implementation.
 - A complete 45-minute system-design interview.
 - Behavioral story authoring.
@@ -71,6 +77,21 @@ not runtime state.
 
 Readiness comes from external performance. A library full of 4s and 5s is not
 evidence that the user can code under time pressure or navigate a whole design.
+
+### Learn mode and exposure delay
+
+First exposure belongs to an unscored Learn path backed by approved answer
+authority. It must provide an accessible source or an internally authored,
+human-approved summary with an observable done-when. It must not scrape or
+reproduce paid course material.
+
+Viewing the explanation, worked example, answer basis, rubric, or correction is
+exposure, not recall. Learn mode writes no score, session history, mastery
+signal, or SM-2 state. After that authority is shown, no attempt in the same
+session may be treated as unaided retention; the first scored review belongs to
+a later review window: the later of eight hours after exposure and the start of
+the next local day. This delay protects the scheduler from measuring short-term
+imitation while still giving every new card an actionable way to be learned.
 
 ## Deck shape
 

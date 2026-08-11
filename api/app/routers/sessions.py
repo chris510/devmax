@@ -29,6 +29,7 @@ from app.schemas import (
     SessionStart,
 )
 from app.services import llm, usage
+from app.services.cards import recall_is_available
 from app.services.scheduler import apply_sm2, quality_for
 from app.services.scoring_contract import (
     SCORING_CONTRACT_V2,
@@ -98,7 +99,7 @@ async def _owned_card(
 ) -> Card | None:
     statement = select(Card).where(Card.id == card_id, Card.user_id == current_user_id())
     if for_update:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return (await db.exec(statement)).first()
 
 
@@ -110,6 +111,20 @@ async def _owned_session(db: AsyncSession, session_id: uuid.UUID) -> Session | N
             .where(Session.id == session_id, Card.user_id == current_user_id())
         )
     ).first()
+
+
+def _require_recall_available(card: Card) -> None:
+    if not recall_is_available(card, datetime.now(UTC)):
+        value = card.recall_not_before_at
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "recall_cooldown",
+                "recall_available_at": value.isoformat() if value else None,
+            },
+        )
 
 
 @router.post("/cards/{card_id}/sessions", response_model=SessionStart)
@@ -130,6 +145,7 @@ async def start_session(
         raise HTTPException(status_code=404, detail="card not found")
     if card.lifecycle_status != CARD_ACTIVE:
         raise HTTPException(status_code=409, detail="card is archived")
+    _require_recall_available(card)
 
     existing = await _live_session(db, card_id)
     if existing is not None:
@@ -146,6 +162,7 @@ async def start_session(
         )
 
     question = card.canonical_question
+    generated_question: str | None = None
     if not question:
         recent = (
             await db.exec(
@@ -157,7 +174,7 @@ async def start_session(
         ).all()
 
         await usage.ensure_available(db, current_user_id(), "question", get_settings())
-        question = await llm.generate_question(
+        generated_question = await llm.generate_question(
             topic=card.topic,
             category=card.category,
             pattern=card.pattern,
@@ -171,6 +188,39 @@ async def start_session(
             answer_rubric=card.answer_rubric,
         )
         usage.record(db, current_user_id(), "question")
+
+    # Serialize the final eligibility check with Learn. Question generation above
+    # intentionally happens outside the lock; after any wait this populate-existing
+    # read sees a learning exposure that landed while the provider was running.
+    card = await _owned_card(db, card_id, for_update=True)
+    if card is None:  # pragma: no cover - the initial owned read found it
+        raise HTTPException(status_code=404, detail="card not found")
+    if card.lifecycle_status != CARD_ACTIVE:
+        raise HTTPException(status_code=409, detail="card is archived")
+    _require_recall_available(card)
+
+    # A concurrent starter may have committed while this request generated a
+    # question. Resume its session rather than creating a second one.
+    existing = await _live_session(db, card_id)
+    if existing is not None:
+        is_follow_up = existing.status == STATUS_AWAITING_FOLLOW_UP
+        existing_question = (
+            existing.follow_up_question or ""
+            if is_follow_up
+            else existing.question_asked
+        )
+        return SessionStart(
+            session_id=existing.id,
+            question=existing_question,
+            is_follow_up=is_follow_up,
+            draft_text=existing.draft_text,
+            resumed=True,
+        )
+
+    question = card.canonical_question or generated_question
+    if not question:  # pragma: no cover - generation rejects an empty question
+        raise llm.LLMError("question generation returned an empty question")
+    if not card.canonical_question:
         # Persisted before it is returned, so the same question comes back next
         # time. Clearing this column by hand is the way to re-roll a bad one.
         card.canonical_question = question

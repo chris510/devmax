@@ -135,6 +135,8 @@ trigger a push, or enter scoring.
 | `source_url` / `source_section` / `source_label` | text NOT NULL DEFAULT '' | trusted provenance |
 | `answer_basis` | text NOT NULL DEFAULT '' | concise trusted answer authority |
 | `answer_rubric` | jsonb NOT NULL DEFAULT `{}` | mechanism, alternative, trade-off, failure mode, misconception |
+| `last_learning_exposure_at` | timestamptz NULL | when trusted learning authority was most recently shown |
+| `recall_not_before_at` | timestamptz NULL | separate eligibility gate; never an SM-2 schedule field |
 | `lifecycle_status` | text NOT NULL DEFAULT `'active'` | `'active'` or `'archived'` |
 | `archived_at` | timestamptz NULL | recoverable removal time |
 | `replaces_card_id` / `replaced_by_card_id` | UUID NULL | question-replacement lineage |
@@ -336,8 +338,9 @@ validation).
 
 ### `GET /cards/due?limit=10`
 
-Returns conversational-mode cards where `next_review_at <= today`, ordered
-by most overdue first, then by lowest `ease_factor`.
+Returns conversational-mode cards where `next_review_at <= today` and
+`recall_not_before_at IS NULL OR recall_not_before_at <= now`, ordered by most
+overdue first, then by lowest `ease_factor`.
 
 ```json
 [
@@ -359,7 +362,10 @@ client doesn't reimplement date math.
 
 ### `GET /cards?sort=next_review|weakest&mode=conversational|desk|all`
 
-Full card list for browsing. Defaults: `sort=next_review`, `mode=all`.
+Full card list for browsing. Defaults: `sort=next_review`, `mode=all`. Learning-
+gated cards remain visible here for Coverage and history. Each summary includes
+nullable `recall_not_before_at`; clients exclude a future value from Review
+Sprint while the session endpoint remains the authoritative backstop.
 
 ### `GET /cards/{id}`
 
@@ -371,6 +377,9 @@ Card fields plus its session history:
   "mastery_summary": "...", "last_score": 3,
   "ease_factor": 2.36, "interval_days": 3,
   "next_review_at": "2026-07-27", "missed_count": 0,
+  "recall_not_before_at": null,
+  "learning_available": true,
+  "source_label": "Reviewed source", "source_section": "Relevant section",
   "sessions": [
     {
       "id": "uuid", "date": "2026-07-21T06:51:00Z", "score": 2,
@@ -386,6 +395,10 @@ Card fields plus its session history:
   ]
 }
 ```
+
+`learning_available` means the card has complete trusted learning authority and
+no live answer currently owns the card. It is false while a session is open or
+awaiting a follow-up; the learning POST rechecks this under the card lock.
 
 Build `turns` server-side from the session columns — the client shouldn't
 assemble transcript ordering.
@@ -459,6 +472,45 @@ endpoint that creates an ungrounded active card.
 - `POST /cards/{id}/replace` creates a fresh blank-history card with the edited
   question, archives the predecessor, and records both lineage links.
 
+### `POST /cards/{id}/learning`
+
+The explicit first-exposure or repair path. This endpoint performs no model call
+and returns no canonical question. It locks the owned active card, refuses to
+expose an answer while a live session exists, validates trusted authority, writes
+the exposure boundary, commits, and only then returns:
+
+```json
+{
+  "card_id": "uuid",
+  "topic": "Consistent hashing",
+  "category": "Core Concept",
+  "source_label": "Reviewed source",
+  "source_section": "Virtual nodes",
+  "source_url": "https://example.com/source",
+  "source_excerpt": "",
+  "core_explanation": "...",
+  "essential_account": "...",
+  "acceptable_alternative": "...",
+  "depth_extension": "...",
+  "boundary_extension": "...",
+  "misconception": "...",
+  "recall_available_at": "2026-08-12T07:00:00Z"
+}
+```
+
+The response normalizes either stored rubric vocabulary into the stable learning
+shape. The core explanation uses `answer_basis`, falling back to an imported
+`answer_anchor`; `source_excerpt` may supplement it. Missing authority fails
+closed. `recall_available_at` is the later of the start of the next day in the
+user's configured timezone and eight hours after exposure. Reopening material
+records a new exposure and extends the boundary from that moment. This keeps the
+minimum separation honest when the learner revisits the answer near expiry.
+
+Learning changes no score, session, mastery summary, or SM-2 field. The card is
+withheld from due, push, and Review Sprint until the gate expires. A direct
+normal or `practice=true` session start must also reject it before question
+generation or usage accounting.
+
 ### `POST /cards/{id}/sessions`
 
 Called when the user taps into a card to start reviewing — **not** when
@@ -466,6 +518,8 @@ the push fires.
 
 Behavior:
 - Reject an archived card.
+- Reject a card whose learning exposure gate has not expired, for scheduled and
+  practice sessions alike.
 - If an existing session for this card has status `'open'` or
   `'awaiting_follow_up'`, return that session instead of creating a new
   one (this is what makes resume work).
@@ -582,8 +636,9 @@ happens in `POST /cards/{id}/sessions`, on actual engagement.
 
 Requires `X-Cron-Secret`. Runs a few times a day.
 
-For any card that was pushed more than 4 hours ago with no session started
-since, increment `missed_count`. **Never modify `ease_factor` here.**
+For any card that was pushed more than 4 hours ago with neither a session started
+nor a learning exposure since, increment `missed_count`. **Never modify
+`ease_factor` here.**
 Track `last_pushed_at` on the card to make this query possible.
 
 ### `GET /health`

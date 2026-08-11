@@ -87,18 +87,29 @@ struct CardHistoryScreen: View {
     }
 
     private func metaLine(_ detail: CardDetail) -> String {
-        guard !detail.sessions.isEmpty else { return "New card" }
-        let scores = detail.sessions.compactMap { session in
-            state.usesRecallContract ? session.recallScore : session.score
-        }
-        var parts = ["\(detail.sessions.count) sessions"]
-        if !scores.isEmpty {
-            let average = Double(scores.reduce(0, +)) / Double(scores.count)
-            parts.append(String(
-                format: state.usesRecallContract ? "avg recall %.1f" : "avg %.1f", average
-            ))
+        var parts: [String]
+        if detail.sessions.isEmpty {
+            parts = ["New card"]
+        } else {
+            let scores = detail.sessions.compactMap { session in
+                state.usesRecallContract ? session.recallScore : session.score
+            }
+            parts = ["\(detail.sessions.count) sessions"]
+            if !scores.isEmpty {
+                let average = Double(scores.reduce(0, +)) / Double(scores.count)
+                parts.append(String(
+                    format: state.usesRecallContract ? "avg recall %.1f" : "avg %.1f", average
+                ))
+            }
         }
 
+        let recallNotBefore = state.recallNotBefore(
+            cardID: cardID, fallback: detail.recallNotBeforeAt
+        )
+        if !detail.sessions.isEmpty, let label = RecallGate.label(recallNotBefore) {
+            parts.append(label)
+            return parts.joined(separator: " · ")
+        }
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd"
         if let due = parser.date(from: detail.nextReviewAt) {
@@ -115,19 +126,14 @@ struct CardHistoryScreen: View {
                 Text("No sessions yet.")
                     .font(TypeRole.bodyLarge)
                     .foregroundStyle(Theme.textSecondary)
-                MetaText(text: "FIRST REVIEW · TODAY, NEXT IN QUEUE",
-                         font: TypeRole.metaBody, tracking: 1.0, color: Theme.metaFaint)
-
-                if state.queue.contains(where: { $0.id == cardID }) {
-                    PrimaryButton(title: "Start review") {
-                        state.beginReviewFromHistory(cardID: cardID)
-                    }
-                    .padding(.top, 8)
-                }
+                availability(detail)
+                cardActions(detail)
             }
             .wcFade()
         } else {
             VStack(spacing: 0) {
+                cardActions(detail)
+                    .padding(.bottom, 18)
                 Hairline()
                 ForEach(detail.sessions) { session in
                     SessionRow(
@@ -146,6 +152,58 @@ struct CardHistoryScreen: View {
                     Hairline()
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func availability(_ detail: CardDetail) -> some View {
+        let value = state.recallNotBefore(cardID: cardID, fallback: detail.recallNotBeforeAt)
+        if let label = RecallGate.label(value) {
+            MetaText(
+                text: label, font: TypeRole.metaBody,
+                tracking: 1.0, color: Theme.metaFaint, uppercased: true
+            )
+        } else {
+            MetaText(
+                text: "CHOOSE THE HONEST NEXT STEP",
+                font: TypeRole.metaBody, tracking: 1.0, color: Theme.metaFaint
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func cardActions(_ detail: CardDetail) -> some View {
+        let recallOpen = state.recallIsAvailable(
+            cardID: cardID, fallback: detail.recallNotBeforeAt
+        )
+        let due = recallOpen && state.queue.contains(where: { $0.id == cardID })
+        if detail.learningAvailable == true || due {
+            VStack(spacing: 10) {
+                if detail.sessions.isEmpty {
+                    if detail.learningAvailable == true {
+                        PrimaryButton(title: "Learn this card") {
+                            state.beginLearningFromHistory(cardID: cardID)
+                        }
+                    }
+                    if due {
+                        SecondaryButton(title: "Review now — I already know it") {
+                            state.beginReviewFromHistory(cardID: cardID)
+                        }
+                    }
+                } else {
+                    if due {
+                        PrimaryButton(title: "Review now") {
+                            state.beginReviewFromHistory(cardID: cardID)
+                        }
+                    }
+                    if detail.learningAvailable == true {
+                        SecondaryButton(title: "Study source again") {
+                            state.beginLearningFromHistory(cardID: cardID)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 8)
         }
     }
 }

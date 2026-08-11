@@ -282,7 +282,9 @@ actor MockAPI: DevmaxAPI {
                 lastScore: 1, recallScore: 1, scoreKind: "recall",
                 scoringContractVersion: 1,
                 easeFactor: 1.96, intervalDays: 1, repetitions: 0,
-                nextReviewAt: "2026-07-25", missedCount: 2, sessions: []
+                nextReviewAt: "2026-07-25", missedCount: 2, sessions: [],
+                learningAvailable: true, sourceLabel: "Raft paper",
+                sourceSection: "Leader election"
             )
         }
         if !extraCards.isEmpty, let match = extraCards.first(where: { $0.id == id }) {
@@ -290,7 +292,9 @@ actor MockAPI: DevmaxAPI {
             return CardDetail(
                 id: id, topic: match.topic, category: match.category, masterySummary: "",
                 lastScore: nil, easeFactor: 2.5, intervalDays: 1, repetitions: 0,
-                nextReviewAt: "2026-07-24", missedCount: 0, sessions: []
+                nextReviewAt: "2026-07-24", missedCount: 0, sessions: [],
+                learningAvailable: true, sourceLabel: "Reviewed source",
+                sourceSection: match.topic
             )
         }
         return CardDetail(
@@ -332,7 +336,46 @@ actor MockAPI: DevmaxAPI {
                         Turn(role: .score, text: "4 — Concise and accurate framing."),
                     ]
                 ),
-            ]
+            ],
+            learningAvailable: true,
+            sourceLabel: "Hello Interview · Consistent Hashing",
+            sourceSection: "Ring ownership and virtual nodes"
+        )
+    }
+
+    func learnCard(_ id: UUID) async throws -> LearningCard {
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let summary = Self.library.first(where: { $0.id == id })
+        let topic = summary?.topic ?? "System design mechanism"
+        let category = summary?.category ?? "Core Concept"
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let recallAt = formatter.string(from: Date().addingTimeInterval(24 * 60 * 60))
+
+        return LearningCard(
+            cardId: id, topic: topic, category: category,
+            sourceLabel: "Hello Interview · Consistent Hashing",
+            sourceSection: "Ring ownership and virtual nodes",
+            sourceUrl: "https://www.hellointerview.com/learn/system-design/"
+                + "core-concepts/consistent-hashing",
+            sourceExcerpt: "Adding or removing a node should move only the keys "
+                + "adjacent to that node's position.",
+            coreExplanation: "Consistent hashing places both keys and owners in the same ordered "
+                + "hash space. A key belongs to the next owner clockwise, so membership changes "
+                + "disturb only a bounded part of the ring.",
+            essentialAccount: "Hash the key onto the ring, walk clockwise to its owner, and use "
+                + "virtual nodes to spread each physical node across multiple positions for "
+                + "smoother balance.",
+            acceptableAlternative: "A fixed-slot hash partition map also bounds movement if slot "
+                + "ownership, rather than every key's modulo, is reassigned.",
+            depthExtension: "More virtual nodes improve balance and failure spreading, but "
+                + "increase ownership metadata and movement planning.",
+            boundaryExtension: "Too few or uneven virtual nodes create hot owners; membership "
+                + "changes also need a controlled handoff so reads do not miss keys while "
+                + "ownership moves.",
+            misconception: "Consistent hashing does not eliminate rebalancing. It limits which "
+                + "keys move when membership changes.",
+            recallAvailableAt: recallAt
         )
     }
 
