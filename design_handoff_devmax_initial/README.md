@@ -326,7 +326,10 @@ No toast, no full-screen error, no data loss. Retrying re-posts the same payload
   `YOUR ANSWER` / `FOLLOW-UP` / `SCORE & FEEDBACK`; questions in serif 17px `#dfe3e5`,
   answers 14.5px `#a8afb5`, the score line colored by score. One row open at a time.
 - **Empty** (`screenshots/card-history-empty.png`): "No sessions yet." + mono
-  `FIRST REVIEW · TODAY, NEXT IN QUEUE`. Meta line reads `NEW CARD`.
+  `FIRST REVIEW · TODAY, NEXT IN QUEUE`. Meta line reads `NEW CARD`. When that
+  card is still in Today's due queue, an accent **Start review** button follows
+  the metadata and opens its Conversation. The button is withheld for non-due
+  cards so History cannot become an unscheduled review launcher.
 
 ---
 
@@ -484,8 +487,10 @@ creation or editing from Coverage · a week-by-week pace view of any kind.
 ## Navigation
 
 Today is home. Card History is reached from a Today row's topic name, or from
-"View history for this card" on the session-end state. Conversation is entered from a row
-tap, Start, or Review Sprint Setup's Start, and exited with `✕` / Done. Review Sprint Setup
+"View history for this card" on the session-end state. An empty History for a
+card that is still due may enter Conversation through **Start review**; otherwise
+Conversation is entered from a row tap, Start, or Review Sprint Setup's Start,
+and exited with `✕` / Done. Review Sprint Setup
 is reached only from Today and exits via `← Today` or by starting a session; Coverage is
 reached only from Setup and returns there; Session Recap
 appears after the last card of any multi-card session and exits to Today or back to Setup.

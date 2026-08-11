@@ -495,6 +495,16 @@ final class AppState: ObservableObject {
         launchQuestionLoad(card)
     }
 
+    /// Rescues the empty-history path without turning Card History into an
+    /// unscheduled practice launcher. Only a card in Today's due queue may start
+    /// here, and Conversation replaces History so its close action returns home.
+    @discardableResult
+    func beginReviewFromHistory(cardID: UUID) -> Bool {
+        guard let card = queue.first(where: { $0.id == cardID }) else { return false }
+        beginSession(cards: [card], replacingPath: true)
+        return true
+    }
+
     var currentCard: DueCard? { sessionCards[safe: cursor] }
 
     /// The current card's topic in a multi-card session, otherwise its category.
