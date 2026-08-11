@@ -296,6 +296,15 @@ async def main() -> int:
         ),
     )
     parser.add_argument(
+        "--reuse-exact-input-total",
+        type=positive_int,
+        metavar="TOKENS",
+        help=(
+            "reuse the exact total from an immediately preceding input-token "
+            "dry-run whose selected requests are unchanged; makes no new count calls"
+        ),
+    )
+    parser.add_argument(
         "--enforce-reviewed-gate",
         action="store_true",
         help="exit nonzero after recording if any reviewed scoring gate fails",
@@ -323,6 +332,10 @@ async def main() -> int:
         parser.error("--enforce-reviewed-gate is available only for scoring")
     if args.enforce_evidence_gate and args.kind != "evidence":
         parser.error("--enforce-evidence-gate is available only for evidence")
+    if args.exact_input_counts and args.reuse_exact_input_total is not None:
+        parser.error(
+            "--exact-input-counts and --reuse-exact-input-total are mutually exclusive"
+        )
 
     cases = select_cases(
         load_cases(args.cases, parser),
@@ -361,6 +374,10 @@ async def main() -> int:
     reusable = {} if args.fresh else prior_by_fingerprint
     resumed_calls = [call for call in prepared if call.fingerprint in reusable]
     pending_calls = [call for call in prepared if call.fingerprint not in reusable]
+    if args.reuse_exact_input_total is not None and resumed_calls:
+        parser.error(
+            "--reuse-exact-input-total requires a fresh run with every selected call pending"
+        )
     result_readers = {
         "scoring": effort_sweep.result_from_record,
         "reattempt": reattempt_effort_sweep.result_from_record,
@@ -411,6 +428,10 @@ async def main() -> int:
             call.fingerprint: count
             for call, count in zip(pending_calls, counts, strict=True)
         }
+    elif args.reuse_exact_input_total is not None:
+        input_counts = {call.fingerprint: 0 for call in pending_calls}
+        if pending_calls:
+            input_counts[pending_calls[0].fingerprint] = args.reuse_exact_input_total
     else:
         input_counts = {
             fingerprint: conservative_input_bound(request)
@@ -428,10 +449,16 @@ async def main() -> int:
         selected=len(prepared),
         resumed=len(resumed_calls),
         rate=rate,
-        input_label="counted input" if args.exact_input_counts else "bounded input",
+        input_label=(
+            "counted input"
+            if args.exact_input_counts or args.reuse_exact_input_total is not None
+            else "bounded input"
+        ),
     )
     if args.exact_input_counts:
         print("  input method       OpenAI Responses input-token endpoint")
+    elif args.reuse_exact_input_total is not None:
+        print("  input method       reused exact input-token dry-run total")
     else:
         print("  input method       UTF-8 byte ceiling plus provider-framing allowance")
     enforce_budget(

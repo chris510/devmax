@@ -403,6 +403,38 @@ async def test_exact_count_dry_run_refuses_without_api_key(
 
 
 @pytest.mark.anyio
+async def test_reused_exact_total_makes_no_count_or_generation_calls(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_scoring_case(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("reused exact total reached an OpenAI endpoint")
+
+    monkeypatch.setattr(openai_bakeoff, "count_input_tokens", forbidden)
+    monkeypatch.setattr(openai_bakeoff, "complete", forbidden)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "scoring",
+            str(cases),
+            "--reuse-exact-input-total",
+            "321",
+            "--dry-run",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 0
+    output = capsys.readouterr().out
+    assert "counted input      321" in output
+    assert "reused exact input-token dry-run total" in output
+    assert "no paid Responses calls were made" in output
+
+
+@pytest.mark.anyio
 async def test_scoring_replay_can_enforce_the_shared_reviewed_gate(
     monkeypatch, tmp_path, capsys
 ) -> None:
