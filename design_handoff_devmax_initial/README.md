@@ -1,5 +1,13 @@
 # Handoff: Devmax — conversational spaced-repetition study coach
 
+> **Approved scoring amendment:**
+> [`../docs/SCORING-CONTRACT-V2-SPEC.md`](../docs/SCORING-CONTRACT-V2-SPEC.md)
+> owns the target Recall-only score semantics, qualitative coaching states, and
+> the list of screens that require new 390×844 references. The visual tokens,
+> typography, spacing, motion limits, and all unaffected states in this handoff
+> remain authoritative. The score, Coverage, Sprint, Recap, History, and
+> onboarding descriptions below remain V1 references until V2 is activated.
+
 ## Overview
 
 Devmax is a private, single-user mobile app for technical-interview prep. It pushes a

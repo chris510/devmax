@@ -6,6 +6,12 @@ file wins; where either disagrees with `AGENTS.md`'s load-bearing invariants,
 behavior, V3.5 owns presentation. Intentional divergences from both are recorded
 in `docs/DEVIATIONS.md` §18–§26.
 
+`docs/SCORING-CONTRACT-V2-SPEC.md` is the approved scoring amendment. After its
+activation gate, it supersedes only Study Plan's weak-card score read and
+three-axis terminology: weak-card proposals read Recall, while the plan safety
+boundary below remains unchanged. Until activation, the current V1 reads remain
+the runtime behavior.
+
 ## What it is
 
 A user pastes a subject-agnostic study guide, picks a duration and a weekly
@@ -513,5 +519,6 @@ Everything in `spec.md` §"Out of scope", plus: readiness scores or percentages;
 exact-day completion forecasts derived from weekly capacity; calendar
 integrations; server-side study-block reminders; actual study-time tracking;
 automatic creation of generic cards; automatic schedule mutations; a second
-review scheduler; any change to SM-2 or to the three-axis scoring model; light
+review scheduler; any change to SM-2 or any scoring change other than the
+separately approved, versioned V2 migration; light
 mode; and any motion beyond the four approved animations.

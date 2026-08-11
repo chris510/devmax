@@ -126,6 +126,15 @@ knowledge for a trusted source.
 
 ## Universal scoring contract
 
+> **Approved V2 amendment:**
+> [`SCORING-CONTRACT-V2-SPEC.md`](SCORING-CONTRACT-V2-SPEC.md) replaces numeric
+> Depth and Boundaries with optional qualitative practice and makes Recall (the
+> existing Accuracy signal) the displayed 0–5 value. The contract below remains
+> the active V1 behavior until the versioned storage, dual-read client, consumer
+> migration, and activation gates in that document are complete. Public
+> onboarding must migrate with the contract; it must not describe V2 while the
+> server still emits V1 semantics.
+
 Every answer is evaluated on the same three axes:
 
 | Axis | Question it answers |
