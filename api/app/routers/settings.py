@@ -4,6 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.db import get_session
 from app.routers.deps import get_settings_row
 from app.schemas import NotificationWindow, SettingsIn, SettingsOut, window_to_dict
+from app.services.scoring_contract import ACTIVE_SCORING_CONTRACT_VERSION
 
 router = APIRouter(tags=["settings"])
 
@@ -13,6 +14,7 @@ def _to_out(row) -> SettingsOut:
         reviews_per_day=row.reviews_per_day,
         timezone=row.timezone,
         windows=[NotificationWindow(**w) for w in row.windows],
+        active_scoring_contract_version=ACTIVE_SCORING_CONTRACT_VERSION,
     )
 
 

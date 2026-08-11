@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.services.scoring_contract import ScoreKind, ScoringContractVersion
+
 
 class DueCard(BaseModel):
     id: uuid.UUID
@@ -11,6 +13,9 @@ class DueCard(BaseModel):
     category: str
     mastery_summary: str
     last_score: int | None
+    recall_score: int | None
+    score_kind: ScoreKind
+    scoring_contract_version: ScoringContractVersion | None
     due_label: str
     resumable: bool
     missed_count: int
@@ -23,6 +28,9 @@ class CardSummary(BaseModel):
     delivery_mode: str
     mastery_summary: str
     last_score: int | None
+    recall_score: int | None
+    score_kind: ScoreKind
+    scoring_contract_version: ScoringContractVersion | None
     # The three axes behind `last_score`. Coverage's rollup means these across the
     # library; nothing else consumes them.
     last_accuracy: int | None = None
@@ -48,8 +56,15 @@ class SessionHistory(BaseModel):
     id: uuid.UUID
     date: datetime
     score: int | None
+    recall_score: int | None
+    legacy_composite_score: int | None
+    scoring_contract_version: ScoringContractVersion
     feedback: str
     turns: list[Turn]
+    coaching_focus: Literal["depth", "boundaries"] | None = None
+    coaching_question: str | None = None
+    coaching_answer: str | None = None
+    coaching_feedback: str | None = None
 
 
 class CardDetail(CardSummary):
@@ -173,6 +188,8 @@ class FollowUpOut(BaseModel):
 class CompleteOut(BaseModel):
     status: Literal["complete"] = "complete"
     score: int
+    recall_score: int
+    scoring_contract_version: ScoringContractVersion
     feedback: str
     next_review_at: date
     interval_days: int
@@ -247,10 +264,14 @@ class NotificationWindow(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class SettingsOut(BaseModel):
+class SettingsBase(BaseModel):
     reviews_per_day: int = Field(ge=1, le=6)
     timezone: str
+
+
+class SettingsOut(SettingsBase):
     windows: list[NotificationWindow]
+    active_scoring_contract_version: ScoringContractVersion
 
 
 # A window shorter than the cron's poll interval can fall between two polls and
@@ -294,7 +315,7 @@ class NotificationWindowIn(NotificationWindow):
         return self
 
 
-class SettingsIn(SettingsOut):
+class SettingsIn(SettingsBase):
     windows: list[NotificationWindowIn]
 
 
