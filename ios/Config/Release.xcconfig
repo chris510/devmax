@@ -6,6 +6,6 @@ WC_BASE_URL = https:/$()/devmax-production.up.railway.app
 
 // Must track APNS_USE_SANDBOX on the server: development <-> true,
 // production <-> false. A mismatch fails silently as BadDeviceToken.
-// Installing directly from Xcode uses a development profile, so this stays
-// `development` until you move to TestFlight.
-WC_APS_ENVIRONMENT = development
+// Release archives are distributed by TestFlight/App Store and receive
+// production device tokens. Direct device testing must use Debug instead.
+WC_APS_ENVIRONMENT = production
