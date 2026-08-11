@@ -189,6 +189,9 @@ class Card(SQLModel, table=True):
     last_accuracy: int | None = None
     last_depth: int | None = None
     last_boundaries: int | None = None
+    # Explicit semantics for `last_score` during the V1/V2 dual-read window.
+    # Null only until the card has a scored result.
+    last_score_contract_version: int | None = None
     last_reviewed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     mastery_summary: str = ""
     # Compliance signal only — never feeds SM-2.
@@ -268,6 +271,16 @@ class Session(SQLModel, table=True):
     boundaries: int | None = None
     feedback: str = ""
     follow_up_used: bool = False
+    # V1 remains active until the staged V2 release gate is complete. Every row
+    # carries its meaning so historical composites are never relabeled as Recall.
+    scoring_contract_version: int = 1
+
+    # Reserved for the optional post-result qualitative turn. Stage 1 adds only
+    # storage; no endpoint writes these fields yet.
+    coaching_focus: str | None = None
+    coaching_question: str | None = None
+    coaching_answer: str | None = None
+    coaching_feedback: str | None = None
 
     # Turn 3: a coached re-attempt, offered only after the correction has been
     # stated and only when the mechanism was wrong. Scored on one axis, written to

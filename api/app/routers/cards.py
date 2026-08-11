@@ -47,6 +47,7 @@ from app.services.cards import (
     days_since_review,
     due_label,
 )
+from app.services.scoring_contract import project_card_score, project_session_score
 
 router = APIRouter(tags=["cards"])
 
@@ -61,6 +62,7 @@ async def _owned_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
 
 def card_summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
     """One card as the library sees it. Two fields are derived, not stored."""
+    score = project_card_score(card)
     return CardSummary(
         id=card.id,
         topic=card.topic,
@@ -68,6 +70,9 @@ def card_summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
         delivery_mode=card.delivery_mode,
         mastery_summary=card.mastery_summary,
         last_score=card.last_score,
+        recall_score=score.recall_score,
+        score_kind=score.score_kind,
+        scoring_contract_version=score.scoring_contract_version,
         last_accuracy=card.last_accuracy,
         last_depth=card.last_depth,
         last_boundaries=card.last_boundaries,
@@ -94,6 +99,7 @@ def _summary_columns():
         Card.last_accuracy,
         Card.last_depth,
         Card.last_boundaries,
+        Card.last_score_contract_version,
         Card.ease_factor,
         Card.interval_days,
         Card.repetitions,
@@ -117,6 +123,24 @@ def _overview_columns():
         Card.repetitions,
         Card.next_review_at,
         Card.lifecycle_status,
+    )
+
+
+def _session_history(session: Session) -> SessionHistory:
+    score = project_session_score(session)
+    return SessionHistory(
+        id=session.id,
+        date=session.started_at,
+        score=session.score,
+        recall_score=score.recall_score,
+        legacy_composite_score=score.legacy_composite_score,
+        scoring_contract_version=score.scoring_contract_version,
+        feedback=session.feedback,
+        turns=build_turns(session),
+        coaching_focus=session.coaching_focus,
+        coaching_question=session.coaching_question,
+        coaching_answer=session.coaching_answer,
+        coaching_feedback=session.coaching_feedback,
     )
 
 
@@ -157,19 +181,25 @@ async def list_due(
     ).all()
 
     resumable = await _resumable_card_ids(db, [c.id for c in cards])
-    return [
-        DueCard(
-            id=c.id,
-            topic=c.topic,
-            category=c.category,
-            mastery_summary=c.mastery_summary,
-            last_score=c.last_score,
-            due_label=due_label(c.next_review_at, today),
-            resumable=c.id in resumable,
-            missed_count=c.missed_count,
+    result = []
+    for card in cards:
+        score = project_card_score(card)
+        result.append(
+            DueCard(
+                id=card.id,
+                topic=card.topic,
+                category=card.category,
+                mastery_summary=card.mastery_summary,
+                last_score=card.last_score,
+                recall_score=score.recall_score,
+                score_kind=score.score_kind,
+                scoring_contract_version=score.scoring_contract_version,
+                due_label=due_label(card.next_review_at, today),
+                resumable=card.id in resumable,
+                missed_count=card.missed_count,
+            )
         )
-        for c in cards
-    ]
+    return result
 
 
 @router.get("/cards/overview", response_model=Overview)
@@ -256,16 +286,7 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
 
     return CardDetail(
         **card_summary(card, today, tz).model_dump(),
-        sessions=[
-            SessionHistory(
-                id=s.id,
-                date=s.started_at,
-                score=s.score,
-                feedback=s.feedback,
-                turns=build_turns(s),
-            )
-            for s in sessions
-        ],
+        sessions=[_session_history(session) for session in sessions],
     )
 
 

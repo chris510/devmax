@@ -890,8 +890,9 @@ async def test_settings_round_trip(client):
 
     put = await client.put("/settings", headers=API_HEADERS, json=payload)
     assert put.status_code == 200
-    assert put.json() == payload
-    assert (await client.get("/settings", headers=API_HEADERS)).json() == payload
+    expected = {**payload, "active_scoring_contract_version": 1}
+    assert put.json() == expected
+    assert (await client.get("/settings", headers=API_HEADERS)).json() == expected
 
 
 async def test_settings_rejects_out_of_range_reviews_per_day(client):

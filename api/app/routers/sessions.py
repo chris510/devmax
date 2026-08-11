@@ -28,6 +28,7 @@ from app.schemas import (
 )
 from app.services import llm, usage
 from app.services.scheduler import apply_sm2, quality_for
+from app.services.scoring_contract import SCORING_CONTRACT_V1
 
 router = APIRouter(tags=["sessions"])
 
@@ -243,6 +244,7 @@ async def submit_answer(
     card.last_accuracy = result.accuracy
     card.last_depth = result.depth
     card.last_boundaries = result.boundaries
+    card.last_score_contract_version = SCORING_CONTRACT_V1
     card.last_reviewed_at = now
     if result.mastery_summary:
         card.mastery_summary = result.mastery_summary
@@ -274,6 +276,8 @@ async def submit_answer(
     eligible = _reattempt_eligible(session)
     return CompleteOut(
         score=result.score or 0,
+        recall_score=result.accuracy or 0,
+        scoring_contract_version=SCORING_CONTRACT_V1,
         feedback=result.feedback,
         next_review_at=next_review,
         interval_days=interval,
