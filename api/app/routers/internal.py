@@ -9,10 +9,17 @@ from sqlmodel import col, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db import get_session
-from app.models import DELIVERY_CONVERSATIONAL, Card, DeviceToken, Session, Settings
+from app.models import (
+    DELIVERY_CONVERSATIONAL,
+    LIVE_STATUSES,
+    Card,
+    DeviceToken,
+    Session,
+    Settings,
+)
 from app.routers.deps import as_utc, now_in
 from app.schemas import TriggerBatchResult, TriggerResult
-from app.services.card_lifecycle import active_card_filter
+from app.services.card_lifecycle import active_card_filter, recall_available_filter
 from app.services.push import send_push
 
 logger = logging.getLogger(__name__)
@@ -128,25 +135,31 @@ async def _trigger_review_for_user(
     due_filter = (
         Card.user_id == user_id,
         active_card_filter(),
+        recall_available_filter(local_now.astimezone(UTC)),
         Card.delivery_mode == DELIVERY_CONVERSATIONAL,
         col(Card.next_review_at) <= today,
     )
-    due_count = (await db.exec(select(func.count()).select_from(Card).where(*due_filter))).one()
-    if not due_count:
-        return TriggerResult(sent=False, reason="nothing_due")
-
-    # `due_count` stays the whole queue — it becomes the notification's "N due" and
-    # has to agree with what GET /cards/due shows. Only the *selection* skips cards
-    # pushed earlier today, so the evening window advances to the next card instead
-    # of repeating the morning's. One unanswered card is not worth two
-    # notifications. Count and selection are separate aggregate/narrow queries so
-    # the 15-minute poll never hydrates every due card's grounding payload.
+    live_session_exists = (
+        select(Session.id)
+        .where(
+            Session.card_id == Card.id,
+            col(Session.status).in_(LIVE_STATUSES),
+        )
+        .exists()
+    )
+    # The final candidate is locked before it becomes observable outside the
+    # database. Learn and session creation take this same Card lock, so either
+    # their eligibility-changing commit wins first and this query re-evaluates the
+    # row, or this push wins and they wait until its stamp is durable. The lock is
+    # deliberately held through APNs; without a reservation column, releasing it
+    # earlier re-opens the exact selection-to-send race this boundary closes.
     top = (
         await db.exec(
             select(Card)
             .options(load_only(Card.id, Card.topic, Card.last_pushed_at))
             .where(
                 *due_filter,
+                ~live_session_exists,
                 or_(
                     col(Card.last_pushed_at).is_(None),
                     col(Card.last_pushed_at) < day_start,
@@ -154,10 +167,66 @@ async def _trigger_review_for_user(
             )
             .order_by(col(Card.next_review_at).asc(), col(Card.ease_factor).asc())
             .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).first()
     if top is None:
+        # Distinguish an empty/gated queue from a queue whose cards were all
+        # offered earlier today. This count occurs after any contended candidate
+        # update committed, rather than reporting the stale pre-lock queue.
+        due_count = (
+            await db.exec(select(func.count()).select_from(Card).where(*due_filter))
+        ).one()
+        if not due_count:
+            return TriggerResult(sent=False, reason="nothing_due")
         return TriggerResult(sent=False, reason="already_offered", due_count=due_count)
+
+    # Session creation owns this same card lock, but keep the state check explicit:
+    # a session committed before this lock must turn the candidate into engagement,
+    # not a notification about work already in progress.
+    live = (
+        await db.exec(
+            select(Session.id).where(
+                Session.card_id == top.id,
+                col(Session.status).in_(LIVE_STATUSES),
+            )
+        )
+    ).first()
+    if live is not None:
+        due_count = (
+            await db.exec(select(func.count()).select_from(Card).where(*due_filter))
+        ).one()
+        await db.commit()
+        return TriggerResult(
+            sent=False,
+            reason="already_offered",
+            due_count=due_count,
+        )
+
+    # Another poll may have passed the cheap guards and then waited on this row.
+    # Re-read both account-level guards after acquiring the candidate lock so two
+    # concurrent polls cannot advance to different cards inside one window.
+    pushed_today, latest_push = (
+        await db.exec(
+            select(func.count(), func.max(col(Card.last_pushed_at))).where(
+                Card.user_id == user_id, col(Card.last_pushed_at) >= day_start
+            )
+        )
+    ).one()
+    if latest_push is not None and as_utc(latest_push) >= window_start:
+        await db.commit()  # release the candidate lock before returning
+        return TriggerResult(sent=False, reason="already_pushed")
+    if pushed_today >= settings.reviews_per_day:
+        await db.commit()  # release the candidate lock before returning
+        return TriggerResult(sent=False, reason="daily_limit")
+
+    # This is the queue after the candidate was serialized with Learn/session,
+    # so the notification count does not include a card that gated while the
+    # poll was waiting for its lock.
+    due_count = (
+        await db.exec(select(func.count()).select_from(Card).where(*due_filter))
+    ).one()
     tokens = [
         t.token
         for t in (await db.exec(select(DeviceToken).where(DeviceToken.user_id == user_id))).all()
@@ -174,6 +243,7 @@ async def _trigger_review_for_user(
     # then increment missed_count four hours later for a push the user never received.
     # missed_count is the product's only compliance signal; don't corrupt it.
     if not delivered:
+        await db.commit()  # no stamp, but release the candidate lock promptly
         return TriggerResult(sent=False, reason="no_devices", due_count=due_count)
 
     # From the injected clock, not `datetime.now(UTC)`: the stamp has to land inside
@@ -184,6 +254,8 @@ async def _trigger_review_for_user(
     await db.commit()
 
     return TriggerResult(sent=True, card_id=top.id, due_count=due_count)
+
+
 @router.post("/trigger-review", response_model=TriggerResult | TriggerBatchResult)
 async def trigger_review(
     db: AsyncSession = Depends(get_session),
@@ -225,9 +297,9 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
     `last_pushed_at` past the stamp.
     """
     cutoff = datetime.now(UTC) - MISSED_AFTER
-    candidates = (
+    candidate_ids = (
         await db.exec(
-            select(Card).where(
+            select(Card.id).where(
                 active_card_filter(),
                 col(Card.last_pushed_at).is_not(None),
                 col(Card.last_pushed_at) <= cutoff,
@@ -238,18 +310,53 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
             )
         )
     ).all()
+    # The discovery query is intentionally lock-free. Close its transaction, then
+    # serialize and commit one card at a time so a large missed batch never holds
+    # earlier locks while it works through later candidates.
+    await db.commit()
 
     marked = 0
-    for card in candidates:
+    for card_id in candidate_ids:
+        card = (
+            await db.exec(
+                select(Card)
+                .where(
+                    Card.id == card_id,
+                    active_card_filter(),
+                    col(Card.last_pushed_at).is_not(None),
+                    col(Card.last_pushed_at) <= cutoff,
+                    or_(
+                        col(Card.missed_counted_at).is_(None),
+                        col(Card.missed_counted_at) < col(Card.last_pushed_at),
+                    ),
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).first()
+        if card is None:
+            await db.commit()
+            continue
+
+        # Opening the trusted learning material is engagement with the push even
+        # though it deliberately creates no scored session. It must suppress a
+        # miss only when that exposure happened after this particular push.
+        if (
+            card.last_learning_exposure_at is not None
+            and as_utc(card.last_learning_exposure_at) >= as_utc(card.last_pushed_at)
+        ):
+            await db.commit()
+            continue
         started_since = (
             await db.exec(
-                select(Session).where(
+                select(Session.id).where(
                     Session.card_id == card.id,
                     col(Session.started_at) >= card.last_pushed_at,
                 )
             )
         ).first()
         if started_since is not None:
+            await db.commit()
             continue
         card.missed_count += 1
         # Records *which push* was counted, not when it was counted, so the
@@ -257,7 +364,7 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
         # re-run is a no-op.
         card.missed_counted_at = card.last_pushed_at
         db.add(card)
+        await db.commit()
         marked += 1
 
-    await db.commit()
     return {"marked_missed": marked}

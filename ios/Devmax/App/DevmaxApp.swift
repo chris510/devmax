@@ -98,6 +98,8 @@ struct RootView: View {
                         ConversationScreen()
                     case .history(let id):
                         CardHistoryScreen(cardID: id)
+                    case .learning(let id):
+                        LearnCardScreen(cardID: id)
                     case .sprintSetup:
                         SprintSetupScreen()
                     case .coverage:

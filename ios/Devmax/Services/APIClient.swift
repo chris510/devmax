@@ -77,6 +77,7 @@ protocol DevmaxAPI {
     func due() async throws -> [DueCard]
     func cards(sort: String, mode: String) async throws -> [CardSummary]
     func card(_ id: UUID) async throws -> CardDetail
+    func learnCard(_ id: UUID) async throws -> LearningCard
     func captures() async throws -> [CaptureSummary]
     func capture(_ id: UUID) async throws -> PendingCapture
     func createCapture(topic: String, context: String) async throws -> PendingCapture
@@ -177,6 +178,7 @@ protocol DevmaxAPI {
 /// methods default to a clear unsupported error so those doubles stay narrow;
 /// LiveAPI and MockAPI implement every method used by the app.
 extension DevmaxAPI {
+    func learnCard(_ id: UUID) async throws -> LearningCard { throw APIError.status(501) }
     func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome {
         throw APIError.status(501)
     }
@@ -346,6 +348,10 @@ struct LiveAPI: DevmaxAPI {
 
     func card(_ id: UUID) async throws -> CardDetail {
         try Self.decoder.decode(CardDetail.self, from: await request("GET", "cards/\(id)"))
+    }
+
+    func learnCard(_ id: UUID) async throws -> LearningCard {
+        try await post("cards/\(id)/learning", LearningCard.self)
     }
 
     func captures() async throws -> [CaptureSummary] {

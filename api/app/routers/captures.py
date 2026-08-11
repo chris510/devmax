@@ -22,6 +22,7 @@ from app.services import llm
 from app.services.card_lifecycle import (
     GroundingError,
     build_grounded_card,
+    clean_rubric,
     grounding_from_capture,
     refresh_capture_status,
     storage_rubric,
@@ -32,7 +33,12 @@ router = APIRouter(tags=["captures"])
 
 
 def _out(capture: PendingCapture) -> CaptureOut:
-    return CaptureOut(**capture.model_dump())
+    return CaptureOut(
+        **capture.model_dump(exclude={"answer_rubric"}),
+        # The Capture editor still speaks the legacy public keys. V2 is a
+        # storage/scoring migration, not permission to silently change its wire.
+        answer_rubric=clean_rubric(capture.answer_rubric),
+    )
 
 
 def _summary(

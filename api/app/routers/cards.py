@@ -15,12 +15,14 @@ from app.models import (
     DELIVERY_CONVERSATIONAL,
     LIVE_STATUSES,
     Card,
+    MaterialSource,
     Session,
 )
-from app.routers.deps import local_calendar, local_today
+from app.routers.deps import get_settings_row, local_calendar, local_today, now_in
 from app.schemas import (
     CardDetail,
     CardGroundingUpdate,
+    CardLearningOut,
     CardMaintenance,
     CardSummary,
     DueCard,
@@ -35,7 +37,10 @@ from app.services.card_lifecycle import (
     active_card_filter,
     archive,
     build_grounded_card,
+    clean_rubric,
+    recall_available_filter,
     restore,
+    scoring_rubric,
     storage_rubric,
 )
 from app.services.cards import (
@@ -46,18 +51,48 @@ from app.services.cards import (
     classify_tier,
     days_since_review,
     due_label,
+    effective_review_date,
+    learning_recall_available_at,
 )
 from app.services.scoring_contract import project_card_score, project_session_score
 
 router = APIRouter(tags=["cards"])
 
 
-async def _owned_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
-    return (
-        await db.exec(
-            select(Card).where(Card.id == card_id, Card.user_id == current_user_id())
-        )
-    ).first()
+async def _owned_card(
+    db: AsyncSession, card_id: uuid.UUID, *, for_update: bool = False
+) -> Card | None:
+    statement = select(Card).where(
+        Card.id == card_id, Card.user_id == current_user_id()
+    )
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    return (await db.exec(statement)).first()
+
+
+def _learning_basis(card: Card) -> str:
+    return card.answer_basis.strip() or card.answer_anchor.strip()
+
+
+def _learning_available(card: Card, *, has_linked_source: bool = False) -> bool:
+    if card.lifecycle_status != CARD_ACTIVE:
+        return False
+    has_provenance = bool(
+        card.source_url.strip()
+        or card.source_section.strip()
+        or card.source_label.strip()
+        or card.source_excerpt.strip()
+        or has_linked_source
+    )
+    rubric = scoring_rubric(card.answer_rubric)
+    if card.answer_basis.strip():
+        # First-party/curated cards cross the full grounding boundary: a source,
+        # the approved basis, and all five teaching/scoring dimensions.
+        return has_provenance and all(rubric.values())
+    # Public imports intentionally have a smaller authority contract. A user-
+    # confirmed anchor tied to that user's durable source is sufficient; they do
+    # not manufacture a five-field rubric during import review.
+    return bool(card.answer_anchor.strip()) and has_linked_source
 
 
 def card_summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
@@ -80,7 +115,8 @@ def card_summary(card: Card, today: date, tz: tzinfo) -> CardSummary:
         interval_days=card.interval_days,
         repetitions=card.repetitions,
         next_review_at=card.next_review_at,
-        due_label=due_label(card.next_review_at, today),
+        recall_not_before_at=card.recall_not_before_at,
+        due_label=due_label(effective_review_date(card, tz), today),
         days_since_review=days_since_review(card, today, tz),
         missed_count=card.missed_count,
         lifecycle_status=card.lifecycle_status,
@@ -104,6 +140,7 @@ def _summary_columns():
         Card.interval_days,
         Card.repetitions,
         Card.next_review_at,
+        Card.recall_not_before_at,
         Card.last_reviewed_at,
         Card.missed_count,
         Card.lifecycle_status,
@@ -166,7 +203,8 @@ async def list_due(
     db: AsyncSession = Depends(get_session),
 ) -> list[DueCard]:
     user_id = current_user_id()
-    today = await local_today(db)
+    today, tz = await local_calendar(db)
+    now = datetime.now(UTC)
     cards = (
         await db.exec(
             select(Card)
@@ -174,6 +212,7 @@ async def list_due(
             .where(
                 Card.user_id == user_id,
                 active_card_filter(),
+                recall_available_filter(now),
                 Card.delivery_mode == DELIVERY_CONVERSATIONAL,
                 col(Card.next_review_at) <= today,
             )
@@ -196,7 +235,7 @@ async def list_due(
                 recall_score=score.recall_score,
                 score_kind=score.score_kind,
                 scoring_contract_version=score.scoring_contract_version,
-                due_label=due_label(card.next_review_at, today),
+                due_label=due_label(effective_review_date(card, tz), today),
                 resumable=card.id in resumable,
                 missed_count=card.missed_count,
             )
@@ -289,10 +328,134 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
             .order_by(col(Session.started_at).desc())
         )
     ).all()
+    source_title = ""
+    has_linked_source = False
+    if card.source_id is not None:
+        source_row = (
+            await db.exec(
+                select(MaterialSource.id, MaterialSource.title).where(
+                    MaterialSource.id == card.source_id,
+                    MaterialSource.user_id == current_user_id(),
+                )
+            )
+        ).first()
+        if source_row is not None:
+            has_linked_source = True
+            _, source_title = source_row
 
     return CardDetail(
         **card_summary(card, today, tz).model_dump(),
+        # A saved/open answer owns the next honest action. Do not advertise Learn
+        # while the POST would correctly refuse to expose the answer authority.
+        learning_available=(
+            _learning_available(card, has_linked_source=has_linked_source)
+            and not any(session.status in LIVE_STATUSES for session in sessions)
+        ),
+        source_label=card.source_label or source_title,
+        source_section=card.source_section,
         sessions=[_session_history(session) for session in sessions],
+    )
+
+
+@router.post("/cards/{card_id}/learning", response_model=CardLearningOut)
+async def open_learning(
+    card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
+) -> CardLearningOut:
+    """Expose trusted authority only after making same-session recall impossible.
+
+    This is intentionally a POST. A GET that returned the answer before recording
+    the hold could contaminate a score if the response arrived but the write did
+    not. Every successful response counts as a fresh exposure and can only extend
+    the existing hold; retrying a lost response is safe in that direction.
+    """
+    # Resolve/create the account's settings before taking the card lock. The
+    # settings helper may commit when repairing a missing singleton row, and a
+    # commit after SELECT FOR UPDATE would release the very lock this endpoint
+    # relies on before the exposure is recorded.
+    settings = await get_settings_row(db)
+    card = await _owned_card(db, card_id, for_update=True)
+    if card is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    if card.lifecycle_status != CARD_ACTIVE:
+        raise HTTPException(status_code=409, detail={"code": "card_archived"})
+
+    live = (
+        await db.exec(
+            select(Session.id).where(
+                Session.card_id == card.id,
+                col(Session.status).in_(LIVE_STATUSES),
+            )
+        )
+    ).first()
+    if live is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "live_session",
+                "message": "finish the in-progress answer before opening learning material",
+            },
+        )
+
+    basis = _learning_basis(card)
+    source_title = ""
+    has_linked_source = False
+    if card.source_id is not None:
+        source_row = (
+            await db.exec(
+                select(MaterialSource.id, MaterialSource.title).where(
+                    MaterialSource.id == card.source_id,
+                    MaterialSource.user_id == current_user_id(),
+                )
+            )
+        ).first()
+        if source_row is not None:
+            has_linked_source = True
+            _, source_title = source_row
+    rubric = scoring_rubric(card.answer_rubric)
+    if not _learning_available(card, has_linked_source=has_linked_source):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "learning_material_unavailable"},
+        )
+
+    source_label = card.source_label.strip()
+    if source_title and not source_label:
+        source_label = source_title.strip()
+
+    local_now = now_in(settings.timezone)
+    exposed_at = local_now.astimezone(UTC)
+    computed_gate = learning_recall_available_at(local_now)
+    existing_gate = card.recall_not_before_at
+    if existing_gate is not None:
+        existing_gate = (
+            existing_gate
+            if existing_gate.tzinfo
+            else existing_gate.replace(tzinfo=UTC)
+        ).astimezone(UTC)
+    card.last_learning_exposure_at = exposed_at
+    card.recall_not_before_at = max(
+        value for value in (existing_gate, computed_gate) if value is not None
+    )
+    card.updated_at = exposed_at
+    db.add(card)
+    # Commit the gate before the response can reveal any answer authority.
+    await db.commit()
+
+    return CardLearningOut(
+        card_id=card.id,
+        topic=card.topic,
+        category=card.category,
+        source_url=card.source_url.strip(),
+        source_section=card.source_section.strip(),
+        source_label=source_label,
+        source_excerpt=card.source_excerpt.strip(),
+        core_explanation=basis,
+        essential_account=rubric["essential_account"],
+        acceptable_alternative=rubric["acceptable_alternative"],
+        depth_extension=rubric["depth_extension"],
+        boundary_extension=rubric["boundary_extension"],
+        misconception=rubric["misconception"],
+        recall_available_at=card.recall_not_before_at,
     )
 
 
@@ -314,7 +477,10 @@ def _maintenance(card: Card) -> CardMaintenance:
         source_section=card.source_section,
         source_label=card.source_label,
         answer_basis=card.answer_basis,
-        answer_rubric=card.answer_rubric,
+        # Storage switches to V2 aliases independently of the shipped iOS
+        # maintenance editor. Keep its established wire vocabulary until that
+        # client migrates, or a saved V2 card reopens with five blank fields.
+        answer_rubric=clean_rubric(card.answer_rubric),
         replaces_card_id=card.replaces_card_id,
         replaced_by_card_id=card.replaced_by_card_id,
     )

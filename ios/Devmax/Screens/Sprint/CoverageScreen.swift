@@ -196,6 +196,7 @@ private struct CoverageSection: View {
     /// Days since the card was last answered, or its due label if it's in the
     /// queue and has never been answered.
     private func note(for card: CardSummary) -> String {
+        if let label = card.recallAvailabilityLabel { return label.uppercased() }
         guard let days = card.daysSinceReview else { return card.dueLabel.uppercased() }
         return "\(days)D SINCE REVIEW"
     }

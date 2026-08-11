@@ -6,7 +6,7 @@ import SwiftUI
 final class AppState: ObservableObject {
     enum LoadState: Equatable { case loading, ready, error }
     enum Screen: Hashable {
-        case today, conversation(UUID), history(UUID)
+        case today, conversation(UUID), history(UUID), learning(UUID)
         case sprintSetup, coverage, recap
         // Study Plan: Today → overview → week → item, plus the flows that hang
         // off them. No new tab, and no second navigation stack.
@@ -66,6 +66,10 @@ final class AppState: ObservableObject {
     @Published var savedCapture: PendingCapture?
     @Published var captureRoute: CaptureRoute?
     @Published var settings: AppSettings = .placeholder
+    /// Immediate client-side overlay for a learning exposure. History remains
+    /// alive underneath Learn in the navigation stack, so its original detail
+    /// response cannot be trusted to know about the just-created delay.
+    @Published private(set) var learningRecallNotBefore: [UUID: String] = [:]
 
     // Navigation
     @Published var path: [Screen] = []
@@ -304,12 +308,13 @@ final class AppState: ObservableObject {
     }
 
     private var sprintBase: [CardSummary] {
-        if usesRecallContract { return library }
+        let recallReady = library.filter { $0.recallIsAvailable() }
+        if usesRecallContract { return recallReady }
         switch sprintKind {
         case .review:
-            return library
+            return recallReady
         case .depth(let axis):
-            let scored = library.filter { depthValue($0, axis: axis) != nil }
+            let scored = recallReady.filter { depthValue($0, axis: axis) != nil }
             let thin = scored.filter { (depthValue($0, axis: axis) ?? 5) <= 2 }
             return thin.count >= Self.minSessionSize ? thin : scored
         }
@@ -356,7 +361,13 @@ final class AppState: ObservableObject {
                 let n = sprintPool.count
                 return "\(n) CARD\(n == 1 ? "" : "S") WITH DEPTH SIGNAL"
             }
-            guard !setupCats.isEmpty else { return "\(library.count) CARDS IN LIBRARY" }
+            guard !setupCats.isEmpty else {
+                let count = sprintBase.count
+                if count < library.count {
+                    return "\(count) CARD\(count == 1 ? "" : "S") AVAILABLE FOR RECALL"
+                }
+                return "\(count) CARD\(count == 1 ? "" : "S") IN LIBRARY"
+            }
             let n = sprintPool.count
             return "\(n) CARD\(n == 1 ? "" : "S") IN FILTER"
         }
@@ -366,13 +377,20 @@ final class AppState: ObservableObject {
     /// loaded and this is false, the pool is too narrow and Setup says so.
     var setupReady: Bool { libraryLoad == .ready && sprintSet.count >= Self.minSessionSize }
 
+    var setupWaitingOnRecall: Bool {
+        guard case .review = sprintKind else { return false }
+        return libraryLoad == .ready
+            && sprintBase.count < Self.minSessionSize
+            && library.count >= Self.minSessionSize
+    }
+
     /// The category chip's second line: its most urgent count, in priority order.
     func chipNote(for category: String) -> String {
         if case .depth = sprintKind {
             let count = sprintBase.filter { $0.category == category }.count
             return "\(count) depth gap\(count == 1 ? "" : "s")"
         }
-        let cards = library.filter { $0.category == category }
+        let cards = sprintBase.filter { $0.category == category }
         let weak = tally(cards, [.cold, .shaky])
         if weak > 0 { return "\(weak) shaky" }
         for tier in [ScoreStyle.Tier.untested, .developing] where tally(cards, [tier]) > 0 {
@@ -500,9 +518,39 @@ final class AppState: ObservableObject {
     /// here, and Conversation replaces History so its close action returns home.
     @discardableResult
     func beginReviewFromHistory(cardID: UUID) -> Bool {
+        guard RecallGate.isOpen(learningRecallNotBefore[cardID]) else { return false }
         guard let card = queue.first(where: { $0.id == cardID }) else { return false }
         beginSession(cards: [card], replacingPath: true)
         return true
+    }
+
+    func beginLearningFromHistory(cardID: UUID) {
+        path.append(.learning(cardID))
+    }
+
+    func recallNotBefore(cardID: UUID, fallback: String?) -> String? {
+        learningRecallNotBefore[cardID] ?? fallback
+    }
+
+    func recallIsAvailable(cardID: UUID, fallback: String?) -> Bool {
+        RecallGate.isOpen(recallNotBefore(cardID: cardID, fallback: fallback))
+    }
+
+    /// POST /learning is the exposure write. Once it succeeds, every local
+    /// recall launcher must close immediately; SM-2 fields remain untouched.
+    func markLearningExposure(_ learning: LearningCard) {
+        learningRecallNotBefore[learning.cardId] = learning.recallAvailableAt
+        queue.removeAll { $0.id == learning.cardId }
+        sprintExcluded.insert(learning.cardId)
+        if let index = library.firstIndex(where: { $0.id == learning.cardId }) {
+            library[index].recallNotBeforeAt = learning.recallAvailableAt
+        }
+        // A normal Today launch defers the full library fetch while cards are
+        // due. If Learn removes the last one, populate that library now so Today
+        // cannot mistake an existing deck for a brand-new empty account.
+        if queue.isEmpty, library.isEmpty {
+            Task { await loadLibrary() }
+        }
     }
 
     var currentCard: DueCard? { sessionCards[safe: cursor] }
@@ -1102,6 +1150,11 @@ final class AppState: ObservableObject {
             }
             queue = (try? await api.due()) ?? queue
             if let card = queue.first { path.append(.history(card.id)) }
+        case "learning":
+            if let card = queue.first {
+                path.append(.history(card.id))
+                path.append(.learning(card.id))
+            }
         case "resume":
             // The Raft card is the one with a stored partial answer.
             if let card = queue.first(where: { $0.resumable }) { beginSession(cards: [card]) }

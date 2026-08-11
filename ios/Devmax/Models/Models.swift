@@ -3,6 +3,26 @@ import Foundation
 // Wire models mirror the backend's snake_case shapes exactly; the decoder is
 // configured with `.convertFromSnakeCase`, so nothing here restates key names.
 
+enum RecallGate {
+    static func isOpen(_ value: String?, at now: Date = Date()) -> Bool {
+        guard let value, !value.isEmpty else { return true }
+        guard let date = WireDate.parse(value) else { return false }
+        return date <= now
+    }
+
+    /// A future learning delay replaces stale SM-2 language in learner-facing
+    /// metadata. The stored review date is intentionally left untouched.
+    static func label(_ value: String?, at now: Date = Date()) -> String? {
+        guard let value, let date = WireDate.parse(value), date > now else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now)
+            ? "'recall available' HH:mm"
+            : "'recall available' d MMM · HH:mm"
+        return formatter.string(from: date)
+    }
+}
+
 struct DueCard: Codable, Identifiable, Equatable {
     let id: UUID
     let topic: String
@@ -44,6 +64,15 @@ struct CardSummary: Codable, Identifiable, Equatable {
     let dueLabel: String
     let daysSinceReview: Int?
     let missedCount: Int
+    /// A learning exposure creates a quiet delay before recall is honest again.
+    /// Optional for rolling deploys and for cards that have never been exposed.
+    var recallNotBeforeAt: String? = nil
+
+    func recallIsAvailable(at now: Date = Date()) -> Bool {
+        RecallGate.isOpen(recallNotBeforeAt, at: now)
+    }
+
+    var recallAvailabilityLabel: String? { RecallGate.label(recallNotBeforeAt) }
 
     /// Review Sprint walks library cards through the same Conversation screen the
     /// daily queue uses, so the set is adapted rather than the screen generalised.
@@ -98,6 +127,36 @@ struct CardDetail: Codable, Equatable {
     let nextReviewAt: String
     let missedCount: Int
     let sessions: [SessionHistory]
+    /// Learning fields are additive so a compatible client can still read a
+    /// server while it rolls forward. A malformed delay fails closed.
+    var recallNotBeforeAt: String? = nil
+    var learningAvailable: Bool? = nil
+    var sourceLabel: String? = nil
+    var sourceSection: String? = nil
+
+    func recallIsAvailable(at now: Date = Date()) -> Bool {
+        RecallGate.isOpen(recallNotBeforeAt, at: now)
+    }
+}
+
+/// Source-backed first exposure. Deliberately contains no canonical question:
+/// Learn and closed-book recall are separate screens and separate moments.
+struct LearningCard: Codable, Equatable, Identifiable {
+    var id: UUID { cardId }
+    let cardId: UUID
+    let topic: String
+    let category: String
+    let sourceLabel: String
+    let sourceSection: String
+    let sourceUrl: String
+    let sourceExcerpt: String
+    let coreExplanation: String
+    let essentialAccount: String
+    let acceptableAlternative: String
+    let depthExtension: String
+    let boundaryExtension: String
+    let misconception: String
+    let recallAvailableAt: String
 }
 
 struct SessionStart: Codable, Equatable {

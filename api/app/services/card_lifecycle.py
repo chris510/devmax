@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
+from sqlmodel import col, or_
+
 from app.config import get_settings
 from app.models import (
     CAPTURE_ACTIVATED,
@@ -148,6 +150,14 @@ def refresh_capture_status(capture: PendingCapture) -> None:
 def active_card_filter():
     """The one active-library predicate reused by every selection query."""
     return Card.lifecycle_status == CARD_ACTIVE
+
+
+def recall_available_filter(at: datetime):
+    """SQL half of the answer-exposure gate shared by due and push queries."""
+    return or_(
+        col(Card.recall_not_before_at).is_(None),
+        col(Card.recall_not_before_at) <= at,
+    )
 
 
 def build_grounded_card(

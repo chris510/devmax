@@ -197,6 +197,12 @@ class Card(SQLModel, table=True):
     # Compliance signal only — never feeds SM-2.
     missed_count: int = 0
     last_pushed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    # Opening the explicit Learn surface exposes trusted answer authority. The
+    # exposure is recorded separately from review history and temporarily gates
+    # every scored session, including Practice, so a same-session answer cannot
+    # masquerade as unaided recall. Neither field is part of SM-2.
+    last_learning_exposure_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    recall_not_before_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     # The `last_pushed_at` value check-missed has already counted — a push instant,
     # not a counting instant. Equal means counted; NULL or older means this push is
     # still uncounted. Replaces clearing `last_pushed_at`, which destroyed the

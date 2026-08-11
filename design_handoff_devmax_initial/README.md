@@ -326,10 +326,37 @@ No toast, no full-screen error, no data loss. Retrying re-posts the same payload
   `YOUR ANSWER` / `FOLLOW-UP` / `SCORE & FEEDBACK`; questions in serif 17px `#dfe3e5`,
   answers 14.5px `#a8afb5`, the score line colored by score. One row open at a time.
 - **Empty** (`screenshots/card-history-empty.png`): "No sessions yet." + mono
-  `FIRST REVIEW · TODAY, NEXT IN QUEUE`. Meta line reads `NEW CARD`. When that
-  card is still in Today's due queue, an accent **Start review** button follows
-  the metadata and opens its Conversation. The button is withheld for non-due
-  cards so History cannot become an unscheduled review launcher.
+  `CHOOSE THE HONEST NEXT STEP`. Meta line reads `NEW CARD`. A grounded card has
+  an accent **Learn this card** action. When it is still in Today's due queue, a
+  secondary **Review now — I already know it** action opens Conversation. The
+  review action is withheld for non-due or learning-gated cards, so History
+  cannot become an unscheduled review launcher.
+- A due card with history puts closed-book **Review now** first and keeps
+  **Study source again** secondary and low-weight. A non-due card may show only
+  the Study action. Choosing it intentionally creates the same recall delay as
+  first exposure; it never starts a scored turn.
+
+### Learn Card (`screenshots/card-learning.png`)
+
+This is an explicit answer-exposure state, reached only by choosing Learn from
+Card History. The server records the exposure boundary before the screen receives
+trusted material.
+
+- Header: `← Card` and the topic at 23px/600 with category metadata.
+- Reuse Study Plan's labelled `Block` rhythm. In order: `START HERE` (source
+  label, precise section, and tappable source when present), `CORE EXPLANATION`,
+  then only the non-empty teaching fields `ESSENTIAL IDEA`, `VALID ALTERNATIVE`,
+  `GO DEEPER`, `BOUNDARY OR FAILURE`, and `COMMON TRAP`.
+- The exact canonical review question is absent. This screen teaches the model
+  of the answer; it does not train recognition of the stable retrieval cue.
+- Footer trust line: `SCORED REVIEW AVAILABLE <DATE/TIME> · YOUR SCHEDULE WASN'T
+  CHANGED`, followed by **Done for now**. There is no answer control and no route
+  directly from this screen into Conversation.
+- Each labelled learning section is a VoiceOver heading so the long lesson can
+  be traversed with the rotor.
+- Loading and transport failure are static and retryable; no shimmer and no new
+  motion. A stale `409` availability conflict instead says the card changed and
+  returns to Card History for the current action rather than retrying in a loop.
 
 ---
 
@@ -487,10 +514,11 @@ creation or editing from Coverage · a week-by-week pace view of any kind.
 ## Navigation
 
 Today is home. Card History is reached from a Today row's topic name, or from
-"View history for this card" on the session-end state. An empty History for a
-card that is still due may enter Conversation through **Start review**; otherwise
-Conversation is entered from a row tap, Start, or Review Sprint Setup's Start,
-and exited with `✕` / Done. Review Sprint Setup
+"View history for this card" on the session-end state. Card History may enter
+Learn Card for grounded material, or Conversation through its due-only review
+action. Learn Card returns only to History or Today and never enters Conversation.
+Otherwise Conversation is entered from a row tap, Start, or Review Sprint Setup's
+Start, and exited with `✕` / Done. Review Sprint Setup
 is reached only from Today and exits via `← Today` or by starting a session; Coverage is
 reached only from Setup and returns there; Session Recap
 appears after the last card of any multi-card session and exits to Today or back to Setup.

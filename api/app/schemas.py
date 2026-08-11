@@ -40,6 +40,9 @@ class CardSummary(BaseModel):
     interval_days: int
     repetitions: int
     next_review_at: date
+    # An answer-authority exposure can hold recall beyond the SM-2 date without
+    # rewriting it. Null means no such hold exists.
+    recall_not_before_at: datetime | None = None
     # Both computed server-side so the client never reimplements date math.
     due_label: str
     days_since_review: int | None
@@ -68,7 +71,33 @@ class SessionHistory(BaseModel):
 
 
 class CardDetail(CardSummary):
+    learning_available: bool = False
+    source_label: str = ""
+    source_section: str = ""
     sessions: list[SessionHistory]
+
+
+class CardLearningOut(BaseModel):
+    """Trusted material returned only after its recall hold is committed.
+
+    The canonical question is deliberately absent. Learning should establish the
+    mechanism, not teach the exact cue that every future review will reuse.
+    """
+
+    card_id: uuid.UUID
+    topic: str
+    category: str
+    source_url: str
+    source_section: str
+    source_label: str
+    source_excerpt: str
+    core_explanation: str
+    essential_account: str
+    acceptable_alternative: str
+    depth_extension: str
+    boundary_extension: str
+    misconception: str
+    recall_available_at: datetime
 
 
 class TierCard(BaseModel):

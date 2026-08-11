@@ -13,6 +13,9 @@ from app.services.cards import (
     classify_tier,
     days_since_review,
     due_label,
+    effective_review_date,
+    learning_recall_available_at,
+    recall_is_available,
 )
 from tests.conftest import make_card
 
@@ -102,6 +105,47 @@ def test_v2_tiering_uses_recall_instead_of_the_legacy_composite(monkeypatch):
 # session gets answered.
 
 LA = ZoneInfo("America/Los_Angeles")
+
+
+def test_learning_at_midday_waits_until_the_next_local_day():
+    exposed = datetime(2026, 8, 11, 12, 0, tzinfo=LA)
+    expected = datetime(2026, 8, 12, 0, 0, tzinfo=LA).astimezone(UTC)
+
+    assert learning_recall_available_at(exposed) == expected
+
+
+def test_learning_near_midnight_still_waits_eight_elapsed_hours():
+    exposed = datetime(2026, 8, 11, 23, 55, tzinfo=LA)
+
+    assert learning_recall_available_at(exposed) == exposed.astimezone(
+        UTC
+    ) + timedelta(hours=8)
+
+
+def test_learning_gate_uses_a_real_local_midnight_across_dst():
+    new_york = ZoneInfo("America/New_York")
+    # This instant is one hour before spring-forward. The next midnight has the
+    # new UTC offset, so adding a fixed 24-hour UTC day would be wrong.
+    exposed = datetime(2027, 3, 14, 1, 0, tzinfo=new_york)
+    expected = datetime(2027, 3, 15, 0, 0, tzinfo=new_york).astimezone(UTC)
+
+    assert learning_recall_available_at(exposed) == expected
+
+
+def test_recall_gate_is_inclusive_and_does_not_rewrite_the_sm2_date():
+    gate = datetime(2026, 8, 12, 7, 0, tzinfo=UTC)
+    card = make_card(
+        next_review_at=date(2026, 8, 1),
+        recall_not_before_at=gate,
+    )
+
+    assert recall_is_available(card, gate - timedelta(microseconds=1)) is False
+    assert recall_is_available(card, gate) is True
+    assert effective_review_date(
+        card, LA, at=gate - timedelta(microseconds=1)
+    ) == date(2026, 8, 12)
+    assert effective_review_date(card, LA, at=gate) == date(2026, 8, 1)
+    assert card.next_review_at == date(2026, 8, 1)
 
 
 def test_days_since_review_is_none_until_the_card_has_been_answered():

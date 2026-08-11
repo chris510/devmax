@@ -304,6 +304,7 @@ struct Block<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             MetaText(text: label, font: WCFont.mono(10), tracking: 1.2, color: Theme.meta)
+                .accessibilityAddTraits(.isHeader)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
