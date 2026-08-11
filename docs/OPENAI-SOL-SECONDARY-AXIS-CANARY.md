@@ -1,7 +1,9 @@
 # OpenAI Sol secondary-axis canary
 
-**Status:** Prepared and locally tested. No evaluation payload has been
-transmitted and no provider call has been made.
+**Status:** Run and stopped at the six-case gate. Sol preserved all reviewed
+Accuracy values but produced two false high secondary-axis buckets. Do not run
+the remainder or replicas; see
+[`OPENAI-SOL-SECONDARY-AXIS-CANARY-RESULTS.md`](OPENAI-SOL-SECONDARY-AXIS-CANARY-RESULTS.md).
 
 ## Decision under test
 
