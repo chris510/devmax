@@ -13,8 +13,10 @@ from app.db import get_session
 from app.models import FOUNDER_USER_ID
 from app.services.authentication import user_for_access_token
 
-# Health is the only unauthenticated route (the platform health check hits it).
+# These routes establish authentication rather than consuming it. The founder
+# claim is handled separately below because it has its own temporary credential.
 PUBLIC_PATHS = {"/health", "/auth/nonce", "/auth/apple", "/auth/refresh"}
+FOUNDER_CLAIM_PATH = "/auth/founder/apple-claim"
 DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 
 _current_user_id: ContextVar[uuid.UUID | None] = ContextVar("devmax_current_user_id", default=None)
@@ -31,6 +33,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        if path == FOUNDER_CLAIM_PATH:
+            # API_KEY is already embedded in the installed compatibility build,
+            # so it must never authorize the permanent founder binding. Empty
+            # config disables this path after the one-time migration.
+            claim_token = get_settings().founder_claim_token
+            ok = bool(claim_token) and _matches(
+                request.headers.get("X-Founder-Claim-Token"), claim_token
+            )
+            if not ok:
+                return JSONResponse(status_code=401, content={})
+            return await call_next(request)
         if path in PUBLIC_PATHS or path in DOCS_PATHS:
             return await call_next(request)
 
@@ -42,7 +55,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Migration-only compatibility. The key has exactly one meaning: founder.
-        if _matches(request.headers.get("X-API-Key"), settings.api_key):
+        if settings.legacy_api_key_auth_enabled and _matches(
+            request.headers.get("X-API-Key"), settings.api_key
+        ):
             request.state.user_id = FOUNDER_USER_ID
             return await call_next(request)
 

@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 /// The account handoff appears only when a prepared setup is worth saving.
@@ -73,10 +74,9 @@ struct AccountHandoffScreen: View {
             .padding(.bottom, 20)
 
             VStack(spacing: 6) {
-                PrimaryButton(
-                    title: primaryTitle,
-                    enabled: !auth.isWorking,
-                    action: auth.startAppleSignIn
+                AppleContinueButton(
+                    purpose: .signIn,
+                    accessibilityHint: "Signs in without losing the setup saved on this device."
                 )
                 if let backAction {
                     Button("Back to my guide", action: backAction)
@@ -124,8 +124,54 @@ struct AccountHandoffScreen: View {
             + "Your guide is sent for topic extraction only after sign-in succeeds."
     }
 
-    private var primaryTitle: String {
-        if auth.isWorking { return "Connecting…" }
-        return isFailure ? "Try Apple again" : "Continue with Apple"
+}
+
+/// AuthenticationServices owns the label, Apple mark, colors, and pressed state.
+/// Progress and errors stay outside the control so it never turns into a branded
+/// approximation or changes its required `Continue with Apple` label mid-request.
+struct AppleContinueButton: View {
+    @EnvironmentObject private var auth: AuthState
+
+    let purpose: AppleAuthorizationPurpose
+    var enabled = true
+    var accessibilityHint: String
+
+    private var canStart: Bool {
+        enabled && !auth.isWorking && auth.isAppleAuthorizationReady(for: purpose)
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            SignInWithAppleButton(.continue) { request in
+                auth.configureAppleRequest(request, for: purpose)
+            } onCompletion: { result in
+                auth.completeAppleAuthorization(result, for: purpose)
+            }
+            .signInWithAppleButtonStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.primaryRadius))
+            .disabled(!canStart)
+            .opacity(canStart ? 1 : 0.55)
+            .accessibilityHint(accessibilityHint)
+
+            if auth.isWorking {
+                HStack(spacing: 7) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Theme.metaAlt)
+                    Text("Connecting…")
+                        .font(WCFont.mono(10))
+                        .tracking(0.4)
+                        .foregroundStyle(Theme.metaAlt)
+                }
+                .frame(minHeight: 18)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .task(id: "\(purpose.rawValue)-\(enabled)") {
+            guard enabled else { return }
+            await auth.prepareAppleAuthorization(for: purpose)
+        }
     }
 }

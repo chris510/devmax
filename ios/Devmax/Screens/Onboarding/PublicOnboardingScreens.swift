@@ -45,7 +45,12 @@ struct PublicOnboardingView: View {
         }
         .background(Theme.bg)
         .onChange(of: auth.isAuthenticated) { _, signedIn in
-            if signedIn { flow.resumeAfterSignIn(app: app) }
+            // Mock bootstrap is authenticated by design. Keep the dedicated
+            // sign-in visual routes parked on their requested state; only a real
+            // onboarding flow should advance after authentication changes.
+            if signedIn, !["signin", "signin-error"].contains(DebugFlags.shared.route) {
+                flow.resumeAfterSignIn(app: app)
+            }
         }
         .sheet(item: $flow.editingTopic) { topic in
             TopicEditSheet(
@@ -433,11 +438,13 @@ struct PublicOnboardingView: View {
             Text("Your existing cards, scores, review history, Study Plans, and notification windows are ready to attach to your Apple identity.").publicBody()
             PublicMaterialCard(title: "Existing Devmax library", meta: "NO ONBOARDING REPLAY · NO SCHEDULE CHANGES")
             PublicNote("This is a one-time owner claim. It does not create a second library or alter any spaced-repetition value.")
+            if let error = auth.errorMessage { PublicError(error) }
         } footer: {
-            PrimaryButton(title: "Continue with Apple") {
-                if auth.isAuthenticated { Task { await completeOnboarding() } }
-                else { auth.startAppleSignIn() }
-            }
+            AppleContinueButton(
+                purpose: .founderClaim,
+                enabled: flow.founderClaimAvailable,
+                accessibilityHint: "Securely attaches the existing Devmax library to your Apple identity."
+            )
         }
     }
 

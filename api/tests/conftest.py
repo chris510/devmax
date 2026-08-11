@@ -6,6 +6,10 @@ from datetime import date, datetime
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("API_KEY", "test-api-key")
 os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+os.environ.setdefault(
+    "FOUNDER_CLAIM_TOKEN", "test-founder-claim-token-00000000000000000000"
+)
+os.environ.setdefault("LEGACY_API_KEY_AUTH_ENABLED", "true")
 
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
@@ -24,6 +28,9 @@ from app.services import llm  # noqa: E402
 
 API_HEADERS = {"X-API-Key": "test-api-key"}
 CRON_HEADERS = {"X-Cron-Secret": "test-cron-secret"}
+FOUNDER_CLAIM_HEADERS = {
+    "X-Founder-Claim-Token": "test-founder-claim-token-00000000000000000000"
+}
 
 
 def local_today() -> date:

@@ -25,19 +25,22 @@ local Postgres 17, including through a PgBouncer running in `transaction` mode (
 
 ## 1. Secrets
 
-Nine values. Generate the two shared secrets fresh, and make them different from
-each other — the app refuses to boot otherwise (`app/config.py`).
+Generate the two long-lived shared secrets fresh and make them different. The
+founder cutover also uses one temporary secret; it must differ from both and is
+removed immediately after the claim (`app/config.py` enforces all three rules).
 
 ```sh
 openssl rand -base64 32   # API_KEY
 openssl rand -base64 32   # CRON_SECRET
+openssl rand -hex 32      # FOUNDER_CLAIM_TOKEN (temporary; xcconfig-safe)
 ```
 
 | Secret | Where it lives | Also held by |
 |---|---|---|
 | `DATABASE_URL` | Railway service variable | Reference the Postgres service, don't paste — see §3 |
-| `API_KEY` | Railway | `ios/Config/Secrets.xcconfig`, inside the app binary |
+| `API_KEY` | Railway until compatibility code is removed; ignored once its flag is false | The already-installed legacy build; never a future public iOS build |
 | `CRON_SECRET` | Railway API service | GitHub repo secret. **Never** in the app. |
+| `FOUNDER_CLAIM_TOKEN` | Railway during founder cutover only | A local claim-capable build only; never commit or ship it publicly |
 | `ANTHROPIC_API_KEY` | Railway | — |
 | `APNS_KEY_ID` | Railway | — |
 | `APNS_TEAM_ID` | Railway | — |
@@ -52,9 +55,10 @@ openssl rand -base64 32   # CRON_SECRET
 - **`CRON_SECRET`** lives in Railway and GitHub. Update Railway, then the GitHub
   secret within the same minute, then run the fallback workflow manually to
   confirm.
-- **`API_KEY`** is also inside an installed binary. Rotating it bricks the phone
-  until you install a new build. Only rotate alongside a build and install; never
-  remotely.
+- **`API_KEY`** is inside the legacy pre-claim build, so rotating it before the
+  bearer cutover bricks that install. Once the founder's Keychain bearer works,
+  first disable `LEGACY_API_KEY_AUTH_ENABLED`, then rotate `API_KEY` immediately;
+  bearer clients are unaffected and the shipped legacy value can never revive.
 
 ---
 
@@ -164,6 +168,9 @@ suite builds its own engine in `conftest` and never calls `engine_kwargs`.
 ```
 API_KEY            = <openssl rand -base64 32>
 CRON_SECRET        = <a different openssl rand -base64 32>
+FOUNDER_CLAIM_TOKEN = <a third, temporary openssl rand -hex 32 value>
+# Explicitly on only so the already-installed private build survives this deploy.
+LEGACY_API_KEY_AUTH_ENABLED = true
 ANTHROPIC_API_KEY  = <your key>
 APNS_USE_SANDBOX   = true
 LOG_LEVEL          = INFO
@@ -338,8 +345,12 @@ as Railway variables. Load the `claude-api` skill before changing them.
 
 ```sh
 cd ios
-cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig   # paste the server's API_KEY
+cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig
 ```
+
+Keep `WC_API_KEY` empty. It exists only for the already-installed private
+compatibility build and must not enter a new Debug, TestFlight, or App Store
+binary; all new builds persist bearer/refresh credentials in Keychain.
 
 Set `WC_BASE_URL` in `Config/Release.xcconfig` to your Railway domain, and
 `DEVELOPMENT_TEAM` in `project.yml` to your Team ID, then:
@@ -362,6 +373,44 @@ argument as the device and fails with `Invalid device`.
 
 Today should load real cards, and **Card History must render non-blank** — that's
 the proof for the date-decoding fix.
+
+### One-time founder Apple claim
+
+Before opening public signup, configure all five Sign in with Apple variables
+from `api/.env.example` plus the temporary `FOUNDER_CLAIM_TOKEN` above. Use the
+local claim-capable build to send its fresh Apple identity token, one-time
+authorization code, and nonce to `POST /auth/founder/apple-claim` with
+`X-Founder-Claim-Token`. `X-API-Key` alone must return 401.
+
+Create the uncommitted direct-device override with
+`cp Config/FounderMigrationSecrets.example.xcconfig Config/FounderMigrationSecrets.xcconfig`,
+paste only `FOUNDER_CLAIM_TOKEN`, and supply that file to the controlled Debug
+device build:
+
+```sh
+xcodegen generate
+xcodebuild -project Devmax.xcodeproj -scheme DevmaxFounderMigration \
+  -destination 'id=<physical-device-identifier>' build
+```
+
+The migration scheme's Run action uses the isolated `FounderMigration`
+configuration; its Archive action deliberately uses `Release`, which force-clears
+the claim token. Install the Run product over the existing app—do not uninstall
+first—then delete the local secret file immediately after verification. Release
+configuration force-clears both bootstrap secrets, so a TestFlight/App Store
+archive cannot carry either one.
+
+The successful response is a normal Devmax bearer/refresh pair. Confirm the app
+stored it in Keychain, `/auth/me` returns the fixed founder ID, and Today/History/
+Study Plan still show the existing data. Only then delete `FOUNDER_CLAIM_TOKEN`
+from Railway, set `LEGACY_API_KEY_AUTH_ENABLED=false`, replace `API_KEY` with a
+new random value that has never shipped in a binary, and restart the service.
+The rotation ensures an accidental future re-enable cannot revive build 2's
+embedded key. The same claim route and an old `X-API-Key` request must both
+return 401 while the verified bearer still works. A
+fresh Apple proof for the same subject is accepted only while that temporary
+token remains configured, so a lost first response is recoverable during this
+verification window.
 
 Then build to the device and tap the mic: confirm it records *your voice*, not a
 fixture paragraph. Any configuration proves this now — `simulateSpeech` defaults off
@@ -389,8 +438,8 @@ paste the whole file, don't collapse the newlines.
 production ↔ false. A mismatch fails silently as `BadDeviceToken`.
 
 1. Launch the Release build, grant notification permission.
-2. **Confirm the token arrived before anything else:**
-   `SELECT token, created_at FROM device_tokens;` — empty means registration failed
+2. **Confirm a token arrived without printing it:**
+   `SELECT COUNT(*) FROM device_tokens;` — zero means registration failed
    (check the device console for `devmax: APNs registration failed`) or the build
    is still in mock mode.
 3. Confirm `GET /cards/due` is non-empty.
@@ -474,7 +523,8 @@ In order.
      `missed_count` stays honest.
 3. **Deploy logs** — `apns rejected token=...` means APNs took the request and
    refused it. Almost always the sandbox/production mismatch.
-4. **`SELECT * FROM device_tokens`** — empty means the phone never registered.
+4. **`SELECT COUNT(*) FROM device_tokens`** — zero means the phone never registered;
+   never print bearer-like device tokens into a terminal transcript.
 5. **The phone** — Focus mode, notification settings, or permission denied at first
    launch (there is no second prompt; delete and reinstall).
 

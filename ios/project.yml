@@ -7,6 +7,7 @@ options:
 
 configs:
   Debug: debug
+  FounderMigration: debug
   Release: release
 
 settings:
@@ -17,7 +18,7 @@ settings:
     DEVELOPMENT_TEAM: "BSM3G2L4RK"
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "5"
 
 targets:
   Devmax:
@@ -25,11 +26,13 @@ targets:
     platform: iOS
     sources:
       - path: Devmax
-    # Per-configuration endpoint and API key, substituted into Info.plist and the
-    # entitlements file. Config/Secrets.xcconfig is gitignored; the includes in
-    # Debug/Release are optional so a fresh clone still builds.
+    # Per-configuration endpoint and optional direct-device claim token,
+    # substituted into Info.plist and the entitlements file.
+    # Config/Secrets.xcconfig is gitignored; Release force-clears both supported
+    # secret settings after the include so a local file cannot leak into an archive.
     configFiles:
       Debug: Config/Debug.xcconfig
+      FounderMigration: Config/FounderMigration.xcconfig
       Release: Config/Release.xcconfig
     settings:
       base:
@@ -79,5 +82,23 @@ schemes:
       config: Release
     analyze:
       config: Debug
+    archive:
+      config: Release
+
+  DevmaxFounderMigration:
+    build:
+      targets:
+        Devmax: all
+        DevmaxTests: [test]
+    run:
+      config: FounderMigration
+    test:
+      config: FounderMigration
+      targets:
+        - DevmaxTests
+    analyze:
+      config: FounderMigration
+    # An accidental Archive on this scheme must still use the keyless Release
+    # configuration; FounderMigration is only for a direct-device Run.
     archive:
       config: Release

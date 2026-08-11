@@ -2,6 +2,12 @@
 // Optional: a fresh clone with no Secrets.xcconfig still compiles.
 #include? "Secrets.xcconfig"
 
+// Founder migration no longer uses the broad legacy API key. Keep it empty even
+// when an older local Secrets.xcconfig still defines one; the direct-device build
+// has its own isolated configuration and secret file.
+WC_API_KEY =
+WC_FOUNDER_CLAIM_TOKEN =
+
 // Debug builds run on MockAPI fixtures by default (WC_MOCK=1). This is where
 // WC_MOCK=0 points them — the local server on the ~/dev port.
 WC_BASE_URL = http:/$()/localhost:8083

@@ -1,0 +1,10 @@
+#include "Base.xcconfig"
+#include? "FounderMigrationSecrets.xcconfig"
+
+// One controlled direct-device build only. It talks to production, keeps the
+// development APNs entitlement in sync with Railway sandbox mode, and never
+// carries the broad legacy API key. Delete the local secrets file after claim.
+WC_API_KEY =
+WC_BASE_URL = https:/$()/devmax-production.up.railway.app
+WC_DEFAULT_MOCK = 0
+WC_APS_ENVIRONMENT = development

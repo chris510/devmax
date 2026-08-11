@@ -16,7 +16,13 @@ from app import models  # noqa: F401  — registers tables on SQLModel.metadata
 from app.config import Settings
 from app.db import engine_kwargs
 
-GOOD = dict(database_url="postgresql+asyncpg://u:p@host/db", api_key="realA", cron_secret="realB")
+GOOD = dict(
+    database_url="postgresql+asyncpg://u:p@host/db",
+    api_key="realA",
+    cron_secret="realB",
+    founder_claim_token="",
+    legacy_api_key_auth_enabled=False,
+)
 
 
 def build(**overrides) -> Settings:
@@ -89,6 +95,33 @@ def test_the_two_secrets_must_differ() -> None:
     """
     with pytest.raises(ValidationError):
         build(api_key="same", cron_secret="same")
+
+
+def test_the_founder_claim_is_disabled_by_default() -> None:
+    assert build().founder_claim_token == ""
+    assert build().legacy_api_key_auth_enabled is False
+
+
+@pytest.mark.parametrize("shared_with", ["api_key", "cron_secret"])
+def test_the_temporary_founder_claim_secret_must_be_independent(shared_with: str) -> None:
+    with pytest.raises(ValidationError):
+        build(founder_claim_token=GOOD[shared_with])
+
+
+@pytest.mark.parametrize("placeholder", ["change-me", "change-me-too", " "])
+def test_a_configured_founder_claim_secret_cannot_be_a_placeholder(
+    placeholder: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        build(founder_claim_token=placeholder)
+
+
+@pytest.mark.parametrize("length", [1, 16, 31, 42])
+def test_a_configured_founder_claim_secret_requires_32_random_bytes(length: int) -> None:
+    with pytest.raises(ValidationError):
+        build(founder_claim_token="x" * length)
+
+    assert len(build(founder_claim_token="x" * 43).founder_claim_token) == 43
 
 
 # Railway's private mesh address, which is what ${{Postgres.DATABASE_URL}} resolves to.
