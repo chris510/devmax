@@ -9,7 +9,6 @@ struct DevmaxApp: App {
     @StateObject private var auth = AuthState()
     @StateObject private var publicFlow = PublicOnboardingState()
     @StateObject private var flags = DebugFlags.shared
-    @AppStorage(Preferences.appearanceKey) private var appearance = AppAppearance.system.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -20,9 +19,7 @@ struct DevmaxApp: App {
                 .environmentObject(auth)
                 .environmentObject(publicFlow)
                 .environmentObject(flags)
-                .preferredColorScheme(
-                    (AppAppearance(rawValue: appearance) ?? .system).colorScheme
-                )
+                .preferredColorScheme(.dark)  // light mode is not designed or supported
                 .task {
                     delegate.state = state
                     await auth.bootstrap()

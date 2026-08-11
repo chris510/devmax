@@ -37,6 +37,7 @@ targets:
         INFOPLIST_FILE: Devmax/Info.plist
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         TARGETED_DEVICE_FAMILY: "1"
+        # The shipped handoff is dark-only; light mode remains explicitly out of scope.
         SUPPORTS_MACCATALYST: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
