@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -39,6 +40,9 @@ class Settings(BaseSettings):
     # at 5029, with no false Accuracy passes or failures at either level.
     # Re-run the sweep before changing this; it's the product's core signal.
     scoring_effort: str | None = "low"
+    # V2-capable code ships dark until a compatible iOS build is deployed.
+    # Activation is one Railway variable, with V1 as the immediate rollback.
+    scoring_contract_version: Literal[1, 2] = 1
     question_effort: str | None = None
 
     # Turn 3, the coached re-attempt. Mirrors the scoring model deliberately — it

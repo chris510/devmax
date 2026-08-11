@@ -281,6 +281,7 @@ struct NoMaterialTodayContent: View {
 }
 
 struct TodayRow: View {
+    @EnvironmentObject private var state: AppState
     let card: DueCard
     let onOpenHistory: () -> Void
     let onStart: () -> Void
@@ -320,7 +321,7 @@ struct TodayRow: View {
                 WrappingChips(chips: chips)
             }
 
-            ScoreColumn(score: card.lastScore)
+            ScoreColumn(score: state.displayScore(card))
         }
         .padding(.top, Metrics.rowTopPadding)
         .padding(.bottom, Metrics.rowBottomPadding)

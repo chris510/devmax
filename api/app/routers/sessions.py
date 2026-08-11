@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -20,6 +21,7 @@ from app.models import (
 from app.routers.deps import as_utc, local_today
 from app.schemas import (
     AnswerIn,
+    CoachingOut,
     CompleteOut,
     DraftUpdate,
     FollowUpOut,
@@ -28,7 +30,12 @@ from app.schemas import (
 )
 from app.services import llm, usage
 from app.services.scheduler import apply_sm2, quality_for
-from app.services.scoring_contract import SCORING_CONTRACT_V1
+from app.services.scoring_contract import (
+    SCORING_CONTRACT_V2,
+    active_scoring_contract_version,
+    coaching_question,
+    next_coaching_focus,
+)
 
 router = APIRouter(tags=["sessions"])
 
@@ -67,10 +74,13 @@ async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
     ).first()
 
 
-async def _owned_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
-    return (
-        await db.exec(select(Card).where(Card.id == card_id, Card.user_id == current_user_id()))
-    ).first()
+async def _owned_card(
+    db: AsyncSession, card_id: uuid.UUID, *, for_update: bool = False
+) -> Card | None:
+    statement = select(Card).where(Card.id == card_id, Card.user_id == current_user_id())
+    if for_update:
+        statement = statement.with_for_update()
+    return (await db.exec(statement)).first()
 
 
 async def _owned_session(db: AsyncSession, session_id: uuid.UUID) -> Session | None:
@@ -148,7 +158,11 @@ async def start_session(
         db.add(card)
 
     session = Session(
-        card_id=card_id, question_asked=question, practice=practice, status=STATUS_OPEN
+        card_id=card_id,
+        question_asked=question,
+        practice=practice,
+        status=STATUS_OPEN,
+        scoring_contract_version=active_scoring_contract_version(),
     )
     db.add(session)
     await db.commit()
@@ -189,37 +203,61 @@ async def submit_answer(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    observed_status = session.status
+
+    card = await _owned_card(db, session.card_id, for_update=True)
+    if card is None:  # pragma: no cover — FK guarantees this
+        raise HTTPException(status_code=404, detail="card not found")
+    # The card lock serializes reviews without blocking PATCH /draft, which only
+    # touches the session row. Refresh after any wait and reject a replay whose
+    # turn changed while the first request was scoring.
+    await db.refresh(session)
+    if session.status != observed_status:
+        raise HTTPException(status_code=409, detail="session advanced during submission")
     if session.status == STATUS_COMPLETE:
         raise HTTPException(status_code=409, detail="session already complete")
 
-    card = await _owned_card(db, session.card_id)
-    if card is None:  # pragma: no cover — FK guarantees this
-        raise HTTPException(status_code=404, detail="card not found")
-
     answering_follow_up = session.status == STATUS_AWAITING_FOLLOW_UP
+    answer_text = session.answer_text
+    follow_up_answer = session.follow_up_answer
     if answering_follow_up:
-        session.follow_up_answer = body.text
+        follow_up_answer = body.text
     else:
-        session.answer_text = body.text
-    session.draft_text = ""
+        answer_text = body.text
 
     # Score before writing anything, so an LLM failure leaves the session and card
     # untouched rather than half-written. The answer is re-sent on retry.
-    await usage.ensure_available(db, current_user_id(), "score", get_settings())
+    score_operation = (
+        "score_v2" if session.scoring_contract_version == SCORING_CONTRACT_V2 else "score"
+    )
+    await usage.ensure_available(db, current_user_id(), score_operation, get_settings())
     result = await llm.score_answer(
         topic=card.topic,
         mastery_summary=card.mastery_summary,
         question_asked=session.question_asked,
-        answer_text=session.answer_text,
+        answer_text=answer_text,
         follow_up_question=session.follow_up_question,
-        follow_up_answer=session.follow_up_answer,
+        follow_up_answer=follow_up_answer,
         follow_up_used=session.follow_up_used,
         answer_anchor=card.answer_anchor,
         source_excerpt=card.source_excerpt,
         answer_basis=card.answer_basis,
         answer_rubric=card.answer_rubric,
+        scoring_contract_version=session.scoring_contract_version,
     )
-    usage.record(db, current_user_id(), "score")
+    usage.record(db, current_user_id(), score_operation)
+
+    if result.scoring_contract_version != session.scoring_contract_version:
+        raise llm.LLMError("scorer returned the wrong contract version")
+
+    # Only now does the transcript move onto the ORM object. If the provider or
+    # contract validation failed above, the request leaves no dirty session state
+    # for a later transaction to commit accidentally.
+    if answering_follow_up:
+        session.follow_up_answer = follow_up_answer
+    else:
+        session.answer_text = answer_text
+    session.draft_text = ""
 
     if result.status == "follow_up":
         session.follow_up_question = result.follow_up_question
@@ -244,7 +282,7 @@ async def submit_answer(
     card.last_accuracy = result.accuracy
     card.last_depth = result.depth
     card.last_boundaries = result.boundaries
-    card.last_score_contract_version = SCORING_CONTRACT_V1
+    card.last_score_contract_version = session.scoring_contract_version
     card.last_reviewed_at = now
     if result.mastery_summary:
         card.mastery_summary = result.mastery_summary
@@ -274,16 +312,37 @@ async def submit_answer(
     await db.commit()
 
     eligible = _reattempt_eligible(session)
+    coaching_offered = (
+        session.scoring_contract_version == SCORING_CONTRACT_V2
+        and session.accuracy is not None
+        and session.accuracy >= 3
+    )
+    focus = None
+    question = None
+    if coaching_offered:
+        completed = (
+            await db.exec(
+                select(func.count(Session.id)).where(
+                    Session.card_id == session.card_id,
+                    col(Session.coaching_answer).is_not(None),
+                )
+            )
+        ).one()
+        focus = next_coaching_focus(completed)
+        question = coaching_question(focus)
     return CompleteOut(
         score=result.score or 0,
         recall_score=result.accuracy or 0,
-        scoring_contract_version=SCORING_CONTRACT_V1,
+        scoring_contract_version=session.scoring_contract_version,
         feedback=result.feedback,
         next_review_at=next_review,
         interval_days=interval,
         practice=session.practice,
         reattempt_offered=eligible,
         reattempt_prompt=REATTEMPT_PREFACE + session.question_asked if eligible else None,
+        coaching_offered=coaching_offered,
+        coaching_focus=focus,
+        coaching_question=question,
     )
 
 
@@ -306,6 +365,10 @@ async def submit_reattempt(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    card = await _owned_card(db, session.card_id, for_update=True)
+    if card is None:  # pragma: no cover — FK guarantees this
+        raise HTTPException(status_code=404, detail="card not found")
+    await db.refresh(session)
     # A re-attempt only exists after a scored, completed session. Any other status
     # means turn 2 never landed, so there is no correction to re-attempt.
     if session.status != STATUS_COMPLETE:
@@ -319,10 +382,6 @@ async def submit_reattempt(
     # guards this; the endpoint must too, because the write is irreversible.
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="re-attempt text is empty")
-
-    card = await _owned_card(db, session.card_id)
-    if card is None:  # pragma: no cover — FK guarantees this
-        raise HTTPException(status_code=404, detail="card not found")
 
     # The offer expires when the card is reviewed again. Turn 3 rewrites
     # `mastery_summary`, which is live context for the *next* `score_answer` — so a
@@ -366,3 +425,66 @@ async def submit_reattempt(
     await db.commit()
 
     return ReattemptOut(mastery_summary=card.mastery_summary)
+
+
+@router.post("/sessions/{session_id}/coaching", response_model=CoachingOut)
+async def submit_coaching(
+    session_id: uuid.UUID, body: AnswerIn, db: AsyncSession = Depends(get_session)
+) -> CoachingOut:
+    """One optional, qualitative post-result turn with a four-column write set."""
+    session = await _owned_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    # Card lock serializes completed coaching turns across separate sessions for
+    # the same card, so two simultaneous submissions cannot select the same
+    # alternation focus. It deliberately does not lock the session row: draft
+    # persistence must stay cheap while the model is running.
+    card = await _owned_card(db, session.card_id, for_update=True)
+    if card is None:  # pragma: no cover — FK guarantees this
+        raise HTTPException(status_code=404, detail="card not found")
+    await db.refresh(session)
+    if session.status != STATUS_COMPLETE:
+        raise HTTPException(status_code=409, detail="session is not complete")
+    if session.scoring_contract_version != SCORING_CONTRACT_V2:
+        raise HTTPException(status_code=409, detail="qualitative coaching requires V2")
+    if session.accuracy is None or session.accuracy < 3:
+        raise HTTPException(status_code=409, detail="failed Recall uses re-attempt coaching")
+    if session.coaching_answer is not None:
+        raise HTTPException(status_code=409, detail="qualitative coaching already used")
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="coaching text is empty")
+
+    if card.last_reviewed_at is not None and session.ended_at is not None:
+        if as_utc(card.last_reviewed_at) > as_utc(session.ended_at):
+            raise HTTPException(status_code=409, detail="card has been reviewed since")
+
+    completed = (
+        await db.exec(
+            select(func.count(Session.id)).where(
+                Session.card_id == session.card_id,
+                col(Session.coaching_answer).is_not(None),
+            )
+        )
+    ).one()
+    focus = next_coaching_focus(completed)
+    question = coaching_question(focus)
+
+    await usage.ensure_available(db, current_user_id(), "coaching", get_settings())
+    result = await llm.coach_answer(
+        topic=card.topic,
+        focus=focus,
+        question=question,
+        answer=body.text,
+        answer_basis=card.answer_basis or card.answer_anchor,
+        answer_rubric=card.answer_rubric,
+    )
+    usage.record(db, current_user_id(), "coaching")
+
+    session.coaching_focus = focus
+    session.coaching_question = question
+    session.coaching_answer = body.text
+    session.coaching_feedback = result.feedback
+    db.add(session)
+    await db.commit()
+
+    return CoachingOut(focus=focus, question=question, feedback=result.feedback)

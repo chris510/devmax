@@ -97,6 +97,9 @@ protocol DevmaxAPI {
     /// the server rewrites the card's mastery summary and there is no second score,
     /// so the client has nothing to display and nothing to store.
     func submitReattempt(sessionID: UUID, text: String) async throws
+    /// Optional V2 practice after a passing Recall result. The response is
+    /// qualitative only and never changes the session score or schedule.
+    func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome
     func settings() async throws -> AppSettings
     func updateSettings(_ settings: AppSettings) async throws -> AppSettings
     func registerDeviceToken(_ token: String) async throws
@@ -174,6 +177,9 @@ protocol DevmaxAPI {
 /// methods default to a clear unsupported error so those doubles stay narrow;
 /// LiveAPI and MockAPI implement every method used by the app.
 extension DevmaxAPI {
+    func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome {
+        throw APIError.status(501)
+    }
     func accountProfile() async throws -> AccountProfile { throw APIError.status(501) }
     func completeOnboarding() async throws -> AccountProfile { throw APIError.status(501) }
     func materialImports() async throws -> [MaterialImport] { throw APIError.status(501) }
@@ -431,6 +437,12 @@ struct LiveAPI: DevmaxAPI {
     func submitReattempt(sessionID: UUID, text: String) async throws {
         let body = try Self.encoder.encode(["text": text])
         _ = try await request("POST", "sessions/\(sessionID)/reattempt", body: body)
+    }
+
+    func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome {
+        let body = try Self.encoder.encode(["text": text])
+        let data = try await request("POST", "sessions/\(sessionID)/coaching", body: body)
+        return try Self.decoder.decode(CoachingOutcome.self, from: data)
     }
 
     func settings() async throws -> AppSettings {

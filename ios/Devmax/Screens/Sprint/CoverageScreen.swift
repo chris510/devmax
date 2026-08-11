@@ -4,8 +4,8 @@ import SwiftUI
 /// deciding where the study guide needs more cards, fewer cards, or rebalancing.
 /// Not a daily habit screen.
 ///
-/// Category tiers remain read-only. The weakest global depth axis can start a
-/// Practice-mode repair run; it never changes SM-2.
+/// Category tiers remain read-only. V1 may expose its historical axis repair;
+/// V2 intentionally has no numeric Depth or Boundaries rollup.
 struct CoverageScreen: View {
     @EnvironmentObject private var state: AppState
 
@@ -116,7 +116,7 @@ private struct CoverageSection: View {
     /// Tiers present here, in fixed order, zero-count tiers omitted.
     private var tiers: [(tier: ScoreStyle.Tier, count: Int)] {
         ScoreStyle.Tier.allCases.compactMap { tier in
-            let count = AppState.tally(cards, [tier])
+            let count = state.tally(cards, [tier])
             return count > 0 ? (tier, count) : nil
         }
     }
@@ -141,7 +141,7 @@ private struct CoverageSection: View {
 
             if let openTier {
                 VStack(alignment: .leading, spacing: 9) {
-                    ForEach(cards.filter { ScoreStyle.Tier.of($0.lastScore) == openTier }) { card in
+                    ForEach(cards.filter { ScoreStyle.Tier.of(state.displayScore($0)) == openTier }) { card in
                         cardRow(card)
                     }
                 }
@@ -186,10 +186,10 @@ private struct CoverageSection: View {
                          tracking: 0.76, color: Theme.metaFaint)
             }
             Spacer(minLength: 0)
-            Text(ScoreStyle.label(for: card.lastScore))
+            Text(ScoreStyle.label(for: state.displayScore(card)))
                 .font(WCFont.sans(14, weight: 600))
                 .monospacedDigit()
-                .foregroundStyle(ScoreStyle.color(for: card.lastScore))
+                .foregroundStyle(ScoreStyle.color(for: state.displayScore(card)))
         }
     }
 

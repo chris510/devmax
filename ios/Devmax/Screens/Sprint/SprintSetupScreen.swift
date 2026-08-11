@@ -20,7 +20,8 @@ struct SprintSetupScreen: View {
                 .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(state.sprintKind == .review ? "Review sprint" : "Depth repair")
+                    Text(state.usesRecallContract || state.sprintKind == .review
+                         ? "Review sprint" : "Depth repair")
                         .font(TypeRole.screenTitle)
                         .tracking(-0.6)
                         .foregroundStyle(Theme.text)
@@ -109,8 +110,10 @@ struct SprintSetupScreen: View {
                     .font(WCFont.sans(14.5))
                     .foregroundStyle(Theme.text)
                 Text(
-                    state.sprintKind == .review
-                        ? "Weakest and least recently reviewed first"
+                    state.sprintKind == .review || state.usesRecallContract
+                        ? (state.usesRecallContract
+                           ? "Lowest Recall and least recently reviewed first"
+                           : "Weakest and least recently reviewed first")
                         : "Thin depth signal first"
                 )
                     .font(WCFont.sans(12.5))
@@ -213,6 +216,7 @@ struct SprintSetupScreen: View {
 
 /// Today's row anatomy minus the meta line.
 private struct SprintPreviewRow: View {
+    @EnvironmentObject private var state: AppState
     let card: CardSummary
     let remove: (() -> Void)?
 
@@ -238,7 +242,7 @@ private struct SprintPreviewRow: View {
                 }
             }
 
-            ScoreColumn(score: card.lastScore)
+            ScoreColumn(score: state.displayScore(card))
         }
         .padding(.top, Metrics.rowTopPadding)
         .padding(.bottom, Metrics.rowBottomPadding)

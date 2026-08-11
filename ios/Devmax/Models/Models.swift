@@ -9,6 +9,11 @@ struct DueCard: Codable, Identifiable, Equatable {
     let category: String
     let masterySummary: String
     let lastScore: Int?
+    /// V2's only numeric signal. Optional so a compatible build can still read
+    /// the pre-capability server during a rolling deployment.
+    var recallScore: Int? = nil
+    var scoreKind: String? = nil
+    var scoringContractVersion: Int? = nil
     /// Computed server-side ("due today", "3 days overdue") — the client never
     /// reimplements date math.
     let dueLabel: String
@@ -23,6 +28,9 @@ struct CardSummary: Codable, Identifiable, Equatable {
     let deliveryMode: String
     let masterySummary: String
     let lastScore: Int?
+    var recallScore: Int? = nil
+    var scoreKind: String? = nil
+    var scoringContractVersion: Int? = nil
     /// The three axes behind `lastScore`. Coverage's rollup line is the only
     /// consumer — nothing else in the app decomposes a score.
     let lastAccuracy: Int?
@@ -44,7 +52,9 @@ struct CardSummary: Codable, Identifiable, Equatable {
     func asQueueCard(resumable: Bool = false) -> DueCard {
         DueCard(
             id: id, topic: topic, category: category, masterySummary: masterySummary,
-            lastScore: lastScore, dueLabel: dueLabel, resumable: resumable,
+            lastScore: lastScore, recallScore: recallScore, scoreKind: scoreKind,
+            scoringContractVersion: scoringContractVersion,
+            dueLabel: dueLabel, resumable: resumable,
             missedCount: missedCount
         )
     }
@@ -62,8 +72,15 @@ struct SessionHistory: Codable, Identifiable, Equatable {
     let id: UUID
     let date: Date
     let score: Int?
+    var recallScore: Int? = nil
+    var legacyCompositeScore: Int? = nil
+    var scoringContractVersion: Int? = nil
     let feedback: String
     let turns: [Turn]
+    var coachingFocus: String? = nil
+    var coachingQuestion: String? = nil
+    var coachingAnswer: String? = nil
+    var coachingFeedback: String? = nil
 }
 
 struct CardDetail: Codable, Equatable {
@@ -72,6 +89,9 @@ struct CardDetail: Codable, Equatable {
     let category: String
     let masterySummary: String
     let lastScore: Int?
+    var recallScore: Int? = nil
+    var scoreKind: String? = nil
+    var scoringContractVersion: Int? = nil
     let easeFactor: Double
     let intervalDays: Int
     let repetitions: Int
@@ -93,8 +113,10 @@ struct SessionStart: Codable, Equatable {
 enum AnswerOutcome: Equatable {
     case followUp(question: String)
     case complete(
-        score: Int, feedback: String, nextReviewAt: String, intervalDays: Int, practice: Bool,
-        reattemptOffered: Bool, reattemptPrompt: String?
+        score: Int, recallScore: Int, scoringContractVersion: Int,
+        feedback: String, nextReviewAt: String, intervalDays: Int, practice: Bool,
+        reattemptOffered: Bool, reattemptPrompt: String?, coachingOffered: Bool,
+        coachingFocus: String?, coachingQuestion: String?
     )
 }
 
@@ -102,6 +124,8 @@ extension AnswerOutcome: Decodable {
     private enum CodingKeys: String, CodingKey {
         case status, question, score, feedback, nextReviewAt, intervalDays, practice
         case reattemptOffered, reattemptPrompt
+        case recallScore, scoringContractVersion
+        case coachingOffered, coachingFocus, coachingQuestion
     }
 
     init(from decoder: Decoder) throws {
@@ -112,6 +136,11 @@ extension AnswerOutcome: Decodable {
         default:
             self = .complete(
                 score: try c.decode(Int.self, forKey: .score),
+                recallScore: try c.decodeIfPresent(Int.self, forKey: .recallScore)
+                    ?? c.decode(Int.self, forKey: .score),
+                scoringContractVersion: try c.decodeIfPresent(
+                    Int.self, forKey: .scoringContractVersion
+                ) ?? 1,
                 feedback: try c.decode(String.self, forKey: .feedback),
                 nextReviewAt: try c.decode(String.self, forKey: .nextReviewAt),
                 intervalDays: try c.decode(Int.self, forKey: .intervalDays),
@@ -122,7 +151,11 @@ extension AnswerOutcome: Decodable {
                 // server would 409 — the safe direction for an optional extra turn.
                 reattemptOffered: try c.decodeIfPresent(Bool.self, forKey: .reattemptOffered)
                     ?? false,
-                reattemptPrompt: try c.decodeIfPresent(String.self, forKey: .reattemptPrompt)
+                reattemptPrompt: try c.decodeIfPresent(String.self, forKey: .reattemptPrompt),
+                coachingOffered: try c.decodeIfPresent(Bool.self, forKey: .coachingOffered)
+                    ?? false,
+                coachingFocus: try c.decodeIfPresent(String.self, forKey: .coachingFocus),
+                coachingQuestion: try c.decodeIfPresent(String.self, forKey: .coachingQuestion)
             )
         }
     }
@@ -140,6 +173,10 @@ struct AppSettings: Codable, Equatable {
     var reviewsPerDay: Int
     var timezone: String
     var windows: [NotificationWindow]
+    /// Read-only server capability. Missing means V1 during a rolling deploy.
+    var activeScoringContractVersion: Int? = nil
+
+    var usesRecallContract: Bool { activeScoringContractVersion == 2 }
 
     static let placeholder = AppSettings(
         reviewsPerDay: 2,
@@ -161,7 +198,10 @@ struct AppSettings: Codable, Equatable {
 struct ThreadEntry: Identifiable, Equatable {
     /// `reattemptQuestion` is turn 3 — a coached re-attempt after the correction,
     /// prefaced `In your words — ` the way the probe is prefaced `One more — `.
-    enum Role: Equatable { case question, answer, followUpQuestion, reattemptQuestion }
+    enum Role: Equatable {
+        case question, answer, followUpQuestion, reattemptQuestion
+        case coachingQuestion, coachingFeedback
+    }
 
     let id = UUID()
     let role: Role
@@ -181,6 +221,9 @@ enum Stage: Equatable {
     /// already complete and scored by the time this stage exists.
     case reattempt
     case recordingReattempt
+    /// Optional, unscored V2 practice after a passing Recall result.
+    case coaching
+    case recordingCoaching
     /// The question never arrived, carrying the note that names why. A state of
     /// its own rather than `.loadingQuestion` plus a flag: there is no session, so
     /// every answering path below must be dead, and pairing two variables by
@@ -194,11 +237,13 @@ enum Stage: Equatable {
     /// Asking the enum about itself keeps them from drifting apart again.
     var isRecording: Bool {
         self == .recording || self == .recordingFollowUp || self == .recordingReattempt
+            || self == .recordingCoaching
     }
 
     /// Whether the answer control is live. Recording counts — tapping it submits.
     var acceptsAnswer: Bool {
-        self == .idle || self == .followUp || self == .reattempt || isRecording
+        self == .idle || self == .followUp || self == .reattempt || self == .coaching
+            || isRecording
     }
 
     /// The recording twin of an answering stage; itself if already recording.
@@ -211,6 +256,7 @@ enum Stage: Equatable {
         switch self {
         case .followUp, .recordingFollowUp: return .recordingFollowUp
         case .reattempt, .recordingReattempt: return .recordingReattempt
+        case .coaching, .recordingCoaching: return .recordingCoaching
         case .questionFailed: return self
         default: return .recording
         }
@@ -221,6 +267,7 @@ enum Stage: Equatable {
         switch self {
         case .followUp, .recordingFollowUp: return .followUp
         case .reattempt, .recordingReattempt: return .reattempt
+        case .coaching, .recordingCoaching: return .coaching
         case .questionFailed: return self
         default: return .idle
         }
@@ -228,6 +275,7 @@ enum Stage: Equatable {
 
     /// Turn 3 goes to a different endpoint than turns 1 and 2.
     var isReattempt: Bool { self == .reattempt || self == .recordingReattempt }
+    var isCoaching: Bool { self == .coaching || self == .recordingCoaching }
 
     /// `hidden`, not `none` — a case named `none` reads as `Optional.none` at every
     /// call site, and Swift will happily infer the wrong one.
@@ -247,6 +295,7 @@ enum Stage: Equatable {
 
 struct SessionResult: Equatable {
     let score: Int
+    let scoringContractVersion: Int
     let feedback: String
     /// `NEXT REVIEW · 27 JUL · INTERVAL 3D`, or the practice-mode line in a sprint.
     let scheduleLine: String
@@ -257,6 +306,15 @@ struct SessionResult: Equatable {
     /// The exact prompt turn 3 asks, composed by the server so what is shown is what
     /// the answer is graded against. Nil when no re-attempt is offered.
     let reattemptPrompt: String?
+    var coachingOffered: Bool
+    let coachingFocus: String?
+    let coachingQuestion: String?
+}
+
+struct CoachingOutcome: Codable, Equatable {
+    let focus: String
+    let question: String
+    let feedback: String
 }
 
 /// One scored card in a multi-card run. Drives the progress rail's covered dots

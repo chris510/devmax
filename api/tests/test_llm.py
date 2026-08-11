@@ -235,6 +235,136 @@ async def test_the_axes_are_carried_onto_the_result(monkeypatch: pytest.MonkeyPa
     assert result.score == 4
 
 
+# --- V2 Recall-only contract -------------------------------------------------
+
+
+def recalled(score: int, probe: str = "") -> dict[str, Any]:
+    return {
+        "recall_score": score,
+        "feedback": "recall feedback",
+        "follow_up_question": probe,
+        "mastery_summary": "recalled the essential account",
+    }
+
+
+@pytest.mark.parametrize(
+    ("score", "probe", "expected"),
+    [
+        (0, "", "complete"),
+        (1, "One more — missing link?", "follow_up"),
+        (2, "One more — missing link?", "follow_up"),
+        (3, "One more — missing link?", "follow_up"),
+        (4, "", "complete"),
+        (5, "", "complete"),
+    ],
+)
+async def test_v2_follow_up_truth_table(
+    monkeypatch: pytest.MonkeyPatch, score: int, probe: str, expected: str
+) -> None:
+    calls = stub_completion(monkeypatch, recalled(score, probe))
+
+    result = await llm.score_answer(
+        **SCORE_ARGS, follow_up_used=False, scoring_contract_version=2
+    )
+
+    assert result.status == expected
+    assert result.scoring_contract_version == 2
+    assert calls[0]["schema"] == llm.SCORE_V2_SCHEMA
+    assert calls[0]["retry"] is False
+
+
+async def test_v2_complete_result_is_recall_and_has_no_secondary_axes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_completion(monkeypatch, recalled(4))
+
+    result = await llm.score_answer(
+        **SCORE_ARGS, follow_up_used=True, scoring_contract_version=2
+    )
+
+    assert result.score == result.accuracy == 4
+    assert result.depth is None
+    assert result.boundaries is None
+    assert set(llm.SCORE_V2_SCHEMA["properties"]) == {
+        "recall_score",
+        "feedback",
+        "follow_up_question",
+        "mastery_summary",
+    }
+    assert llm.SCORE_V2_SCHEMA["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {**recalled(3), "recall_score": None},
+        {**recalled(3), "recall_score": "not a number"},
+        {**recalled(3), "recall_score": 6},
+    ],
+)
+async def test_v2_unusable_recall_raises_llm_error(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+) -> None:
+    stub_completion(monkeypatch, payload)
+    with pytest.raises(llm.LLMError):
+        await llm.score_answer(
+            **SCORE_ARGS, follow_up_used=False, scoring_contract_version=2
+        )
+
+
+async def test_v2_used_follow_up_cannot_create_a_third_scored_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_completion(monkeypatch, recalled(2))
+
+    result = await llm.score_answer(
+        **SCORE_ARGS, follow_up_used=True, scoring_contract_version=2
+    )
+
+    assert result.status == "complete"
+    assert result.score == 2
+
+
+@pytest.mark.parametrize(
+    ("score", "used", "probe"),
+    [
+        (2, False, ""),
+        (0, False, "One more — forbidden"),
+        (4, False, "One more — forbidden"),
+        (2, True, "One more — forbidden"),
+    ],
+)
+async def test_v2_invalid_follow_up_policy_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, score: int, used: bool, probe: str
+) -> None:
+    stub_completion(monkeypatch, recalled(score, probe))
+    with pytest.raises(llm.LLMError):
+        await llm.score_answer(
+            **SCORE_ARGS, follow_up_used=used, scoring_contract_version=2
+        )
+
+
+async def test_qualitative_coaching_is_unscored_and_no_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = stub_completion(monkeypatch, {"coaching_feedback": "One grounded note."})
+
+    result = await llm.coach_answer(
+        topic="Consistent hashing",
+        focus="depth",
+        question="Why does it matter?",
+        answer="It limits movement.",
+        answer_basis="Only one arc moves.",
+        answer_rubric={"mechanism": "Only one arc moves."},
+    )
+
+    assert result.feedback == "One grounded note."
+    assert set(calls[0]["schema"]["properties"]) == {"coaching_feedback"}
+    assert calls[0]["retry"] is False
+    assert "score" not in json.dumps(calls[0]["schema"])
+
+
 # --- request construction ---------------------------------------------------
 # The tests above stub `_complete`, so nothing there covers what `_complete`
 # actually sends or how it retries. These stub one layer deeper, at `_client`.
@@ -291,6 +421,29 @@ async def test_no_cache_control_is_sent(fake_client):
 
     assert client.calls[0]["system"] == [{"type": "text", "text": llm.SCORING_RUBRIC}]
     assert "cache_control" not in json.dumps(client.calls[0])
+
+
+async def test_v2_parse_failure_makes_exactly_one_transmission(monkeypatch):
+    client = FakeClient(
+        [
+            make_response(text="not json"),
+            make_response(recalled(4)),
+        ]
+    )
+    monkeypatch.setattr(llm, "_no_retry_client", lambda: client)
+
+    with pytest.raises(llm.LLMError):
+        await llm._complete(
+            model="test",
+            effort=None,
+            rubric=llm.SCORING_V2_RUBRIC,
+            user_content="test",
+            schema=llm.SCORE_V2_SCHEMA,
+            max_tokens=256,
+            retry=False,
+        )
+
+    assert len(client.calls) == 1
 
 
 async def test_effort_is_omitted_when_unset(fake_client, monkeypatch):

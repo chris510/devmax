@@ -28,6 +28,13 @@ def test_a_full_config_boots() -> None:
     assert build().api_key == "realA"
 
 
+def test_scoring_v2_is_dark_by_default_and_only_known_versions_are_valid() -> None:
+    assert build().scoring_contract_version == 1
+    assert build(scoring_contract_version=2).scoring_contract_version == 2
+    with pytest.raises(ValidationError):
+        build(scoring_contract_version=3)
+
+
 @pytest.mark.parametrize("missing", ["database_url", "api_key", "cron_secret"])
 def test_the_three_required_settings_have_no_default(
     monkeypatch: pytest.MonkeyPatch, missing: str

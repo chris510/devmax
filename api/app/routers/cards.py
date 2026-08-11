@@ -35,8 +35,8 @@ from app.services.card_lifecycle import (
     active_card_filter,
     archive,
     build_grounded_card,
-    clean_rubric,
     restore,
+    storage_rubric,
 )
 from app.services.cards import (
     COLD,
@@ -118,6 +118,8 @@ def _overview_columns():
         Card.delivery_mode,
         Card.mastery_summary,
         Card.last_score,
+        Card.last_accuracy,
+        Card.last_score_contract_version,
         Card.ease_factor,
         Card.interval_days,
         Card.repetitions,
@@ -226,12 +228,16 @@ async def overview(
         tier = classify_tier(card, today)
         counts[tier] += 1
         if tier == SHAKY:
+            score = project_card_score(card)
             shaky.append(
                 TierCard(
                     id=card.id,
                     topic=card.topic,
                     mastery_summary=card.mastery_summary,
                     last_score=card.last_score,
+                    recall_score=score.recall_score,
+                    score_kind=score.score_kind,
+                    scoring_contract_version=score.scoring_contract_version,
                 )
             )
         elif tier == COLD:
@@ -368,7 +374,7 @@ async def update_card_grounding(
     for name, value in changes.items():
         setattr(card, name, (value or "").strip())
     if rubric is not None:
-        card.answer_rubric = clean_rubric(rubric)
+        card.answer_rubric = storage_rubric(rubric)
     card.updated_at = datetime.now(UTC)
     db.add(card)
     await db.commit()

@@ -52,7 +52,7 @@ struct SessionRecapScreen: View {
                     .font(TypeRole.bigScoreNumeral)
                     .monospacedDigit()
                     .foregroundStyle(averageColor)
-                MetaText(text: "/ 5 AVERAGE", font: WCFont.mono(13),
+                MetaText(text: state.usesRecallContract ? "/ 5 AVG RECALL" : "/ 5 AVERAGE", font: WCFont.mono(13),
                          tracking: 0, color: Theme.metaDimAlt)
             }
         }

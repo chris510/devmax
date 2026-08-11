@@ -56,7 +56,7 @@ from app.models import (
     Session,
 )
 from app.routers.deps import get_settings_row, now_in
-from app.services.card_lifecycle import Grounding, GroundingError
+from app.services.card_lifecycle import Grounding, GroundingError, storage_rubric
 
 # Coding problems need a keyboard and an hour, not a two-minute voice session.
 DESK_CATEGORIES = {"Coding Warmup", "Coding Pattern", "Tier 2 Practical Build"}
@@ -223,7 +223,7 @@ async def load_from_file(
                     source_section=authority.source_section if authority else "",
                     source_label=authority.source_label if authority else "",
                     answer_basis=authority.answer_basis if authority else "",
-                    answer_rubric=(authority.answer_rubric or {}) if authority else {},
+                    answer_rubric=storage_rubric(authority.answer_rubric) if authority else {},
                     next_review_at=due,
                 )
             )

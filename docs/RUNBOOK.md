@@ -491,6 +491,43 @@ rather than half-written. A session stuck in `open` or `awaiting_follow_up` is
 resumable by design — starting a session on that card returns the existing one.
 There is no `abandoned` transition; nothing sets it.
 
+## Scoring Contract V2 activation and rollback
+
+V2 is dark-launched. `SCORING_CONTRACT_VERSION` defaults to `1`; merging or
+deploying its code does not change production scoring.
+
+Activate only after the compatible iOS build is installed on every supported
+device:
+
+1. With the server still on V1, open `GET /settings` in that build and confirm
+   `active_scoring_contract_version` renders the V1 UI without decoding errors.
+2. Exercise Today, a scored result, mixed Card History, Coverage, Review Sprint,
+   and Session Recap. V1 composites must remain V1; no screen may call them
+   Recall merely because the integers happen to match.
+3. Set `SCORING_CONTRACT_VERSION=2` on Railway and deploy without changing
+   `SCORING_MODEL`, `SCORING_EFFORT`, or any provider credential.
+4. Confirm `GET /settings` returns `2`, then complete one ordinary review at each
+   final Recall band needed to prove both branches: `0–2` offers the existing
+   re-attempt; `3–5` offers **Go one level deeper**. A provisional `1–3` may use
+   one scored follow-up; `0` and `4–5` must not.
+5. Verify the new session row: `score = accuracy`, `depth IS NULL`,
+   `boundaries IS NULL`, and `scoring_contract_version = 2`. Verify the card's
+   `last_score = last_accuracy`, secondary axes are null, and
+   `last_score_contract_version = 2`.
+6. Submit one qualitative turn and verify exactly the four `coaching_*` session
+   columns changed. The card, mastery summary, original score, and four SM-2
+   fields must be unchanged.
+7. Inspect logs for the `score` and `coaching` model calls, including model,
+   latency, cache/input/output tokens, and invalid structured responses. No live
+   canary beyond the answers you intentionally submit is part of deployment.
+
+Immediate rollback is configuration-only: set
+`SCORING_CONTRACT_VERSION=1` and redeploy. Existing V2 rows remain versioned and
+visible; do not reverse migration 0011, clear coaching fields, copy Recall into a
+legacy composite, or rewrite history. Sessions already created retain the
+contract version they started with, so a rollback cannot change their scorer
+mid-session.
+
 ## The daily push cap — resolved, no `push_log` needed
 
 This section used to warn that moving to a frequent cron required a `push_log`

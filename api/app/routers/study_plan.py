@@ -113,6 +113,11 @@ from app.services.card_lifecycle import (
     active_card_filter,
     build_grounded_card,
     clean_rubric,
+    storage_rubric,
+)
+from app.services.scoring_contract import (
+    SCORING_CONTRACT_V2,
+    active_scoring_contract_version,
 )
 
 router = APIRouter(tags=["study-plan"])
@@ -1595,6 +1600,7 @@ async def create_card_proposals(
             raise HTTPException(status_code=409, detail="practice debrief is required")
         observed_gap = debrief.text
 
+    active_contract = active_scoring_contract_version()
     existing = (
         await db.exec(
             select(StudyPlanCardProposal).where(
@@ -1603,13 +1609,16 @@ async def create_card_proposals(
         )
     ).all()
     if not existing:
+        weak_score = (
+            Card.last_accuracy if active_contract == SCORING_CONTRACT_V2 else Card.last_score
+        )
         weak = (
             await db.exec(
                 select(Card)
                 .where(Card.user_id == current_user_id(), active_card_filter())
-                .where(col(Card.last_score).is_not(None))
-                .where(col(Card.last_score) <= 3)
-                .order_by(col(Card.last_score))
+                .where(col(weak_score).is_not(None))
+                .where(col(weak_score) <= 3)
+                .order_by(col(weak_score))
                 .limit(10)
             )
         ).all()
@@ -1635,7 +1644,7 @@ async def create_card_proposals(
             grounding = Grounding(
                 source_label=f"{item.full_title} · Study Plan",
                 answer_basis=item.source_excerpt,
-                answer_rubric=rubric,
+                answer_rubric=storage_rubric(rubric),
                 canonical_question=question,
             )
             try:
@@ -1684,8 +1693,15 @@ async def create_card_proposals(
                 )
             ).first()
             if card is not None:
-                score = card.last_score if card.last_score is not None else "—"
-                context = f"Existing · score {score} · due {card.next_review_at.isoformat()}"
+                if active_contract == SCORING_CONTRACT_V2:
+                    score = card.last_accuracy if card.last_accuracy is not None else "—"
+                    label = "recall"
+                else:
+                    score = card.last_score if card.last_score is not None else "—"
+                    label = "score"
+                context = (
+                    f"Existing · {label} {score} · due {card.next_review_at.isoformat()}"
+                )
         rows.append(_proposal_response(proposal, context))
 
     suggested = sum(1 for r in rows if r.disposition == DISPOSITION_SUGGESTED)

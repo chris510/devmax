@@ -42,6 +42,23 @@ final class StudyQualitySelectionTests: XCTestCase {
         XCTAssertEqual(state.sprintPool.count, poolCount)
     }
 
+    @MainActor
+    func test_v2_ranks_recall_and_hides_v1_axis_repair() {
+        let state = AppState(api: MockAPI.shared)
+        state.settings.activeScoringContractVersion = 2
+        var compositeLowRecallHigh = card(1, depth: 1, boundaries: 1)
+        compositeLowRecallHigh.recallScore = 5
+        var compositeHighRecallLow = card(2, depth: 4, boundaries: 4)
+        compositeHighRecallLow.recallScore = 1
+        state.library = [compositeLowRecallHigh, compositeHighRecallLow]
+        state.libraryLoad = .ready
+
+        XCTAssertEqual(state.sprintSet.first?.id, compositeHighRecallLow.id)
+        XCTAssertTrue(state.axisRollup.isEmpty)
+        state.enterDepthRepair(.depth)
+        XCTAssertEqual(state.sprintKind, .review)
+    }
+
     private static func id(_ value: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-0000-0000-%012x", value + 1))!
     }

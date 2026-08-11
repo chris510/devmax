@@ -22,6 +22,7 @@ final class DebugFlags: ObservableObject {
     /// Forces a failing mechanism score, which is what makes the coached
     /// re-attempt reachable — the affordance only appears below the band.
     @Published var failedMechanism: Bool
+    @Published var scoringV2: Bool
     @Published var failAdd: Bool
     @Published var emptyQueue: Bool
     @Published var textFirst: Bool
@@ -101,6 +102,7 @@ final class DebugFlags: ObservableObject {
         let route = env["WC_ROUTE"] ?? ""
         failQuestion = flag("WC_FAIL_QUESTION") || route == "question-failure"
         failedMechanism = flag("WC_FAILED_MECHANISM") || route.hasPrefix("reattempt")
+        scoringV2 = flag("WC_SCORING_V2") || route.hasPrefix("coaching")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
         textFirst = flag("WC_TEXT_FIRST")
@@ -261,7 +263,8 @@ actor MockAPI: DevmaxAPI {
     ) -> CardSummary {
         CardSummary(
             id: id, topic: topic, category: category, deliveryMode: "conversational",
-            masterySummary: mastery, lastScore: score,
+            masterySummary: mastery, lastScore: score, recallScore: axes?.0,
+            scoreKind: axes == nil ? "unrated" : "recall", scoringContractVersion: 1,
             lastAccuracy: axes?.0,
             lastDepth: axes?.1,
             lastBoundaries: axes?.2,
@@ -276,7 +279,9 @@ actor MockAPI: DevmaxAPI {
             return CardDetail(
                 id: id, topic: "Raft leader election", category: "Distributed Systems",
                 masterySummary: "can describe terms and voting; fuzzy on log-matching safety",
-                lastScore: 1, easeFactor: 1.96, intervalDays: 1, repetitions: 0,
+                lastScore: 1, recallScore: 1, scoreKind: "recall",
+                scoringContractVersion: 1,
+                easeFactor: 1.96, intervalDays: 1, repetitions: 0,
                 nextReviewAt: "2026-07-25", missedCount: 2, sessions: []
             )
         }
@@ -291,11 +296,13 @@ actor MockAPI: DevmaxAPI {
         return CardDetail(
             id: Self.chID, topic: "Consistent hashing", category: "Core Concept",
             masterySummary: "solid on ring mechanics, shaky on virtual nodes",
-            lastScore: 2, easeFactor: 2.36, intervalDays: 3, repetitions: 3,
+            lastScore: 2, recallScore: 2, scoreKind: "recall", scoringContractVersion: 1,
+            easeFactor: 2.36, intervalDays: 3, repetitions: 3,
             nextReviewAt: "2026-07-27", missedCount: 0,
             sessions: [
                 SessionHistory(
                     id: UUID(), date: Self.date("2026-07-21T06:51:00Z"), score: 2,
+                    recallScore: 2, legacyCompositeScore: 2, scoringContractVersion: 1,
                     feedback: "Explained the ring, stalled on virtual nodes.",
                     turns: [
                         Turn(role: .question, text: "What problem does consistent hashing solve that modulo hashing doesn't?"),
@@ -307,6 +314,7 @@ actor MockAPI: DevmaxAPI {
                 ),
                 SessionHistory(
                     id: UUID(), date: Self.date("2026-07-16T21:32:00Z"), score: 3,
+                    recallScore: nil, legacyCompositeScore: 3, scoringContractVersion: 1,
                     feedback: "Clear on lookups; didn't mention replication.",
                     turns: [
                         Turn(role: .question, text: "How does a client find which node owns a key?"),
@@ -316,6 +324,7 @@ actor MockAPI: DevmaxAPI {
                 ),
                 SessionHistory(
                     id: UUID(), date: Self.date("2026-07-12T07:04:00Z"), score: 4,
+                    recallScore: 4, legacyCompositeScore: 4, scoringContractVersion: 1,
                     feedback: "First pass, mostly solid.",
                     turns: [
                         Turn(role: .question, text: "Describe consistent hashing in two sentences."),
@@ -521,11 +530,20 @@ actor MockAPI: DevmaxAPI {
         var score = sessionIsPractice ? scores[completions % scores.count] : 3
         if await MainActor.run(body: { DebugFlags.shared.failedMechanism }) { score = 1 }
         completions += 1
+        let scoringV2 = await MainActor.run { DebugFlags.shared.scoringV2 }
+        let boundaryCoaching = await MainActor.run {
+            DebugFlags.shared.route.contains("boundary")
+        }
+        let feedback = score <= 2
+            ? "The ring isn't ordered by node identity — each node owns the arc of hash space ending at its own position, so adding one only moves the slice that arc takes over."
+            : (scoringV2
+                ? "The essential ring-ownership account was recalled. The successor-node handoff remained the one bounded omission."
+                : "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.")
         return .complete(
             score: score,
-            feedback: score <= 2
-                ? "The ring isn't ordered by node identity — each node owns the arc of hash space ending at its own position, so adding one only moves the slice that arc takes over."
-                : "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.",
+            recallScore: score,
+            scoringContractVersion: scoringV2 ? 2 : 1,
+            feedback: feedback,
             nextReviewAt: "2026-07-27",
             intervalDays: 3,
             practice: sessionIsPractice,
@@ -535,6 +553,14 @@ actor MockAPI: DevmaxAPI {
             reattemptOffered: score <= 2,
             reattemptPrompt: score <= 2
                 ? "In your words — You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't."
+                : nil,
+            coachingOffered: scoringV2 && score >= 3,
+            coachingFocus: scoringV2 && score >= 3
+                ? (boundaryCoaching ? "boundaries" : "depth") : nil,
+            coachingQuestion: scoringV2 && score >= 3
+                ? (boundaryCoaching
+                    ? "One level deeper — what condition, exception, limitation, or failure case matters here?"
+                    : "One level deeper — what reasoning, causal link, application, or trade-off matters here?")
                 : nil
         )
     }
@@ -547,7 +573,27 @@ actor MockAPI: DevmaxAPI {
         }
     }
 
-    func settings() async throws -> AppSettings { storedSettings }
+    func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome {
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let boundary = await MainActor.run { DebugFlags.shared.route.contains("boundary") }
+        return CoachingOutcome(
+            focus: boundary ? "boundaries" : "depth",
+            question: boundary
+                ? "One level deeper — what condition, exception, limitation, or failure case matters here?"
+                : "One level deeper — what reasoning, causal link, application, or trade-off matters here?",
+            feedback: boundary
+                ? "The boundary is grounded: skewed vnode assignment can still concentrate ownership and transfer load."
+                : "The causal link is explicit, and the transfer consequence follows from it."
+        )
+    }
+
+    func settings() async throws -> AppSettings {
+        var value = storedSettings
+        if await MainActor.run(body: { DebugFlags.shared.scoringV2 }) {
+            value.activeScoringContractVersion = 2
+        }
+        return value
+    }
 
     func updateSettings(_ settings: AppSettings) async throws -> AppSettings {
         storedSettings = settings

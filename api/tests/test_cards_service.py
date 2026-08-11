@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.config import get_settings
 from app.services.cards import (
     COLD,
     DEVELOPING,
@@ -81,6 +82,18 @@ def test_lapsed_but_not_solid_is_not_cold():
         next_review_at=TODAY - timedelta(days=30),
     )
     assert classify_tier(card, TODAY) == DEVELOPING
+
+
+def test_v2_tiering_uses_recall_instead_of_the_legacy_composite(monkeypatch):
+    monkeypatch.setattr(get_settings(), "scoring_contract_version", 2)
+    card = make_card(
+        repetitions=4,
+        last_score=5,
+        last_accuracy=2,
+        ease_factor=2.6,
+        next_review_at=TODAY,
+    )
+    assert classify_tier(card, TODAY) == SHAKY
 
 
 # --- days since review ------------------------------------------------------
