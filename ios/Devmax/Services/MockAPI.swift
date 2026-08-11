@@ -87,7 +87,9 @@ final class DebugFlags: ObservableObject {
         // speech is silent, and swaps the model's own answer in for the user's.
         // Their defaults also fail in opposite directions: mocks off with no
         // `WC_BASE_URL` is an app pointing at nothing.
-        useMockAPI = Self.isDebug && flag("WC_MOCK", default: true)
+        let configuredMockDefault =
+            (Bundle.main.object(forInfoDictionaryKey: "WCDefaultMock") as? String) != "0"
+        useMockAPI = Self.isDebug && flag("WC_MOCK", default: configuredMockDefault)
         simulateSpeech = Self.isDebug && flag("WC_SIM_SPEECH", default: Self.isSimulator)
 
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto

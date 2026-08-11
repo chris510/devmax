@@ -8,7 +8,8 @@ __pycache__/
 ios/build/
 ios/Devmax.xcodeproj/
 DerivedData/
-# Holds WC_API_KEY, which must match the server's API_KEY.
-# See ios/Config/Secrets.example.xcconfig.
+# Local build settings. FounderMigrationSecrets.xcconfig holds a short-lived,
+# single-purpose claim token and must be deleted after the controlled migration.
 ios/Config/Secrets.xcconfig
+ios/Config/FounderMigrationSecrets.xcconfig
 *.p8

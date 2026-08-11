@@ -26,14 +26,22 @@ final class PublicOnboardingState: ObservableObject {
     @Published var imports: [MaterialImport] = []
 
     let api: DevmaxAPI
+    let founderClaimAvailable: Bool
     private var pollTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var pendingAfterSignIn: PendingAfterSignIn = .guide
 
-    init(api: DevmaxAPI = APIConfig.client) {
+    init(
+        api: DevmaxAPI = APIConfig.client,
+        route: String = DebugFlags.shared.route,
+        founderClaimAvailable: Bool = APIConfig.hasFounderClaimToken
+    ) {
         self.api = api
+        self.founderClaimAvailable = founderClaimAvailable
         draft = PublicSetupStore.read() ?? PublicSetupDraft()
-        step = Self.debugStep(DebugFlags.shared.route) ?? .welcome
+        step = Self.initialStep(
+            route: route, founderClaimAvailable: founderClaimAvailable
+        )
     }
 
     deinit {
@@ -318,7 +326,14 @@ final class PublicOnboardingState: ObservableObject {
         step = .review
     }
 
-    static func handlesDebugRoute(_ route: String) -> Bool { debugStep(route) != nil }
+    static func handlesDebugRoute(_ route: String) -> Bool {
+        debugStep(route) != nil
+    }
+
+    static func initialStep(route: String, founderClaimAvailable: Bool) -> Step {
+        debugStep(route)
+            ?? (founderClaimAvailable ? .returning : .welcome)
+    }
 
     private static func debugStep(_ route: String) -> Step? {
         switch route {
@@ -344,6 +359,9 @@ final class PublicOnboardingState: ObservableObject {
         case "reminders-denied": .remindersDenied
         case "empty": .empty
         case "learn-branch": .learnBranch
+        // The debug route remains renderable in a keyless build so visual QA can
+        // confirm the disabled state. Automatic production routing still requires
+        // the claim token in `initialStep` above.
         case "returning": .returning
         case "guide-update": .importReady
         default: nil

@@ -199,7 +199,15 @@ The existing owner completes a one-time secure claim and returns directly to
 Today. The upgrade must not replay onboarding or alter any card, session, score,
 mastery summary, plan, notification window, or SM-2 field.
 
-The public app must not expose a general endpoint for claiming legacy data.
+`POST /auth/founder/apple-claim` is the sole migration path. It binds a fresh,
+fully verified Apple proof to the fixed founder row only and requires a temporary
+`X-Founder-Claim-Token` that is distinct from both deployed shared secrets. The
+legacy API key alone cannot call it, and an unset claim token disables it. A
+fresh proof for the already-bound same Apple subject may reissue bearer tokens
+after a lost response; a reused nonce, different subject, or subject owned by
+another user fails closed. Remove the temporary deployment token after the
+returned credentials are verified in Keychain. The public app must not expose a
+general endpoint for claiming legacy data.
 
 ## Today with no material
 
@@ -282,10 +290,16 @@ Accuracy / Depth / Boundaries.
   tokens rotate on every use and a replay revokes the affected login family.
 - Access tokens are sent as `Authorization: Bearer <token>`. Refresh tokens are
   used only at `/auth/refresh` and stored in the iOS Keychain.
-- `/auth/apple` and `/auth/refresh` are the only unauthenticated client routes.
-  Cron routes continue to require `X-Cron-Secret`; health remains public.
+- `/auth/apple` and `/auth/refresh` are the only generally unauthenticated client
+  routes. The founder claim route authenticates with its dedicated temporary
+  header; cron routes continue to require `X-Cron-Secret`, and health remains
+  public. While the founder claim token is configured, `/auth/apple` may resume
+  an already-linked identity but cannot create a new account. Removing that token
+  after verification opens signup without coupling it to the founder's lifetime.
 - The legacy `X-API-Key` maps to the founder user only during migration. It can
-  neither choose a user nor claim legacy data.
+  neither choose a user nor claim legacy data, and is accepted only while the
+  temporary, fail-closed-by-default `LEGACY_API_KEY_AUTH_ENABLED` switch is
+  explicitly on.
 - Authentication failures reveal no account-existence detail.
 
 ### Ownership contract

@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PLACEHOLDER_SECRETS = frozenset(
     {"dev-api-key", "dev-cron-secret", "change-me", "change-me-too", ""}
 )
+MIN_FOUNDER_CLAIM_TOKEN_CHARS = 43
 
 
 class Settings(BaseSettings):
@@ -22,6 +23,16 @@ class Settings(BaseSettings):
     database_url: str
     api_key: str
     cron_secret: str
+
+    # Temporary credential for the one-time founder Apple-identity claim. It is
+    # deliberately separate from API_KEY, which already ships in the installed
+    # compatibility build. Empty disables the claim route; remove it from the
+    # deployment after the returned bearer credentials are verified on-device.
+    founder_claim_token: str = ""
+    # Transitional escape hatch for the already-installed private build. Turn
+    # on explicitly only for that rollout window, then turn it off immediately
+    # after the founder's bearer-token build is verified.
+    legacy_api_key_auth_enabled: bool = False
 
     anthropic_api_key: str = ""
     # Per-function model config so either can be swapped during calibration.
@@ -127,6 +138,24 @@ class Settings(BaseSettings):
         # means the cron secret ships inside the iOS binary along with the API key.
         if self.api_key == self.cron_secret:
             raise ValueError("API_KEY and CRON_SECRET must be different values.")
+        if self.founder_claim_token:
+            if (
+                self.founder_claim_token in PLACEHOLDER_SECRETS
+                or not self.founder_claim_token.strip()
+            ):
+                raise ValueError(
+                    "FOUNDER_CLAIM_TOKEN is still a placeholder. Generate one with "
+                    "`openssl rand -hex 32`."
+                )
+            if len(self.founder_claim_token) < MIN_FOUNDER_CLAIM_TOKEN_CHARS:
+                raise ValueError(
+                    "FOUNDER_CLAIM_TOKEN must contain at least 43 characters "
+                    "(for example, 32 random bytes encoded as 64 hex characters)."
+                )
+            if self.founder_claim_token in (self.api_key, self.cron_secret):
+                raise ValueError(
+                    "FOUNDER_CLAIM_TOKEN must differ from API_KEY and CRON_SECRET."
+                )
         return self
 
 

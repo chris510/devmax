@@ -55,6 +55,29 @@ async def apple_sign_in(body: AppleSignInIn, db: AsyncSession = Depends(get_sess
     return _out(pair)
 
 
+@router.post("/founder/apple-claim", response_model=TokenOut)
+async def founder_apple_claim(
+    body: AppleSignInIn, db: AsyncSession = Depends(get_session)
+) -> TokenOut:
+    """One-time founder migration; middleware requires its dedicated secret."""
+    try:
+        _, pair = await authentication.claim_founder_with_apple(
+            db,
+            identity_token=body.identity_token,
+            authorization_code=body.authorization_code,
+            nonce=body.nonce,
+            display_name=body.display_name,
+            config=get_settings(),
+        )
+    except authentication.AuthenticationUnavailable as exc:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail="sign_in_unavailable") from exc
+    except authentication.AuthenticationError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=401, detail="unauthorized") from exc
+    return _out(pair)
+
+
 @router.post("/refresh", response_model=TokenOut)
 async def refresh(body: RefreshTokenIn, db: AsyncSession = Depends(get_session)) -> TokenOut:
     try:

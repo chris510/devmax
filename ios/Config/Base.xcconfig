@@ -4,9 +4,12 @@
 // xcconfig file, so `https://host` would truncate at the scheme. The empty
 // expansion breaks the token without changing the result.
 
-// Empty default so $(WC_API_KEY) always resolves even without Secrets.xcconfig.
-// A build with no key gets a clean 401 rather than a mystery.
+// Empty defaults so Info.plist substitution always resolves without
+// Secrets.xcconfig. WC_API_KEY is retained only for local compatibility; the
+// founder migration uses the narrower one-time claim token below.
 WC_API_KEY =
+WC_FOUNDER_CLAIM_TOKEN =
+WC_DEFAULT_MOCK = 1
 
 // Overridden per configuration.
 WC_BASE_URL =

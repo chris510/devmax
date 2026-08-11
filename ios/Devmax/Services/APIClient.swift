@@ -764,8 +764,9 @@ struct LiveAPI: DevmaxAPI {
 /// Where the app points.
 ///
 /// The endpoint comes from the per-configuration xcconfigs in `ios/Config` via
-/// Info.plist substitution. WC_API_KEY remains only for the founder migration;
-/// public accounts use opaque bearer credentials from `AuthTokenStore`.
+/// Info.plist substitution. Public API calls use opaque bearer credentials from
+/// `AuthTokenStore`. The separate founder claim token is only an availability
+/// signal here; it must never be attached by `LiveAPI` as general authentication.
 ///
 /// There is deliberately no fallback API key. A default here can only mask a
 /// misconfigured build, and the value it used to fall back to is published in this
@@ -797,4 +798,6 @@ enum APIConfig {
     }
 
     static var hasLegacyKey: Bool { info("WCAPIKey") != nil }
+    static var founderClaimToken: String? { info("WCFounderClaimToken") }
+    static var hasFounderClaimToken: Bool { founderClaimToken != nil }
 }

@@ -17,11 +17,13 @@ import httpx
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
 from jwt import PyJWKClient
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import Settings as AppConfig
 from app.models import (
+    FOUNDER_USER_ID,
     USER_ACTIVE,
     AppleIdentity,
     AuthNonce,
@@ -55,6 +57,12 @@ class AuthenticationUnavailable(Exception):
 class AppleClaims:
     subject: str
     email: str | None
+
+
+@dataclass(frozen=True)
+class AppleCodeExchange:
+    subject: str
+    refresh_token: str | None
 
 
 @dataclass(frozen=True)
@@ -164,7 +172,9 @@ def _apple_client_secret(config: AppConfig) -> str:
     )
 
 
-async def exchange_apple_code(code: str, config: AppConfig) -> str | None:
+async def exchange_apple_code(
+    code: str, nonce: str, config: AppConfig
+) -> AppleCodeExchange:
     if not _configured(config):
         raise AuthenticationUnavailable
     try:
@@ -187,8 +197,17 @@ async def exchange_apple_code(code: str, config: AppConfig) -> str | None:
         payload = response.json()
     except ValueError as exc:
         raise AuthenticationUnavailable from exc
+    if not isinstance(payload, dict):
+        raise AuthenticationUnavailable
+    identity_token = payload.get("id_token")
+    if not isinstance(identity_token, str) or not identity_token:
+        raise AuthenticationError
+    claims = await verify_apple_identity_token(identity_token, nonce, config)
     refresh = payload.get("refresh_token")
-    return refresh if isinstance(refresh, str) and refresh else None
+    return AppleCodeExchange(
+        subject=claims.subject,
+        refresh_token=refresh if isinstance(refresh, str) and refresh else None,
+    )
 
 
 async def revoke_apple_authorization(refresh_token: str, config: AppConfig) -> None:
@@ -272,35 +291,134 @@ async def sign_in_with_apple(
 ) -> tuple[User, TokenPair]:
     claims = await verify_apple_identity_token(identity_token, nonce, config)
     await _consume_nonce(db, nonce)
-    apple_refresh = await exchange_apple_code(authorization_code, config)
+    exchange = await exchange_apple_code(authorization_code, nonce, config)
+    if not secrets.compare_digest(exchange.subject, claims.subject):
+        raise AuthenticationError
 
-    identity = (
-        await db.exec(select(AppleIdentity).where(AppleIdentity.subject == claims.subject))
-    ).first()
-    if identity is None:
-        user = User()
-        db.add(user)
-        await db.flush()
-        identity = AppleIdentity(user_id=user.id, subject=claims.subject)
+    try:
+        identity = (
+            await db.exec(select(AppleIdentity).where(AppleIdentity.subject == claims.subject))
+        ).first()
+        if identity is None:
+            # While the one-time founder claim is open, this public route may
+            # resume an existing identity but cannot create any account. Removing
+            # the temporary token opens signup without coupling it forever to the
+            # founder account's lifecycle.
+            if config.founder_claim_token or exchange.refresh_token is None:
+                raise AuthenticationError
+            user = User()
+            db.add(user)
+            await db.flush()
+            identity = AppleIdentity(user_id=user.id, subject=claims.subject)
+            db.add(identity)
+            db.add(Settings(user_id=user.id))
+        else:
+            user = await db.get(User, identity.user_id)
+            if user is None or user.status != USER_ACTIVE:
+                raise AuthenticationError
+
+        if claims.email:
+            identity.email = claims.email
+        if display_name and display_name.strip():
+            identity.display_name = display_name.strip()[:200]
+        if exchange.refresh_token:
+            identity.apple_refresh_token = _encrypt_apple_token(exchange.refresh_token, config)
+        identity.updated_at = _now()
         db.add(identity)
-        db.add(Settings(user_id=user.id))
-    else:
-        user = await db.get(User, identity.user_id)
-        if user is None or user.status != USER_ACTIVE:
-            raise AuthenticationError
 
+        pair = await issue_session(db, user.id, config)
+        await db.commit()
+        return user, pair
+    except IntegrityError as exc:
+        # The founder claim and public sign-up can observe each other's state
+        # between reads. Unique identity indexes remain authoritative; the loser
+        # gets a controlled, detail-free authentication failure instead of 500.
+        await db.rollback()
+        raise AuthenticationError from exc
+
+
+async def claim_founder_with_apple(
+    db: AsyncSession,
+    *,
+    identity_token: str,
+    authorization_code: str,
+    nonce: str,
+    display_name: str | None,
+    config: AppConfig,
+) -> tuple[User, TokenPair]:
+    """Bind verified Apple identity to the fixed founder without moving data.
+
+    The temporary claim secret is authenticated by middleware. This transaction
+    supplies the permanent latch: the founder row is locked, the Apple subject
+    must be unowned (or already owned by this founder), and both ownership
+    dimensions are also protected by unique database indexes. A fresh Apple
+    proof for the same subject is intentionally idempotent so a lost HTTP
+    response cannot strand the migration; replaying the same nonce still fails.
+    """
+
+    claims = await verify_apple_identity_token(identity_token, nonce, config)
+    await _consume_nonce(db, nonce)
+
+    founder = (
+        await db.exec(
+            select(User).where(User.id == FOUNDER_USER_ID).with_for_update()
+        )
+    ).first()
+    if founder is None or founder.status != USER_ACTIVE or not founder.is_founder:
+        raise AuthenticationError
+
+    founder_identity = (
+        await db.exec(
+            select(AppleIdentity)
+            .where(AppleIdentity.user_id == FOUNDER_USER_ID)
+            .with_for_update()
+        )
+    ).first()
+    subject_identity = (
+        await db.exec(
+            select(AppleIdentity)
+            .where(AppleIdentity.subject == claims.subject)
+            .with_for_update()
+        )
+    ).first()
+
+    if founder_identity is not None:
+        if founder_identity.subject != claims.subject:
+            raise AuthenticationError
+        if subject_identity is None or subject_identity.id != founder_identity.id:
+            raise AuthenticationError
+        identity = founder_identity
+    else:
+        if subject_identity is not None:
+            raise AuthenticationError
+        identity = AppleIdentity(user_id=FOUNDER_USER_ID, subject=claims.subject)
+
+    # Validate the single-use authorization code before either creating the
+    # permanent identity or minting Devmax credentials.
+    exchange = await exchange_apple_code(authorization_code, nonce, config)
+    if not secrets.compare_digest(exchange.subject, claims.subject):
+        raise AuthenticationError
+    if founder_identity is None and exchange.refresh_token is None:
+        raise AuthenticationError
     if claims.email:
         identity.email = claims.email
     if display_name and display_name.strip():
         identity.display_name = display_name.strip()[:200]
-    if apple_refresh:
-        identity.apple_refresh_token = _encrypt_apple_token(apple_refresh, config)
+    if exchange.refresh_token:
+        identity.apple_refresh_token = _encrypt_apple_token(exchange.refresh_token, config)
     identity.updated_at = _now()
     db.add(identity)
 
-    pair = await issue_session(db, user.id, config)
-    await db.commit()
-    return user, pair
+    try:
+        pair = await issue_session(db, FOUNDER_USER_ID, config)
+        await db.commit()
+    except IntegrityError as exc:
+        # The unique subject/user indexes are the final concurrency arbiter for
+        # engines where SELECT FOR UPDATE is unavailable or another identity is
+        # inserted between the checks and flush.
+        await db.rollback()
+        raise AuthenticationError from exc
+    return founder, pair
 
 
 async def user_for_access_token(db: AsyncSession, token: str) -> uuid.UUID | None:
