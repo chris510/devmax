@@ -82,6 +82,7 @@ async def db() -> AsyncIterator[AsyncSession]:
                     "study_plan_card_proposal_acceptances, "
                     "study_plan_card_links, study_plan_duplications, "
                     "material_topic_proposals, material_sources, llm_usage, "
+                    "ai_consent_events, "
                     "auth_nonces, auth_sessions, apple_identities, users "
                     "RESTART IDENTITY CASCADE"
                 )

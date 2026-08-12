@@ -305,6 +305,29 @@ class CurrentUserOut(BaseModel):
     is_founder: bool
     display_name: str = ""
     email: str = ""
+    apple_user_identifier: str = ""
+    ai_consent_status: str
+    ai_consent_version: str
+    ai_consent_updated_at: datetime | None
+    ai_processing_allowed: bool
+    ai_consent_prompt_required: bool
+
+
+class AIConsentIn(BaseModel):
+    action: Literal["grant", "decline", "withdraw"]
+
+
+class AIConsentOut(BaseModel):
+    provider: Literal["Anthropic"] = "Anthropic"
+    policy_version: str
+    status: Literal["granted", "declined", "withdrawn"]
+    updated_at: datetime
+    processing_allowed: bool
+    prompt_required: bool
+
+
+class AppleServerNotificationIn(BaseModel):
+    payload: str = Field(min_length=1, max_length=16_384)
 
 
 class NotificationWindow(BaseModel):
@@ -979,3 +1002,4 @@ class AccountExport(BaseModel):
     cards: list[dict[str, object]]
     sessions: list[dict[str, object]]
     study_plans: list[dict[str, object]]
+    ai_consent_events: list[dict[str, object]]

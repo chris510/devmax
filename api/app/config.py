@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     llm_calls_per_day: int = Field(default=200, ge=10, le=10_000)
     guide_imports_per_day: int = Field(default=3, ge=1, le=100)
 
+    # Deploy the consent schema and client before turning this on. The app still
+    # presents the current disclosure while false; this switch only prevents an
+    # older installed client from being stranded during the staged rollout.
+    ai_consent_enforcement_enabled: bool = False
+
     # The production API is a single always-on Railway replica. Keeping the dumb
     # trigger-review poll in that process removes an unreliable external schedule;
     # the endpoint still owns every notification-time decision. Disabled by

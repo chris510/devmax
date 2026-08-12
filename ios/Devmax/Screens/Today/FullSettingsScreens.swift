@@ -96,20 +96,72 @@ struct FullSettingsScreen: View {
 struct DataPrivacyScreen: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var flow: PublicOnboardingState
+    @EnvironmentObject private var auth: AuthState
     @State private var exporting = false
     @State private var exportURL: URL?
     @State private var error = ""
+    @State private var savingConsent = false
+    @State private var confirmWithdrawal = false
 
     var body: some View {
         PublicSettingsPage(title: "Data & privacy", back: { state.path.removeLast() }) {
             Text("How AI processing works")
                 .font(WCFont.serif(22)).foregroundStyle(Theme.textStrong)
-            privacyNote("Guide processing", "Devmax sends guide text needed to propose topics and plan structure to its AI provider. The source remains attached to your account until you delete it or the account.")
-            privacyNote("Answer scoring", "Devmax sends your transcript and relevant study material for scoring. It receives a transcript, not an audio recording; iOS handles speech recognition.")
-            privacyNote("AI-provider retention", "Anthropic states that standard API inputs and outputs are deleted from its systems within 30 days and are not used for model training by default. Exceptions can apply for abuse prevention, legal obligations, explicit opt-in, or a different agreement.")
-            privacyNote("Your control", "You can export account data, remove individual study material, or delete the entire account. Deletion is separate from signing out.")
+            privacyNote(
+                "Provider",
+                "Unprompted uses Anthropic for guide processing, question generation, "
+                    + "answer scoring, and optional coaching."
+            )
+            privacyNote(
+                "Guide processing",
+                "Unprompted sends guide text, its title, and the plan length, weekly "
+                    + "capacity, mode, deadline, and subject hints you chose to Anthropic "
+                    + "to propose topics and plan structure. The source remains attached "
+                    + "to your account until you remove it or delete the account."
+            )
+            privacyNote(
+                "Answer scoring",
+                "Unprompted sends the topic, question, your transcript, any follow-up, "
+                    + "the card's mastery summary, trusted answer basis, source excerpt, "
+                    + "and rubric to Anthropic for scoring and optional coaching. It "
+                    + "receives text, not an audio recording; iOS handles speech recognition."
+            )
+            privacyNote(
+                "AI-provider retention",
+                "Anthropic states that standard API inputs and outputs are deleted from "
+                    + "its systems within 30 days and are not used for model training by "
+                    + "default. Exceptions can apply for abuse prevention, legal obligations, "
+                    + "explicit opt-in, or a different agreement."
+            )
+            privacyNote(
+                "Your control",
+                "You can export account data, remove individual study material, or delete "
+                    + "the entire account. Deletion is separate from signing out."
+            )
 
-            Link("Read Anthropic's API data policy", destination: URL(string: "https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data")!)
+            privacyNote(
+                "AI processing choice",
+                auth.profile?.aiProcessingAllowed == true
+                    ? "Allowed · recorded for the current Anthropic disclosure."
+                    : "Not allowed · AI features are unavailable, while saved lessons, "
+                        + "plans, history, and settings remain usable."
+            )
+            if auth.profile?.aiProcessingAllowed == true {
+                SecondaryButton(title: "Withdraw AI processing permission") {
+                    confirmWithdrawal = true
+                }
+                .disabled(savingConsent)
+            } else {
+                PrimaryButton(title: savingConsent ? "Saving…" : "Allow AI processing") {
+                    updateConsent("grant")
+                }
+                .disabled(savingConsent)
+            }
+
+            Link("Read Unprompted's privacy policy", destination: PrivacyLinks.policy)
+                .font(WCFont.sans(14)).foregroundStyle(Theme.meta)
+                .frame(minHeight: Metrics.minTapTarget)
+            Link("Read Anthropic's API data policy", destination: PrivacyLinks.anthropicRetention)
                 .font(WCFont.sans(14)).foregroundStyle(Theme.meta)
                 .frame(minHeight: Metrics.minTapTarget)
 
@@ -132,6 +184,15 @@ struct DataPrivacyScreen: View {
                 .buttonStyle(.plain).font(WCFont.sans(14.5)).foregroundStyle(Theme.scoreLow)
                 .frame(minHeight: Metrics.minTapTarget)
         }
+        .alert("Withdraw AI processing permission?", isPresented: $confirmWithdrawal) {
+            Button("Cancel", role: .cancel) {}
+            Button("Withdraw", role: .destructive) { updateConsent("withdraw") }
+        } message: {
+            Text(
+                "Future guide processing, scoring, question generation, and AI coaching "
+                    + "will stop. Your saved data and review schedule will not be deleted."
+            )
+        }
     }
 
     private func privacyNote(_ title: String, _ body: String) -> some View {
@@ -150,6 +211,16 @@ struct DataPrivacyScreen: View {
             try data.write(to: url, options: .atomic)
             exportURL = url
         } catch { self.error = "The export couldn't be prepared. Try again." }
+    }
+
+    private func updateConsent(_ action: String) {
+        guard !savingConsent else { return }
+        savingConsent = true
+        Task {
+            let saved = await auth.updateAIConsent(action)
+            if !saved { error = auth.errorMessage ?? "That privacy choice couldn't be saved." }
+            savingConsent = false
+        }
     }
 }
 

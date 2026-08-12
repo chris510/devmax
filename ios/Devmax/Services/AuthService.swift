@@ -299,6 +299,7 @@ final class AuthState: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var profile: AccountProfile?
     @Published private(set) var isPreparingAppleAuthorization = false
+    @Published private(set) var consentInterventionRequested = false
 
     private let client: AuthClient
     private let api: DevmaxAPI
@@ -311,6 +312,9 @@ final class AuthState: ObservableObject {
     }
 
     var isAuthenticated: Bool { status == .authenticated }
+    var needsAIConsentPresentation: Bool {
+        profile?.aiConsentPromptRequired == true || consentInterventionRequested
+    }
     var isWorking: Bool {
         status == .checking || status == .signingIn || isPreparingAppleAuthorization
     }
@@ -472,6 +476,51 @@ final class AuthState: ObservableObject {
         await loadAuthenticatedProfile()
     }
 
+    func markAIConsentRequired() {
+        consentInterventionRequested = true
+    }
+
+    func updateAIConsent(_ action: String) async -> Bool {
+        errorMessage = nil
+        do {
+            _ = try await api.updateAIConsent(action: action)
+            await loadAuthenticatedProfile()
+            consentInterventionRequested = false
+            return true
+        } catch {
+            errorMessage = "That privacy choice couldn't be saved. Nothing was sent."
+            return false
+        }
+    }
+
+    func checkAppleCredentialState() async {
+        guard isAuthenticated,
+              !DebugFlags.shared.useMockAPI,
+              let identifier = profile?.appleUserIdentifier,
+              !identifier.isEmpty
+        else { return }
+
+        let credentialState = await withCheckedContinuation { continuation in
+            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: identifier) { state, _ in
+                continuation.resume(returning: state)
+            }
+        }
+        if Self.appleCredentialRequiresSignOut(credentialState) {
+            await clearLocalAccountState()
+            errorMessage = "Apple authorization changed. Sign in again to continue."
+        }
+    }
+
+    static func appleCredentialRequiresSignOut(
+        _ state: ASAuthorizationAppleIDProvider.CredentialState
+    ) -> Bool {
+        switch state {
+        case .revoked, .notFound: true
+        case .authorized, .transferred: false
+        @unknown default: false
+        }
+    }
+
     func deleteAccount() async throws {
         try await api.deleteAccount()
         await clearLocalAccountState()
@@ -489,6 +538,7 @@ final class AuthState: ObservableObject {
         GuideDraftStore.clear()
         PublicSetupStore.clear()
         profile = nil
+        consentInterventionRequested = false
         status = .signedOut
     }
 

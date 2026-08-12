@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import UIKit
 
@@ -23,6 +24,7 @@ struct DevmaxApp: App {
                 .task {
                     delegate.state = state
                     await auth.bootstrap()
+                    await auth.checkAppleCredentialState()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Backgrounding mid-answer must not lose the transcript, and the
@@ -32,7 +34,19 @@ struct DevmaxApp: App {
                         state.flushDraft()
                         publicFlow.persist()
                         plan.flushPracticeDebriefDraft()
+                    } else {
+                        Task { await auth.checkAppleCredentialState() }
                     }
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: ASAuthorizationAppleIDProvider.credentialRevokedNotification
+                    )
+                ) { _ in
+                    Task { await auth.checkAppleCredentialState() }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .aiConsentRequired)) { _ in
+                    auth.markAIConsentRequired()
                 }
         }
     }
@@ -53,8 +67,14 @@ struct AppEntryView: View {
                 NavigationStack { DataPrivacyScreen() }
             } else if flags.route == "delete-account" {
                 NavigationStack { DeleteAccountScreen() }
+            } else if flags.route == "ai-consent" {
+                AIConsentScreen()
             } else if PublicOnboardingState.handlesDebugRoute(flags.route) {
                 PublicOnboardingView()
+            } else if auth.isAuthenticated, auth.profile != nil,
+                      auth.needsAIConsentPresentation
+            {
+                AIConsentScreen()
             } else if auth.isAuthenticated, auth.profile?.onboardingCompleted == true {
                 RootView()
                     .task {

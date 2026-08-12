@@ -1,11 +1,55 @@
 import Foundation
 
+enum PrivacyLinks {
+    static let policy = URL(
+        string: "https://devmax-recall.christrinh5.chatgpt.site/privacy"
+    )!
+    static let anthropicRetention = URL(
+        string: "https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data"
+    )!
+}
+
 struct AccountProfile: Codable, Equatable {
     let id: UUID
     let onboardingCompleted: Bool
     let isFounder: Bool
     let displayName: String
     let email: String
+    let appleUserIdentifier: String
+    let aiConsentStatus: String
+    let aiConsentVersion: String
+    let aiConsentUpdatedAt: Date?
+    let aiProcessingAllowed: Bool
+    let aiConsentPromptRequired: Bool
+
+    init(
+        id: UUID, onboardingCompleted: Bool, isFounder: Bool,
+        displayName: String, email: String, appleUserIdentifier: String = "",
+        aiConsentStatus: String = "pending", aiConsentVersion: String = "",
+        aiConsentUpdatedAt: Date? = nil, aiProcessingAllowed: Bool = false,
+        aiConsentPromptRequired: Bool = true
+    ) {
+        self.id = id
+        self.onboardingCompleted = onboardingCompleted
+        self.isFounder = isFounder
+        self.displayName = displayName
+        self.email = email
+        self.appleUserIdentifier = appleUserIdentifier
+        self.aiConsentStatus = aiConsentStatus
+        self.aiConsentVersion = aiConsentVersion
+        self.aiConsentUpdatedAt = aiConsentUpdatedAt
+        self.aiProcessingAllowed = aiProcessingAllowed
+        self.aiConsentPromptRequired = aiConsentPromptRequired
+    }
+}
+
+struct AIConsentReceipt: Codable, Equatable {
+    let provider: String
+    let policyVersion: String
+    let status: String
+    let updatedAt: Date
+    let processingAllowed: Bool
+    let promptRequired: Bool
 }
 
 struct MaterialTopic: Codable, Identifiable, Equatable {

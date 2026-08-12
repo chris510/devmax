@@ -18,13 +18,19 @@ extension MockAPI {
         let isPublicRoute = await MainActor.run {
             PublicOnboardingState.handlesDebugRoute(route)
         }
+        let consentPending = route == "ai-consent"
         return AccountProfile(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             // Private screenshot routes still need the authenticated app shell.
             // Only routes owned by PublicOnboardingState should force setup.
             onboardingCompleted: !isPublicRoute && !route.hasPrefix("public-"),
             isFounder: route == "returning",
-            displayName: "Casey", email: "casey@privaterelay.appleid.com"
+            displayName: "Casey", email: "casey@privaterelay.appleid.com",
+            appleUserIdentifier: "fixture-apple-user",
+            aiConsentStatus: consentPending ? "pending" : "granted",
+            aiConsentVersion: consentPending ? "" : "anthropic-2026-08-12-v1",
+            aiProcessingAllowed: !consentPending,
+            aiConsentPromptRequired: consentPending
         )
     }
 
@@ -32,7 +38,24 @@ extension MockAPI {
         AccountProfile(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             onboardingCompleted: true, isFounder: false, displayName: "Casey",
-            email: "casey@privaterelay.appleid.com"
+            email: "casey@privaterelay.appleid.com", appleUserIdentifier: "fixture-apple-user",
+            aiConsentStatus: "granted", aiConsentVersion: "anthropic-2026-08-12-v1",
+            aiProcessingAllowed: true, aiConsentPromptRequired: false
+        )
+    }
+
+    func updateAIConsent(action: String) async throws -> AIConsentReceipt {
+        let status = if action == "grant" {
+            "granted"
+        } else if action == "decline" {
+            "declined"
+        } else {
+            "withdrawn"
+        }
+        return AIConsentReceipt(
+            provider: "Anthropic", policyVersion: "anthropic-2026-08-12-v1",
+            status: status,
+            updatedAt: Date(), processingAllowed: action == "grant", promptRequired: false
         )
     }
 

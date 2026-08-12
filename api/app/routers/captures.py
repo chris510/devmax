@@ -6,6 +6,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import current_user_id
+from app.config import get_settings
 from app.db import get_session
 from app.models import CAPTURE_ACTIVATED, Card, PendingCapture
 from app.routers.cards import card_summary
@@ -18,7 +19,7 @@ from app.schemas import (
     CaptureUpdate,
     CardSummary,
 )
-from app.services import llm
+from app.services import llm, usage
 from app.services.card_lifecycle import (
     GroundingError,
     build_grounded_card,
@@ -162,6 +163,7 @@ async def prepare_question(
             detail={"code": "missing_grounding", "missing": exc.missing},
         ) from exc
 
+    await usage.ensure_available(db, current_user_id(), "question", get_settings())
     capture.canonical_question = await llm.generate_question(
         topic=capture.topic,
         category="Unsorted",
@@ -173,6 +175,7 @@ async def prepare_question(
         answer_basis=value.answer_basis,
         answer_rubric=value.answer_rubric,
     )
+    usage.record(db, current_user_id(), "question")
     capture.updated_at = datetime.now(UTC)
     refresh_capture_status(capture)
     db.add(capture)

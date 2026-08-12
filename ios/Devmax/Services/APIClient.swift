@@ -9,6 +9,15 @@ enum APIError: Error {
     case status(Int)
 }
 
+extension Notification.Name {
+    static let aiConsentRequired = Notification.Name("devmax.ai-consent-required")
+}
+
+private struct APIErrorEnvelope: Decodable {
+    struct Detail: Decodable { let code: String? }
+    let detail: Detail?
+}
+
 extension Error {
     /// The mono note under a failure that had nothing to retry — which half broke.
     ///
@@ -108,6 +117,7 @@ protocol DevmaxAPI {
     // MARK: Public account and study material
     func accountProfile() async throws -> AccountProfile
     func completeOnboarding() async throws -> AccountProfile
+    func updateAIConsent(action: String) async throws -> AIConsentReceipt
     func materialImports() async throws -> [MaterialImport]
     func materialImport(_ id: UUID) async throws -> MaterialImport
     func startMaterialImport(_ request: MaterialImportRequest) async throws -> MaterialImport
@@ -184,6 +194,9 @@ extension DevmaxAPI {
     }
     func accountProfile() async throws -> AccountProfile { throw APIError.status(501) }
     func completeOnboarding() async throws -> AccountProfile { throw APIError.status(501) }
+    func updateAIConsent(action: String) async throws -> AIConsentReceipt {
+        throw APIError.status(501)
+    }
     func materialImports() async throws -> [MaterialImport] { throw APIError.status(501) }
     func materialImport(_ id: UUID) async throws -> MaterialImport { throw APIError.status(501) }
     func startMaterialImport(_ request: MaterialImportRequest) async throws -> MaterialImport {
@@ -283,6 +296,14 @@ struct LiveAPI: DevmaxAPI {
         return e
     }()
 
+    private func announceAIConsentIfNeeded(_ data: Data) async {
+        let envelope = try? Self.decoder.decode(APIErrorEnvelope.self, from: data)
+        guard envelope?.detail?.code == "ai_consent_required" else { return }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .aiConsentRequired, object: nil)
+        }
+    }
+
     private func request(
         _ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil,
         mayRefresh: Bool = true
@@ -329,6 +350,9 @@ struct LiveAPI: DevmaxAPI {
                 throw APIError.unauthorized
             }
         case 401: throw APIError.unauthorized
+        case 403:
+            await announceAIConsentIfNeeded(data)
+            throw APIError.status(code)
         case 503: throw APIError.scoringUnavailable
         default: throw APIError.status(code)
         }
@@ -467,6 +491,12 @@ struct LiveAPI: DevmaxAPI {
 
     func accountProfile() async throws -> AccountProfile {
         try await get("auth/me", AccountProfile.self)
+    }
+
+    func updateAIConsent(action: String) async throws -> AIConsentReceipt {
+        let body = try Self.encoder.encode(["action": action])
+        let data = try await request("PUT", "auth/ai-consent", body: body)
+        return try Self.decoder.decode(AIConsentReceipt.self, from: data)
     }
 
     func completeOnboarding() async throws -> AccountProfile {

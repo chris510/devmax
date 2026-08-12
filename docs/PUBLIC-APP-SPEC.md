@@ -241,6 +241,13 @@ before confirmation.
 
 ## Privacy copy that is part of the design
 
+Before either paid path is available, the app names Anthropic, describes the
+guide/title/plan settings or question/transcript/answer authority/context sent,
+states the purpose, and records a versioned Allow or Decline decision on the
+server. A current grant is required at the provider-call boundary. Withdrawal
+from Settings blocks future Anthropic work without deleting study state; a
+material disclosure change requires consent again.
+
 Before the first guide is processed:
 
 > Devmax sends the guide text needed to propose your review topics to its AI

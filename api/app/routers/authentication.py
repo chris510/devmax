@@ -1,22 +1,35 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import bearer_token, current_user_id, require_user
 from app.config import get_settings
 from app.db import get_session
-from app.models import AppleIdentity, Card, MaterialSource, Session, Settings, StudyPlan, User
+from app.models import (
+    AIConsentEvent,
+    AppleIdentity,
+    AuthSession,
+    Card,
+    MaterialSource,
+    Session,
+    Settings,
+    StudyPlan,
+    User,
+)
 from app.schemas import (
     AccountExport,
+    AIConsentIn,
+    AIConsentOut,
+    AppleServerNotificationIn,
     AppleSignInIn,
     AuthNonceOut,
     CurrentUserOut,
     RefreshTokenIn,
     TokenOut,
 )
-from app.services import authentication
+from app.services import ai_consent, authentication
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -102,7 +115,85 @@ async def me(db: AsyncSession = Depends(get_session)) -> CurrentUserOut:
         is_founder=user.is_founder,
         display_name=identity.display_name if identity and identity.display_name else "",
         email=identity.email if identity and identity.email else "",
+        apple_user_identifier=identity.subject if identity else "",
+        ai_consent_status=user.ai_consent_status,
+        ai_consent_version=user.ai_consent_version,
+        ai_consent_updated_at=user.ai_consent_updated_at,
+        ai_processing_allowed=ai_consent.processing_allowed(user),
+        ai_consent_prompt_required=ai_consent.prompt_required(user),
     )
+
+
+@router.put(
+    "/ai-consent", response_model=AIConsentOut, dependencies=[Depends(require_user)]
+)
+async def update_ai_consent(
+    body: AIConsentIn, db: AsyncSession = Depends(get_session)
+) -> AIConsentOut:
+    user, changed_at = await ai_consent.record(db, current_user_id(), body.action)
+    return AIConsentOut(
+        policy_version=ai_consent.POLICY_VERSION,
+        status=user.ai_consent_status,
+        updated_at=changed_at,
+        processing_allowed=ai_consent.processing_allowed(user),
+        prompt_required=ai_consent.prompt_required(user),
+    )
+
+
+@router.post("/apple/notifications", status_code=204)
+async def apple_notifications(
+    body: AppleServerNotificationIn, db: AsyncSession = Depends(get_session)
+) -> Response:
+    """Invalidate access on verified Apple account-change events without deleting study data."""
+    try:
+        event = await authentication.verify_apple_server_notification(
+            body.payload, get_settings()
+        )
+    except authentication.AuthenticationUnavailable as exc:
+        raise HTTPException(status_code=503, detail="notification_unavailable") from exc
+    except authentication.AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail="unauthorized") from exc
+
+    identity = (
+        await db.exec(
+            select(AppleIdentity)
+            .where(AppleIdentity.subject == event.subject)
+            .with_for_update()
+        )
+    ).first()
+    if identity is None:
+        return Response(status_code=204)
+    now = datetime.now(UTC)
+    # Apple's notifications are retryable. An event generated before the most
+    # recent successful Apple authorization must not revoke the fresh session if
+    # an old delivery is replayed afterward.
+    if (
+        identity.last_apple_event_at is not None
+        and event.occurred_at <= identity.last_apple_event_at
+    ):
+        return Response(status_code=204)
+    if event.event_type in {"consent-revoked", "account-deleted"}:
+        identity.apple_refresh_token = None
+        identity.authorization_revoked_at = event.occurred_at
+        sessions = (
+            await db.exec(
+                select(AuthSession).where(
+                    AuthSession.user_id == identity.user_id,
+                    col(AuthSession.revoked_at).is_(None),
+                )
+            )
+        ).all()
+        for session in sessions:
+            session.revoked_at = now
+            session.updated_at = now
+            db.add(session)
+    elif event.event_type == "email-disabled":
+        identity.email = None
+    identity.last_apple_event_at = event.occurred_at
+    identity.updated_at = now
+    db.add(identity)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.post(
@@ -132,6 +223,13 @@ async def export_account(db: AsyncSession = Depends(get_session)) -> AccountExpo
         )
     ).all()
     plans = (await db.exec(select(StudyPlan).where(StudyPlan.user_id == user_id))).all()
+    consent_events = (
+        await db.exec(
+            select(AIConsentEvent)
+            .where(AIConsentEvent.user_id == user_id)
+            .order_by(AIConsentEvent.created_at)
+        )
+    ).all()
     return AccountExport(
         exported_at=datetime.now(UTC),
         account=user.model_dump() if user else {},
@@ -140,6 +238,7 @@ async def export_account(db: AsyncSession = Depends(get_session)) -> AccountExpo
         cards=[row.model_dump() for row in cards],
         sessions=[row.model_dump() for row in sessions],
         study_plans=[row.model_dump() for row in plans],
+        ai_consent_events=[row.model_dump() for row in consent_events],
     )
 
 

@@ -191,7 +191,13 @@ final class FounderClaimTransportTests: XCTestCase {
           "onboarding_completed": true,
           "is_founder": \(isFounder),
           "display_name": "Founder",
-          "email": "founder@example.com"
+          "email": "founder@example.com",
+          "apple_user_identifier": "founder-apple-subject",
+          "ai_consent_status": "pending",
+          "ai_consent_version": "",
+          "ai_consent_updated_at": null,
+          "ai_processing_allowed": false,
+          "ai_consent_prompt_required": true
         }
         """
     }
