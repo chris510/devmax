@@ -66,6 +66,13 @@ class AppleCodeExchange:
 
 
 @dataclass(frozen=True)
+class AppleAccountEvent:
+    event_type: str
+    subject: str
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
 class TokenPair:
     access_token: str
     refresh_token: str
@@ -154,6 +161,57 @@ async def verify_apple_identity_token(
         raise AuthenticationError
     email = claims.get("email")
     return AppleClaims(subject=subject, email=email if isinstance(email, str) else None)
+
+
+async def verify_apple_server_notification(
+    payload: str, config: AppConfig
+) -> AppleAccountEvent:
+    """Verify Apple's signed server-to-server account-change payload."""
+    if not _configured(config):
+        raise AuthenticationUnavailable
+
+    def decode() -> dict[str, Any]:
+        key = APPLE_JWK_CLIENT.get_signing_key_from_jwt(payload)
+        return jwt.decode(
+            payload,
+            key.key,
+            algorithms=["RS256"],
+            audience=config.apple_client_id,
+            issuer=APPLE_ISSUER,
+            options={"require": ["iss", "aud", "iat", "jti", "events"]},
+        )
+
+    try:
+        claims = await asyncio.to_thread(decode)
+    except (jwt.PyJWTError, OSError) as exc:
+        raise AuthenticationError from exc
+    events = claims.get("events")
+    if not isinstance(events, dict):
+        raise AuthenticationError
+    event_type = events.get("type")
+    subject = events.get("sub")
+    event_time = events.get("event_time")
+    if (
+        not isinstance(event_type, str)
+        or not isinstance(subject, str)
+        or not subject
+        or not isinstance(event_time, int)
+    ):
+        raise AuthenticationError
+    if event_type not in {
+        "email-disabled",
+        "email-enabled",
+        "consent-revoked",
+        "account-deleted",
+    }:
+        raise AuthenticationError
+    try:
+        occurred_at = datetime.fromtimestamp(event_time, UTC)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise AuthenticationError from exc
+    return AppleAccountEvent(
+        event_type=event_type, subject=subject, occurred_at=occurred_at
+    )
 
 
 def _apple_client_secret(config: AppConfig) -> str:
@@ -297,7 +355,11 @@ async def sign_in_with_apple(
 
     try:
         identity = (
-            await db.exec(select(AppleIdentity).where(AppleIdentity.subject == claims.subject))
+            await db.exec(
+                select(AppleIdentity)
+                .where(AppleIdentity.subject == claims.subject)
+                .with_for_update()
+            )
         ).first()
         if identity is None:
             # While the one-time founder claim is open, this public route may
@@ -323,7 +385,10 @@ async def sign_in_with_apple(
             identity.display_name = display_name.strip()[:200]
         if exchange.refresh_token:
             identity.apple_refresh_token = _encrypt_apple_token(exchange.refresh_token, config)
-        identity.updated_at = _now()
+        authorized_at = _now()
+        identity.authorization_revoked_at = None
+        identity.last_apple_event_at = authorized_at
+        identity.updated_at = authorized_at
         db.add(identity)
 
         pair = await issue_session(db, user.id, config)
@@ -406,7 +471,10 @@ async def claim_founder_with_apple(
         identity.display_name = display_name.strip()[:200]
     if exchange.refresh_token:
         identity.apple_refresh_token = _encrypt_apple_token(exchange.refresh_token, config)
-    identity.updated_at = _now()
+    authorized_at = _now()
+    identity.authorization_revoked_at = None
+    identity.last_apple_event_at = authorized_at
+    identity.updated_at = authorized_at
     db.add(identity)
 
     try:

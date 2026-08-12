@@ -247,7 +247,7 @@ export default function Home() {
       <footer>
         <div className="brand"><Image src="/unprompted-icon.png" alt="" width={30} height={30} /><span>Unprompted</span></div>
         <p>Private voice-first recall coach</p>
-        <div><a href="#private-beta">Privacy</a><a href="#private-beta">Contact</a></div>
+        <div><a href="/privacy">Privacy</a><a href="#private-beta">Contact</a></div>
       </footer>
     </main>
   );

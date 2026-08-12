@@ -251,7 +251,7 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 
 `WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup` `score` `resume`
 `submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
-`learning` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
+`learning` `ai-consent` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
 An unrecognised
 value falls through to the conversation question state rather than erroring, so check the

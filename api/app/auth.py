@@ -15,7 +15,13 @@ from app.services.authentication import user_for_access_token
 
 # These routes establish authentication rather than consuming it. The founder
 # claim is handled separately below because it has its own temporary credential.
-PUBLIC_PATHS = {"/health", "/auth/nonce", "/auth/apple", "/auth/refresh"}
+PUBLIC_PATHS = {
+    "/health",
+    "/auth/nonce",
+    "/auth/apple",
+    "/auth/refresh",
+    "/auth/apple/notifications",
+}
 FOUNDER_CLAIM_PATH = "/auth/founder/apple-claim"
 DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 

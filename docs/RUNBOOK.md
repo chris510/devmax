@@ -601,3 +601,28 @@ it already pushed today, so every push in a day lands on a distinct card — whi
 makes the card count *equal* the push count, and the cap exact.
 
 Reintroduce a `push_log` only if a card ever needs to be pushed twice in one day.
+
+## Public privacy and Sign in with Apple operations
+
+The source of truth for App Store privacy answers is
+`docs/APP-STORE-PRIVACY-CHECKLIST.md`. The public privacy policy is
+`https://devmax-recall.christrinh5.chatgpt.site/privacy`.
+
+Deploy migration 0014 and the consent-capable client while
+`AI_CONSENT_ENFORCEMENT_ENABLED=false`. Record the current Anthropic disclosure
+from that client, verify `/auth/me` reports `ai_processing_allowed=true`, and
+only then enable enforcement and restart the API. This order prevents an older
+installed client from being trapped behind a choice it cannot render.
+
+In Apple Developer → Certificates, Identifiers & Profiles → Identifiers →
+`com.christrinh.devmax` → Sign in with Apple → Configure, set the server-to-server
+notification endpoint to:
+
+```text
+https://devmax-production.up.railway.app/auth/apple/notifications
+```
+
+The endpoint accepts only Apple-signed JWTs for this app identifier. A verified
+`consent-revoked` or `account-deleted` event clears the stored Apple refresh
+authorization and revokes all live Unprompted sessions. Study data is preserved;
+permanent deletion remains the explicit in-app Delete account operation.

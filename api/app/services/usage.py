@@ -10,11 +10,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import Settings
 from app.models import LLMUsage
+from app.services import ai_consent
 
 
 async def ensure_available(
     db: AsyncSession, user_id: uuid.UUID, operation: str, config: Settings
 ) -> None:
+    await ai_consent.require_ai_processing(db, user_id, config)
     since = datetime.now(UTC) - timedelta(days=1)
     total = (
         await db.exec(

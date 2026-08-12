@@ -27,6 +27,11 @@ FOUNDER_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 USER_ACTIVE = "active"
 USER_DELETING = "deleting"
 
+AI_CONSENT_PENDING = "pending"
+AI_CONSENT_GRANTED = "granted"
+AI_CONSENT_DECLINED = "declined"
+AI_CONSENT_WITHDRAWN = "withdrawn"
+
 CARD_ACTIVE = "active"
 CARD_ARCHIVED = "archived"
 
@@ -59,8 +64,24 @@ class User(SQLModel, table=True):
     status: str = USER_ACTIVE
     is_founder: bool = False
     onboarding_completed: bool = False
+    ai_consent_status: str = AI_CONSENT_PENDING
+    ai_consent_version: str = ""
+    ai_consent_updated_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    ai_consent_granted_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class AIConsentEvent(SQLModel, table=True):
+    __tablename__ = "ai_consent_events"
+    __table_args__ = (Index("ix_ai_consent_events_user_created", "user_id", "created_at"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    provider: str = "Anthropic"
+    policy_version: str
+    action: str
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 class AppleIdentity(SQLModel, table=True):
@@ -80,6 +101,8 @@ class AppleIdentity(SQLModel, table=True):
     # Encrypted before storage by services/authentication.py. Needed to revoke
     # Sign in with Apple when the account is deleted.
     apple_refresh_token: str | None = None
+    authorization_revoked_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    last_apple_event_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 

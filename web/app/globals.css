@@ -36,6 +36,35 @@ button, a { -webkit-tap-highlight-color: transparent; }
 button { font: inherit; }
 ::selection { background: var(--signal); color: var(--signal-ink); }
 
+/* Privacy policy */
+.policy-page { min-height: 100vh; background: var(--paper); }
+.policy-header {
+  width: min(980px, calc(100% - 48px));
+  min-height: 88px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+.policy-back { min-height: 44px; display: inline-flex; align-items: center; color: var(--ink-soft); font-size: 13px; }
+.policy-shell { width: min(980px, calc(100% - 48px)); margin: 0 auto; padding: 92px 0 130px; }
+.policy-shell > h1 { margin: 0; max-width: 850px; font-family: var(--font-newsreader), Georgia, serif; font-size: clamp(54px, 7vw, 88px); line-height: .94; letter-spacing: -.052em; font-weight: 450; }
+.policy-shell > h1 em { color: var(--signal-dark); font-weight: 400; }
+.policy-intro { max-width: 750px; margin: 38px 0 76px; color: var(--ink-soft); font-size: 19px; line-height: 1.65; }
+.policy-section { display: grid; grid-template-columns: minmax(210px, .42fr) minmax(0, 1fr); gap: 56px; padding: 34px 0 42px; border-top: 1px solid var(--line); }
+.policy-section h2 { margin: 0; font-family: var(--font-newsreader), Georgia, serif; font-size: 31px; line-height: 1.1; letter-spacing: -.025em; font-weight: 450; }
+.policy-section p, .policy-section li { color: var(--ink-soft); font-size: 15.5px; line-height: 1.7; }
+.policy-section p { margin: 0 0 18px; }
+.policy-section ul, .policy-section ol { margin: 0 0 20px; padding-left: 22px; }
+.policy-section li { margin-bottom: 9px; }
+.policy-section a { color: var(--signal-dark); border-bottom: 1px solid currentColor; }
+@media (max-width: 680px) {
+  .policy-header, .policy-shell { width: min(100% - 36px, 980px); }
+  .policy-shell { padding-top: 62px; }
+  .policy-section { grid-template-columns: 1fr; gap: 16px; }
+}
+
 .section-shell, .site-header, footer {
   width: min(1240px, calc(100% - 56px));
   margin-inline: auto;

@@ -1,6 +1,6 @@
 # Devmax privacy and data handling
 
-Last updated: August 7, 2026
+Last updated: August 12, 2026
 
 This document records the behavior implemented by Devmax. It is product and
 engineering policy, not a substitute for legal review before a public App Store
@@ -23,10 +23,10 @@ history, schedules, plans, settings, tokens, and account records. If revocation
 cannot complete, server deletion stops rather than partially deleting the
 account. A user can also export the account data as JSON.
 
-Server backups and operational logs must follow the hosting provider's configured
-retention policy. Before launch, that period and the support contact must be
-filled into the public legal policy; the app does not currently promise a backup
-deletion deadline it cannot enforce.
+Server backups and operational logs follow the hosting provider's configured
+retention policy. The public policy deliberately does not promise a shorter
+backup deletion deadline than the deployed systems enforce. The App Store
+support listing remains the public contact for privacy questions.
 
 ## AI processing
 
@@ -45,6 +45,20 @@ Current provider references:
 
 - <https://privacy.anthropic.com/en/articles/7996868-is-my-data-used-for-model-training>
 - <https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data>
+
+Before any of those operations, the current versioned Anthropic disclosure must
+be granted explicitly. Decline and withdrawal are recorded server-side and block
+future guide processing, question generation, answer scoring, and coaching while
+leaving saved lessons, Study Plans, history, settings, and schedules readable.
+
+## Sign in with Apple account changes
+
+The app checks Apple's credential state at launch/foreground and observes Apple's
+credential-revoked notification. A revoked or missing relationship clears local
+credentials and returns to sign-in. The API accepts only cryptographically
+verified Apple server-to-server notifications; consent-revoked and
+account-deleted events clear the stored Apple refresh authorization and revoke
+every live Devmax session without silently deleting study data.
 
 ## Sensitive study material
 

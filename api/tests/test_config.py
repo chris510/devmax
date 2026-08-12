@@ -102,6 +102,10 @@ def test_the_founder_claim_is_disabled_by_default() -> None:
     assert build().legacy_api_key_auth_enabled is False
 
 
+def test_ai_consent_enforcement_is_staged_off_by_default() -> None:
+    assert build().ai_consent_enforcement_enabled is False
+
+
 @pytest.mark.parametrize("shared_with", ["api_key", "cron_secret"])
 def test_the_temporary_founder_claim_secret_must_be_independent(shared_with: str) -> None:
     with pytest.raises(ValidationError):

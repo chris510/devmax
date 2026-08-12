@@ -709,6 +709,12 @@ async def test_founder_claim_links_identity_without_touching_existing_study_data
         "is_founder": True,
         "display_name": "Casey",
         "email": "first@example.com",
+        "apple_user_identifier": "founder-apple-subject",
+        "ai_consent_status": "pending",
+        "ai_consent_version": "",
+        "ai_consent_updated_at": None,
+        "ai_processing_allowed": False,
+        "ai_consent_prompt_required": True,
     }
     assert await _founder_study_data_snapshot(db) == before
 
