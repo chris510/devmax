@@ -22,6 +22,7 @@ from app.models import (
     Card,
     PendingCapture,
     Session,
+    SessionProbe,
     User,
 )
 from app.seed import (
@@ -323,6 +324,28 @@ async def test_fixtures_ignore_a_public_users_same_topic(db) -> None:
         "Multi-source BFS",
     }
     assert len((await db.exec(select(Card).where(Card.user_id == other.id))).all()) == 1
+
+
+async def test_fixture_follow_ups_are_probe_rows(db) -> None:
+    """The design fixtures must render through the production history path.
+
+    Their follow-up turns come from `session_probes` now; writing them to the
+    frozen scalar columns would drop them out of `build_turns` silently.
+    """
+    assert await load_fixtures(db=db) == 4
+
+    probes = (await db.exec(select(SessionProbe))).all()
+    assert {(p.idx, p.question) for p in probes} == {
+        (1, "One more — what are virtual nodes for?"),
+        (1, "One more — is that the only condition?"),
+    }
+    assert all(p.answer for p in probes)
+
+    probed = {p.session_id for p in probes}
+    for session in (await db.exec(select(Session))).all():
+        assert session.follow_up_used is (session.id in probed)
+        assert session.follow_up_question is None
+        assert session.follow_up_answer == ""
 
 
 @pytest.mark.parametrize(

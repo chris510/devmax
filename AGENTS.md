@@ -255,7 +255,8 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 `SIMCTL_CHILD_`; the `--setenv` flag it once accepted is gone, and today's
 `simctl` reads it as the device argument and fails with `Invalid device`.
 
-`WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup` `score` `resume`
+`WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup`
+`followup-second` `score` `resume`
 `submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
 `learning` `ai-consent` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
@@ -264,11 +265,14 @@ value falls through to the conversation question state rather than erroring, so 
 spelling. Also `WC_LOAD` (`auto|loading|error`),
 `WC_RAIL_STYLE` (`dots|chips` — dots ships; chips exists only for the side-by-side) and
 boolean `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_QUESTION` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS`
-`WC_SIM_SPEECH` `WC_FAILED_MECHANISM`. Forced failures succeed on the retry, so each path
+`WC_SIM_SPEECH` `WC_FAILED_MECHANISM` `WC_SECOND_PROBE`. Forced failures succeed on the retry, so each path
 walks end to end. `WC_FAIL_QUESTION` fails `startSession` — the *load* failure, not the
 submit one; the `question-failure` route sets it itself. `WC_FAILED_MECHANISM` forces a failing mechanism score, which is what
 makes the coached re-attempt reachable; the two `reattempt` routes set it themselves, so
 it only needs passing to see a failed mechanism on some *other* route.
+`WC_SECOND_PROBE` grants the session the model's second scored probe: the mock probes a
+daily review once by default and twice with it set, and never probes a Review Sprint card.
+The `followup-second` route sets it itself.
 
 `WC_SIM_SPEECH` types a hardcoded model answer into the transcript, so its default is
 the environment, not the configuration: on in the simulator, which has no usable

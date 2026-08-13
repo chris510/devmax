@@ -588,7 +588,10 @@ Behavior:
 ```
 
 When resuming, `draft_text` carries the saved partial answer and
-`resumed: true`.
+`resumed: true`. When the resumed session is `'awaiting_follow_up'`,
+`is_follow_up` is true and `question` is the **pending probe's** question — the
+last `session_probes` row, the one still unanswered — not the card's opening
+question and not an earlier probe.
 
 ### `PATCH /sessions/{id}/draft`
 

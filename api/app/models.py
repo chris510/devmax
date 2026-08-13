@@ -285,6 +285,9 @@ class Session(SQLModel, table=True):
     card_id: uuid.UUID = Field(foreign_key="cards.id", ondelete="CASCADE")
 
     question_asked: str
+    # Frozen legacy, both of them: the single probe a session could once carry.
+    # Migration 0015 moved probes to `session_probes` and left these holding the
+    # history they already had. Nothing reads or writes them — see DEVIATIONS §30.
     follow_up_question: str | None = None
     answer_text: str = ""
     follow_up_answer: str = ""
@@ -299,6 +302,8 @@ class Session(SQLModel, table=True):
     depth: int | None = None
     boundaries: int | None = None
     feedback: str = ""
+    # Still written, still truthful: "a scored probe was issued in this session".
+    # How many, and which, is `session_probes`.
     follow_up_used: bool = False
     # V1 remains active until the staged V2 release gate is complete. Every row
     # carries its meaning so historical composites are never relabeled as Recall.
