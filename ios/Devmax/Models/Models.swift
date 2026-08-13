@@ -255,8 +255,9 @@ struct AppSettings: Codable, Equatable {
 
 /// One turn in the Conversation thread. Render order is the source of truth.
 struct ThreadEntry: Identifiable, Equatable {
-    /// `reattemptQuestion` is turn 3 — a coached re-attempt after the correction,
-    /// prefaced `In your words — ` the way the probe is prefaced `One more — `.
+    /// `reattemptQuestion` is the coached re-attempt after the correction,
+    /// prefaced `In your words — ` the way the probes are prefaced
+    /// `One more — ` and `Last one — `.
     enum Role: Equatable {
         case question, answer, followUpQuestion, reattemptQuestion
         case coachingQuestion, coachingFeedback

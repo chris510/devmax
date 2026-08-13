@@ -22,6 +22,10 @@ final class DebugFlags: ObservableObject {
     /// Forces a failing mechanism score, which is what makes the coached
     /// re-attempt reachable — the affordance only appears below the band.
     @Published var failedMechanism: Bool
+    /// Grants a session the second scored probe. The server issues it only when
+    /// the model reports it still cannot tell two adjacent scores apart — a
+    /// judgement no fixture can make, so the flag stands in for it.
+    @Published var secondProbe: Bool
     @Published var scoringV2: Bool
     @Published var failAdd: Bool
     @Published var emptyQueue: Bool
@@ -104,6 +108,7 @@ final class DebugFlags: ObservableObject {
         let route = env["WC_ROUTE"] ?? ""
         failQuestion = flag("WC_FAIL_QUESTION") || route == "question-failure"
         failedMechanism = flag("WC_FAILED_MECHANISM") || route.hasPrefix("reattempt")
+        secondProbe = flag("WC_SECOND_PROBE") || route == "followup-second"
         scoringV2 = flag("WC_SCORING_V2") || route.hasPrefix("coaching")
         failAdd = flag("WC_FAIL_ADD")
         emptyQueue = flag("WC_EMPTY")
@@ -130,6 +135,9 @@ final class DebugFlags: ObservableObject {
 actor MockAPI: DevmaxAPI {
     static let shared = MockAPI()
 
+    /// Only the forced-failure alternation reads this. It counts submits across
+    /// the whole app run — and across both answer endpoints, so a re-attempt
+    /// after a failed answer still lands on the attempt that succeeds.
     private var submitAttempts = 0
     private var questionAttempts = 0
     private var addAttempts = 0
@@ -143,6 +151,12 @@ actor MockAPI: DevmaxAPI {
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.
     private var sessionIsPractice = false
+    /// How many scored follow-ups a session may be asked, fixed when it starts,
+    /// and how many it has already been asked. The budget belongs to the session
+    /// rather than to the app run, the way the server's does: two cards answered
+    /// back to back each get their own, and a Review Sprint card gets none.
+    private var probeBudget: [UUID: Int] = [:]
+    private var probesIssued: [UUID: Int] = [:]
     private var storedSettings = AppSettings.placeholder
     private var extraCards: [DueCard] = []
     private var capturedGaps: [PendingCapture] = [
@@ -332,6 +346,11 @@ actor MockAPI: DevmaxAPI {
                         Turn(role: .score, text: "2 — Right on the core motivation. Virtual nodes were guessed at, not explained."),
                     ]
                 ),
+                // The session that took both probes — the transcript shape a
+                // history row has whenever the model asked twice. It is this
+                // session rather than the one above deliberately: the expanded
+                // screenshot opens the newest row, so the acceptance comparison
+                // is unchanged and the two-probe rendering is still one tap away.
                 SessionHistory(
                     id: UUID(), date: Self.date("2026-07-16T21:32:00Z"), score: 3,
                     recallScore: nil, legacyCompositeScore: 3, scoringContractVersion: 1,
@@ -339,6 +358,10 @@ actor MockAPI: DevmaxAPI {
                     turns: [
                         Turn(role: .question, text: "How does a client find which node owns a key?"),
                         Turn(role: .answer, text: "Hash the key, walk clockwise on the ring to the first node position you hit, that node owns it."),
+                        Turn(role: .followUp, text: "One more — what happens to that lookup while a node is joining the ring?"),
+                        Turn(role: .answer, text: "The ring changes, so some of those keys point at the new node instead. I suppose the lookup just resolves to whoever owns the position at the time."),
+                        Turn(role: .followUp, text: "Last one — during that handoff, does the old owner or the new one serve the key?"),
+                        Turn(role: .answer, text: "Whichever one has the data, I'd assume. I don't know how they agree on the moment it switches over."),
                         Turn(role: .score, text: "3 — Correct lookup path. No mention of how replicas are chosen from the successors."),
                     ]
                 ),
@@ -538,9 +561,18 @@ actor MockAPI: DevmaxAPI {
             throw APIError.scoringUnavailable
         }
         sessionIsPractice = practice
+        let sessionID = UUID()
+        // The probe budget is settled here, before a word has been said, because
+        // the server settles it here too. A daily review may be probed once —
+        // twice when `WC_SECOND_PROBE` stands in for the model reporting it still
+        // lacks the evidence to score. A Review Sprint card is never probed: the
+        // recap walks six cards, and a probe apiece buys the screenshot nothing
+        // but latency.
+        let allowsSecondProbe = await MainActor.run { DebugFlags.shared.secondProbe }
+        probeBudget[sessionID] = practice ? 0 : (allowsSecondProbe ? 2 : 1)
         if cardID == Self.raftID {
             return SessionStart(
-                sessionId: UUID(),
+                sessionId: sessionID,
                 question: "A follower stops hearing heartbeats and starts an election. What stops it from becoming leader with an incomplete log?",
                 isFollowUp: false,
                 draftText: "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate, then it asks",
@@ -549,14 +581,14 @@ actor MockAPI: DevmaxAPI {
         }
         if cardID == Self.pgID {
             return SessionStart(
-                sessionId: UUID(),
+                sessionId: sessionID,
                 question: "You have a jsonb column and queries that filter on keys inside it. Which index, and what does it cost you?",
                 isFollowUp: false, draftText: "", resumed: false
             )
         }
         if cardID == Self.chID {
             return SessionStart(
-                sessionId: UUID(),
+                sessionId: sessionID,
                 question: "You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't.",
                 isFollowUp: false, draftText: "", resumed: false
             )
@@ -566,7 +598,7 @@ actor MockAPI: DevmaxAPI {
         // server-side.
         let topic = Self.library.first { $0.id == cardID }?.topic ?? "this topic"
         return SessionStart(
-            sessionId: UUID(),
+            sessionId: sessionID,
             question: "Reconstruct \(topic.lowercased()) from memory — what is the mechanism, and where does it break?",
             isFollowUp: false, draftText: "", resumed: false
         )
@@ -574,14 +606,30 @@ actor MockAPI: DevmaxAPI {
 
     func saveDraft(sessionID: UUID, text: String) async throws {}
 
+    /// The two probes, in the voice and about the card the Conversation
+    /// screenshots were taken against. Only the second is prefaced `Last one — `,
+    /// which is the one thing that tells the user the session cannot keep being
+    /// extended.
+    private static let firstProbe =
+        "One more — how do virtual nodes change the amount of data that moves?"
+    private static let secondProbe =
+        "Last one — while the new node takes over its slice, which node serves those keys?"
+
     func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome {
         try await Task.sleep(nanoseconds: 1_200_000_000)
         submitAttempts += 1
         if await MainActor.run(body: { DebugFlags.shared.failSubmit }), submitAttempts % 2 == 1 {
             throw APIError.scoringUnavailable
         }
-        if submitAttempts <= 2 {
-            return .followUp(question: "One more — how do virtual nodes change the amount of data that moves?")
+        // A forced failure costs the session nothing: the answer that failed was
+        // never scored, so the probe it would have drawn is still owed.
+        //
+        // A session this mock never started — a test that assigns `sessionID` by
+        // hand — is treated as a daily review, which is the case it is standing in for.
+        let issued = probesIssued[sessionID] ?? 0
+        if issued < (probeBudget[sessionID] ?? 1) {
+            probesIssued[sessionID] = issued + 1
+            return .followUp(question: issued == 0 ? Self.firstProbe : Self.secondProbe)
         }
         // Sprint runs vary so the recap has something to show; a daily review
         // keeps the fixture the Conversation screenshots were taken against.
