@@ -796,6 +796,12 @@ final class AppState: ObservableObject {
         // Optimistic: the answer appears in the thread immediately.
         thread.append(ThreadEntry(role: .answer, text: text))
         stage = .processing
+        // Cleared with the commit, not with the response: the answer is in the
+        // thread now, and a draft outliving it renders the same words a second
+        // time with a live caret under the scoring indicator. Only the in-memory
+        // copy goes — disk still holds the answer until the request lands, so an
+        // app killed in flight can rehydrate it, and the catch below restores it.
+        draft = ""
 
         do {
             let value = try await send(sessionID, text)
@@ -804,7 +810,6 @@ final class AppState: ObservableObject {
             // flight. Applying a stale result would score the wrong card.
             guard self.sessionID == sessionID else { return nil }
             if let card = currentCard { DraftStore.clear(for: card.id) }
-            draft = ""
             return value
         } catch {
             guard self.sessionID == sessionID else { return nil }

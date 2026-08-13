@@ -346,6 +346,10 @@ enum Stage: Equatable {
     var footer: Footer {
         switch self {
         case .questionFailed: return .hidden
+        // The turn is closed: the answer is sent and the scoring indicator owns
+        // the screen. A mic still on screen reading `TAP TO KEEP GOING` offers to
+        // continue an answer that is already being scored.
+        case .processing: return .hidden
         case .result: return .result
         default: return .answer
         }

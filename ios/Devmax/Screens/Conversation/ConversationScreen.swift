@@ -12,6 +12,10 @@ struct ConversationScreen: View {
     /// stage is still a recording one during that gap, so without this a second
     /// tap would submit the same answer twice.
     @State private var finalizing = false
+    /// The last thread entry spoken. A stage change is also how the app comes
+    /// *back* to a turn — a failed submit rewinds to the stage it was answering —
+    /// so without this the question restarts over an answer already half given.
+    @State private var lastReadID: UUID?
 
     /// Answer bubbles and the live transcript cap at 84% — of the thread's content
     /// width, not the screen's.
@@ -37,7 +41,10 @@ struct ConversationScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        .onChange(of: state.thread.count) { _, _ in readLatestQuestion() }
+        // The stage is the only read trigger, because every question arrives with
+        // the stage that makes it answerable — a card opening, each probe through
+        // `.processing`, turn 3. The thread also grows when the *user* answers,
+        // which is what read the question back over the scoring indicator.
         .onChange(of: state.stage) { _, stage in
             if stage.acceptsAnswer && !stage.isRecording { readLatestQuestion() }
         }
@@ -592,14 +599,32 @@ struct ConversationScreen: View {
 
     // MARK: - TTS
 
+    /// What may be read aloud: the four roles that ask the user something. An
+    /// answer is the user's own words, and coaching feedback is prose the score
+    /// block already shows — neither is a question waiting to be answered.
+    private static let spokenRoles: [ThreadEntry.Role] = [
+        .question, .followUpQuestion, .reattemptQuestion, .coachingQuestion,
+    ]
+
+    /// The entry to speak, or nil when the newest question was already spoken.
+    /// Static and pure so the rule is exercised without a view: it decides what
+    /// TTS says, and getting it wrong re-reads a question mid-answer.
+    static func entryToSpeak(in thread: [ThreadEntry], lastSpoken: UUID?) -> ThreadEntry? {
+        guard let entry = thread.last(where: { Self.spokenRoles.contains($0.role) }),
+              entry.id != lastSpoken
+        else { return nil }
+        return entry
+    }
+
     private func readLatestQuestion() {
         // Two independent gates. `WC_TTS` is the screenshot override and stays
         // debug-only; `readAloud` is the user's, and is the one that works in a
         // Release build — where `WC_TTS` reads its default and is always true.
         guard flags.ttsEnabled, readAloud,
-              let last = state.thread.last(where: { $0.role != .answer })
+              let entry = Self.entryToSpeak(in: state.thread, lastSpoken: lastReadID)
         else { return }
-        speaker.speak(last.text)
+        lastReadID = entry.id
+        speaker.speak(entry.text)
     }
 
     /// Fixture answers for the simulated-speech path, matching the prototype.
