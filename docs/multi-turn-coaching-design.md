@@ -188,6 +188,28 @@ schema and make growing the cap require a migration. **The shape is deliberately
 hostile to N turns.** If the cap ever legitimately becomes N, the turns table is
 the right move and this decision should be reversed on purpose, not drifted past.
 
+**Amended 2026-08-13 — that condition fired.** The scored follow-up cap became N
+(`llm.MAX_SCORED_FOLLOW_UPS = 2`, the model requesting probe #2 through
+`needs_more_evidence`), so the reversal above is taken, on purpose:
+
+> ~~`follow_up_*` does not generalize; add a parallel set rather than a turns
+> table.~~
+>
+> **Scored follow-ups are rows: `session_probes(session_id, idx, question,
+> answer)`, migration 0015, one row per probe written unanswered when its
+> question is issued. `sessions.follow_up_question` / `follow_up_answer` are kept
+> and frozen; `follow_up_used` is still written and still means "a probe was
+> issued". The `reattempt_*` columns stay scalar.**
+
+The flattening objection in this section is not withdrawn — it was never about
+the number of turns. It says turn 3 is post-correction and unscored for
+scheduling, *a different kind of thing* from a probe, and modelling it as
+"another follow-up" would erase that. `session_probes` cannot absorb it for
+exactly that reason: every row in that table is by definition scored and
+pre-correction, so the same argument that put the re-attempt in scalar columns is
+what keeps it there. What changed is only the premise that the scored side had a
+fixed cap of one.
+
 Handwritten migration, as always — `alembic revision --autogenerate` is off.
 
 ### 5.2 Scoring and prompts
@@ -292,6 +314,10 @@ If adopted, `AGENTS.md` and `spec.md` §LLM integration both change:
 > **Maximum one *scored* follow-up per session, enforced server-side. At most one
 > further coached re-attempt after the correction, which writes mastery signal and
 > never reaches SM-2 or the displayed score.**
+
+That rewrite landed, and its first clause was itself amended on 2026-08-13 when
+the scored cap became two — see §5.1 and the current text in `AGENTS.md`. The
+re-attempt clause is unchanged.
 
 And a new invariant, which is the load-bearing one:
 

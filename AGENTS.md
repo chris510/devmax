@@ -7,9 +7,9 @@ before touching the iOS client.
 ## What this is
 
 A **private, single-user conversational spaced-repetition coach** for technical-interview
-prep. A push arrives, you answer a question by voice or text, the model asks at most one
-clarifying follow-up if the answer was shaky, then scores recall 0–5 and reschedules the
-card with SM-2.
+prep. A push arrives, you answer a question by voice or text, the model asks up to two
+clarifying follow-ups when the answer was shaky or it lacks the signal to score honestly,
+then scores recall 0–5 and reschedules the card with SM-2.
 
 Sessions are **1–3 minutes, used half-awake or in line.** Every decision optimizes for
 *speed into a session* and *honesty of signal* — never engagement mechanics. There are no
@@ -84,11 +84,17 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   none of the four SM-2 fields, any score, or history; it counts as engagement for a push
   so it cannot become a false missed review. The exact canonical question is never part
   of the learning response.
-- **Maximum one *scored* follow-up per session, enforced server-side.** The model always
-  writes a probe and returns a provisional score; `submit_answer` decides whether to use it
-  based on `follow_up_used`. This is structural, not prompt-dependent — keep it that way.
-  At most one further *coached re-attempt* may follow, and it never reaches SM-2 or the
-  displayed score — see the next invariant.
+- **Maximum `llm.MAX_SCORED_FOLLOW_UPS` (2) *scored* follow-ups per session, enforced
+  server-side.** The model may *request* a further probe — `needs_more_evidence` says the
+  transcript cannot distinguish adjacent scores — but it never decides. The server owns
+  all of it in code: the band rule for probe #1 (today's 1–3), the insufficiency rule for
+  probe #2, the cap (both parsers, re-checked at the write site in `submit_answer`), and
+  the rule that every probe is pre-correction. The count lives in `session_probes`, one
+  row per probe, written unanswered when its question is issued; `follow_up_used` stays a
+  truthful "a probe was issued". This is structural, not prompt-dependent — a prompt alone
+  can never extend a session, and keep it that way. At most one further *coached
+  re-attempt* may follow, and it never reaches SM-2 or the displayed score — see the next
+  invariant.
 - **No turn that happens after the model has stated the correct essential account may reach the
   scheduler.** Turn 3 (`POST /sessions/{id}/reattempt`) is offered only when
   `accuracy <= 2`, is user-initiated, and runs *after* the session is already

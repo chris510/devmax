@@ -173,7 +173,7 @@ the session at two scored follow-ups.
 
 `mastery_summary` replaces the prior rolling summary. Write one or two sentences \
 in lowercase fragment style describing essential-account recall only: unaided, \
-recovered after one probe, or still missing. Never claim strong/weak Depth or \
+recovered after a probe, or still missing. Never claim strong/weak Depth or \
 Boundaries.
 
 Return only the structured fields. No preamble, no code fences, no commentary.\

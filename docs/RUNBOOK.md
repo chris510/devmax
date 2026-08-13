@@ -324,9 +324,25 @@ SID=$(echo "$SESSION" | jq -r .session_id)
 curl -sS -X POST -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
   -d '{"text":"something about a ring of hashes, not sure beyond that"}' \
   $B/sessions/$SID/answers                                  # -> status: follow_up
+
+# A thin answer to probe 1: enough to be scored, not enough to separate adjacent
+# scores. The model may answer `needs_more_evidence` here, in which case this
+# returns a second `follow_up` prefaced "Last one — ". Either outcome is correct;
+# the cap is two, so the turn after a second probe always completes.
+curl -sS -X POST -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"text":"virtual nodes help spread things out, I think"}' \
+  $B/sessions/$SID/answers                  # -> status: follow_up OR complete
 curl -sS -X POST -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
   -d '{"text":"virtual nodes spread each server over many ring positions"}' \
-  $B/sessions/$SID/answers                                  # -> status: complete
+  $B/sessions/$SID/answers                  # -> status: complete (409 if already)
+```
+
+If a second probe was issued, confirm it was recorded as a row rather than
+overwriting the first:
+
+```sql
+select idx, left(question, 40), left(answer, 40)
+  from session_probes where session_id = '<SID>' order by idx;
 ```
 
 Logs should show `llm model=... ms=... in=... out=...`. Confirm SM-2 applied exactly
@@ -567,8 +583,12 @@ device:
    `SCORING_MODEL`, `SCORING_EFFORT`, or any provider credential.
 4. Confirm `GET /settings` returns `2`, then complete one ordinary review at each
    final Recall band needed to prove both branches: `0–2` offers the existing
-   re-attempt; `3–5` offers **Go one level deeper**. A provisional `1–3` may use
-   one scored follow-up; `0` and `4–5` must not.
+   re-attempt; `3–5` offers **Go one level deeper**. Follow-ups must match the
+   amended truth table in `docs/SCORING-CONTRACT-V2-SPEC.md`: on the initial
+   answer a provisional `1–3` probes and `0`/`4–5` must not; after one answered
+   probe only `needs_more_evidence: true` probes again; at two answered probes
+   the turn always completes with `needs_more_evidence` false and no probe.
+   V2 is fail-closed, so any departure is a 503, not a quietly dropped probe.
 5. Verify the new session row: `score = accuracy`, `depth IS NULL`,
    `boundaries IS NULL`, and `scoring_contract_version = 2`. Verify the card's
    `last_score = last_accuracy`, secondary axes are null, and

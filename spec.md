@@ -21,8 +21,9 @@ scope" at the bottom before adding anything.
 Devmax is a single-user conversational spaced-repetition study app for
 technical interview prep. A scheduled job pushes a notification; the user
 opens the iOS app, gets asked a question about a concept, answers by voice
-or text, gets one follow-up probe if the answer was partial, then gets
-scored 0–5. The score drives an SM-2 schedule that decides when the topic
+or text, gets up to two follow-up probes — the first if the answer was
+partial, a second only if the model still lacks the signal to score honestly
+— then gets scored 0–5. The score drives an SM-2 schedule that decides when the topic
 comes back.
 
 This backend serves that iOS client and receives a cron webhook. The original
@@ -175,21 +176,50 @@ transaction. Replaying a successful activation returns the same card.
 | `id` | UUID PK | |
 | `card_id` | UUID FK → cards, ON DELETE CASCADE | |
 | `question_asked` | text NOT NULL | the opening question |
-| `follow_up_question` | text NULL | set if a follow-up was issued |
+| `follow_up_question` | text NULL | **frozen legacy** — see `session_probes` |
 | `answer_text` | text NOT NULL DEFAULT '' | first answer |
-| `follow_up_answer` | text NOT NULL DEFAULT '' | second answer if any |
+| `follow_up_answer` | text NOT NULL DEFAULT '' | **frozen legacy** — see `session_probes` |
 | `draft_text` | text NOT NULL DEFAULT '' | in-progress, unsubmitted |
 | `score` | smallint NULL | final score, null until complete |
 | `feedback` | text NOT NULL DEFAULT '' | one-line, generated |
-| `follow_up_used` | bool NOT NULL DEFAULT false | |
+| `follow_up_used` | bool NOT NULL DEFAULT false | true once any probe was issued |
 | `status` | text NOT NULL | `'open'` / `'awaiting_follow_up'` / `'complete'` / `'abandoned'` |
 | `started_at` | timestamptz NOT NULL DEFAULT now() | |
 | `ended_at` | timestamptz NULL | |
 
 Index on `(card_id, started_at DESC)`.
 
+The two `follow_up_*` text columns held the single probe a session could once
+carry. They are **kept and frozen** by migration 0015: every historical row keeps
+its own evidence and the downgrade has somewhere to put a probe back, but nothing
+reads or writes them. `follow_up_used` is still written, and still means "a scored
+probe was issued in this session".
+
 A card is **resumable** if it has a session with
 `status IN ('open','awaiting_follow_up')` and non-empty `draft_text`.
+
+### `session_probes`
+
+| column | type | notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `session_id` | UUID FK → sessions, ON DELETE CASCADE | |
+| `idx` | smallint NOT NULL | 1-based probe order, `CHECK (idx >= 1)` |
+| `question` | text NOT NULL | the probe as asked |
+| `answer` | text NOT NULL DEFAULT '' | `''` while this probe is unanswered |
+| `created_at` | timestamptz NOT NULL | |
+
+Unique on `(session_id, idx)`.
+
+One row per scored follow-up, written unanswered the moment its question is
+issued. `status = 'awaiting_follow_up'` means "a scored probe is pending"; *which*
+one is the last row, and its `answer` is empty. There is deliberately **no
+`CHECK (idx <= 2)`**: the cap is one decision and it lives in one place,
+`llm.MAX_SCORED_FOLLOW_UPS`, re-checked at the write site.
+
+Every row here is scored and pre-correction by definition. That is why the coached
+re-attempt and the qualitative coaching turn stay in scalar columns on `sessions`
+— they happen after the correction has been stated and never reach SM-2.
 
 ### `device_tokens`
 
@@ -295,7 +325,12 @@ Prompt shape:
 > repeat any of the recent questions listed. Return JSON:
 > `{"question": "..."}`
 
-### `score_answer(card, session, answer, is_follow_up) -> ScoreResult`
+### `score_answer(card, session, answer, probes) -> ScoreResult`
+
+`probes` is the session's scored follow-ups as ordered `(question, answer)`
+pairs — empty on the initial answer, and when the learner is answering probe
+*k* the k-th pair carries the text they just submitted. `probes_used =
+len(probes)` is what every rule below is keyed on.
 
 Returns one of two shapes:
 
@@ -309,14 +344,25 @@ Rules to encode in the prompt:
 
 - Score 0–5 on **mechanism accuracy, trade-off awareness, and failure-mode
   awareness** — not on fluency, length, or confidence.
-- If the score would be 2 or 3 **and** `follow_up_used` is false, return
-  `status: "follow_up"` with a probe targeting the specific gap instead of
-  scoring. Otherwise return `status: "complete"`.
-- **Maximum one follow-up per session** — if `follow_up_used` is already
-  true, always return `complete`. A session may carry at most one further
-  *coached re-attempt* after completion; it is a separate call
-  (`llm.score_reattempt`) on a separate endpoint and never reaches SM-2.
+- The model also returns `needs_more_evidence`: true only when the transcript
+  cannot honestly distinguish adjacent scores and one further probe would
+  settle it. It reports missing signal, not a wrong answer — a wrong essential
+  account is scored, not probed.
+- Two-stage follow-up policy, decided in the parser, never by the model:
+  - `probes_used == 0`: if the score would be 2 or 3, return
+    `status: "follow_up"` with a probe targeting the specific gap. This is the
+    band rule, unchanged; a stray `needs_more_evidence` cannot widen it.
+  - `0 < probes_used < MAX_SCORED_FOLLOW_UPS`: probe again only if
+    `needs_more_evidence` is true.
+  - `probes_used == MAX_SCORED_FOLLOW_UPS`: always `complete`.
+- **Maximum `MAX_SCORED_FOLLOW_UPS` (2) scored follow-ups per session.** The cap
+  is structural: both parsers enforce it and `submit_answer` re-checks it at the
+  write site, so a prompt alone can never extend a session. A session may carry
+  at most one further *coached re-attempt* after completion; it is a separate
+  call (`llm.score_reattempt`) on a separate endpoint and never reaches SM-2.
   See `docs/multi-turn-coaching-design.md`.
+- The probe's preface names the turn: "One more — " for the first,
+  "Last one — " for the second.
 - `feedback` is one or two sentences, specific to what was said and what
   was missed. Not generic encouragement.
 - `mastery_summary` is a rewritten rolling summary (1–2 sentences,
@@ -400,8 +446,12 @@ Card fields plus its session history:
 no live answer currently owns the card. It is false while a session is open or
 awaiting a follow-up; the learning POST rechecks this under the card lock.
 
-Build `turns` server-side from the session columns — the client shouldn't
-assemble transcript ordering.
+Build `turns` server-side from the session row and its `session_probes` — the
+client shouldn't assemble transcript ordering. The shape is `question`,
+`answer`, then **0–2 `follow_up`/`answer` pairs** in `idx` order, then `score`;
+the example above shows the one-probe case. Load the probes for all of a card's
+sessions in one query — per-session loading is an N+1 that grows with the card's
+history.
 
 ### `GET /cards/overview`
 
@@ -560,15 +610,21 @@ never blocked behind anything slow.
 ```
 
 Behavior:
-1. Persist the answer to `answer_text` (or `follow_up_answer` if
-   `status == 'awaiting_follow_up'`), clear `draft_text`.
-2. Call `llm.score_answer`.
-3. If `status: "follow_up"` — store `follow_up_question`, set
-   `follow_up_used = true`, set session status to `'awaiting_follow_up'`,
-   return:
+1. Load the session's probes in `idx` order. The answer belongs to
+   `answer_text` on the first turn, and to the pending probe's `answer`
+   (the last row, still empty) once `status == 'awaiting_follow_up'`.
+   Clear `draft_text`.
+2. Call `llm.score_answer` with the probe pairs, **before writing anything** —
+   an exact replay of the last answered turn short-circuits here and returns the
+   pending probe again without a model call.
+3. If `status: "follow_up"` — insert a `session_probes` row at
+   `idx = len(probes) + 1` holding the new question, set `follow_up_used = true`,
+   set session status to `'awaiting_follow_up'`, return:
    ```json
    {"status": "follow_up", "question": "One more — ..."}
    ```
+   Refuse a follow-up returned at `MAX_SCORED_FOLLOW_UPS`: the parsers already
+   do, and the write site checks again so the cap survives a parser bug.
 4. If `status: "complete"` — store `score`, `feedback`; set session status
    `'complete'` and `ended_at`; update the card's `last_score` and
    `mastery_summary`; run `apply_sm2` and persist the new
@@ -585,7 +641,10 @@ Behavior:
 
 Steps 1–4 for the complete case must be a **single transaction** — a
 partial write here (answer saved, SM-2 not applied) leaves a card
-permanently stuck.
+permanently stuck. The follow-up case is one transaction too: the answered
+probe (or `answer_text`), the new probe row, and the session status commit
+together, so a session can never be `'awaiting_follow_up'` with no pending
+probe to answer.
 
 Return 409 if the session is already `'complete'`.
 
@@ -705,8 +764,10 @@ At minimum:
   must classify as `cold`; a card with `repetitions == 0` and
   `last_score == null` must classify as `untested`, not `shaky`.
 - **Follow-up flow integration test** — mock the LLM, assert that a score
-  of 2 with `follow_up_used=false` returns a follow-up, and that the same
-  score with `follow_up_used=true` completes.
+  of 2 on the initial answer returns a follow-up, that a second probe is
+  issued only on `needs_more_evidence`, that the third scored turn always
+  completes, and that a follow-up returned at the cap is refused with the
+  session and card unchanged.
 - **Transaction integrity** — assert that an LLM failure mid-scoring
   leaves the session and card unchanged, not half-written.
 - **Auth** — wrong/missing key returns 401 on both client and internal
