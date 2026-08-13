@@ -1,10 +1,10 @@
 """Tests for the scoring gate in services/llm.py.
 
-`score_answer`'s follow-up decision is the structural half of "maximum one
-follow-up per session" — the model always writes a probe and returns a provisional
-score, and this code decides whether the probe is used. Every other test in the
-suite monkeypatches `score_answer` wholesale, so without this file the invariant
-has no coverage at all.
+`score_answer`'s follow-up decision is the structural half of "at most
+`MAX_SCORED_FOLLOW_UPS` scored follow-ups per session" — the model always writes a
+probe and returns a provisional score, and this code decides whether the probe is
+used. Every other test in the suite monkeypatches `score_answer` wholesale, so
+without this file the invariant has no coverage at all.
 """
 
 import json
@@ -22,9 +22,16 @@ SCORE_ARGS = dict(
     mastery_summary="",
     question_asked="What problem does consistent hashing solve?",
     answer_text="It keeps most keys in place when a node joins.",
-    follow_up_question=None,
-    follow_up_answer="",
 )
+
+# The parsers gate on how many scored follow-ups a session has already taken, so
+# these name the turn rather than the content. `AT_CAP` is what a test uses when it
+# wants a completed result regardless of score.
+NO_PROBES: list[tuple[str, str]] = []
+ONE_PROBE = [("One more — what moves?", "Only the keys on one arc.")]
+AT_CAP = ONE_PROBE + [
+    ("Last one — what are virtual nodes for?", "They spread each node over the ring.")
+]
 
 
 # One axis triple per composite band. The model no longer returns a composite, so
@@ -47,7 +54,9 @@ def test_proposal_schema_and_activation_share_the_rubric_fields():
     assert tuple(rubric["required"]) == RUBRIC_FIELDS
 
 
-def scored(score: Any, probe: str | None = "probe?") -> dict[str, Any]:
+def scored(
+    score: Any, probe: str | None = "probe?", *, needs: bool = False
+) -> dict[str, Any]:
     """A well-formed scoring response deriving to `score`.
 
     `probe=None` omits the follow-up entirely.
@@ -58,6 +67,7 @@ def scored(score: Any, probe: str | None = "probe?") -> dict[str, Any]:
         "depth": trade_offs,
         "boundaries": failure_modes,
         "feedback": "f",
+        "needs_more_evidence": needs,
         "mastery_summary": "m",
     }
     if probe is not None:
@@ -97,26 +107,68 @@ async def test_only_shaky_scores_probe(
 ) -> None:
     stub_completion(monkeypatch, scored(score))
 
-    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
+    result = await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)
 
     assert result.status == expected
 
 
+@pytest.mark.parametrize("needs", [True, False])
+async def test_the_band_alone_decides_the_first_probe(
+    monkeypatch: pytest.MonkeyPatch, needs: bool
+) -> None:
+    """`needs_more_evidence` is ignored on turn 1, in both directions.
+
+    A stray `true` cannot widen the band, and a `false` cannot narrow it — the
+    first probe is exactly the rule the app already ships.
+    """
+    stub_completion(monkeypatch, scored(2, needs=needs))
+    assert (await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)).status == "follow_up"
+
+    stub_completion(monkeypatch, scored(5, needs=needs))
+    assert (await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)).status == "complete"
+
+
 @pytest.mark.parametrize("score", [0, 1, 2, 3, 4, 5])
-async def test_a_used_follow_up_always_completes(
+async def test_at_the_cap_every_score_completes(
     monkeypatch: pytest.MonkeyPatch, score: int
 ) -> None:
-    """The second answer of a session can never produce a third turn.
+    """The answer to the last permitted probe can never produce another turn.
 
     This is enforced here in code rather than by asking the model nicely — the
-    model still writes a probe, and it is discarded.
+    model still writes a probe and may still claim it needs more evidence, and
+    both are discarded.
     """
-    stub_completion(monkeypatch, scored(score))
+    stub_completion(monkeypatch, scored(score, needs=True))
 
-    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    result = await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert result.status == "complete"
     assert result.score == score
+
+
+# Mid-session — one probe taken, one still available — the band no longer decides;
+# only the model saying it still cannot tell adjacent scores apart earns a turn.
+@pytest.mark.parametrize(
+    ("score", "needs", "probe", "expected"),
+    [
+        (2, True, "Last one — why?", "follow_up"),
+        (3, True, "Last one — why?", "follow_up"),
+        # A score inside the band is not enough on its own past the first probe.
+        (2, False, "Last one — why?", "complete"),
+        (0, True, "Last one — why?", "follow_up"),
+        (5, True, "Last one — why?", "follow_up"),
+        # Tolerant, as on turn 1: a claim with no probe to act on completes.
+        (2, True, "", "complete"),
+    ],
+)
+async def test_after_the_first_probe_only_insufficiency_probes_again(
+    monkeypatch: pytest.MonkeyPatch, score: int, needs: bool, probe: str, expected: str
+) -> None:
+    stub_completion(monkeypatch, scored(score, probe, needs=needs))
+
+    result = await llm.score_answer(**SCORE_ARGS, probes=ONE_PROBE)
+
+    assert result.status == expected
 
 
 @pytest.mark.parametrize("probe", ["", "   "])
@@ -125,7 +177,7 @@ async def test_a_shaky_score_without_a_probe_completes(
 ) -> None:
     stub_completion(monkeypatch, scored(2, probe))
 
-    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
+    result = await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)
 
     assert result.status == "complete"
     assert result.score == 2
@@ -136,7 +188,7 @@ async def test_follow_up_result_carries_the_probe_and_no_score(
 ) -> None:
     stub_completion(monkeypatch, scored(2, " One more — "))
 
-    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
+    result = await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)
 
     assert result.status == "follow_up"
     assert result.follow_up_question == "One more —"
@@ -145,23 +197,54 @@ async def test_follow_up_result_carries_the_probe_and_no_score(
     assert result.score is None
 
 
+async def test_a_second_probe_result_also_carries_no_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_completion(monkeypatch, scored(2, " Last one — ", needs=True))
+
+    result = await llm.score_answer(**SCORE_ARGS, probes=ONE_PROBE)
+
+    assert result.status == "follow_up"
+    assert result.follow_up_question == "Last one —"
+    assert result.score is None
+
+
 async def test_the_prior_follow_up_turns_are_sent_for_the_second_scoring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Every probe pair reaches the transcript, in order."""
     calls = stub_completion(monkeypatch, scored(4, probe=None))
 
-    await llm.score_answer(
-        **{
-            **SCORE_ARGS,
-            "follow_up_question": "What are virtual nodes for?",
-            "follow_up_answer": "They spread each node over many ring positions.",
-        },
-        follow_up_used=True,
-    )
+    await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     sent = calls[0]["user_content"]
-    assert "What are virtual nodes for?" in sent
-    assert "They spread each node over many ring positions." in sent
+    for question, answer in AT_CAP:
+        assert question in sent
+        assert answer in sent
+    assert sent.index(AT_CAP[0][0]) < sent.index(AT_CAP[1][0])
+    assert sent.index(SCORE_ARGS["answer_text"]) < sent.index(AT_CAP[0][0])
+
+
+@pytest.mark.parametrize(
+    ("probes", "used", "final"),
+    [(NO_PROBES, 0, "no"), (ONE_PROBE, 1, "no"), (AT_CAP, 2, "yes")],
+)
+@pytest.mark.parametrize(
+    "builder", [llm.build_score_answer_completion, llm.build_score_v2_completion]
+)
+def test_both_builders_state_the_turn_and_the_cap(builder, probes, used, final) -> None:
+    """The model is told where it is and that the turn may be its last.
+
+    Both contracts, one wording — the preface rule keys off the count, so a V1/V2
+    divergence here would show up as the wrong copy on the second probe.
+    """
+    completion = builder(
+        model="test", effort=None, **SCORE_ARGS, probes=probes
+    )
+
+    sent = completion["user_content"]
+    assert f"SCORED FOLLOW-UPS USED: {used} of {llm.MAX_SCORED_FOLLOW_UPS}" in sent
+    assert f"FINAL SCORED TURN: {final}" in sent
 
 
 @pytest.mark.parametrize(
@@ -186,7 +269,7 @@ async def test_an_unusable_score_raises_llm_error(
     stub_completion(monkeypatch, payload)
 
     with pytest.raises(llm.LLMError):
-        await llm.score_answer(**SCORE_ARGS, follow_up_used=False)
+        await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)
 
 
 # --- the composite ----------------------------------------------------------
@@ -228,7 +311,7 @@ async def test_the_axes_are_carried_onto_the_result(monkeypatch: pytest.MonkeyPa
     """They are persisted per session and rolled up on Coverage."""
     stub_completion(monkeypatch, scored(4))
 
-    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    result = await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert (result.accuracy, result.depth) == (4, 3)
     assert result.boundaries == 0
@@ -238,33 +321,50 @@ async def test_the_axes_are_carried_onto_the_result(monkeypatch: pytest.MonkeyPa
 # --- V2 Recall-only contract -------------------------------------------------
 
 
-def recalled(score: int, probe: str = "") -> dict[str, Any]:
+def recalled(score: int, probe: str = "", *, needs: bool = False) -> dict[str, Any]:
     return {
         "recall_score": score,
         "feedback": "recall feedback",
         "follow_up_question": probe,
+        "needs_more_evidence": needs,
         "mastery_summary": "recalled the essential account",
     }
 
 
+PROBE = "One more — missing link?"
+
+
+# The V2 contract in full. Turn 1 is decided by the band and `needs_more_evidence`
+# may say either thing; past it the flag decides alone; at the cap nothing probes.
 @pytest.mark.parametrize(
-    ("score", "probe", "expected"),
+    ("probes", "score", "needs", "probe", "expected"),
     [
-        (0, "", "complete"),
-        (1, "One more — missing link?", "follow_up"),
-        (2, "One more — missing link?", "follow_up"),
-        (3, "One more — missing link?", "follow_up"),
-        (4, "", "complete"),
-        (5, "", "complete"),
+        (NO_PROBES, 0, False, "", "complete"),
+        (NO_PROBES, 1, False, PROBE, "follow_up"),
+        (NO_PROBES, 2, False, PROBE, "follow_up"),
+        (NO_PROBES, 3, False, PROBE, "follow_up"),
+        # In band, the model additionally says it lacks signal: still one probe.
+        (NO_PROBES, 2, True, PROBE, "follow_up"),
+        (NO_PROBES, 4, False, "", "complete"),
+        (NO_PROBES, 5, False, "", "complete"),
+        (ONE_PROBE, 2, True, PROBE, "follow_up"),
+        (ONE_PROBE, 5, True, PROBE, "follow_up"),
+        (ONE_PROBE, 2, False, "", "complete"),
+        (AT_CAP, 2, False, "", "complete"),
     ],
 )
 async def test_v2_follow_up_truth_table(
-    monkeypatch: pytest.MonkeyPatch, score: int, probe: str, expected: str
+    monkeypatch: pytest.MonkeyPatch,
+    probes: list[tuple[str, str]],
+    score: int,
+    needs: bool,
+    probe: str,
+    expected: str,
 ) -> None:
-    calls = stub_completion(monkeypatch, recalled(score, probe))
+    calls = stub_completion(monkeypatch, recalled(score, probe, needs=needs))
 
     result = await llm.score_answer(
-        **SCORE_ARGS, follow_up_used=False, scoring_contract_version=2
+        **SCORE_ARGS, probes=probes, scoring_contract_version=2
     )
 
     assert result.status == expected
@@ -279,7 +379,7 @@ async def test_v2_complete_result_is_recall_and_has_no_secondary_axes(
     stub_completion(monkeypatch, recalled(4))
 
     result = await llm.score_answer(
-        **SCORE_ARGS, follow_up_used=True, scoring_contract_version=2
+        **SCORE_ARGS, probes=AT_CAP, scoring_contract_version=2
     )
 
     assert result.score == result.accuracy == 4
@@ -289,6 +389,7 @@ async def test_v2_complete_result_is_recall_and_has_no_secondary_axes(
         "recall_score",
         "feedback",
         "follow_up_question",
+        "needs_more_evidence",
         "mastery_summary",
     }
     assert llm.SCORE_V2_SCHEMA["additionalProperties"] is False
@@ -309,39 +410,76 @@ async def test_v2_unusable_recall_raises_llm_error(
     stub_completion(monkeypatch, payload)
     with pytest.raises(llm.LLMError):
         await llm.score_answer(
-            **SCORE_ARGS, follow_up_used=False, scoring_contract_version=2
+            **SCORE_ARGS, probes=NO_PROBES, scoring_contract_version=2
         )
 
 
-async def test_v2_used_follow_up_cannot_create_a_third_scored_turn(
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {key: value for key, value in recalled(4).items() if key != "needs_more_evidence"},
+        {**recalled(4), "needs_more_evidence": None},
+        {**recalled(4), "needs_more_evidence": "yes"},
+        {**recalled(4), "needs_more_evidence": 1},
+    ],
+)
+async def test_v2_missing_or_non_boolean_evidence_flag_raises(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+) -> None:
+    """The flag is a required schema field; V2 never guesses what was meant."""
+    stub_completion(monkeypatch, payload)
+    with pytest.raises(llm.LLMError):
+        await llm.score_answer(
+            **SCORE_ARGS, probes=AT_CAP, scoring_contract_version=2
+        )
+
+
+async def test_v2_at_the_cap_cannot_create_another_scored_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stub_completion(monkeypatch, recalled(2))
 
     result = await llm.score_answer(
-        **SCORE_ARGS, follow_up_used=True, scoring_contract_version=2
+        **SCORE_ARGS, probes=AT_CAP, scoring_contract_version=2
     )
 
     assert result.status == "complete"
     assert result.score == 2
 
 
+# Every departure from the table above, in both directions. V2 is still dark, so a
+# violation must be loud rather than silently coerced the way V1 coerces it.
 @pytest.mark.parametrize(
-    ("score", "used", "probe"),
+    ("probes", "score", "needs", "probe"),
     [
-        (2, False, ""),
-        (0, False, "One more — forbidden"),
-        (4, False, "One more — forbidden"),
-        (2, True, "One more — forbidden"),
+        # Turn 1: the band demanded a probe and none came.
+        (NO_PROBES, 2, False, ""),
+        (NO_PROBES, 2, True, ""),
+        # Turn 1: outside the band, a probe is forbidden — and so is the claim.
+        (NO_PROBES, 0, False, "One more — forbidden"),
+        (NO_PROBES, 4, False, "One more — forbidden"),
+        (NO_PROBES, 0, True, ""),
+        (NO_PROBES, 4, True, "One more — forbidden"),
+        # Mid-session: the flag alone decides, and must agree with the probe.
+        (ONE_PROBE, 2, False, "Last one — forbidden"),
+        (ONE_PROBE, 2, True, ""),
+        # At the cap: no probe, and no claim that one is needed.
+        (AT_CAP, 2, False, "Last one — forbidden"),
+        (AT_CAP, 2, True, "Last one — forbidden"),
+        (AT_CAP, 2, True, ""),
     ],
 )
 async def test_v2_invalid_follow_up_policy_fails_closed(
-    monkeypatch: pytest.MonkeyPatch, score: int, used: bool, probe: str
+    monkeypatch: pytest.MonkeyPatch,
+    probes: list[tuple[str, str]],
+    score: int,
+    needs: bool,
+    probe: str,
 ) -> None:
-    stub_completion(monkeypatch, recalled(score, probe))
+    stub_completion(monkeypatch, recalled(score, probe, needs=needs))
     with pytest.raises(llm.LLMError):
         await llm.score_answer(
-            **SCORE_ARGS, follow_up_used=used, scoring_contract_version=2
+            **SCORE_ARGS, probes=probes, scoring_contract_version=2
         )
 
 
@@ -419,7 +557,7 @@ async def test_no_cache_control_is_sent(fake_client):
     never fills. Keeping it out is deliberate; see the comment on SCORING_RUBRIC.
     """
     client = fake_client(make_response(scored(4)))
-    await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert client.calls[0]["system"] == [{"type": "text", "text": llm.SCORING_RUBRIC}]
     assert "cache_control" not in json.dumps(client.calls[0])
@@ -456,7 +594,7 @@ async def test_v2_usage_and_outcome_logs_are_attributed_to_the_contract(
 
     with caplog.at_level("INFO", logger="app.services.llm"):
         await llm.score_answer(
-            **SCORE_ARGS, follow_up_used=True, scoring_contract_version=2
+            **SCORE_ARGS, probes=AT_CAP, scoring_contract_version=2
         )
 
     messages = [record.getMessage() for record in caplog.records]
@@ -474,7 +612,7 @@ async def test_v2_contract_failure_is_attributed_for_invalid_rate(monkeypatch, c
     with caplog.at_level("WARNING", logger="app.services.llm"):
         with pytest.raises(llm.LLMError):
             await llm.score_answer(
-                **SCORE_ARGS, follow_up_used=False, scoring_contract_version=2
+                **SCORE_ARGS, probes=NO_PROBES, scoring_contract_version=2
             )
 
     assert "llm purpose=score_v2 event=invalid_contract" in [
@@ -504,7 +642,7 @@ async def test_effort_is_passed_through_when_set(fake_client, monkeypatch):
     client = fake_client(make_response(scored(4)))
     monkeypatch.setattr(llm.get_settings(), "scoring_effort", "low")
 
-    await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert client.calls[0]["output_config"]["effort"] == "low"
 
@@ -515,12 +653,12 @@ async def test_paid_preflight_builder_is_the_exact_scoring_request(
     client = fake_client(make_response(scored(4)))
     monkeypatch.setattr(llm.get_settings(), "scoring_effort", "low")
 
-    await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
     completion = llm.build_score_answer_completion(
         model=llm.get_settings().scoring_model,
         effort="low",
         **SCORE_ARGS,
-        follow_up_used=True,
+        probes=AT_CAP,
     )
     counted = llm.count_params_for_completion(completion)
 
@@ -545,7 +683,7 @@ def test_client_is_cached_with_explicit_limits():
 async def test_unparseable_output_is_retried_once(fake_client):
     client = fake_client(make_response(text="Here you go: {oops"), make_response(scored(4)))
 
-    result = await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+    result = await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert len(client.calls) == 2
     assert result.score == 4
@@ -555,7 +693,7 @@ async def test_unparseable_twice_raises(fake_client):
     client = fake_client(make_response(text="nope"), make_response(text="still nope"))
 
     with pytest.raises(llm.LLMError):
-        await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+        await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert len(client.calls) == 2
 
@@ -565,7 +703,7 @@ async def test_transport_failure_is_not_retried_here(fake_client):
     client = fake_client(RuntimeError("overloaded"))
 
     with pytest.raises(llm.LLMError):
-        await llm.score_answer(**SCORE_ARGS, follow_up_used=True)
+        await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
 
     assert len(client.calls) == 1
 

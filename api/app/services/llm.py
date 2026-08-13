@@ -7,6 +7,7 @@ unit-testable — the callers pass plain values, not ORM sessions.
 import json
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -29,6 +30,13 @@ log = logging.getLogger(__name__)
 # §15 has the reasoning.
 FOLLOW_UP_LOW = 1
 FOLLOW_UP_HIGH = 3
+
+# How many *scored* follow-ups a session may take, and the only place that number
+# is decided. The parsers below enforce it and the router re-checks it at the write
+# site, so a prompt alone can never extend a session. `session_probes` deliberately
+# carries no `idx <= N` CHECK constraint — a second copy of the cap in the schema
+# would have to be migrated in lockstep with this line.
+MAX_SCORED_FOLLOW_UPS = 2
 
 # Retries match the SDK's own default, pinned so a future SDK change can't
 # quietly alter how long a session can stall. The timeout is the real
@@ -106,11 +114,17 @@ alternative the approved rubric accepts.
   Never generic encouragement. Never congratulatory.
 
 `follow_up_question` is a probe at the single most important gap in this answer, \
-phrased as one short question and prefaced with "One more — ". Always write one, \
+phrased as one short question. Preface it "One more — " when no scored follow-up has \
+been used and "Last one — " when one has. Always write one, \
 even when the answer was strong; the caller decides whether to use it.
 Anchor it in what was actually said — refer to the specific claim, term, or example \
 the answer used, so the probe could not have been written before hearing it. A probe \
 that would fit any answer to this question is a failure.
+
+`needs_more_evidence` is true only when, after this transcript, you cannot honestly \
+distinguish between adjacent scores and one further probe would settle it. It reports \
+missing signal, not a wrong answer: a wrong essential account is scored, not probed. \
+Otherwise it is false.
 
 {MASTERY_SUMMARY_RULE}
 
@@ -143,11 +157,19 @@ cases unless the canonical question makes one part of the essential account.
 and, if needed, the single bounded omission that kept it from the next score.
 Never congratulate and never imply a numeric Depth or Boundaries grade.
 
-`follow_up_question` is non-empty only when recall_score is 1-3 and the transcript \
-says no follow-up has been used. In that case, write one short probe prefaced \
-"One more — " at the single missing essential link. For recall_score 0 or 4-5, \
-or after a follow-up was already used, return an empty string. The server validates \
-this policy and structurally caps the session at one scored follow-up.
+`needs_more_evidence` is true only when, after this transcript, you cannot honestly \
+distinguish between adjacent Recall scores and one further probe would settle it. It \
+reports missing signal, not a wrong answer: a wrong essential account is scored, not \
+probed. Otherwise it is false.
+
+`follow_up_question` is one short probe at the single missing essential link, and is \
+non-empty in exactly two cases. When the transcript says no scored follow-up has been \
+used, write it prefaced "One more — " whenever recall_score is 1-3; for recall_score \
+0 or 4-5 return an empty string and `needs_more_evidence` false. When one scored \
+follow-up has been used, write it prefaced "Last one — " if and only if \
+`needs_more_evidence` is true. On the final scored turn, return an empty string and \
+`needs_more_evidence` false. The server validates this policy and structurally caps \
+the session at two scored follow-ups.
 
 `mastery_summary` replaces the prior rolling summary. Write one or two sentences \
 in lowercase fragment style describing essential-account recall only: unaided, \
@@ -634,6 +656,7 @@ SCORE_SCHEMA: dict[str, Any] = {
         "boundaries": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
         "feedback": {"type": "string"},
         "follow_up_question": {"type": "string"},
+        "needs_more_evidence": {"type": "boolean"},
         "mastery_summary": {"type": "string"},
     },
     "required": [
@@ -642,6 +665,7 @@ SCORE_SCHEMA: dict[str, Any] = {
         "boundaries",
         "feedback",
         "follow_up_question",
+        "needs_more_evidence",
         "mastery_summary",
     ],
     "additionalProperties": False,
@@ -653,12 +677,14 @@ SCORE_V2_SCHEMA: dict[str, Any] = {
         "recall_score": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
         "feedback": {"type": "string"},
         "follow_up_question": {"type": "string"},
+        "needs_more_evidence": {"type": "boolean"},
         "mastery_summary": {"type": "string"},
     },
     "required": [
         "recall_score",
         "feedback",
         "follow_up_question",
+        "needs_more_evidence",
         "mastery_summary",
     ],
     "additionalProperties": False,
@@ -721,10 +747,12 @@ class LLMError(RuntimeError):
 class ScoreResult:
     """Either a follow-up probe or a final score — never both.
 
-    The follow-up decision is made *here*, in code, from the score the model
-    returned. The model always writes a probe; whether it gets used depends on
-    ``follow_up_used``, so "maximum one follow-up per session" is structurally
-    guaranteed rather than dependent on the model obeying a prompt.
+    The follow-up decision is made *here*, in code. The model always writes a
+    probe and reports whether it still lacks signal; the parsers decide from
+    ``probes_used`` whether that probe is used — today's band rule for the first
+    one, the model's ``needs_more_evidence`` claim for the second. At
+    ``MAX_SCORED_FOLLOW_UPS`` the result is structurally complete whatever the
+    model wrote, so the cap holds without depending on the model obeying a prompt.
     """
 
     status: str  # "follow_up" | "complete"
@@ -1000,6 +1028,20 @@ async def generate_question(
     return question
 
 
+def _turn_state_lines(probes: Sequence[tuple[str, str]]) -> list[str]:
+    """Tell the model where in the session it is, in both contracts.
+
+    Two lines rather than one: the count drives which preface the probe takes, and
+    the explicit final-turn flag means the model never has to do the arithmetic. It
+    is told the cap, but is not trusted with it — the parsers enforce it regardless
+    of what comes back.
+    """
+    return [
+        f"SCORED FOLLOW-UPS USED: {len(probes)} of {MAX_SCORED_FOLLOW_UPS}",
+        f"FINAL SCORED TURN: {'yes' if len(probes) == MAX_SCORED_FOLLOW_UPS else 'no'}",
+    ]
+
+
 def build_score_answer_completion(
     *,
     model: str,
@@ -1008,9 +1050,7 @@ def build_score_answer_completion(
     mastery_summary: str,
     question_asked: str,
     answer_text: str,
-    follow_up_question: str | None,
-    follow_up_answer: str,
-    follow_up_used: bool,
+    probes: Sequence[tuple[str, str]],
     answer_anchor: str = "",
     source_excerpt: str = "",
     answer_basis: str = "",
@@ -1020,6 +1060,10 @@ def build_score_answer_completion(
 
     Production scoring and paid-evaluation token preflight deliberately share this
     builder so model, prompt, schema, and effort cannot drift.
+
+    ``probes`` is the ordered (question, answer) pairs of the scored follow-ups
+    taken so far — empty on the initial answer, and when the learner is answering
+    probe *k* the k-th pair carries the text they just submitted.
     """
     transcript = [
         f"Topic: {topic}",
@@ -1027,12 +1071,13 @@ def build_score_answer_completion(
         f"A good answer should include: {answer_anchor}" if answer_anchor else None,
         f"Source excerpt: {source_excerpt}" if source_excerpt else None,
         *_grounding_context(answer_basis, answer_rubric),
+        *_turn_state_lines(probes),
         "",
         f"QUESTION: {question_asked}",
         f"ANSWER: {answer_text}",
     ]
-    if follow_up_used and follow_up_question:
-        transcript += [f"FOLLOW-UP: {follow_up_question}", f"ANSWER: {follow_up_answer}"]
+    for probe_question, probe_answer in probes:
+        transcript += [f"FOLLOW-UP: {probe_question}", f"ANSWER: {probe_answer}"]
 
     return {
         "model": model,
@@ -1052,28 +1097,29 @@ def build_score_v2_completion(
     mastery_summary: str,
     question_asked: str,
     answer_text: str,
-    follow_up_question: str | None,
-    follow_up_answer: str,
-    follow_up_used: bool,
+    probes: Sequence[tuple[str, str]],
     answer_anchor: str = "",
     source_excerpt: str = "",
     answer_basis: str = "",
     answer_rubric: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Prepare the single-signal V2 call without sending it."""
+    """Prepare the single-signal V2 call without sending it.
+
+    ``probes`` carries the same ordered (question, answer) pairs as the V1 builder.
+    """
     transcript = [
         f"Topic: {topic}",
         f"Rolling Recall summary: {mastery_summary}" if mastery_summary else None,
         f"A good answer should include: {answer_anchor}" if answer_anchor else None,
         f"Source excerpt: {source_excerpt}" if source_excerpt else None,
         *_grounding_context(answer_basis, answer_rubric, v2_aliases=True),
-        f"FOLLOW-UP ALREADY USED: {'yes' if follow_up_used else 'no'}",
+        *_turn_state_lines(probes),
         "",
         f"QUESTION: {question_asked}",
         f"ANSWER: {answer_text}",
     ]
-    if follow_up_used and follow_up_question:
-        transcript += [f"FOLLOW-UP: {follow_up_question}", f"ANSWER: {follow_up_answer}"]
+    for probe_question, probe_answer in probes:
+        transcript += [f"FOLLOW-UP: {probe_question}", f"ANSWER: {probe_answer}"]
 
     return {
         "model": model,
@@ -1092,9 +1138,7 @@ async def score_answer(
     mastery_summary: str,
     question_asked: str,
     answer_text: str,
-    follow_up_question: str | None,
-    follow_up_answer: str,
-    follow_up_used: bool,
+    probes: Sequence[tuple[str, str]],
     answer_anchor: str = "",
     source_excerpt: str = "",
     answer_basis: str = "",
@@ -1103,6 +1147,7 @@ async def score_answer(
 ) -> ScoreResult:
     """Score the session so far, or return a probe if the answer was partial."""
     settings = get_settings()
+    probes_used = len(probes)
     builder = (
         build_score_v2_completion
         if scoring_contract_version == SCORING_CONTRACT_V2
@@ -1115,9 +1160,7 @@ async def score_answer(
         mastery_summary=mastery_summary,
         question_asked=question_asked,
         answer_text=answer_text,
-        follow_up_question=follow_up_question,
-        follow_up_answer=follow_up_answer,
-        follow_up_used=follow_up_used,
+        probes=probes,
         answer_anchor=answer_anchor,
         source_excerpt=source_excerpt,
         answer_basis=answer_basis,
@@ -1130,9 +1173,9 @@ async def score_answer(
 
     try:
         result = (
-            parse_score_v2_result(data, follow_up_used=follow_up_used)
+            parse_score_v2_result(data, probes_used=probes_used)
             if scoring_contract_version == SCORING_CONTRACT_V2
-            else parse_score_result(data, follow_up_used=follow_up_used)
+            else parse_score_result(data, probes_used=probes_used)
         )
     except LLMError:
         log.warning("llm purpose=%s event=invalid_contract", purpose)
@@ -1141,8 +1184,14 @@ async def score_answer(
     return result
 
 
-def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreResult:
-    """Apply the production scoring contract to provider-structured data."""
+def parse_score_result(data: dict[str, Any], *, probes_used: int) -> ScoreResult:
+    """Apply the production scoring contract to provider-structured data.
+
+    Tolerant by design, in both directions: a probe the policy did not ask for is
+    dropped, and a missing probe completes the session rather than failing it. The
+    live contract cannot afford to lose a spoken answer to a model that returned
+    the wrong shape.
+    """
 
     # The JSON schema makes all three axes required, so this should be unreachable —
     # but an unguarded KeyError/ValueError here is a 500, and the client only knows
@@ -1156,7 +1205,20 @@ def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreRe
     score = derive_composite(accuracy, depth, boundaries)
     probe = str(data.get("follow_up_question", "")).strip()
 
-    if not follow_up_used and FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH and probe:
+    if probes_used == 0:
+        # The first probe is the band rule the app already ships, unchanged.
+        # `needs_more_evidence` is deliberately ignored on turn 1, so a stray
+        # `true` from the model cannot widen who gets probed.
+        should_probe = FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH
+    else:
+        # Past the first, only the model's own insufficiency claim earns another
+        # turn — and never at the cap, whatever it claims.
+        should_probe = (
+            probes_used < MAX_SCORED_FOLLOW_UPS
+            and data.get("needs_more_evidence") is True
+        )
+
+    if should_probe and probe:
         return ScoreResult(status="follow_up", follow_up_question=probe)
 
     return ScoreResult(
@@ -1170,8 +1232,13 @@ def parse_score_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreRe
     )
 
 
-def parse_score_v2_result(data: dict[str, Any], *, follow_up_used: bool) -> ScoreResult:
-    """Apply the Recall-only V2 contract to provider-structured data."""
+def parse_score_v2_result(data: dict[str, Any], *, probes_used: int) -> ScoreResult:
+    """Apply the Recall-only V2 contract to provider-structured data.
+
+    Fail-closed, unlike V1: every departure from the follow-up policy is an
+    LLMError rather than a silent coercion, because V2 is still dark and a
+    tolerated violation would be invisible until activation.
+    """
     try:
         recall = int(data["recall_score"])
     except (KeyError, TypeError, ValueError) as exc:
@@ -1179,12 +1246,28 @@ def parse_score_v2_result(data: dict[str, Any], *, follow_up_used: bool) -> Scor
     if recall not in range(6):
         raise LLMError(f"V2 scoring response had out-of-range Recall: {recall}")
 
+    try:
+        needs = data["needs_more_evidence"]
+    except KeyError as exc:
+        raise LLMError(
+            f"V2 scoring response omitted needs_more_evidence: {data!r}"
+        ) from exc
+    if not isinstance(needs, bool):
+        raise LLMError(f"V2 scoring response had non-boolean needs_more_evidence: {needs!r}")
+
     probe = str(data.get("follow_up_question", "")).strip()
-    should_probe = not follow_up_used and FOLLOW_UP_LOW <= recall <= FOLLOW_UP_HIGH
-    if should_probe and not probe:
-        raise LLMError("V2 scoring response omitted its required Recall follow-up")
-    if not should_probe and probe:
-        raise LLMError("V2 scoring response returned a forbidden Recall follow-up")
+    should_probe = (probes_used == 0 and FOLLOW_UP_LOW <= recall <= FOLLOW_UP_HIGH) or (
+        0 < probes_used < MAX_SCORED_FOLLOW_UPS and needs is True
+    )
+    # An insufficiency claim has to carry the probe that would settle it. This is
+    # also what rejects `needs_more_evidence` at the cap, where no probe is legal.
+    if needs is True and not probe:
+        raise LLMError("V2 scoring response claimed missing evidence without a probe")
+    if bool(probe) != should_probe:
+        raise LLMError(
+            "V2 scoring response violated the Recall follow-up policy: "
+            f"probe={'present' if probe else 'absent'} at probes_used={probes_used}"
+        )
     if should_probe:
         return ScoreResult(
             status="follow_up",
