@@ -4,13 +4,13 @@
     "devmax.senior-backend-12-week.v2",
     "devmax.senior-backend-12-week.v3"
   ],
-  "version": 4,
+  "version": 5,
   "source_guide_path": "../../docs/CURRICULUM.md",
-  "source_guide_sha256": "bd7228463f6cec47206578822eba677d2c62d1a39f4df92d80835e31f04269f5",
-  "guide_text": "# Senior backend interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles. Each week schedules twenty dependable hours: Hello Interview teaches the material, every coding exercise is implemented in Python, full designs and mocks happen outside Unprompted, and short closed-book retrieval makes gaps visible. Global Unprompted reviews remain separate from plan capacity and begin only after the source lesson has been studied.\n\nAn additional stretch menu offers up to twenty hours each week without blocking advancement or changing the forecast. Stretch work deepens the current week through unseen Python problems, additional designs, case studies, behavioral rehearsal, and sourced gap repair; it never pre-teaches the next week or creates generic card volume. Resume work, job applications, and professional networking are intentionally deferred.",
-  "guide_sha256": "fb3ae13e8182be904a2330926177e425c4f9f68ee4ec83816516e4f481c479ad",
-  "title": "Senior backend interview preparation",
-  "subject": "Senior backend interview preparation",
+  "source_guide_sha256": "d4428b5f658a5c95b37ff479f005605ff49f7152aa86f072fe356c0253f81e3a",
+  "guide_text": "# Senior backend and AI systems interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles at AI companies. Distributed systems remains the spine. Version 5 applies those same boundaries to hosted inference, application-owned state and authority, evaluation, recoverable model workflows, model routing, and retrieval-augmented generation. It does not target research, model training infrastructure, GPU kernels, or inference-runtime implementation.\n\nEach week remains exactly twenty dependable hours. Eleven existing Learn hours are reallocated to explicit AI application-systems work; the existing five hours of ChatGPT design practice bring the explicit AI total to sixteen hours without increasing the 240-hour plan. Hello Interview retains the conventional system-design foundation, every coding exercise is implemented in Python, and full designs and mocks remain external performance evidence. Global Unprompted reviews remain separate from plan capacity and begin only after the mapped source lesson and reviewed card authority are complete.\n\nAn additional stretch menu offers up to twenty hours each week without blocking advancement or changing the forecast. Stretch work deepens the current week through unseen Python problems, additional designs, case studies, behavioral rehearsal, and sourced gap repair; it never pre-teaches the next week or creates generic card volume. Resume work, job applications, and professional networking are intentionally deferred.",
+  "guide_sha256": "a88d756d38917102eb7664e15a947133ba11e6d973348b5385917652bddb5d33",
+  "title": "Senior backend and AI systems interview preparation",
+  "subject": "Senior backend and AI systems interview preparation",
   "subject_slug": "senior-backend-interview-prep",
   "supports_technical_recall_cards": true,
   "requested_weeks": 12,
@@ -23,19 +23,19 @@
       "index": 1,
       "full_title": "Delivery and system design foundations",
       "overview_title": "Foundations",
-      "description": "Build the delivery method, data foundations, and coding patterns that later designs depend on."
+      "description": "Build the delivery method, hosted-inference boundaries, data foundations, and coding patterns that later designs depend on."
     },
     {
       "index": 2,
       "full_title": "Reusable architecture patterns and application",
       "overview_title": "Patterns and application",
-      "description": "Apply scaling, resilience, workflow, realtime, and storage patterns in complete designs."
+      "description": "Apply scaling, resilience, bounded AI workflow, realtime, and storage patterns in complete designs."
     },
     {
       "index": 3,
-      "full_title": "Backend technologies and coordination",
+      "full_title": "Backend technologies, retrieval, and coordination",
       "overview_title": "Technologies",
-      "description": "Choose concrete data, messaging, search, stream, and coordination systems from their mechanics."
+      "description": "Choose concrete data, messaging, retrieval, stream, gateway, and coordination systems from their mechanics."
     },
     {
       "index": 4,
@@ -48,7 +48,7 @@
     {
       "index": 1,
       "phase_index": 1,
-      "full_title": "Delivery, APIs, and network boundaries",
+      "full_title": "Delivery, APIs, and hosted-inference boundaries",
       "overview_title": "Delivery",
       "items": [
         {
@@ -139,10 +139,11 @@
           "key": "V4-W1-L3",
           "type": "learn",
           "priority": "core",
-          "title": "Handle timeouts, retries, and ambiguous outcomes",
+          "requires_fresh_completion": true,
+          "title": "Trace hosted LLM inference and make ambiguous retries safe",
           "minutes": 90,
-          "why": "A timeout does not reveal whether a remote write happened, so safe retries require explicit semantics.",
-          "done_when": "Finish the lesson and explain one timed-out write from client deadline through retry, idempotency, and final reconciliation.",
+          "why": "Hosted inference is probabilistic, token-by-token remote computation; a timeout still cannot prove whether provider work or an adjacent write happened, so retry and idempotency semantics must be explicit.",
+          "done_when": "Read all three sources, then draw one Devmax-style request from prompt assembly and tokenization through prefill, decode, streaming, structured output, timeout, retry, and reconciliation; distinguish training from inference and state which effect owns the idempotency key.",
           "resources": [
             {
               "kind": "lesson",
@@ -151,10 +152,28 @@
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/core-concepts/networking-essentials",
               "language": ""
+            },
+            {
+              "kind": "lesson",
+              "provider": "Google",
+              "label": "LLM tuning and prompt engineering",
+              "action_label": "Open course",
+              "url": "https://developers.google.com/machine-learning/crash-course/llm/tuning",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Google Cloud",
+              "label": "Inference optimization",
+              "action_label": "Open guide",
+              "url": "https://cloud.google.com/discover/inference-optimization",
+              "language": ""
             }
           ],
           "mapped_recall_topics": [
-            "Timeouts, retries, and idempotency across a partial network failure"
+            "Timeouts, retries, and idempotency across a partial network failure",
+            "Training versus hosted inference: parameter updates versus prediction with a deployed model",
+            "Hosted LLM request lifecycle: tokenization, prefill, autoregressive decode, and latency boundaries"
           ]
         },
         {
@@ -335,17 +354,18 @@
     {
       "index": 2,
       "phase_index": 1,
-      "full_title": "Data models, indexes, and request state",
+      "full_title": "Data models, indexes, and AI application state",
       "overview_title": "Data access",
       "items": [
         {
           "key": "V4-W2-L1",
           "type": "learn",
           "priority": "core",
-          "title": "Derive data models from access patterns",
+          "requires_fresh_completion": true,
+          "title": "Model prompts, conversations, and eval evidence from access patterns",
           "minutes": 90,
-          "why": "Schema decisions should follow required reads and writes rather than entity diagrams alone.",
-          "done_when": "Finish the lesson and derive entities, relationships, read paths, write paths, and one justified denormalization for a sample service.",
+          "why": "A model has a context window, not durable application memory; prompt versions, turns, outputs, provenance, permissions, and eval labels need a schema derived from the product's reads and writes.",
+          "done_when": "For five queries—resume a conversation, reproduce a score, compare prompt versions, audit answer authority, and inspect an eval result—derive entities, relationships, read paths, write paths, and one justified denormalization; label model weights, request context, durable application state, and code-owned policy separately.",
           "resources": [
             {
               "kind": "lesson",
@@ -354,11 +374,28 @@
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/core-concepts/data-modeling",
               "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "OpenAI",
+              "label": "Conversation state",
+              "action_label": "Open guide",
+              "url": "https://developers.openai.com/api/docs/guides/conversation-state",
+              "language": ""
+            },
+            {
+              "kind": "standard",
+              "provider": "NIST",
+              "label": "Generative AI risk profile",
+              "action_label": "Open profile",
+              "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+              "language": ""
             }
           ],
           "mapped_recall_topics": [
             "Data modeling from access patterns: deriving entities, relationships, and query shapes",
-            "Denormalization: duplicating data for a read path without losing update correctness"
+            "Denormalization: duplicating data for a read path without losing update correctness",
+            "Context windows versus durable conversation state: explicit history, storage, retention, and compaction"
           ],
           "stretch_actions": [
             {
@@ -904,7 +941,7 @@
     {
       "index": 4,
       "phase_index": 2,
-      "full_title": "Scaling reads, writes, and fan-out",
+      "full_title": "Scaling, fan-out, and measured AI reliability",
       "overview_title": "Scaling paths",
       "items": [
         {
@@ -1003,10 +1040,11 @@
           "key": "V4-W4-L3",
           "type": "learn",
           "priority": "core",
-          "title": "Operate bounded queue workers",
+          "requires_fresh_completion": true,
+          "title": "Operate bounded inference workers and measure reliability",
           "minutes": 60,
-          "why": "Queues move work; worker concurrency, retries, and poison handling determine whether it completes safely.",
-          "done_when": "Finish the lesson and specify concurrency, ordering, retry, dead-letter, and observability behavior for one worker pool.",
+          "why": "AI queues move expensive, variable-duration work; concurrency, token budgets, retries, poison inputs, and semantic evals determine whether overload becomes a bill, an outage, or a silent product regression.",
+          "done_when": "For one scoring workload, write a one-page worker contract covering admission, concurrency and token budgets, ordering requirements, per-item idempotency, retry limits, dead-letter handling, and queue-age plus model-latency metrics; then run four labelled cases from the committed eval pack, repeat one failure-sensitive case three times, and report schema pass, semantic pass, and failure classes separately.",
           "resources": [
             {
               "kind": "lesson",
@@ -1015,10 +1053,27 @@
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/patterns/long-running-tasks",
               "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Anthropic",
+              "label": "Demystifying evals for AI agents",
+              "action_label": "Open guide",
+              "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "OpenAI",
+              "label": "Structured model outputs",
+              "action_label": "Open guide",
+              "url": "https://developers.openai.com/api/docs/guides/structured-outputs",
+              "language": ""
             }
           ],
           "mapped_recall_topics": [
-            "Queue workers: controlling concurrency, ordering, retries, and dead-letter handling"
+            "Queue workers: controlling concurrency, ordering, retries, and dead-letter handling",
+            "Evaluation-driven reliability: realistic cases, repeated trials, calibrated graders, and regression gates"
           ]
         },
         {
@@ -1191,7 +1246,7 @@
     {
       "index": 5,
       "phase_index": 2,
-      "full_title": "Contention, workflows, and resilience",
+      "full_title": "Contention, bounded AI workflows, and resilience",
       "overview_title": "Resilience",
       "items": [
         {
@@ -1258,10 +1313,11 @@
           "key": "V4-W5-L2",
           "type": "learn",
           "priority": "core",
-          "title": "Recover multi-step workflows and dependency failures",
+          "requires_fresh_completion": true,
+          "title": "Bound tool authority in recoverable AI workflows",
           "minutes": 120,
-          "why": "Distributed workflows need explicit progress, retry, compensation, containment, and effect semantics.",
-          "done_when": "Finish the lesson and trace one partial workflow through retry, compensation, durable progress, dependency isolation, and deduplication.",
+          "why": "Model output is nondeterministic and provider calls can fail after money or state changed; durable progress, least-privilege tools, validation, deduplication, and code-owned stop rules must define what may be retried or committed.",
+          "done_when": "Draw a persisted, resumable state machine for one score-or-import workflow from prompt version and provider call through schema and semantic validation, database commit, and downstream effect. Mark deterministic code versus bounded model decisions, least-privilege tool scopes, attempt or token budgets, and stop or approval conditions; then inject a timeout, invalid JSON, unsupported claim, unauthorized tool proposal, crash, and duplicate delivery and show the retry, compensation, containment, idempotent resume, or stop decision for each.",
           "resources": [
             {
               "kind": "lesson",
@@ -1269,6 +1325,22 @@
               "label": "Multi-step Processes",
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/patterns/multi-step-processes",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Anthropic",
+              "label": "Building effective agents",
+              "action_label": "Open guide",
+              "url": "https://www.anthropic.com/engineering/building-effective-agents",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Anthropic",
+              "label": "Claude API errors",
+              "action_label": "Open docs",
+              "url": "https://platform.claude.com/docs/en/api/errors",
               "language": ""
             }
           ],
@@ -1476,7 +1548,7 @@
     {
       "index": 6,
       "phase_index": 2,
-      "full_title": "Realtime delivery, blobs, and durable jobs",
+      "full_title": "Realtime delivery, blobs, and durable AI jobs",
       "overview_title": "Realtime and jobs",
       "items": [
         {
@@ -1566,10 +1638,11 @@
           "key": "V4-W6-L3",
           "type": "learn",
           "priority": "core",
-          "title": "Publish reliable events and expose durable job state",
+          "requires_fresh_completion": true,
+          "title": "Expose durable state for long-running AI jobs",
           "minutes": 60,
-          "why": "A committed write and its asynchronous work must survive crashes without becoming two unrelated truths.",
-          "done_when": "Trace a transactional outbox through publication and design submission, status, cancellation, retry, and completion for one long job.",
+          "why": "Large imports and batch inference outlive a request; accepted, running, failed, canceled, and completed must remain durable while publication cannot drift from the committed result.",
+          "done_when": "Design a guide-import or batch-inference API with a submission token, pollable status, cancellation boundary, retry semantics, result retention, and webhook or outbox publication; state what the client sees after a crash before the provider call, after provider success, and after the database commit.",
           "resources": [
             {
               "kind": "lesson",
@@ -1585,6 +1658,14 @@
               "label": "Managing Long Running Tasks",
               "action_label": "Open jobs source",
               "url": "https://www.hellointerview.com/learn/system-design/patterns/long-running-tasks",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Anthropic",
+              "label": "Batch processing",
+              "action_label": "Open docs",
+              "url": "https://platform.claude.com/docs/en/build-with-claude/batch-processing",
               "language": ""
             }
           ],
@@ -1790,7 +1871,7 @@
     {
       "index": 7,
       "phase_index": 3,
-      "full_title": "Database technologies and selection",
+      "full_title": "Database technologies and inference gateways",
       "overview_title": "Databases",
       "items": [
         {
@@ -1923,10 +2004,11 @@
           "key": "V4-W7-L5",
           "type": "learn",
           "priority": "core",
-          "title": "Place authentication, quotas, and routing at an API gateway",
+          "requires_fresh_completion": true,
+          "title": "Route hosted models through a trusted inference gateway",
           "minutes": 60,
-          "why": "Gateway policy centralizes cross-cutting controls but can become a bottleneck and trust boundary.",
-          "done_when": "Finish the lesson and trace one request through authentication, quota, routing, policy, and gateway failure.",
+          "why": "An inference gateway can centralize trusted identity, consent, per-user spend, prompt policy, model routing, and audit metadata, but it also becomes a sensitive bottleneck and failure boundary.",
+          "done_when": "Trace one user answer through trusted identity, AI-consent check, quota and token budget, prompt-policy version, primary model route, timeout or fallback, semantic compatibility gate, audit metadata, and gateway failure; name one authorization control that must remain in the application service and one eval threshold required before enabling a provider fallback.",
           "resources": [
             {
               "kind": "lesson",
@@ -1934,6 +2016,14 @@
               "label": "API Gateway",
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/deep-dives/api-gateway",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "OpenAI",
+              "label": "Production best practices",
+              "action_label": "Open guide",
+              "url": "https://developers.openai.com/api/docs/guides/production-best-practices",
               "language": ""
             }
           ],
@@ -2041,7 +2131,7 @@
     {
       "index": 8,
       "phase_index": 3,
-      "full_title": "Messaging, search, delivery, and rate limits",
+      "full_title": "Messaging, retrieval, delivery, and rate limits",
       "overview_title": "Messaging and search",
       "items": [
         {
@@ -2108,10 +2198,11 @@
           "key": "V4-W8-L2",
           "type": "learn",
           "priority": "core",
-          "title": "Trace Elasticsearch indexing and refresh",
+          "requires_fresh_completion": true,
+          "title": "Build permission-filtered retrieval for grounded generation",
           "minutes": 90,
-          "why": "Search latency and freshness follow immutable segments, refresh, and merge behavior.",
-          "done_when": "Finish the lesson and trace one document from indexing through refresh, search visibility, merge, and update.",
+          "why": "RAG quality starts with ingestion and retrieval: exact terms, freshness, chunking, permissions, and semantic similarity fail differently, and fluent generation cannot repair missing or unauthorized evidence.",
+          "done_when": "Using the committed retrieval lab's ten-chunk, nine-document versioned corpus, inspect its document-version, chunk, provenance, and tenant or ACL metadata; trace one update through Elasticsearch refresh and merge, run three labelled queries through lexical and semantic or hybrid retrieval, record top-k evidence, and demonstrate that access filtering occurs before reranking and citation context reaches generation.",
           "resources": [
             {
               "kind": "lesson",
@@ -2119,6 +2210,30 @@
               "label": "Elasticsearch",
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/deep-dives/elasticsearch",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Devmax",
+              "label": "AI retrieval lab corpus and qrels",
+              "action_label": "Open lab",
+              "url": "https://github.com/chris510/devmax/blob/main/api/evals/ai-retrieval-lab-v1.json",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "OpenAI",
+              "label": "Retrieval and vector stores",
+              "action_label": "Open guide",
+              "url": "https://developers.openai.com/api/docs/guides/retrieval",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Elastic",
+              "label": "Hybrid search",
+              "action_label": "Open guide",
+              "url": "https://www.elastic.co/docs/solutions/search/hybrid-search",
               "language": ""
             }
           ],
@@ -2311,7 +2426,7 @@
     {
       "index": 9,
       "phase_index": 3,
-      "full_title": "Streams, coordination, and specialized indexes",
+      "full_title": "Streams, coordination, and end-to-end RAG",
       "overview_title": "Streams and indexes",
       "items": [
         {
@@ -2444,10 +2559,11 @@
           "key": "V4-W9-L5",
           "type": "learn",
           "priority": "core",
-          "title": "Tune vector search recall, latency, and memory",
+          "requires_fresh_completion": true,
+          "title": "Tune vector retrieval and evaluate end-to-end RAG",
           "minutes": 90,
-          "why": "Approximate nearest-neighbor indexes trade accuracy for serving cost and speed.",
-          "done_when": "Finish the lesson and explain HNSW traversal plus one tuning change that moves recall, latency, and memory.",
+          "why": "Embeddings turn meaning into vectors, but HNSW is approximate; chunking and index parameters trade retrieval recall, latency, and memory, so answer quality and authorization must be measured end to end.",
+          "done_when": "Embed and index the committed Week 8 retrieval lab corpus, explain HNSW traversal, vary one search-breadth or graph parameter, and report recall@k on its eight positive-qrel queries, forbidden-chunk leakage and expected-empty correctness on its two authorization-denial queries, plus exploratory median and maximum retrieval latency and memory or index-size change; then inspect two grounded answers and classify retrieval, generation, citation, or access-control failure.",
           "resources": [
             {
               "kind": "lesson",
@@ -2455,6 +2571,30 @@
               "label": "Vector Databases",
               "action_label": "Open lesson",
               "url": "https://www.hellointerview.com/learn/system-design/deep-dives/vector-databases",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Devmax",
+              "label": "AI retrieval lab corpus and qrels",
+              "action_label": "Open lab",
+              "url": "https://github.com/chris510/devmax/blob/main/api/evals/ai-retrieval-lab-v1.json",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "OpenAI",
+              "label": "Embeddings",
+              "action_label": "Open guide",
+              "url": "https://developers.openai.com/api/docs/guides/embeddings",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "pgvector",
+              "label": "HNSW index options",
+              "action_label": "Open docs",
+              "url": "https://github.com/pgvector/pgvector#hnsw",
               "language": ""
             }
           ],

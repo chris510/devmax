@@ -111,7 +111,9 @@ final class ReattemptRoutingTests: XCTestCase {
         func editPlanItem(
             _ id: UUID, itemID: UUID, edit: PlanItemEdit
         ) async throws -> PlanItemDetail { throw CancellationError() }
-        func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
+        func completePlanItem(
+            _ id: UUID, itemID: UUID, revision: Int?
+        ) async throws -> PlanItemDetail {
             throw CancellationError()
         }
         func savePracticeDebriefDraft(

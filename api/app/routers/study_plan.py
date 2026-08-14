@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -140,22 +140,27 @@ def _now() -> datetime:
 # --- loading ----------------------------------------------------------------
 
 
-async def _get_plan(db: AsyncSession, plan_id: uuid.UUID) -> StudyPlan:
-    plan = (
-        await db.exec(
-            select(StudyPlan).where(
-                col(StudyPlan.id) == plan_id,
-                StudyPlan.user_id == current_user_id(),
-            )
-        )
-    ).first()
+async def _get_plan(
+    db: AsyncSession, plan_id: uuid.UUID, *, for_update: bool = False
+) -> StudyPlan:
+    statement = select(StudyPlan).where(
+        col(StudyPlan.id) == plan_id,
+        StudyPlan.user_id == current_user_id(),
+    )
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    plan = (await db.exec(statement)).first()
     if plan is None:
         raise HTTPException(status_code=404, detail="plan not found")
     return plan
 
 
-async def _get_graph(db: AsyncSession, plan_id: uuid.UUID) -> sp.PlanGraph:
-    return await sp.load_plan_graph(db, await _get_plan(db, plan_id))
+async def _get_graph(
+    db: AsyncSession, plan_id: uuid.UUID, *, for_update: bool = False
+) -> sp.PlanGraph:
+    return await sp.load_plan_graph(
+        db, await _get_plan(db, plan_id, for_update=for_update)
+    )
 
 
 def _available_item(graph: sp.PlanGraph, item_id: uuid.UUID) -> StudyPlanItem:
@@ -187,6 +192,40 @@ def _require_current(plan: StudyPlan, base_plan_revision: int) -> None:
     """
     if plan.revision != base_plan_revision:
         raise HTTPException(status_code=409, detail="plan has changed since this proposal")
+
+
+async def _fresh_completion_keys_for_plan(
+    db: AsyncSession, plan_id: uuid.UUID
+) -> set[str]:
+    """Return every item key ever marked as fresh work for this plan.
+
+    ``requires_fresh_completion`` is deliberately release-local in the source
+    manifest. The durable revision ledger records each release's keys, and the
+    completion boundary uses their union: a later manifest omitting the marker
+    must not make an older client safe again by accident.
+    """
+    revisions = (
+        await db.exec(
+            select(StudyPlanRevision).where(
+                col(StudyPlanRevision.plan_id) == plan_id
+            )
+        )
+    ).all()
+    keys: set[str] = set()
+    for revision in revisions:
+        after = revision.after or {}
+        raw_keys = after.get("fresh_completion_keys", [])
+        if not isinstance(raw_keys, list) or any(
+            not isinstance(key, str) or not key.strip() for key in raw_keys
+        ):
+            # This is operator-authored metadata. Fail closed rather than let a
+            # malformed ledger silently remove the view-bound precondition.
+            raise HTTPException(
+                status_code=409,
+                detail="curriculum completion policy is unavailable; reopen the item",
+            )
+        keys.update(key.strip() for key in raw_keys)
+    return keys
 
 
 def _forecast_label(plan: StudyPlan, week: int) -> str:
@@ -918,6 +957,7 @@ async def _item_detail(db: AsyncSession, graph: sp.PlanGraph, item: StudyPlanIte
     return ItemDetail(
         id=item.id,
         plan_id=item.plan_id,
+        plan_revision=graph.plan.revision,
         full_title=item.full_title,
         phase_title=sp.display_title(phase.full_title, phase.overview_title) if phase else "",
         week_index=week.index if week else 0,
@@ -1225,21 +1265,70 @@ async def update_capacity(
 # --- item progress ----------------------------------------------------------
 
 
+async def _complete_item_cas(
+    db: AsyncSession, item: StudyPlanItem, *, completed_at: datetime
+) -> bool:
+    """Complete only the exact item content snapshot the request inspected.
+
+    The plan-row lock serializes this endpoint with first-party curriculum
+    upgrades on Postgres. SQLite ignores ``FOR UPDATE``, so status plus
+    ``updated_at`` form a portable compare-and-swap backstop: if an upgrade
+    claimed or rewrote the row, this stale completion fails instead of granting
+    completion credit to content the user did not see.
+    """
+    result = await db.exec(
+        update(StudyPlanItem)
+        .where(
+            StudyPlanItem.id == item.id,
+            StudyPlanItem.status == item.status,
+            StudyPlanItem.updated_at == item.updated_at,
+        )
+        .values(
+            status=ITEM_COMPLETE,
+            completed_at=completed_at,
+            updated_at=completed_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
 @router.post("/study-plans/{plan_id}/items/{item_id}/complete", response_model=ItemDetail)
 async def complete_item(
-    plan_id: uuid.UUID, item_id: uuid.UUID, db: AsyncSession = Depends(get_session)
+    plan_id: uuid.UUID,
+    item_id: uuid.UUID,
+    base_plan_revision: int | None = Query(default=None, ge=1),
+    db: AsyncSession = Depends(get_session),
 ) -> ItemDetail:
     """Plan progress only. No card, score, session, or SM-2 field is read here."""
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     item = _available_item(graph, item_id)
+    if base_plan_revision is not None:
+        if graph.plan.revision != base_plan_revision:
+            raise HTTPException(
+                status_code=409,
+                detail="plan has changed since this item was opened; reopen it and try again",
+            )
+    elif item.curriculum_key in await _fresh_completion_keys_for_plan(db, plan_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "this curriculum item requires a current plan revision; "
+                "reopen it and try again"
+            ),
+        )
     if item.status == ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is already complete")
 
-    item.status = ITEM_COMPLETE
-    item.completed_at = _now()
-    item.updated_at = item.completed_at
-    db.add(item)
+    completed_at = _now()
+    if not await _complete_item_cas(db, item, completed_at=completed_at):
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="item changed while completion was being saved; reopen it and try again",
+        )
     await db.commit()
+    await db.refresh(item)
     return await _item_detail(db, graph, item)
 
 

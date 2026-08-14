@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -21,8 +22,10 @@ from app.models import (
     StudyPlanCardProposalAcceptance,
     StudyPlanItem,
     StudyPlanPracticeDebrief,
+    StudyPlanRevision,
     User,
 )
+from app.seed_study_plan import load_first_party_plan
 from app.services import llm
 from tests.conftest import API_HEADERS, GUIDE, _item, gate, import_payload, make_card
 
@@ -403,6 +406,49 @@ async def test_completed_is_not_archived(client, stub_import):
     listed = (await client.get("/study-plans", headers=API_HEADERS)).json()
     assert listed["completed"] == []
     assert len(listed["archived"]) == 1
+
+
+async def test_stale_item_completion_loses_to_curriculum_claim(
+    client, stub_import, db, monkeypatch
+):
+    from app.routers import study_plan as router
+
+    plan = await make_plan(client)
+    plan_id = uuid.UUID(plan["id"])
+    item = (
+        await db.exec(
+            select(StudyPlanItem)
+            .where(StudyPlanItem.plan_id == plan_id)
+            .order_by(StudyPlanItem.guide_order)
+        )
+    ).first()
+    original_complete = router._complete_item_cas
+
+    async def curriculum_claim_wins(session, stale_item, *, completed_at):
+        await session.exec(
+            update(StudyPlanItem)
+            .where(StudyPlanItem.id == stale_item.id)
+            .values(
+                full_title="New curriculum content",
+                updated_at=completed_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return await original_complete(
+            session, stale_item, completed_at=completed_at + timedelta(seconds=1)
+        )
+
+    monkeypatch.setattr(router, "_complete_item_cas", curriculum_claim_wins)
+
+    response = await client.post(
+        f"/study-plans/{plan_id}/items/{item.id}/complete", headers=API_HEADERS
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"].startswith("item changed")
+    await db.refresh(item)
+    assert item.status == "pending"
+    assert item.completed_at is None
 
 
 async def test_duplicating_copies_structure_and_resets_progress(client, stub_import, db):
@@ -813,6 +859,145 @@ async def test_completing_and_reopening_an_item(client, stub_import):
     assert reopened.json()["status"] == "pending"
     assert reopened.json()["reopened_at"] is not None
     assert reopened.json()["completed_at"] is None
+
+
+async def test_item_detail_revision_can_bind_a_matching_completion(
+    client, stub_import
+):
+    plan = await make_plan(client)
+    week = (
+        await client.get(
+            f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS
+        )
+    ).json()
+    item_id = week["sections"][0]["rows"][0]["id"]
+
+    opened = (
+        await client.get(
+            f"/study-plans/{plan['id']}/items/{item_id}", headers=API_HEADERS
+        )
+    ).json()
+
+    assert opened["plan_revision"] == plan["revision"]
+    completed = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/complete",
+        params={"base_plan_revision": opened["plan_revision"]},
+        headers=API_HEADERS,
+    )
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "complete"
+    assert completed.json()["plan_revision"] == opened["plan_revision"]
+
+
+async def test_stale_item_revision_rejects_completion_without_writes(
+    client, stub_import
+):
+    plan = await make_plan(client)
+    week = (
+        await client.get(
+            f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS
+        )
+    ).json()
+    item_id = week["sections"][0]["rows"][0]["id"]
+    item_url = f"/study-plans/{plan['id']}/items/{item_id}"
+    opened = (await client.get(item_url, headers=API_HEADERS)).json()
+
+    edited = await client.patch(
+        item_url,
+        json={"estimate_minutes": opened["estimate_minutes"] + 30},
+        headers=API_HEADERS,
+    )
+    assert edited.status_code == 200
+    before_attempt = edited.json()
+    assert before_attempt["plan_revision"] == opened["plan_revision"] + 1
+
+    stale = await client.post(
+        f"{item_url}/complete",
+        params={"base_plan_revision": opened["plan_revision"]},
+        headers=API_HEADERS,
+    )
+
+    assert stale.status_code == 409
+    assert "opened" in stale.json()["detail"]
+    assert (await client.get(item_url, headers=API_HEADERS)).json() == before_attempt
+
+
+async def test_first_party_fresh_work_requires_a_revision_after_later_markers_drop(
+    client, db
+):
+    seeded = await load_first_party_plan(
+        start_date=date(2026, 7, 27), activate=True, db=db
+    )
+    plan_id = uuid.UUID(seeded.plan_id)
+    item = (
+        await db.exec(
+            select(StudyPlanItem).where(
+                StudyPlanItem.plan_id == plan_id,
+                StudyPlanItem.curriculum_key == "V4-W1-L3",
+            )
+        )
+    ).one()
+    item_url = f"/study-plans/{plan_id}/items/{item.id}"
+    opened = (await client.get(item_url, headers=API_HEADERS)).json()
+    before_missing = item.model_dump()
+
+    missing = await client.post(f"{item_url}/complete", headers=API_HEADERS)
+
+    assert missing.status_code == 409
+    assert "requires a current plan revision" in missing.json()["detail"]
+    await db.refresh(item)
+    assert item.model_dump() == before_missing
+
+    # A later release can omit its release-local marker. The earlier revision's
+    # durable key remains in the per-plan union, so an old client is still
+    # refused while a current client can complete normally.
+    plan = (await db.exec(select(StudyPlan).where(StudyPlan.id == plan_id))).one()
+    plan.revision += 1
+    db.add(plan)
+    db.add(
+        StudyPlanRevision(
+            plan_id=plan_id,
+            kind="curriculum_update",
+            base_plan_revision=opened["plan_revision"],
+            before={"seed_version": 5},
+            after={"seed_version": 6},
+            summary="Later release without a fresh-work marker",
+        )
+    )
+    await db.commit()
+    reopened = (await client.get(item_url, headers=API_HEADERS)).json()
+    assert reopened["plan_revision"] == opened["plan_revision"] + 1
+
+    still_missing = await client.post(f"{item_url}/complete", headers=API_HEADERS)
+    assert still_missing.status_code == 409
+
+    completed = await client.post(
+        f"{item_url}/complete",
+        params={"base_plan_revision": reopened["plan_revision"]},
+        headers=API_HEADERS,
+    )
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "complete"
+
+
+async def test_generic_plan_keeps_legacy_completion_without_a_revision(
+    client, stub_import
+):
+    plan = await make_plan(client)
+    week = (
+        await client.get(
+            f"/study-plans/{plan['id']}/weeks/1", headers=API_HEADERS
+        )
+    ).json()
+    item_id = week["sections"][0]["rows"][0]["id"]
+
+    completed = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/complete",
+        headers=API_HEADERS,
+    )
+
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "complete"
 
 
 async def test_an_estimate_edit_is_recorded_as_a_material_change(client, stub_import):

@@ -153,13 +153,28 @@ final class StudyPlanState: ObservableObject {
     @discardableResult
     func completeItem() async -> Bool {
         guard let item else { return false }
+        let planID = item.planId
+        let itemID = item.id
+        let loadedRevision = item.planRevision
         itemBusy = true
         itemError = nil
         defer { itemBusy = false }
         do {
-            self.item = try await api.completePlanItem(item.planId, itemID: item.id)
-            await refreshAfterProgress(item.planId)
+            self.item = try await api.completePlanItem(
+                planID, itemID: itemID, revision: loadedRevision
+            )
+            await refreshAfterProgress(planID)
             return true
+        } catch APIError.status(409) {
+            // A curriculum upgrade or another completion won. Discard the
+            // snapshot the tap referred to, then reload the item and plan. We
+            // deliberately return false and never resubmit: completing the new
+            // content requires a second, explicit tap after the user sees it.
+            self.item = nil
+            await loadItem(planID, itemID: itemID)
+            await refreshAfterProgress(planID)
+            itemError = "Couldn't mark this complete. Nothing changed."
+            return false
         } catch {
             itemError = "Couldn't mark this complete. Nothing changed."
             return false

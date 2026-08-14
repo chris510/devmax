@@ -148,7 +148,9 @@ protocol DevmaxAPI {
     func planWeek(_ id: UUID, index: Int) async throws -> WeekDetail
     func planItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
     func editPlanItem(_ id: UUID, itemID: UUID, edit: PlanItemEdit) async throws -> PlanItemDetail
-    func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail
+    func completePlanItem(
+        _ id: UUID, itemID: UUID, revision: Int?
+    ) async throws -> PlanItemDetail
     func savePracticeDebriefDraft(
         _ id: UUID, itemID: UUID, text: String
     ) async throws -> PracticeDebrief
@@ -626,8 +628,16 @@ struct LiveAPI: DevmaxAPI {
         return try Self.decoder.decode(PlanItemDetail.self, from: data)
     }
 
-    func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
-        try await post("study-plans/\(id)/items/\(itemID)/complete", PlanItemDetail.self)
+    func completePlanItem(
+        _ id: UUID, itemID: UUID, revision: Int?
+    ) async throws -> PlanItemDetail {
+        let query = revision.map {
+            [URLQueryItem(name: "base_plan_revision", value: String($0))]
+        } ?? []
+        return try await post(
+            "study-plans/\(id)/items/\(itemID)/complete", PlanItemDetail.self,
+            query: query
+        )
     }
 
     func previewReopen(_ id: UUID, itemID: UUID) async throws -> PlanProposal {

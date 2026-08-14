@@ -4,7 +4,7 @@
 detailed procedure; this is the running status, the ordering, and the traps that
 cost time. When both disagree, the RUNBOOK is the procedure and this is the state.
 
-Last updated: **2026-07-30**. Live at
+Last updated: **2026-08-13**. Live at
 `https://devmax-production.up.railway.app` (Railway project `devmax`,
 services `devmax` + `Postgres`).
 
@@ -14,7 +14,7 @@ services `devmax` + `Postgres`).
 
 | | Item | State |
 |---|---|---|
-| ✅ | Backend built, 182 tests green on SQLite **and** Postgres 17 | done |
+| ✅ | Backend test suite green on SQLite **and** Postgres 17 | done |
 | ✅ | iOS client built, 15 wire-format tests, all screens screenshot-checked | done |
 | ✅ | Schema applied to real Postgres 17; migrations 0001–0003 round-tripped | done |
 | ✅ | Anthropic exercised live through both prompts (and the re-attempt rubric) | done |
@@ -123,11 +123,23 @@ The Study Plan command is a second, independent seed: 12 weeks, four phases,
 20-hour stretch menu, no LLM call, and no card or SM-2 writes. A same-version
 rerun is a no-op. The one-time version-2/version-3→v4 upgrade preserves the same
 plan id but requires the old plan to be pristine; any progress, personalization,
-override, or advancement makes it fail closed rather than misattach history. Its
-explicit `--start-date` becomes the corrected start for that legacy upgrade. Completing a
-mapped Learn item makes its already-owned, grounded cards actionable through Card
-History. Missing or unapproved future cards remain `Not ready`; they are never
-created or activated by elapsed calendar time.
+override, or advancement makes that legacy rewrite fail closed rather than
+misattach history. Its explicit `--start-date` becomes the corrected start for
+that legacy upgrade. The later content-version-5 upgrade keeps the same 116
+stable keys, weeks, minutes, and dependency semantics. Unfinished items receive
+the reviewed content update; a completed item marked `requires_fresh_completion`
+is preserved in full so newly added AI work cannot receive retroactive credit.
+That skipped-work debt survives later versions and same-version confirmation
+runs; completion and upgrade writes also share an item snapshot guard. The
+item-detail response carries `plan_revision`, and the current client echoes that
+loaded revision on completion. A stale value returns 409, reloads the item, and
+requires a new explicit tap. Deploy the backend first: an older client remains
+compatible for conventional and generic items but cannot complete any of the
+eight protected fresh-work keys without the revision token.
+Completing a mapped Learn item makes its already-owned, grounded cards actionable
+through Card History. Missing or unapproved future cards—including the draft AI
+foundations overlay—remain `Not ready`; they are never created or activated by
+elapsed calendar time.
 
 **`APNS_USE_SANDBOX` and the app's `aps-environment` must flip together.**
 Development ↔ `true`, production ↔ `false`. A TestFlight build gets a *production*

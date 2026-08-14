@@ -15,13 +15,12 @@ Sessions are **1–3 minutes, used half-awake or in line.** Every decision optim
 *speed into a session* and *honesty of signal* — never engagement mechanics. There are no
 streaks, no XP, no badges, and no celebration animations. Do not add them.
 
-**Status:** backend and iOS client both built; being prepared for a first deploy. The
-backend has 172 passing tests against a real ASGI app, green on both SQLite and Postgres.
+**Status:** backend and iOS client both built, with the backend live on Railway. The
+backend suite is green against the real ASGI app on both SQLite and Postgres.
 The whole stack has since been exercised locally end to end: schema applied to a real
 Postgres 17, live Anthropic calls through both prompts, the iOS client compiled and run
 against the real API on simulator and on a physical device, and a real APNs push
-delivered to that device. Not yet deployed. `docs/RUNBOOK.md` is the path from here to a
-push on a phone.
+delivered to that device. `docs/RUNBOOK.md` is the reproduction and operations path.
 
 ## Authoritative source documents
 
@@ -143,6 +142,16 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   consumes capacity — while still not blocking week advancement.
 - **Study Plan forecasts are plan-week precision only.** No response carries a
   field from which a completion *day* could be derived from weekly capacity.
+- **Fresh-work completion is bound to the item revision the learner saw.**
+  Item detail returns `plan_revision`, and the client sends that exact value as
+  `base_plan_revision` when it marks the item complete. Under the same plan lock
+  used by curriculum upgrades, a stale value returns 409; the client reloads
+  the item and requires another explicit tap. Revision metadata durably unions
+  every key introduced as fresh work, so an old client that omits the token is
+  also rejected for those keys even if a later manifest drops the marker.
+  Generic and legacy items remain compatible with clients that predate the
+  token. The item `status + updated_at` compare-and-swap remains the
+  cross-database backstop for simultaneous writers.
 - **Today loads the plan summary concurrently with due cards, and swallows its
   failure.** A Study Plan outage degrades one line to `PLAN · UNAVAILABLE`; it must
   never delay or block a due card.
@@ -316,8 +325,11 @@ change faster than this file does — do not write Anthropic calls from memory.
   *plus* output). **The post-fix re-run did not happen: the Anthropic account ran
   out of credit.** The fixes are unit-tested; they are not live-tested.
   The deterministic first-party plan does not use that model path: its reviewed
-  version-4 manifest has 116 items, exact resources, dependencies, and mapped
-  topics, and its create/upgrade path makes no LLM call.
+  content-version-5 manifest has 116 stable items, exact resources,
+  dependencies, and mapped topics, and its create/upgrade path makes no LLM
+  call. Eight existing Learn rows integrate 11 hours of application-side AI
+  systems without changing weekly capacity; `requires_fresh_completion`
+  prevents a completed historical row from receiving retroactive credit.
 - **The import takes about 11 minutes** at `effort: high` on a 10k-character
   guide. Fine for a once-a-quarter action, but the client needs to expect it, and
   `studyplan_effort` is the lever if that is too slow — `medium` is untested here.
@@ -337,7 +349,10 @@ change faster than this file does — do not write Anthropic calls from memory.
   `--activate-week N` only after its Hello Interview source lessons are complete and the
   cards have approved answer authority. The retired 126-card plan lives at
   `api/archive/cards-legacy-126.json`; coding is a desk-only reference library, and
-  company material is on demand. `docs/CURRICULUM.md` is authoritative for content.
+  company material is on demand. The four vendor-neutral AI foundation cards live in
+  `api/modules/ai-foundations.json` and intentionally remain `draft_review` until a
+  human approves their authority; the older `ai-application.json` stubs do not count.
+  `docs/CURRICULUM.md` is authoritative for content.
 - **Production is live on Railway.** `docs/DEPLOY-CHECKLIST.md` records the current state;
   `docs/RUNBOOK.md` is the procedure for reproducing it.
 - **Anthropic and APNs have both been exercised for real, locally.** `services/llm.py` runs

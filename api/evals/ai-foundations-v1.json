@@ -1,0 +1,98 @@
+[
+  {
+    "name": "training versus inference — complete",
+    "topic": "Training versus hosted inference: parameter updates versus prediction with a deployed model",
+    "answer": "Training or fine-tuning runs optimization over examples: loss and backpropagation update all or some model parameters. This scoring request is online inference. The hosted service applies an already trained deployment to the prompt and generates a prediction, but its parameters do not change. Prompt examples can condition the answer without training it. Logged interactions could enter a later training pipeline, but that would be a separate data, optimization, evaluation, and deployment process.",
+    "expected_judgment": "strong",
+    "review_status": "draft_review",
+    "review_note": "Complete mechanism, prompting-versus-tuning trade-off, fixed-parameter inference boundary, and later-training distinction."
+  },
+  {
+    "name": "training versus inference — mechanism only",
+    "topic": "Training versus hosted inference: parameter updates versus prediction with a deployed model",
+    "answer": "Inference uses an already trained model to generate a prediction without changing its weights. Training would run optimization and backpropagation to update those parameters.",
+    "expected_judgment": "partial",
+    "review_status": "draft_review",
+    "review_note": "Correct essential distinction without the prompting-versus-tuning trade-off or later-training distinction."
+  },
+  {
+    "name": "training versus inference — treats prompts as weight updates",
+    "topic": "Training versus hosted inference: parameter updates versus prediction with a deployed model",
+    "answer": "Every learner answer trains the hosted model because adding the prompt expands its context and permanently writes that information into the model's weights for future requests.",
+    "expected_judgment": "incorrect",
+    "review_status": "draft_review",
+    "review_note": "Confuses request context with permanent parameter updates."
+  },
+  {
+    "name": "inference lifecycle — complete",
+    "topic": "Hosted LLM request lifecycle: tokenization, prefill, autoregressive decode, and latency boundaries",
+    "answer": "The application assembles the prompt and sends the API request across the network. In the provider stack, the input is tokenized and may pass through queues whose exact placement depends on the serving architecture. Prefill processes the whole input context and builds the state needed to produce the first token. Decode then generates later tokens sequentially from the input and prior output until it stops, and the service detokenizes and streams them back. Time to first token covers submission through the first received token, while end-to-end latency runs through the final token. Because output is fast once it starts, I would investigate transport, queueing, prompt length, and prefill before decode.",
+    "expected_judgment": "strong",
+    "review_status": "draft_review",
+    "review_note": "Complete trace, causal diagnosis, and first-token-versus-completion boundary."
+  },
+  {
+    "name": "inference lifecycle — mechanism only",
+    "topic": "Hosted LLM request lifecycle: tokenization, prefill, autoregressive decode, and latency boundaries",
+    "answer": "The prompt is tokenized, prefill processes the input, and decode generates the output one token at a time. A long wait before the first token points to the first-token or prefill side of the request.",
+    "expected_judgment": "partial",
+    "review_status": "draft_review",
+    "review_note": "Correct phase separation and diagnosis, but omits queueing, metric definitions, and streaming or completion trade-offs."
+  },
+  {
+    "name": "inference lifecycle — confuses first-token latency and decode",
+    "topic": "Hosted LLM request lifecycle: tokenization, prefill, autoregressive decode, and latency boundaries",
+    "answer": "The delay proves decode is slow because the model generates the first character one at a time. Time to first token means the time until the entire response is complete, and tokenization happens after generation so text can be returned.",
+    "expected_judgment": "incorrect",
+    "review_status": "draft_review",
+    "review_note": "Reverses tokenization order, misdefines time to first token, and attributes a first-token delay to subsequent decode."
+  },
+  {
+    "name": "conversation state — complete",
+    "topic": "Context windows versus durable conversation state: explicit history, storage, retention, and compaction",
+    "answer": "Each text-generation request is independent and stateless unless prior state is supplied. I can either persist history in the application and resend selected messages, chain the previous response ID, or reference a provider-persisted conversation object. That storage is explicit; it is not invisible memory inside the request. The context window only bounds the input, output, and sometimes reasoning tokens available to one request, so a week of stored history may not fit. I would compact or select relevant turns for the next call and make retention and deletion ownership explicit, keeping an application-owned canonical copy when the product needs independent control. Full replay is simple but costs more tokens; compaction is cheaper but can omit details.",
+    "expected_judgment": "strong",
+    "review_status": "draft_review",
+    "review_note": "Correct stateless-request mechanism, explicit persistence and continuation options, context-window boundary, retention ownership, and replay-versus-compaction trade-off."
+  },
+  {
+    "name": "conversation state — mechanism only",
+    "topic": "Context windows versus durable conversation state: explicit history, storage, retention, and compaction",
+    "answer": "A request is stateless, so the application has to save the conversation and send the prior messages again on the next request. The context window limits how much history can be sent at once.",
+    "expected_judgment": "partial",
+    "review_status": "draft_review",
+    "review_note": "Correct essential mechanism and context limit without persistence alternatives, retention ownership, or replay-versus-compaction trade-offs."
+  },
+  {
+    "name": "conversation state — context is permanent memory",
+    "topic": "Context windows versus durable conversation state: explicit history, storage, retention, and compaction",
+    "answer": "Once a message fits in the context window, the model remembers it permanently across every future API request and app restart. A previous-response ID makes that memory free and unlimited, so the application does not need to persist or trim conversation history.",
+    "expected_judgment": "incorrect",
+    "review_status": "draft_review",
+    "review_note": "Treats per-request context as permanent storage, ignores explicit state persistence, and mistakes response chaining for free unlimited memory."
+  },
+  {
+    "name": "evaluation reliability — complete",
+    "topic": "Evaluation-driven reliability: realistic cases, repeated trials, calibrated graders, and regression gates",
+    "answer": "Schema validity is only one deterministic check. I would build reviewed cases from real scoring behavior with reference labels, including both scheduler passes and failures, then run the candidate through the same production prompt and harness for multiple independent trials. Deterministic checks can grade shape and ranges; semantic scoring needs a rubric grader calibrated against human experts. I would report false scheduler passes and false failures separately, alongside latency and cost, version every tested component, and require explicit regression thresholds before rollout. Monitoring and sampled human review continue afterward.",
+    "expected_judgment": "strong",
+    "review_status": "draft_review",
+    "review_note": "Complete task set, grader calibration, repeated-trial, asymmetric-error, rollout-gate, and postdeployment account."
+  },
+  {
+    "name": "evaluation reliability — mechanism only",
+    "topic": "Evaluation-driven reliability: realistic cases, repeated trials, calibrated graders, and regression gates",
+    "answer": "Run the new model several times on representative scoring cases with reviewed expected answers, compare its quality against a threshold, and switch only if it does not regress.",
+    "expected_judgment": "partial",
+    "review_status": "draft_review",
+    "review_note": "Essential eval-and-gate direction is correct but omits balanced errors, grader selection and calibration, versioning, and monitoring."
+  },
+  {
+    "name": "evaluation reliability — schema and speed only",
+    "topic": "Evaluation-driven reliability: realistic cases, repeated trials, calibrated graders, and regression gates",
+    "answer": "Valid JSON proves the scorer is correct, so the latency improvement is enough to deploy it. One smoke test should be representative, and any semantic issues can be found by A/B testing directly on learner schedules.",
+    "expected_judgment": "incorrect",
+    "review_status": "draft_review",
+    "review_note": "Treats shape and one trial as correctness and makes production learners the first semantic regression test."
+  }
+]

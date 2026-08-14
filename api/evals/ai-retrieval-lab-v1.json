@@ -1,0 +1,372 @@
+{
+  "schema_version": 1,
+  "name": "ai-retrieval-lab-v1",
+  "description": "Synthetic vendor-neutral corpus and labelled queries for retrieval and access-filter evaluation.",
+  "access_policy": {
+    "tenant": "The principal tenant must match the document tenant.",
+    "restricted": "After tenant matching, the principal ID or one principal role must appear in the document allow lists.",
+    "current_versions": "A current version query excludes documents whose is_current value is false."
+  },
+  "documents": [
+    {
+      "document_id": "atlas-error-catalog",
+      "version": 1,
+      "chunk_id": "atlas-error-catalog:v1:c1",
+      "text": "PX-417 means the edge proxy rejected a request because its signed timestamp was more than five minutes old.",
+      "provenance": {
+        "source_type": "synthetic_handbook",
+        "source_uri": "lab://atlas/error-catalog/v1",
+        "ingested_at": "2026-08-01T09:00:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "atlas-payment-safety",
+      "version": 1,
+      "chunk_id": "atlas-payment-safety:v1:c1",
+      "text": "Prevent duplicate charges by storing an idempotency key with the first payment result and replaying that result on retries.",
+      "provenance": {
+        "source_type": "synthetic_runbook",
+        "source_uri": "lab://atlas/payment-safety/v1",
+        "ingested_at": "2026-08-01T09:05:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "atlas-webhook-recovery",
+      "version": 1,
+      "chunk_id": "atlas-webhook-recovery:v1:c1",
+      "text": "For ORBIT-9 callback failures, retry with exponential backoff and deduplicate deliveries by event identifier.",
+      "provenance": {
+        "source_type": "synthetic_runbook",
+        "source_uri": "lab://atlas/webhook-recovery/v1",
+        "ingested_at": "2026-08-01T09:10:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "atlas-cache-failover",
+      "version": 1,
+      "chunk_id": "atlas-cache-failover:v1:c1",
+      "text": "Archived cache failover guidance used a 30-second health timeout before promoting the standby.",
+      "provenance": {
+        "source_type": "synthetic_runbook",
+        "source_uri": "lab://atlas/cache-failover/v1",
+        "ingested_at": "2026-07-01T10:00:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": false
+    },
+    {
+      "document_id": "atlas-cache-failover",
+      "version": 2,
+      "chunk_id": "atlas-cache-failover:v2:c1",
+      "text": "Current cache failover guidance uses a 10-second health timeout before promoting the standby.",
+      "provenance": {
+        "source_type": "synthetic_runbook",
+        "source_uri": "lab://atlas/cache-failover/v2",
+        "ingested_at": "2026-08-01T10:00:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "boreal-vpn-rotation",
+      "version": 1,
+      "chunk_id": "boreal-vpn-rotation:v1:c1",
+      "text": "Boreal rotates its synthetic VPN certificate on the first Monday of each quarter after a staged connectivity check.",
+      "provenance": {
+        "source_type": "synthetic_handbook",
+        "source_uri": "lab://boreal/vpn-rotation/v1",
+        "ingested_at": "2026-08-02T09:00:00Z"
+      },
+      "tenant_id": "boreal",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "boreal-project-birch",
+      "version": 1,
+      "chunk_id": "boreal-project-birch:v1:c1",
+      "text": "Project Birch is a fictional Boreal migration exercise scheduled for the third test window.",
+      "provenance": {
+        "source_type": "synthetic_memo",
+        "source_uri": "lab://boreal/project-birch/v1",
+        "ingested_at": "2026-08-02T09:05:00Z"
+      },
+      "tenant_id": "boreal",
+      "acl": {
+        "visibility": "restricted",
+        "allowed_principals": [
+          "carol"
+        ],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "atlas-payroll-calendar",
+      "version": 1,
+      "chunk_id": "atlas-payroll-calendar:v1:c1",
+      "text": "The synthetic payroll rehearsal closes at 16:00 UTC on the final business day of the month.",
+      "provenance": {
+        "source_type": "synthetic_memo",
+        "source_uri": "lab://atlas/payroll-calendar/v1",
+        "ingested_at": "2026-08-02T09:10:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "restricted",
+        "allowed_principals": [],
+        "allowed_roles": [
+          "finance"
+        ]
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "atlas-incident-comms",
+      "version": 1,
+      "chunk_id": "atlas-incident-comms:v1:c1",
+      "text": "During an outage, assign one incident lead and publish a timestamped status update every twenty minutes.",
+      "provenance": {
+        "source_type": "synthetic_runbook",
+        "source_uri": "lab://atlas/incident-comms/v1",
+        "ingested_at": "2026-08-03T09:00:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    },
+    {
+      "document_id": "atlas-rollback-checklist",
+      "version": 1,
+      "chunk_id": "atlas-rollback-checklist:v1:c1",
+      "text": "Before rollback, freeze deployments, capture the failing release identifier, and verify database compatibility.",
+      "provenance": {
+        "source_type": "synthetic_runbook",
+        "source_uri": "lab://atlas/rollback-checklist/v1",
+        "ingested_at": "2026-08-03T09:05:00Z"
+      },
+      "tenant_id": "atlas",
+      "acl": {
+        "visibility": "tenant",
+        "allowed_principals": [],
+        "allowed_roles": []
+      },
+      "is_current": true
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q01-lexical-code",
+      "category": "lexical",
+      "text": "What does PX-417 mean?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "atlas-error-catalog:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    },
+    {
+      "query_id": "q02-semantic-duplicates",
+      "category": "semantic",
+      "text": "How should a service avoid charging twice when a client repeats a request?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "atlas-payment-safety:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    },
+    {
+      "query_id": "q03-hybrid-callback",
+      "category": "hybrid",
+      "text": "How do we recover safely from repeated ORBIT-9 callback failures?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "atlas-webhook-recovery:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    },
+    {
+      "query_id": "q04-freshness-current",
+      "category": "freshness",
+      "text": "What is the current cache failover health timeout?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "atlas-cache-failover:v2:c1": 1
+      },
+      "forbidden_chunk_ids": [
+        "atlas-cache-failover:v1:c1"
+      ]
+    },
+    {
+      "query_id": "q05-version-archived",
+      "category": "version",
+      "text": "What timeout did version 1 of the cache failover guide use?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "all",
+      "qrels": {
+        "atlas-cache-failover:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    },
+    {
+      "query_id": "q06-tenant-authorized",
+      "category": "semantic",
+      "text": "When does our quarterly VPN certificate rotation happen?",
+      "principal": {
+        "principal_id": "carol",
+        "tenant_id": "boreal",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "boreal-vpn-rotation:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    },
+    {
+      "query_id": "q07-tenant-unauthorized",
+      "category": "unauthorized_evidence",
+      "text": "When is Project Birch scheduled?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {},
+      "forbidden_chunk_ids": [
+        "boreal-project-birch:v1:c1"
+      ]
+    },
+    {
+      "query_id": "q08-acl-unauthorized",
+      "category": "unauthorized_evidence",
+      "text": "When does the payroll rehearsal close?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {},
+      "forbidden_chunk_ids": [
+        "atlas-payroll-calendar:v1:c1"
+      ]
+    },
+    {
+      "query_id": "q09-multi-relevant-incident",
+      "category": "semantic",
+      "text": "What coordination and rollback steps should we take during a bad release outage?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "atlas-incident-comms:v1:c1": 1,
+        "atlas-rollback-checklist:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    },
+    {
+      "query_id": "q10-hybrid-idempotent-orbit",
+      "category": "hybrid",
+      "text": "For ORBIT-9 retries, which guidance covers idempotent results and duplicate callback deliveries?",
+      "principal": {
+        "principal_id": "alice",
+        "tenant_id": "atlas",
+        "roles": [
+          "engineering"
+        ]
+      },
+      "version_scope": "current",
+      "qrels": {
+        "atlas-payment-safety:v1:c1": 1,
+        "atlas-webhook-recovery:v1:c1": 1
+      },
+      "forbidden_chunk_ids": []
+    }
+  ]
+}
