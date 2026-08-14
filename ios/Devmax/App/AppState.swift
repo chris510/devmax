@@ -740,11 +740,27 @@ final class AppState: ObservableObject {
     /// Write the current draft everywhere, immediately. Called when the app is
     /// backgrounded and when recording stops — the moments a delay isn't free.
     func flushDraft() {
-        syncDraft(debounced: false)
+        syncDraft(debounced: false, uploadToServer: true)
+    }
+
+    /// Persist the final transcript to disk immediately before `/answers`, while
+    /// cancelling any debounced server PATCH. Uploading that same draft here can
+    /// race the answer transaction: a late PATCH then repopulates `draft_text`
+    /// after the server has advanced to the follow-up turn.
+    func flushDraftForSubmission() async {
+        // Cancellation alone is not an ordering guarantee once URLSession may
+        // already have put the PATCH on the wire. Wait for that task to return
+        // before `/answers`; even a server that finishes the cancelled PATCH now
+        // necessarily does so before the answer transaction clears the draft.
+        let pendingUpload = draftSync
+        draftSync = nil
+        pendingUpload?.cancel()
+        syncDraft(debounced: false, uploadToServer: false)
+        await pendingUpload?.value
     }
 
     private func scheduleDraftSync() {
-        syncDraft(debounced: true)
+        syncDraft(debounced: true, uploadToServer: true)
     }
 
     /// Disk is the source of truth for instant rehydration; the server copy is the
@@ -754,14 +770,14 @@ final class AppState: ObservableObject {
     /// atomic rename, so running it per partial competes with the live caret and
     /// auto-scroll for the same main-thread frame budget. `flushDraft` on
     /// backgrounding and on recording-stop is what makes the guarantee exact.
-    private func syncDraft(debounced: Bool) {
+    private func syncDraft(debounced: Bool, uploadToServer: Bool) {
         draftSync?.cancel()
         guard let card = currentCard else { return }
         let text = draft
 
         guard debounced else {
             DraftStore.save(text, for: card.id)
-            if let sessionID {
+            if uploadToServer, let sessionID {
                 Task { [api] in try? await api.saveDraft(sessionID: sessionID, text: text) }
             }
             return

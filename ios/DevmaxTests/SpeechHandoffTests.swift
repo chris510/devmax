@@ -26,6 +26,28 @@ final class SpeechHandoffTests: XCTestCase {
         XCTAssertEqual(carried, "", "A finished capture must not carry into the next turn")
     }
 
+    func testNoCaptureIsNotSafeToSubmit() async {
+        let speech = SpeechService()
+
+        let result = await speech.finishResult()
+
+        XCTAssertEqual(result.status, .noCapture)
+        XCTAssertFalse(result.isSafeToSubmit)
+    }
+
+    func testSimulatedFinalizationIsSafeAndClearsCaptureState() async {
+        let speech = SpeechService()
+        speech.start(continuing: "a spoken answer", simulated: true, simulate: " and more")
+
+        let result = await speech.finishResult()
+
+        XCTAssertEqual(result.status, .final)
+        XCTAssertEqual(result.text, "a spoken answer")
+        XCTAssertTrue(result.isSafeToSubmit)
+        XCTAssertEqual(speech.captureState, .idle)
+        XCTAssertTrue(speech.transcript.isEmpty)
+    }
+
     /// And the state behind it: ending a capture leaves the service empty, so a
     /// later reader has nothing stale to find in the first place.
     func testEndingACaptureClearsTheTranscript() {
@@ -36,5 +58,19 @@ final class SpeechHandoffTests: XCTestCase {
         speech.stop()
 
         XCTAssertTrue(speech.transcript.isEmpty, "An ended capture owns no text")
+    }
+}
+
+final class SpeechVocabularyTests: XCTestCase {
+    func testVocabularyBiasesTheExactTechnicalPhraseAndCurrentPrompt() {
+        let terms = SpeechVocabulary.terms(
+            for: "Timeouts, retries, and idempotency",
+            prompt: "What should the payment server do with the same idempotency key?"
+        )
+
+        XCTAssertTrue(terms.contains("idempotency key"))
+        XCTAssertTrue(terms.contains("payment"))
+        XCTAssertTrue(terms.contains("server"))
+        XCTAssertLessThanOrEqual(terms.count, 100)
     }
 }
