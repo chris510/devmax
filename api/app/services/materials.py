@@ -33,10 +33,108 @@ from app.models import (
 )
 from app.services import guide_import, llm, study_plan_import, usage
 from app.services import study_plan as study_plan_service
+from app.services.card_lifecycle import Grounding, GroundingError, clean_rubric
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+_CLOSED_QUESTION_PREFIXES = (
+    "am ",
+    "are ",
+    "can ",
+    "could ",
+    "did ",
+    "do ",
+    "does ",
+    "had ",
+    "has ",
+    "have ",
+    "is ",
+    "should ",
+    "was ",
+    "were ",
+    "will ",
+    "would ",
+)
+
+
+def _is_open_question(value: str) -> bool:
+    question = value.strip()
+    return (
+        question.endswith("?")
+        and len(question.split()) >= 4
+        and not question.casefold().startswith(_CLOSED_QUESTION_PREFIXES)
+    )
+
+
+def confidence_for(recall_score: int | None) -> str:
+    """A deterministic export label from the latest unaided Recall score."""
+    if recall_score is None:
+        return "unrated"
+    if recall_score <= 2:
+        return "needs_review"
+    if recall_score == 3:
+        return "developing"
+    return "established"
+
+
+def render_lesson_markdown(
+    source: MaterialSource, concepts: list[dict]
+) -> tuple[str, str]:
+    """Render distilled artifacts without copying raw source or transcripts."""
+    source_line = source.title
+    if source.source_url:
+        source_line = f"[{source.title}](<{source.source_url}>)"
+
+    note_lines = [f"# {source.title}", "", f"Source: {source_line}"]
+    recall_lines = [f"# {source.title} — Recall questions"]
+    for concept in concepts:
+        note_lines.extend(
+            [
+                "",
+                f"## {concept['concept']}",
+                "",
+                concept["mental_model"],
+                "",
+                "### How it works",
+                "",
+                concept["how_it_works"],
+            ]
+        )
+        gotchas = concept.get("gotchas") or []
+        if gotchas:
+            note_lines.extend(["", "### Gotchas and trade-offs", ""])
+            note_lines.extend(f"- {value}" for value in gotchas)
+
+        prompts = concept["recall_prompts"]
+        note_lines.extend(["", "### Recall prompts", ""])
+        recall_lines.extend(["", f"## {concept['concept']}"])
+        for prompt in prompts:
+            label = prompt["level"].replace("_", " / ").title()
+            line = f"- **{label}:** {prompt['question']}"
+            note_lines.append(line)
+            recall_lines.append(line)
+
+        quiz_results = concept.get("quiz_results") or []
+        if quiz_results:
+            note_lines.extend(["", "### Quiz results", ""])
+            for result in quiz_results:
+                reviewed_at = result["reviewed_at"]
+                reviewed_on = (
+                    reviewed_at.date().isoformat()
+                    if isinstance(reviewed_at, datetime)
+                    else str(reviewed_at)
+                )
+                score = result.get("recall_score")
+                score_copy = f"Recall {score}/5" if score is not None else "graded"
+                summary = result.get("graded_summary") or result.get("feedback") or ""
+                note_lines.append(
+                    f"- {reviewed_on} · {score_copy} · {summary}".rstrip(" ·")
+                )
+
+    return "\n".join(note_lines).strip() + "\n", "\n".join(recall_lines).strip() + "\n"
 
 
 class _ImportClaimLost(Exception):
@@ -48,6 +146,8 @@ def _guide_authorizer(
     user_id: uuid.UUID,
     source_id: uuid.UUID,
     run_id: uuid.UUID,
+    *,
+    model: str | None = None,
 ):
     config = get_settings()
 
@@ -73,7 +173,7 @@ def _guide_authorizer(
         "guide_import",
         config=config,
         provider="anthropic",
-        model=config.studyplan_model,
+        model=model or config.studyplan_model,
         boundary_check=require_live_claim,
     )
 
@@ -206,6 +306,10 @@ async def process_import(source_id: uuid.UUID) -> bool:
                 if source.import_path == "plan":
                     source = await guide_import.run_while_heartbeat_live(
                         _process_plan(db, source, run_id), heartbeat
+                    )
+                elif source.import_path == "lesson":
+                    source = await guide_import.run_while_heartbeat_live(
+                        _process_lesson(db, source, run_id), heartbeat
                     )
                 else:
                     source = await guide_import.run_while_heartbeat_live(
@@ -396,6 +500,203 @@ async def _process_topics(
     return source
 
 
+async def _process_lesson(
+    db: AsyncSession, source: MaterialSource, run_id: uuid.UUID
+) -> MaterialSource:
+    concepts = await llm.extract_lesson(
+        title=source.title,
+        source_text=source.source_text,
+        source_url=source.source_url,
+        source_type=source.kind,
+        before_provider_call=_guide_authorizer(
+            db,
+            source.user_id,
+            source.id,
+            run_id,
+            model=get_settings().card_proposal_model,
+        ),
+    )
+    source = await _lock_result_claim(
+        db,
+        user_id=source.user_id,
+        source_id=source.id,
+        run_id=run_id,
+    )
+    clean, attention, comparison = await _store_lesson_proposals(
+        db, source, concepts
+    )
+    source.status = SOURCE_NEEDS_ATTENTION if attention else SOURCE_READY
+    source.result_summary = {
+        "workflow": "lesson",
+        "concept_count": clean + attention,
+        "clean_count": clean,
+        "attention_count": attention,
+        "subject": source.title,
+        "comparison": comparison,
+    }
+    return source
+
+
+def _validated_lesson_concepts(
+    source: MaterialSource, concepts: list[dict]
+) -> list[dict]:
+    """Fail the extraction atomically unless every concept is source-grounded."""
+    if not 1 <= len(concepts) <= 7:
+        raise llm.LLMError("lesson extraction must return between 1 and 7 concepts")
+
+    validated: list[dict] = []
+    normalized_topics: set[str] = set()
+    for index, concept in enumerate(concepts, 1):
+        if not isinstance(concept, dict):
+            raise llm.LLMError(f"lesson concept {index} is not an object")
+        topic = str(concept.get("topic", "")).strip()
+        section = str(concept.get("section_title", "")).strip() or source.title
+        excerpt = str(concept.get("source_excerpt", "")).strip()
+        answer_basis = str(concept.get("answer_basis", "")).strip()
+        canonical_question = str(concept.get("canonical_question", "")).strip()
+        raw_rubric = concept.get("answer_rubric")
+        if not isinstance(raw_rubric, dict):
+            raise llm.LLMError(
+                f"lesson concept {index} answer rubric is not an object"
+            )
+        rubric = clean_rubric(raw_rubric)
+        prompts = concept.get("recall_questions")
+
+        normalized = study_plan_service.normalize_topic(topic)
+        if not normalized or normalized in normalized_topics:
+            raise llm.LLMError(
+                f"lesson concept {index} has an empty or duplicate topic"
+            )
+        normalized_topics.add(normalized)
+        if len(topic) > 200 or len(section) > 1000:
+            raise llm.LLMError(
+                f"lesson concept {index} topic or section is too long"
+            )
+        if len(excerpt) > 20_000 or len(answer_basis) > 2000:
+            raise llm.LLMError(
+                f"lesson concept {index} grounding is too long"
+            )
+        if len(canonical_question) > 2000:
+            raise llm.LLMError(
+                f"lesson concept {index} canonical question is too long"
+            )
+        if any(len(value) > 900 for value in rubric.values()):
+            raise llm.LLMError(
+                f"lesson concept {index} answer rubric is too long"
+            )
+        if not excerpt or excerpt not in source.source_text:
+            raise llm.LLMError(
+                f"lesson concept {index} excerpt is not verbatim source text"
+            )
+        if not _is_open_question(canonical_question):
+            raise llm.LLMError(
+                f"lesson concept {index} canonical question is not open-ended"
+            )
+        if not isinstance(prompts, list) or len(prompts) != len(
+            llm.LESSON_RECALL_LEVELS
+        ):
+            raise llm.LLMError(
+                f"lesson concept {index} must have exactly five recall prompts"
+            )
+
+        cleaned_prompts: list[dict[str, str]] = []
+        for expected_level, prompt in zip(
+            llm.LESSON_RECALL_LEVELS, prompts, strict=True
+        ):
+            if not isinstance(prompt, dict):
+                raise llm.LLMError(
+                    f"lesson concept {index} has an invalid recall prompt"
+                )
+            level = str(prompt.get("level", "")).strip()
+            question = str(prompt.get("question", "")).strip()
+            if (
+                level != expected_level
+                or len(question) > 1000
+                or not _is_open_question(question)
+            ):
+                raise llm.LLMError(
+                    f"lesson concept {index} has invalid {expected_level} recall"
+                )
+            cleaned_prompts.append({"level": level, "question": question})
+
+        try:
+            grounding = Grounding(
+                source_url=source.source_url,
+                source_section=section,
+                source_label=source.title,
+                answer_basis=answer_basis,
+                answer_rubric=rubric,
+                canonical_question=canonical_question,
+            ).require_complete()
+        except GroundingError as exc:
+            raise llm.LLMError(
+                f"lesson concept {index} has incomplete grounding: {', '.join(exc.missing)}"
+            ) from exc
+
+        validated.append(
+            {
+                "topic": topic,
+                "section_title": section,
+                "source_excerpt": excerpt,
+                "answer_basis": grounding.answer_basis,
+                "canonical_question": grounding.canonical_question,
+                "answer_rubric": rubric,
+                "recall_questions": cleaned_prompts,
+            }
+        )
+    return validated
+
+
+async def _store_lesson_proposals(
+    db: AsyncSession,
+    source: MaterialSource,
+    concepts: list[dict],
+) -> tuple[int, int, dict[str, int]]:
+    """Validate the complete concept pack, then replace its durable preview."""
+    validated = _validated_lesson_concepts(source, concepts)
+    existing = await study_plan_service.normalized_card_index(db, source.user_id)
+    rows: list[MaterialTopicProposal] = []
+    current: dict[str, str] = {}
+    clean = 0
+    attention = 0
+    for position, concept in enumerate(validated, 1):
+        normalized = study_plan_service.normalize_topic(concept["topic"])
+        issue = (
+            "A topic with this name already exists in your library."
+            if normalized in existing
+            else ""
+        )
+        status = PROPOSAL_NEEDS_ATTENTION if issue else PROPOSAL_CLEAN
+        attention += status == PROPOSAL_NEEDS_ATTENTION
+        clean += status == PROPOSAL_CLEAN
+        current[normalized] = concept["answer_basis"]
+        rows.append(
+            MaterialTopicProposal(
+                source_id=source.id,
+                position=position,
+                section_title=concept["section_title"],
+                topic=concept["topic"],
+                answer_anchor=concept["answer_basis"],
+                source_excerpt=concept["source_excerpt"],
+                canonical_question=concept["canonical_question"],
+                answer_rubric=concept["answer_rubric"],
+                recall_questions=concept["recall_questions"],
+                status=status,
+                issue=issue,
+            )
+        )
+
+    comparison = await _proposal_comparison(db, source, current)
+    await db.exec(
+        delete(MaterialTopicProposal).where(
+            MaterialTopicProposal.source_id == source.id
+        )
+    )
+    for row in rows:
+        db.add(row)
+    return clean, attention, comparison
+
+
 async def confirm_source_version(db, source: MaterialSource, user_id: uuid.UUID) -> None:
     """Confirm one source and supersede its owned predecessor, if any."""
     source.status = SOURCE_CONFIRMED
@@ -405,6 +706,33 @@ async def confirm_source_version(db, source: MaterialSource, user_id: uuid.UUID)
         if previous is not None and previous.user_id == user_id:
             previous.status = SOURCE_SUPERSEDED
             db.add(previous)
+
+
+async def _proposal_comparison(
+    db: AsyncSession,
+    source: MaterialSource,
+    current: dict[str, str],
+) -> dict[str, int]:
+    if not source.previous_version_id:
+        return {}
+    previous_rows = (
+        await db.exec(
+            select(MaterialTopicProposal).where(
+                MaterialTopicProposal.source_id == source.previous_version_id
+            )
+        )
+    ).all()
+    previous = {
+        study_plan_service.normalize_topic(row.topic): row.answer_anchor
+        for row in previous_rows
+    }
+    shared = previous.keys() & current.keys()
+    return {
+        "added": len(current.keys() - previous.keys()),
+        "changed": sum(previous[key] != current[key] for key in shared),
+        "removed": len(previous.keys() - current.keys()),
+        "unchanged": sum(previous[key] == current[key] for key in shared),
+    }
 
 
 async def _store_topic_proposals(
@@ -445,27 +773,7 @@ async def _store_topic_proposals(
                 issue=issue,
             )
         )
-    comparison: dict[str, int] = {}
-    if source.previous_version_id:
-        previous_rows = (
-            await db.exec(
-                select(MaterialTopicProposal).where(
-                    MaterialTopicProposal.source_id == source.previous_version_id
-                )
-            )
-        ).all()
-        previous = {
-            study_plan_service.normalize_topic(row.topic): row.answer_anchor
-            for row in previous_rows
-        }
-        shared = previous.keys() & current.keys()
-        comparison = {
-            "added": len(current.keys() - previous.keys()),
-            "changed": sum(previous[key] != current[key] for key in shared),
-            "removed": len(previous.keys() - current.keys()),
-            "unchanged": sum(previous[key] == current[key] for key in shared),
-        }
-    return clean, attention, comparison
+    return clean, attention, await _proposal_comparison(db, source, current)
 
 
 async def resume_imports() -> list[uuid.UUID]:

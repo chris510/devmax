@@ -60,6 +60,16 @@ FOLLOW_UP_HIGH = 3
 # would have to be migrated in lockstep with this line.
 MAX_SCORED_FOLLOW_UPS = 2
 
+# Durable lesson prompts have one stable label per learning depth. They are
+# preview/export artifacts; scheduled recall still uses Card.canonical_question.
+LESSON_RECALL_LEVELS = (
+    "definition_recognition",
+    "mechanism",
+    "derivation",
+    "application",
+    "failure_tradeoff",
+)
+
 # Retries match the SDK's own default, pinned so a future SDK change can't
 # quietly alter how long a session can stall. The timeout is the real
 # departure: 600s is the default and is absurd for a session the user is
@@ -655,6 +665,102 @@ CARD_PROPOSAL_SCHEMA: dict[str, Any] = {
         }
     },
     "required": ["candidates"],
+    "additionalProperties": False,
+}
+
+LESSON_EXTRACTION_RUBRIC = f"""\
+You are turning one pasted source the learner just read into a small, durable, \
+source-grounded lesson. Treat the pasted source as the only answer authority. \
+Never add facts, examples, trade-offs, or failure modes that it does not support.
+
+Extract 1-7 load-bearing concepts. Prefer fewer concepts with clear boundaries \
+over exhaustive headings or vocabulary fragments. Each concept must be useful as \
+one concept-level mastery unit and reconstructable aloud in under two minutes.
+
+For each concept return:
+  - `topic`: a short noun phrase.
+  - `section_title`: the nearest useful source heading, or a concise source-backed \
+section label when the paste has no heading.
+  - `source_excerpt`: an exact, contiguous substring copied from the pasted source. \
+Do not normalize punctuation or whitespace.
+  - `answer_basis`: a concise canonical mental model, fully supported by that \
+excerpt and the pasted source.
+  - `canonical_question`: one open-ended engineering question that forces \
+reconstruction of the mechanism or application. Prefer a concrete scenario. It \
+must not be a definition-only prompt or a yes/no question.
+  - `answer_rubric`: exactly these five fields: {", ".join(RUBRIC_FIELDS)}. The \
+mechanism is required; the other fields must state the best source-supported \
+alternative framing, trade-off, failure mode, and misconception. If the source \
+does not support a separate nuance, explicitly state the bounded absence (for \
+example, "the source does not claim an alternative mechanism") instead of \
+inventing one.
+  - `recall_questions`: exactly five open-ended questions, in this exact level \
+order: {", ".join(LESSON_RECALL_LEVELS)}. Definition/recognition must still ask \
+the learner to distinguish or recognize the concept in context, not recite a \
+glossary line. Mechanism asks how it works. Derivation asks the learner to reason \
+from constraints. Application uses a concrete scenario. Failure/trade-off asks \
+where it breaks or what it costs.
+
+Every question is one self-contained question with no answer embedded in it. Do \
+not write multi-part checklists. Return only the structured fields. No preamble, \
+no code fences, no commentary.\
+"""
+
+_LESSON_RECALL_PROMPT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "level": {"type": "string", "enum": list(LESSON_RECALL_LEVELS)},
+        "question": {"type": "string", "maxLength": 1000},
+    },
+    "required": ["level", "question"],
+    "additionalProperties": False,
+}
+
+LESSON_EXTRACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "concepts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "maxLength": 200},
+                    "section_title": {"type": "string", "maxLength": 1000},
+                    "source_excerpt": {"type": "string", "maxLength": 20000},
+                    "answer_basis": {"type": "string", "maxLength": 2000},
+                    "canonical_question": {"type": "string", "maxLength": 2000},
+                    "answer_rubric": {
+                        "type": "object",
+                        "properties": {
+                            field: {"type": "string", "maxLength": 900}
+                            for field in RUBRIC_FIELDS
+                        },
+                        "required": list(RUBRIC_FIELDS),
+                        "additionalProperties": False,
+                    },
+                    "recall_questions": {
+                        "type": "array",
+                        "minItems": len(LESSON_RECALL_LEVELS),
+                        "maxItems": len(LESSON_RECALL_LEVELS),
+                        "items": _LESSON_RECALL_PROMPT_SCHEMA,
+                    },
+                },
+                "required": [
+                    "topic",
+                    "section_title",
+                    "source_excerpt",
+                    "answer_basis",
+                    "canonical_question",
+                    "answer_rubric",
+                    "recall_questions",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["concepts"],
     "additionalProperties": False,
 }
 
@@ -1857,6 +1963,46 @@ async def coach_answer(
         log.warning("llm purpose=coaching_v2 event=invalid_contract")
         raise LLMError("qualitative coaching returned empty feedback")
     return CoachingResult(feedback=feedback)
+
+
+async def extract_lesson(
+    *,
+    title: str,
+    source_text: str,
+    source_url: str,
+    source_type: str,
+    before_provider_call: BeforeProviderCall,
+) -> list[dict[str, Any]]:
+    """Extract a bounded concept pack from pasted text; never fetch the URL.
+
+    The structured response is still untrusted. ``services.materials`` checks
+    exact prompt labels, open-ended question shape, complete grounding, duplicate
+    topics, and verbatim excerpt provenance before it writes any proposal.
+    """
+    settings = get_settings()
+    context = [
+        f"Lesson title: {title}",
+        f"Source type: {source_type}",
+        f"Source URL (provenance only): {source_url}" if source_url else None,
+        "",
+        "PASTED SOURCE BEGINS. Copy source_excerpt from this exact string.",
+        "",
+        source_text,
+    ]
+    data = await _complete(
+        model=settings.card_proposal_model,
+        effort=settings.card_proposal_effort,
+        rubric=LESSON_EXTRACTION_RUBRIC,
+        user_content="\n".join(line for line in context if line is not None),
+        schema=LESSON_EXTRACTION_SCHEMA,
+        max_tokens=8000,
+        purpose="lesson_extract",
+        before_provider_call=before_provider_call,
+    )
+    concepts = data.get("concepts")
+    if not isinstance(concepts, list):
+        raise LLMError(f"lesson extraction response had no concept list: {data!r}")
+    return [concept for concept in concepts if isinstance(concept, dict)]
 
 
 async def import_guide(

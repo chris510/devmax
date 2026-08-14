@@ -44,6 +44,10 @@ final class AppState: ObservableObject {
         }
     }
 
+    enum SessionOrigin: Equatable {
+        case review, lesson
+    }
+
     /// The expanded tier on Coverage. One at a time, across the whole screen.
     struct OpenTier: Equatable {
         let category: String
@@ -90,6 +94,9 @@ final class AppState: ObservableObject {
     @Published var practice = false
     /// This session's scored cards, in walk order. Drives the rail and the recap.
     @Published var run: [RunEntry] = []
+    /// Presentation context only. Scheduling still comes exclusively from the
+    /// server's per-session `practice` flag.
+    @Published private(set) var sessionOrigin: SessionOrigin = .review
     /// Installed only for onboarding's first real review. The ordinary review
     /// path has no callback and continues to Today exactly as before.
     var firstReviewCompletion: (() -> Void)?
@@ -500,11 +507,12 @@ final class AppState: ObservableObject {
     /// from a Review Sprint's suggested set.
     func beginSession(
         cards: [DueCard], startingAt index: Int = 0, practice: Bool = false,
-        replacingPath: Bool = false
+        replacingPath: Bool = false, origin: SessionOrigin = .review
     ) {
         sessionCards = cards
         cursor = index
         self.practice = practice
+        sessionOrigin = origin
         run = []
         recapOpen = nil
         guard let card = cards[safe: index] else { return }
@@ -872,13 +880,14 @@ final class AppState: ObservableObject {
             let coachingFocus, let coachingQuestion
         ):
             let displayedScore = scoringContractVersion == 2 ? recallScore : score
+            let scheduleLine = wasPractice
+                ? Self.practiceScheduleLine
+                : Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays)
             result = SessionResult(
                 score: displayedScore,
                 scoringContractVersion: scoringContractVersion,
                 feedback: feedback,
-                scheduleLine: wasPractice
-                    ? Self.practiceScheduleLine
-                    : Self.scheduleLine(nextReviewAt: nextReviewAt, intervalDays: intervalDays),
+                scheduleLine: scheduleLine,
                 reattemptOffered: reattemptOffered,
                 reattemptPrompt: reattemptPrompt,
                 coachingOffered: coachingOffered,
@@ -889,7 +898,8 @@ final class AppState: ObservableObject {
                 run.append(
                     RunEntry(
                         id: card.id, topic: card.topic, category: card.category,
-                        score: displayedScore, feedback: feedback, practice: wasPractice
+                        score: displayedScore, feedback: feedback,
+                        scheduleLine: scheduleLine, practice: wasPractice
                     )
                 )
             }
@@ -960,12 +970,13 @@ final class AppState: ObservableObject {
     /// keeps `Done`. The transition is always a tap, never an automatic swap.
     var sessionEndLabel: String {
         if hasMoreCards { return "Next card" }
+        if sessionOrigin == .lesson { return "See results" }
         return sessionCards.count > 1 ? "See recap" : "Done"
     }
 
     func nextCard() {
         guard cursor + 1 < sessionCards.count else {
-            if sessionCards.count > 1 {
+            if sessionCards.count > 1 || sessionOrigin == .lesson {
                 recapOpen = nil
                 path = [.recap]
             } else {
@@ -992,6 +1003,8 @@ final class AppState: ObservableObject {
     /// Conversation screen would print a real schedule; the recap must not then
     /// claim the schedule was untouched.
     var runWasPractice: Bool { run.allSatisfy(\.practice) && !run.isEmpty }
+
+    var runWasLesson: Bool { sessionOrigin == .lesson && !run.isEmpty }
 
     func runAnother() {
         path = [.sprintSetup]

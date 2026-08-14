@@ -128,6 +128,9 @@ protocol DevmaxAPI {
         mergeInto: UUID?
     ) async throws -> MaterialTopic
     func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation
+    func lessonProgress(_ id: UUID) async throws -> LessonProgress
+    func distillLesson(_ id: UUID) async throws -> MaterialArtifacts
+    func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts
     func createManualMaterial(title: String, topics: [ManualTopic]) async throws -> MaterialConfirmation
     func materialCollections() async throws -> [MaterialCollection]
     func materialCollection(_ id: String) async throws -> MaterialCollectionDetail
@@ -211,6 +214,11 @@ extension DevmaxAPI {
         mergeInto: UUID?
     ) async throws -> MaterialTopic { throw APIError.status(501) }
     func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
+        throw APIError.status(501)
+    }
+    func lessonProgress(_ id: UUID) async throws -> LessonProgress { throw APIError.status(501) }
+    func distillLesson(_ id: UUID) async throws -> MaterialArtifacts { throw APIError.status(501) }
+    func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
         throw APIError.status(501)
     }
     func createManualMaterial(
@@ -556,6 +564,18 @@ struct LiveAPI: DevmaxAPI {
             "materials/imports/\(id)/confirm", MaterialConfirmation.self,
             body: Body(selectedTopicIds: topics)
         )
+    }
+
+    func lessonProgress(_ id: UUID) async throws -> LessonProgress {
+        try await get("materials/imports/\(id)/progress", LessonProgress.self)
+    }
+
+    func distillLesson(_ id: UUID) async throws -> MaterialArtifacts {
+        try await post("materials/imports/\(id)/distill", MaterialArtifacts.self)
+    }
+
+    func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
+        try await get("materials/imports/\(id)/artifacts", MaterialArtifacts.self)
     }
 
     func createManualMaterial(

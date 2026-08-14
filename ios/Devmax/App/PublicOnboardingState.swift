@@ -4,12 +4,15 @@ import Foundation
 final class PublicOnboardingState: ObservableObject {
     private enum PendingAfterSignIn { case guide, manual, collection }
     enum Step: String {
-        case welcome, material, guide, fileError, planPath, planIntent, planSetup
+        case welcome, material, guide, lesson, fileError, planPath, planIntent, planSetup
         case handoff, importing, importFailed, importReady, topics, manual
         case collections, collectionDetail, planPreview, review, scoring, pace
         case reminders, remindersDenied, empty, learnBranch
         case returning
         case studyMaterial
+    }
+    enum LessonArtifactState: Equatable {
+        case idle, preparing, ready, failed
     }
 
     @Published var step: Step
@@ -24,6 +27,9 @@ final class PublicOnboardingState: ObservableObject {
     @Published var filePickerShown = false
     @Published var editingTopic: MaterialTopic?
     @Published var imports: [MaterialImport] = []
+    @Published var lessonProgress: LessonProgress?
+    @Published var lessonArtifactState: LessonArtifactState = .idle
+    @Published var lessonExportURL: URL?
 
     let api: DevmaxAPI
     let founderClaimAvailable: Bool
@@ -42,6 +48,11 @@ final class PublicOnboardingState: ObservableObject {
         step = Self.initialStep(
             route: route, founderClaimAvailable: founderClaimAvailable
         )
+        if step == .lesson {
+            draft.importPath = "lesson"
+            draft.intent = "already_studied"
+            if draft.sourceType == "guide" { draft.sourceType = "article" }
+        }
     }
 
     deinit {
@@ -50,11 +61,27 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     var guideIsValid: Bool {
-        draft.guideText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 200
+        var readableCharacters = 0
+        for character in draft.guideText where !character.isWhitespace {
+            readableCharacters += 1
+            if readableCharacters == 200 { return true }
+        }
+        return false
     }
 
+    var isLessonDraft: Bool { draft.importPath == "lesson" }
+
+    var lessonSourceURLIsValid: Bool {
+        let value = draft.sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty || SafeExternalURL.parse(value) != nil
+    }
+
+    var lessonIsValid: Bool { guideIsValid && lessonSourceURLIsValid }
+
     var preparedTitle: String {
-        draft.title.isEmpty ? (draft.originalFilename.isEmpty ? "Your study guide" : draft.originalFilename) : draft.title
+        draft.title.isEmpty
+            ? (draft.originalFilename.isEmpty ? "Your study guide" : draft.originalFilename)
+            : draft.title
     }
 
     var handoffTitle: String {
@@ -69,8 +96,29 @@ final class PublicOnboardingState: ObservableObject {
         switch pendingAfterSignIn {
         case .manual: .manual
         case .collection: .collectionDetail
-        case .guide: .guide
+        case .guide: isLessonDraft ? .lesson : .guide
         }
+    }
+
+    /// Opens the focused article/lesson path without creating a second ingestion
+    /// state machine. An unsent lesson draft is resumed; a submitted or unrelated
+    /// draft starts clean while the durable server import remains in Study material.
+    func beginLesson() {
+        pollTask?.cancel()
+        if !isLessonDraft || draft.sourceID != nil {
+            draft = PublicSetupDraft()
+            draft.importPath = "lesson"
+            draft.intent = "already_studied"
+            draft.sourceType = "article"
+        }
+        job = nil
+        selectedTopics = []
+        lessonProgress = nil
+        lessonArtifactState = .idle
+        lessonExportURL = nil
+        error = ""
+        persist()
+        step = .lesson
     }
 
     func persist() {
@@ -104,8 +152,10 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func startImport() async {
-        guard guideIsValid else {
-            error = "Add at least 200 readable characters. Your draft is still saved."
+        guard guideIsValid, !isLessonDraft || lessonSourceURLIsValid else {
+            error = lessonSourceURLIsValid
+                ? "Add at least 200 readable characters. Your draft is still saved."
+                : "Use a full http or https source URL, or leave it blank."
             step = .fileError
             return
         }
@@ -117,6 +167,8 @@ final class PublicOnboardingState: ObservableObject {
                 MaterialImportRequest(
                     title: preparedTitle, sourceText: draft.guideText,
                     originalFilename: draft.originalFilename, mimeType: draft.mimeType,
+                    kind: draft.sourceType,
+                    sourceUrl: draft.sourceURL.trimmingCharacters(in: .whitespacesAndNewlines),
                     importPath: draft.importPath, intent: draft.intent,
                     requestedWeeks: draft.requestedWeeks,
                     weeklyCapacityMinutes: draft.weeklyCapacityHours * 60,
@@ -129,7 +181,9 @@ final class PublicOnboardingState: ObservableObject {
             persist()
             beginPolling(value.id)
         } catch {
-            self.error = "The guide is safe, but processing couldn't start."
+            self.error = isLessonDraft
+                ? "Your lesson is still saved, but processing couldn't start."
+                : "The guide is safe, but processing couldn't start."
             step = .importFailed
         }
         busy = false
@@ -142,7 +196,9 @@ final class PublicOnboardingState: ObservableObject {
             job = try await api.retryMaterialImport(id)
             beginPolling(id)
         } catch {
-            self.error = "The guide is still saved. Try again when the service is reachable."
+            self.error = isLessonDraft
+                ? "The lesson is still saved. Try again when the service is reachable."
+                : "The guide is still saved. Try again when the service is reachable."
             step = .importFailed
         }
     }
@@ -213,11 +269,74 @@ final class PublicOnboardingState: ObservableObject {
         busy = true
         defer { busy = false }
         do {
-            let result = try await api.confirmMaterial(job.id, topics: Array(selectedTopics))
-            await beginFirstReview(cardIDs: result.createdCardIds, app: app)
+            let selected = job.topics
+                .filter { selectedTopics.contains($0.id) }
+                .sorted { $0.position < $1.position }
+            let result = try await api.confirmMaterial(job.id, topics: selected.map(\.id))
+            if isLessonDraft {
+                await beginLessonStudy(
+                    cardIDs: result.createdCardIds, topics: selected, app: app
+                )
+            } else {
+                await beginFirstReview(cardIDs: result.createdCardIds, app: app)
+            }
         } catch {
             self.error = "Resolve the highlighted topics before creating review cards."
         }
+    }
+
+    func loadLessonProgress() async {
+        guard isLessonDraft, let id = job?.id ?? draft.sourceID else { return }
+        if let value = try? await api.lessonProgress(id) { lessonProgress = value }
+    }
+
+    /// Distillation is explicit and operates on confirmed source-backed concepts,
+    /// never on the conversation transcript. iOS cannot write into a Mac vault,
+    /// so it prepares one shareable Markdown export after the server produces the
+    /// canonical note and recall artifact.
+    func prepareLessonArtifacts() async {
+        guard isLessonDraft, let id = job?.id ?? draft.sourceID else {
+            error = "This lesson no longer has a source to export."
+            lessonArtifactState = .failed
+            return
+        }
+        lessonArtifactState = .preparing
+        error = ""
+        do {
+            let progress: LessonProgress
+            if let current = lessonProgress, current.complete {
+                progress = current
+            } else {
+                progress = try await api.lessonProgress(id)
+                lessonProgress = progress
+            }
+            guard progress.complete else {
+                error = "Finish the selected concepts before preparing learning notes."
+                lessonArtifactState = .failed
+                return
+            }
+            let artifacts: MaterialArtifacts
+            if job?.artifactsReady == true {
+                artifacts = try await api.materialArtifacts(id)
+            } else {
+                artifacts = try await api.distillLesson(id)
+            }
+            lessonExportURL = try Self.writeLessonExport(artifacts)
+            lessonArtifactState = .ready
+        } catch {
+            self.error = "The lesson is safe, but its distilled export couldn't be prepared."
+            lessonArtifactState = .failed
+        }
+    }
+
+    private static func writeLessonExport(_ artifacts: MaterialArtifacts) throws -> URL {
+        let body = artifacts.canonicalNoteMarkdown
+            + "\n\n---\n\n"
+            + artifacts.recallExportMarkdown
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("devmax-learning-notes-\(artifacts.sourceId).md")
+        try Data(body.utf8).write(to: url, options: .atomic)
+        return url
     }
 
     func updateTopic(
@@ -230,8 +349,7 @@ final class PublicOnboardingState: ObservableObject {
                 action: action, mergeInto: mergeInto
             )
             if var current = job,
-               let index = current.topics.firstIndex(where: { $0.id == topic.id })
-            {
+               let index = current.topics.firstIndex(where: { $0.id == topic.id }) {
                 current.topics[index] = updated
                 job = current
                 if updated.isClean { selectedTopics.insert(updated.id) }
@@ -278,12 +396,14 @@ final class PublicOnboardingState: ObservableObject {
         update.title = source.title
         update.importPath = source.importPath
         update.intent = source.intent
+        update.sourceType = source.kind
+        update.sourceURL = source.sourceUrl ?? ""
         update.requestedWeeks = draft.requestedWeeks
         update.weeklyCapacityHours = draft.weeklyCapacityHours
         update.previousVersionID = source.id
         draft = update
         persist()
-        step = .guide
+        step = source.importPath == "lesson" ? .lesson : .guide
     }
 
     func deleteMaterial(_ id: UUID) async {
@@ -326,6 +446,53 @@ final class PublicOnboardingState: ObservableObject {
         step = .review
     }
 
+    private func beginLessonStudy(
+        cardIDs: [UUID], topics: [MaterialTopic], app: AppState
+    ) async {
+        let library = (try? await api.cards(sort: "next_review", mode: "conversational")) ?? []
+        let cards = Self.orderedLessonCards(
+            cardIDs: cardIDs, topics: topics, library: library
+        )
+        guard !cards.isEmpty else {
+            error = "The concepts were saved, but this study session couldn't open."
+            step = .empty
+            return
+        }
+        app.beginSession(
+            cards: cards, replacingPath: true, origin: .lesson
+        )
+        step = .review
+    }
+
+    /// Confirmation returns card ids, while the learner approved proposals in
+    /// source order. Rejoin those two server-owned facts without depending on the
+    /// library endpoint's next-review sort. Any unmatched rolling-deploy card is
+    /// retained in the confirmation order rather than silently dropped.
+    static func orderedLessonCards(
+        cardIDs: [UUID], topics: [MaterialTopic], library: [CardSummary]
+    ) -> [DueCard] {
+        let wanted = Set(cardIDs)
+        let candidates = library.filter { wanted.contains($0.id) }
+        var used = Set<UUID>()
+        var ordered: [CardSummary] = []
+
+        for topic in topics.sorted(by: { $0.position < $1.position }) {
+            guard let card = candidates.first(where: {
+                !used.contains($0.id) && $0.topic == topic.topic
+            }) else { continue }
+            ordered.append(card)
+            used.insert(card.id)
+        }
+
+        let byID = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })
+        ordered.append(contentsOf: cardIDs.compactMap { id in
+            guard !used.contains(id), let card = byID[id] else { return nil }
+            used.insert(id)
+            return card
+        })
+        return ordered.map { $0.asQueueCard() }
+    }
+
     static func handlesDebugRoute(_ route: String) -> Bool {
         debugStep(route) != nil
     }
@@ -340,6 +507,7 @@ final class PublicOnboardingState: ObservableObject {
         case "welcome": .welcome
         case "material": .material
         case "guide", "file-import": .guide
+        case "lesson-add": .lesson
         case "file-error": .fileError
         case "signin", "signin-error": .handoff
         case "plan-path": .planPath

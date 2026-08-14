@@ -54,6 +54,48 @@ def test_proposal_schema_and_activation_share_the_rubric_fields():
     assert tuple(rubric["required"]) == RUBRIC_FIELDS
 
 
+def test_lesson_schema_has_one_open_prompt_slot_for_each_depth():
+    concepts = llm.LESSON_EXTRACTION_SCHEMA["properties"]["concepts"]
+    assert concepts["minItems"] == 1
+    assert concepts["maxItems"] == 7
+    prompt_list = concepts["items"]["properties"]["recall_questions"]
+    assert prompt_list["minItems"] == prompt_list["maxItems"] == 5
+    assert tuple(prompt_list["items"]["properties"]["level"]["enum"]) == (
+        llm.LESSON_RECALL_LEVELS
+    )
+    rubric = concepts["items"]["properties"]["answer_rubric"]
+    assert tuple(rubric["properties"]) == RUBRIC_FIELDS
+    assert tuple(rubric["required"]) == RUBRIC_FIELDS
+
+
+async def test_lesson_extraction_uses_the_bounded_card_proposal_route(monkeypatch):
+    payload = {"concepts": [{"topic": "Request routing"}]}
+    calls = stub_completion(monkeypatch, payload)
+    authorizations: list[int] = []
+
+    async def authorize(attempt: int) -> None:
+        authorizations.append(attempt)
+
+    result = await llm.extract_lesson(
+        title="Request path",
+        source_text="DNS to load balancer to application to storage.",
+        source_url="https://example.com/request-path",
+        source_type="article",
+        before_provider_call=authorize,
+    )
+
+    assert result == payload["concepts"]
+    assert calls[0]["model"] == llm.get_settings().card_proposal_model
+    assert calls[0]["effort"] == llm.get_settings().card_proposal_effort
+    assert calls[0]["max_tokens"] == 8000
+    assert calls[0]["purpose"] == "lesson_extract"
+    assert calls[0]["before_provider_call"] is authorize
+    assert "Source URL (provenance only)" in calls[0]["user_content"]
+    # `_complete` owns invocation at the physical transmission boundary; this
+    # stub only verifies the exact callback is forwarded, so it is not called here.
+    assert authorizations == []
+
+
 def scored(
     score: Any, probe: str | None = "probe?", *, needs: bool = False
 ) -> dict[str, Any]:

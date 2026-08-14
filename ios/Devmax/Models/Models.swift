@@ -409,6 +409,9 @@ struct RunEntry: Identifiable, Equatable {
     let category: String
     let score: Int
     let feedback: String
+    /// The server-owned next-review result for this concept, carried into recap
+    /// so lesson Results does not make the learner reopen every card.
+    let scheduleLine: String
     /// As the server reported it for this card, not as the client requested it.
     let practice: Bool
 }

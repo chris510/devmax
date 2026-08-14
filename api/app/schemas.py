@@ -1,8 +1,16 @@
 import uuid
 from datetime import date, datetime, time
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.services.scoring_contract import CoachingFocus, ScoreKind, ScoringContractVersion
 
@@ -906,18 +914,70 @@ class DuplicateResolution(BaseModel):
 # Public study material -------------------------------------------------------
 
 
+MaterialSourceKind = Literal[
+    "guide", "article", "documentation", "course", "book", "notes", "other"
+]
+LessonRecallLevel = Literal[
+    "definition_recognition",
+    "mechanism",
+    "derivation",
+    "application",
+    "failure_tradeoff",
+]
+
+
+class LessonRecallPrompt(BaseModel):
+    level: LessonRecallLevel
+    question: str = Field(min_length=1, max_length=2000)
+
+
 class MaterialImportIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    source_text: str = Field(min_length=200, max_length=400_000)
+    source_text: str = Field(default="", max_length=400_000)
+    # Provenance only. The server never fetches this URL; extraction always uses
+    # the required pasted source_text above.
+    source_url: str = Field(default="", max_length=4000)
+    kind: MaterialSourceKind = "guide"
     original_filename: str = Field(default="", max_length=255)
     mime_type: Literal["text/plain", "text/markdown", "application/pdf"] = "text/plain"
-    import_path: Literal["topics", "plan"] = "topics"
+    import_path: Literal["topics", "plan", "lesson"] = "topics"
     intent: Literal["already_studied", "learn"] = "already_studied"
     requested_weeks: int = Field(default=12, ge=2, le=52)
     weekly_capacity_minutes: int = Field(default=480, gt=0, le=10080)
     mode: PlanMode = "flexible"
     deadline: date | None = None
     previous_version_id: uuid.UUID | None = None
+
+    @field_validator("source_url")
+    @classmethod
+    def source_url_is_safe_provenance(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            return ""
+        parsed = urlsplit(text)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or any(character.isspace() for character in text)
+            or any(character in text for character in "<>")
+        ):
+            raise ValueError(
+                "source_url must be an absolute http(s) URL without credentials"
+            )
+        return text
+
+    @model_validator(mode="after")
+    def pasted_text_is_the_required_authority(self) -> "MaterialImportIn":
+        if len(self.source_text.strip()) < 200:
+            raise ValueError(
+                "at least 200 readable characters of pasted source_text are required "
+                "for processing; source_url is provenance metadata only and the "
+                "server never fetches it"
+            )
+        return self
 
 
 class MaterialTopicOut(BaseModel):
@@ -929,6 +989,10 @@ class MaterialTopicOut(BaseModel):
     topic: str
     answer_anchor: str
     source_excerpt: str
+    canonical_question: str
+    answer_rubric: dict[str, str]
+    recall_questions: list[LessonRecallPrompt]
+    card_id: uuid.UUID | None
     status: Literal["clean", "needs_attention", "excluded", "confirmed"]
     issue: str
 
@@ -937,6 +1001,7 @@ class MaterialImportOut(BaseModel):
     id: uuid.UUID
     title: str
     kind: str
+    source_url: str
     version: int
     status: Literal[
         "draft",
@@ -948,7 +1013,7 @@ class MaterialImportOut(BaseModel):
         "confirmed",
         "superseded",
     ]
-    import_path: Literal["topics", "plan"]
+    import_path: Literal["topics", "plan", "lesson"]
     intent: Literal["already_studied", "learn"]
     original_filename: str
     character_count: int
@@ -958,6 +1023,8 @@ class MaterialImportOut(BaseModel):
     plan_draft_id: uuid.UUID | None = None
     comparison: dict[str, int] = Field(default_factory=dict)
     topics: list[MaterialTopicOut] = Field(default_factory=list)
+    artifacts_ready: bool = False
+    distilled_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -976,6 +1043,63 @@ class MaterialConfirmIn(BaseModel):
 class MaterialConfirmOut(BaseModel):
     source_id: uuid.UUID
     created_card_ids: list[uuid.UUID]
+
+
+class LessonConceptProgress(BaseModel):
+    proposal_id: uuid.UUID
+    card_id: uuid.UUID
+    concept: str
+    mastery_summary: str
+    last_score: int | None
+    recall_score: int | None
+    score_kind: ScoreKind
+    scoring_contract_version: ScoringContractVersion | None
+    last_reviewed_at: datetime | None
+    next_review_at: date
+    interval_days: int
+
+
+class LessonProgressOut(BaseModel):
+    source_id: uuid.UUID
+    title: str
+    concept_count: int
+    reviewed_count: int
+    weak_count: int
+    complete: bool
+    next_card_id: uuid.UUID | None
+    concepts: list[LessonConceptProgress]
+
+
+class LessonQuizResult(BaseModel):
+    reviewed_at: datetime
+    question: str
+    recall_score: int | None
+    graded_summary: str
+    feedback: str
+
+
+class LearningNoteConcept(BaseModel):
+    proposal_id: uuid.UUID
+    card_id: uuid.UUID
+    concept: str
+    source_title: str
+    source_url: str
+    mental_model: str
+    how_it_works: str
+    gotchas: list[str]
+    recall_prompts: list[LessonRecallPrompt]
+    quiz_results: list[LessonQuizResult]
+    confidence: Literal["unrated", "needs_review", "developing", "established"]
+
+
+class MaterialArtifactsOut(BaseModel):
+    source_id: uuid.UUID
+    title: str
+    source_url: str
+    distilled_at: datetime
+    canonical_note_markdown: str
+    recall_export_markdown: str
+    concepts: list[LearningNoteConcept]
 
 
 class ManualTopicIn(BaseModel):

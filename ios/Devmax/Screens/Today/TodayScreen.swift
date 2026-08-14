@@ -4,6 +4,7 @@ import SwiftUI
 struct TodayScreen: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var plan: StudyPlanState
+    @EnvironmentObject private var flow: PublicOnboardingState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -206,6 +207,21 @@ struct TodayScreen: View {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 12) {
+                // A lesson is source ingestion, not Quick Add: it stays outside
+                // pending captures and opens the durable material flow.
+                Button {
+                    flow.beginLesson()
+                    state.path.append(.materialSetup)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("+").font(WCFont.sans(16))
+                        Text("Add lesson").font(TypeRole.rowSummary)
+                    }
+                    .foregroundStyle(Theme.meta)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+
                 // Quick-add stays visible in every state, including empty and error.
                 Button {
                     state.savedCapture = nil
@@ -263,7 +279,10 @@ struct NoMaterialTodayContent: View {
             Text("Add something you want to understand.")
                 .font(TypeRole.emptyQueue).foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            PrimaryButton(title: "Add study material") { open(.material) }
+            PrimaryButton(title: "Add lesson") {
+                flow.beginLesson()
+                state.path.append(.materialSetup)
+            }
             SecondaryButton(title: "Add a few topics") { open(.manual) }
             Button("Browse Devmax collections") { open(.collections) }
                 .buttonStyle(.plain).font(TypeRole.secondaryAction).foregroundStyle(Theme.meta)

@@ -59,6 +59,23 @@ struct AIConsentReceipt: Codable, Equatable {
     let promptRequired: Bool
 }
 
+struct LessonRecallPrompt: Codable, Equatable, Identifiable {
+    var id: String { level }
+    let level: String
+    let question: String
+
+    var levelLabel: String {
+        switch level {
+        case "definition_recognition": "Definition"
+        case "mechanism": "Mechanism"
+        case "derivation": "Derivation"
+        case "application": "Application"
+        case "failure_tradeoff": "Failure / trade-off"
+        default: level.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+}
+
 struct MaterialTopic: Codable, Identifiable, Equatable {
     let id: UUID
     let position: Int
@@ -66,6 +83,12 @@ struct MaterialTopic: Codable, Identifiable, Equatable {
     var topic: String
     var answerAnchor: String
     let sourceExcerpt: String
+    /// Additive lesson grounding. Optional while older material imports remain
+    /// readable during rollout.
+    var canonicalQuestion: String? = nil
+    var answerRubric: [String: String]? = nil
+    var recallQuestions: [LessonRecallPrompt]? = nil
+    var cardId: UUID? = nil
     var status: String
     var issue: String
 
@@ -81,6 +104,9 @@ struct MaterialImport: Codable, Identifiable, Equatable {
     let importPath: String
     let intent: String
     let originalFilename: String
+    /// Attribution metadata for lesson imports. Optional during the additive API
+    /// rollout and absent on older guide/manual sources.
+    var sourceUrl: String? = nil
     let characterCount: Int
     let cleanCount: Int
     let attentionCount: Int
@@ -88,6 +114,8 @@ struct MaterialImport: Codable, Identifiable, Equatable {
     let planDraftId: UUID?
     let comparison: [String: Int]
     var topics: [MaterialTopic]
+    var artifactsReady: Bool? = nil
+    var distilledAt: Date? = nil
     let createdAt: Date
     let updatedAt: Date
 
@@ -99,6 +127,8 @@ struct MaterialImportRequest: Encodable {
     let sourceText: String
     let originalFilename: String
     let mimeType: String
+    let kind: String
+    let sourceUrl: String
     let importPath: String
     let intent: String
     let requestedWeeks: Int
@@ -111,6 +141,65 @@ struct MaterialImportRequest: Encodable {
 struct MaterialConfirmation: Codable, Equatable {
     let sourceId: UUID
     let createdCardIds: [UUID]
+}
+
+struct LessonConceptProgress: Codable, Identifiable, Equatable {
+    var id: UUID { proposalId }
+    let proposalId: UUID
+    let cardId: UUID
+    let concept: String
+    let masterySummary: String
+    let lastScore: Int?
+    let recallScore: Int?
+    let scoreKind: String
+    let scoringContractVersion: Int?
+    let lastReviewedAt: Date?
+    let nextReviewAt: String
+    let intervalDays: Int
+}
+
+struct LessonProgress: Codable, Equatable {
+    let sourceId: UUID
+    let title: String
+    let conceptCount: Int
+    let reviewedCount: Int
+    let weakCount: Int
+    let complete: Bool
+    let nextCardId: UUID?
+    let concepts: [LessonConceptProgress]
+}
+
+struct LessonQuizResult: Codable, Equatable {
+    let reviewedAt: Date
+    let question: String
+    let recallScore: Int?
+    let gradedSummary: String
+    let feedback: String
+}
+
+struct LearningNoteConcept: Codable, Identifiable, Equatable {
+    var id: UUID { proposalId }
+    let proposalId: UUID
+    let cardId: UUID
+    let concept: String
+    let sourceTitle: String
+    let sourceUrl: String
+    let mentalModel: String
+    let howItWorks: String
+    let gotchas: [String]
+    let recallPrompts: [LessonRecallPrompt]
+    let quizResults: [LessonQuizResult]
+    let confidence: String
+}
+
+struct MaterialArtifacts: Codable, Equatable {
+    let sourceId: UUID
+    let title: String
+    let sourceUrl: String
+    let distilledAt: Date
+    let canonicalNoteMarkdown: String
+    let recallExportMarkdown: String
+    let concepts: [LearningNoteConcept]
 }
 
 struct ManualTopic: Codable, Equatable {

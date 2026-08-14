@@ -7,6 +7,7 @@ import SwiftUI
 /// scoring rubric's tone.
 struct SessionRecapScreen: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var flow: PublicOnboardingState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,6 +19,9 @@ struct SessionRecapScreen: View {
                     ForEach(state.run) { entry in
                         RecapRow(
                             entry: entry,
+                            mastery: flow.lessonProgress?.concepts.first {
+                                $0.cardId == entry.id
+                            }?.masterySummary,
                             isExpanded: state.recapOpen == entry.id,
                             toggle: {
                                 withAnimation(Motion.fadeFast) {
@@ -36,13 +40,16 @@ struct SessionRecapScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
+        .task {
+            if state.runWasLesson { await flow.loadLessonProgress() }
+        }
     }
 
     /// The single-card score block's treatment, applied to the run's average.
     /// No new number presentation, no chart.
     private var header: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Session recap")
+            Text(state.runWasLesson ? "Lesson results" : "Session recap")
                 .font(WCFont.serif(24))
                 .tracking(-0.24)
                 .foregroundStyle(Theme.textStrong)
@@ -54,6 +61,12 @@ struct SessionRecapScreen: View {
                     .foregroundStyle(averageColor)
                 MetaText(text: state.usesRecallContract ? "/ 5 AVG RECALL" : "/ 5 AVERAGE", font: WCFont.mono(13),
                          tracking: 0, color: Theme.metaDimAlt)
+            }
+            if state.runWasLesson, let progress = flow.lessonProgress {
+                MetaText(
+                    text: progressSummary(progress),
+                    font: WCFont.mono(10.5), tracking: 0.55, color: Theme.metaFaint
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,6 +100,8 @@ struct SessionRecapScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            if state.runWasLesson { lessonExportBlock }
+
             PrimaryButton(title: "Done") { state.finish() }
 
             if state.runWasPractice {
@@ -105,12 +120,67 @@ struct SessionRecapScreen: View {
         .padding(.bottom, Metrics.bottomSafeArea)
         .background(Theme.bg)
     }
+
+    @ViewBuilder
+    private var lessonExportBlock: some View {
+        switch flow.lessonArtifactState {
+        case .idle:
+            SecondaryButton(title: "Prepare learning notes") {
+                Task { await flow.prepareLessonArtifacts() }
+            }
+        case .preparing:
+            SecondaryButton(title: "Preparing learning notes…") {}
+                .disabled(true)
+                .opacity(0.55)
+        case .ready:
+            if let url = flow.lessonExportURL {
+                VStack(alignment: .leading, spacing: 8) {
+                    MetaText(
+                        text: "DISTILLED NOTE + RECALL QUESTIONS READY · "
+                            + "RAW SOURCE EXCLUDED",
+                        font: WCFont.mono(9.5), tracking: 0.55, color: Theme.metaFaint
+                    )
+                    ShareLink(item: url) {
+                        Text("Export learning notes")
+                            .font(WCFont.sans(14))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(
+                                RoundedRectangle(cornerRadius: Metrics.secondaryRadius)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: Metrics.minTapTarget)
+                }
+            }
+        case .failed:
+            VStack(alignment: .leading, spacing: 8) {
+                InlineNotice {
+                    Text(flow.error)
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                SecondaryButton(title: "Try preparing again") {
+                    Task { await flow.prepareLessonArtifacts() }
+                }
+            }
+        }
+    }
+
+    private func progressSummary(_ progress: LessonProgress) -> String {
+        "\(progress.reviewedCount) OF \(progress.conceptCount) CONCEPTS REVIEWED · "
+            + "\(progress.weakCount) NEED REVIEW"
+    }
 }
 
 /// Setup's row anatomy with this run's score, expanding to that card's feedback.
 /// Card History's accordion behaviour, reused exactly — one row open at a time.
 private struct RecapRow: View {
     let entry: RunEntry
+    let mastery: String?
     let isExpanded: Bool
     let toggle: () -> Void
 
@@ -138,14 +208,26 @@ private struct RecapRow: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(entry.feedback)
-                    .font(WCFont.serif(17))
-                    .lineSpacing(17 * 1.5 - 17 * 1.2)
-                    .foregroundStyle(Theme.textSerif)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 20)
-                    .wcFade(Motion.fadeFast)
+                VStack(alignment: .leading, spacing: 12) {
+                    if let mastery, !mastery.isEmpty {
+                        Text(mastery)
+                            .font(TypeRole.masterySummary)
+                            .foregroundStyle(Theme.textSerif)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(entry.feedback)
+                        .font(WCFont.serif(17))
+                        .lineSpacing(17 * 1.5 - 17 * 1.2)
+                        .foregroundStyle(Theme.textSerif)
+                        .fixedSize(horizontal: false, vertical: true)
+                    MetaText(
+                        text: entry.scheduleLine, font: TypeRole.metaBody,
+                        tracking: 1.0, color: Theme.metaFaint
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 20)
+                .wcFade(Motion.fadeFast)
             }
         }
         .overlay(alignment: .top) { Hairline() }
