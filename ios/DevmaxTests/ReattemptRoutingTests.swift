@@ -27,6 +27,7 @@ final class ReattemptRoutingTests: XCTestCase {
         var answerCalls: [String] = []
         var reattemptCalls: [String] = []
         var coachingCalls: [String] = []
+        var saveDraftCalls: [String] = []
         var startStubs: [UUID: [StartStub]] = [:]
 
         func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome {
@@ -87,7 +88,9 @@ final class ReattemptRoutingTests: XCTestCase {
             try await Task.sleep(for: stub.delay)
             return try stub.result.get()
         }
-        func saveDraft(sessionID: UUID, text: String) async throws {}
+        func saveDraft(sessionID: UUID, text: String) async throws {
+            saveDraftCalls.append(text)
+        }
         func settings() async throws -> AppSettings { throw CancellationError() }
         func updateSettings(_ settings: AppSettings) async throws -> AppSettings {
             throw CancellationError()
@@ -239,6 +242,22 @@ final class ReattemptRoutingTests: XCTestCase {
         XCTAssertEqual(Stage.recordingFollowUp.answeringTwin, .followUp)
         XCTAssertEqual(Stage.recording.answeringTwin, .idle)
         XCTAssertEqual(Stage.recordingCoaching.answeringTwin, .coaching)
+    }
+
+    @MainActor
+    func testSubmissionFlushCancelsDraftUploadRaceButKeepsLocalCopy() async {
+        let api = SpyAPI()
+        let state = AppState(api: api)
+        let card = Self.card("Draft race")
+        state.sessionCards = [card]
+        state.sessionID = UUID()
+        state.updateDraft("the final spoken transcript")
+        defer { DraftStore.clear(for: card.id) }
+
+        await state.flushDraftForSubmission()
+
+        XCTAssertEqual(DraftStore.read(for: card.id), "the final spoken transcript")
+        XCTAssertTrue(api.saveDraftCalls.isEmpty, "a late PATCH can repopulate the next turn")
     }
 
     // MARK: - A question that never loaded

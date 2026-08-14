@@ -10,9 +10,34 @@ import Speech
 /// the handoff requires a full text-only path for every voice interaction.
 @MainActor
 final class SpeechService: ObservableObject {
+    enum CaptureState: Equatable {
+        case idle
+        case preparing
+        case recording
+        case finalizing
+        /// Capture ended without a user-initiated, trustworthy final result. The
+        /// transcript is deliberately left intact so the caller can move it into
+        /// the existing editable text path instead of scoring a silent partial.
+        case needsReview
+    }
+
+    struct Finalization: Equatable {
+        enum Status: Equatable { case final, timedOut, failed, noCapture }
+
+        let text: String
+        let status: Status
+
+        var isSafeToSubmit: Bool {
+            status == .final && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     @Published private(set) var transcript = ""
-    @Published private(set) var isRecording = false
+    @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var unavailable = false
+
+    var isRecording: Bool { captureState == .recording }
+    var isPreparing: Bool { captureState == .preparing }
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let engine = AVAudioEngine()
@@ -22,9 +47,11 @@ final class SpeechService: ObservableObject {
     private var simulationTarget = ""
 
     /// Resumed with the final transcription once the recognizer has flushed the
-    /// audio still in flight. Non-nil only while `finish()` is waiting.
-    private var finalization: CheckedContinuation<String, Never>?
+    /// audio still in flight. Non-nil only while `finishResult()` is waiting.
+    private var finalization: CheckedContinuation<Finalization, Never>?
     private var finalizationTimeout: Task<Void, Never>?
+    private var permissionTask: Task<Void, Never>?
+    private var terminalStatus: Finalization.Status?
 
     /// A recognition callback that arrives after its recording ended must not
     /// write into the next recording's transcript.
@@ -32,8 +59,8 @@ final class SpeechService: ObservableObject {
 
     private enum CaptureError: Error { case unavailable }
 
-    /// How long to wait for a final result before giving up and submitting the
-    /// partials. A recognizer that never reports `isFinal` must not hang a submit.
+    /// How long to wait for a final result before handing the latest partial to
+    /// editable review. A recognizer that never reports `isFinal` must not hang.
     private static let finalizationDeadline = Duration.seconds(3)
 
     /// Recording resumes onto existing text rather than replacing it, so
@@ -48,10 +75,21 @@ final class SpeechService: ObservableObject {
         simulated: Bool = false,
         simulate text: String = ""
     ) {
+        // A previous permission request may still be returning after the screen
+        // moved on. Invalidate it before this capture gets its own generation.
+        permissionTask?.cancel()
+        permissionTask = nil
+        task?.cancel()
+        teardown()
+        generation += 1
+        let capture = generation
+
         transcript = existing
+        terminalStatus = nil
+        unavailable = false
 
         if simulated {
-            isRecording = true
+            captureState = .recording
             startSimulation(fullText: text)
             return
         }
@@ -62,16 +100,20 @@ final class SpeechService: ObservableObject {
         // start synchronously rather than paying an await hop to re-learn an
         // answer already on disk. That gap is why answers arrived mid-sentence.
         if permissionsGranted {
-            beginCaptureOrDegrade(vocabulary: vocabulary)
+            beginCaptureOrDegrade(vocabulary: vocabulary, capture: capture)
             return
         }
 
-        Task {
-            guard await requestPermissions() else {
-                unavailable = true
+        captureState = .preparing
+        permissionTask = Task { [weak self] in
+            let granted = await Self.requestPermissions()
+            guard let self, capture == generation, !Task.isCancelled else { return }
+            guard granted else {
+                self.unavailable = true
+                self.captureState = .needsReview
                 return
             }
-            beginCaptureOrDegrade(vocabulary: vocabulary)
+            self.beginCaptureOrDegrade(vocabulary: vocabulary, capture: capture)
         }
     }
 
@@ -83,9 +125,19 @@ final class SpeechService: ObservableObject {
     /// synchronously truncated the tail of every spoken answer.
     ///
     /// Nothing recording means nothing to hand back — see `endCapture`.
-    func finish() async -> String {
-        guard isRecording else { return "" }
-        isRecording = false
+    func finishResult() async -> Finalization {
+        if captureState == .needsReview {
+            let result = Finalization(text: transcript, status: terminalStatus ?? .failed)
+            endCapture()
+            return result
+        }
+        if captureState == .preparing {
+            let text = transcript
+            endCapture()
+            return Finalization(text: text, status: .noCapture)
+        }
+        guard isRecording else { return Finalization(text: "", status: .noCapture) }
+        captureState = .finalizing
 
         simulationTimer?.invalidate()
         simulationTimer = nil
@@ -98,37 +150,48 @@ final class SpeechService: ObservableObject {
         //
         // One exit, so the text is bound before `endCapture` clears it rather than
         // by an ordering a later tidy-up could quietly reverse.
-        let text: String
+        let result: Finalization
         if task == nil {
-            text = transcript
+            result = Finalization(text: transcript, status: .final)
         } else {
             stopEngine()
             request?.endAudio()
-            text = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            result = await withCheckedContinuation { continuation in
                 finalization = continuation
                 finalizationTimeout = Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: Self.finalizationDeadline)
-                    self?.completeFinalization()
+                    do {
+                        try await Task.sleep(for: Self.finalizationDeadline)
+                    } catch {
+                        return
+                    }
+                    self?.completeFinalization(status: .timedOut)
                 }
             }
         }
 
         endCapture()
-        return text
+        return result
+    }
+
+    /// Compatibility seam for unscored voice capture such as Practice Debrief.
+    /// Conversation uses `finishResult()` because only it must decide whether the
+    /// transcript is trustworthy enough to reach a score.
+    func finish() async -> String {
+        (await finishResult()).text
     }
 
     /// Ends recording and discards anything still in flight. For leaving the
     /// screen or swapping input modes — never for submitting, which needs
-    /// `finish()`.
+    /// `finishResult()`.
     func stop() {
-        isRecording = false
-        generation += 1
+        permissionTask?.cancel()
+        permissionTask = nil
         simulationTimer?.invalidate()
         simulationTimer = nil
         task?.cancel()
         // Unblocks a `finish()` racing with this stop. It resumes with the
         // transcript, so it has to run before `endCapture` clears it.
-        completeFinalization()
+        completeFinalization(status: .failed)
         endCapture()
     }
 
@@ -140,7 +203,7 @@ final class SpeechService: ObservableObject {
             && AVAudioApplication.shared.recordPermission == .granted
     }
 
-    private func requestPermissions() async -> Bool {
+    private static func requestPermissions() async -> Bool {
         let speech = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
@@ -148,22 +211,35 @@ final class SpeechService: ObservableObject {
         return await AVAudioApplication.requestRecordPermission()
     }
 
-    private func beginCaptureOrDegrade(vocabulary: [String]) {
+    private func beginCaptureOrDegrade(vocabulary: [String], capture: Int) {
+        guard capture == generation else { return }
         do {
-            try beginCapture(vocabulary: vocabulary)
-            isRecording = true
+            try beginCapture(vocabulary: vocabulary, capture: capture)
+            captureState = .recording
         } catch {
             unavailable = true
-            isRecording = false
+            terminalStatus = .failed
+            captureState = .needsReview
         }
     }
 
-    private func completeFinalization() {
+    private func completeFinalization(status: Finalization.Status) {
         finalizationTimeout?.cancel()
         finalizationTimeout = nil
         guard let continuation = finalization else { return }
         finalization = nil
-        continuation.resume(returning: transcript)
+        continuation.resume(returning: Finalization(text: transcript, status: status))
+    }
+
+    private func handleRecognitionTermination(status: Finalization.Status) {
+        terminalStatus = status
+        if finalization != nil {
+            completeFinalization(status: status)
+        } else {
+            captureState = .needsReview
+            generation += 1
+            teardown()
+        }
     }
 
     private func stopEngine() {
@@ -186,19 +262,26 @@ final class SpeechService: ObservableObject {
     /// together made the read-before-clear ordering in `finish()` and `stop()`
     /// load-bearing but invisible.
     private func endCapture() {
+        generation += 1
+        permissionTask?.cancel()
+        permissionTask = nil
         transcript = ""
+        terminalStatus = nil
+        captureState = .idle
         teardown()
     }
 
     private func teardown() {
+        let hadAudioResources = task != nil || request != nil || engine.isRunning
         task = nil
         request = nil
         simulationTarget = ""
+        guard hadAudioResources else { return }
         stopEngine()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func beginCapture(vocabulary: [String]) throws {
+    private func beginCapture(vocabulary: [String], capture: Int) throws {
         guard let recognizer, recognizer.isAvailable else { throw CaptureError.unavailable }
 
         let audioSession = AVAudioSession.sharedInstance()
@@ -207,6 +290,7 @@ final class SpeechService: ObservableObject {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.taskHint = .dictation
         // Keeps audio on device — this is a private, single-user app.
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         // Biases recognition toward this curriculum's vocabulary, which is
@@ -224,8 +308,6 @@ final class SpeechService: ObservableObject {
         engine.prepare()
         try engine.start()
 
-        generation += 1
-        let capture = generation
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             Task { @MainActor in
@@ -233,8 +315,15 @@ final class SpeechService: ObservableObject {
                 if let result {
                     self.transcript = prefix + result.bestTranscription.formattedString
                 }
-                if result?.isFinal == true || error != nil {
-                    self.completeFinalization()
+                if error != nil {
+                    // An early task failure used to leave the UI saying
+                    // LISTENING while later speech went nowhere. Preserve the
+                    // latest partial and hand it to editable text instead.
+                    self.handleRecognitionTermination(status: .failed)
+                } else if result?.isFinal == true {
+                    // A recognizer may close an utterance before the stop tap.
+                    // It is complete recognition, but not an explicit submit.
+                    self.handleRecognitionTermination(status: .final)
                 }
             }
         }

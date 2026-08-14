@@ -57,6 +57,14 @@ struct ConversationScreen: View {
             guard speech.isRecording else { return }
             state.updateDraft(text)
         }
+        // Recognition can end before the stop tap because permission/capture
+        // failed or the recognizer closed the utterance. Never leave the chrome
+        // claiming LISTENING over a dead task, and never score its last partial:
+        // preserve it in the existing editable text path.
+        .onChange(of: speech.captureState) { _, captureState in
+            guard captureState == .needsReview else { return }
+            moveUncertainSpeechToText()
+        }
         .onDisappear { speech.stop(); speaker.stop() }
     }
 
@@ -207,13 +215,30 @@ struct ConversationScreen: View {
             }
             // Auto-scrolled to the bottom on every new turn or stage change.
             .onChange(of: state.thread.count) { _, _ in scrollToBottom(proxy) }
-            .onChange(of: state.stage) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: state.stage) { _, stage in
+                guard stage != .result else { return }
+                scrollToBottom(proxy)
+            }
             .onChange(of: speech.transcript) { _, _ in scrollToBottom(proxy) }
+            // `.result` inserts both a variable-height score block and a taller
+            // fixed footer. The stage observer can scroll against the old
+            // viewport geometry, leaving the correction just below the fold.
+            .onChange(of: state.result) { _, result in
+                guard result != nil else { return }
+                scrollToBottomAfterLayout(proxy)
+            }
         }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(Motion.fadeFast) { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
+
+    private func scrollToBottomAfterLayout(_ proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            scrollToBottom(proxy)
+        }
     }
 
     private func alignment(for entry: ThreadEntry) -> Alignment {
@@ -428,8 +453,9 @@ struct ConversationScreen: View {
 
     // MARK: - Input
 
-    private var isRecording: Bool { state.stage.isRecording }
+    private var isRecording: Bool { speech.isRecording }
     private var canAnswer: Bool { state.stage.acceptsAnswer }
+    private var micEnabled: Bool { canAnswer && !finalizing && !speech.isPreparing }
 
     @ViewBuilder
     private var inputArea: some View {
@@ -491,8 +517,8 @@ struct ConversationScreen: View {
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(!canAnswer)
-            .opacity(canAnswer ? 1 : 0.4)
+            .disabled(!micEnabled)
+            .opacity(micEnabled ? 1 : 0.4)
 
             MetaText(text: micLabel, font: TypeRole.metaRow, tracking: 1.2, color: Theme.metaAlt)
 
@@ -500,13 +526,11 @@ struct ConversationScreen: View {
                 // Swapping input mode carries the text across and never navigates
                 // away — so it has to finalize like a submit does, not discard.
                 // Reading the transcript straight after stop() dropped whatever
-                // was still in flight. On a turn with no live capture `finish()`
+                // was still in flight. On a turn with no live capture `finishResult()`
                 // returns nothing, so `state.draft` is the value — not a fallback.
                 Task {
-                    let spoken = await speech.finish()
-                    state.updateDraft(spoken.isEmpty ? state.draft : spoken)
-                    state.inputMode = .text
-                    draftFocused = true
+                    let result = await speech.finishResult()
+                    enterTextMode(with: result.text.isEmpty ? state.draft : result.text)
                 }
             } label: {
                 Text("Type instead")
@@ -527,34 +551,73 @@ struct ConversationScreen: View {
     }
 
     private func toggleRecording() {
+        guard !finalizing else { return }
         speaker.stop()
         if isRecording {
             // The stage must stay the recording one until `submit` reads it:
             // it carries which turn this answer belongs to, and `sendAnswer`
             // rewinds to it if the submit fails.
-            guard !finalizing else { return }
             finalizing = true
+            let recordingSessionID = state.sessionID
+            let recordingCardID = state.currentCard?.id
             Task {
-                // finish(), not stop(): the recognizer's last corrected result
+                // finishResult(), not stop(): the recognizer's last corrected result
                 // arrives after the audio ends, and reading the transcript
                 // synchronously cut the end off every spoken answer.
-                let text = await speech.finish()
+                let result = await speech.finishResult()
                 finalizing = false
+                let text = result.text.isEmpty ? state.draft : result.text
+
+                // Final recognition can outlive this screen. Preserve the answer
+                // under the card that captured it, but never let a late callback
+                // write or submit against a session opened in the meantime.
+                guard state.sessionID == recordingSessionID,
+                      state.currentCard?.id == recordingCardID else {
+                    if let recordingCardID, !text.isEmpty {
+                        DraftStore.save(text, for: recordingCardID)
+                    }
+                    return
+                }
+                guard result.isSafeToSubmit else {
+                    // Error/timeout/no-capture results may be incomplete. Keep
+                    // the exact partial and require an editable text submission
+                    // instead of letting it alter Recall and the schedule.
+                    enterTextMode(with: text)
+                    return
+                }
                 state.updateDraft(text)
                 // Submitting is the other moment a pending debounce can't be waited out.
-                state.flushDraft()
-                await state.submit(text)
+                await state.flushDraftForSubmission()
+                guard state.sessionID == recordingSessionID,
+                      state.currentCard?.id == recordingCardID else { return }
+                await state.submit(result.text)
             }
         } else {
             state.submitError = false
             state.stage = state.stage.recordingTwin
             speech.start(
                 continuing: state.draft,
-                vocabulary: SpeechVocabulary.terms(for: state.currentCard?.topic),
+                vocabulary: SpeechVocabulary.terms(
+                    for: state.currentCard?.topic,
+                    prompt: state.thread.latestSpokenPrompt?.text
+                ),
                 simulated: flags.simulateSpeech,
                 simulate: Self.simulatedAnswer(for: state.stage)
             )
         }
+    }
+
+    private func moveUncertainSpeechToText() {
+        let text = speech.transcript.isEmpty ? state.draft : speech.transcript
+        enterTextMode(with: text)
+        speech.stop()
+    }
+
+    private func enterTextMode(with text: String) {
+        state.updateDraft(text)
+        state.stage = state.stage.answeringTwin
+        state.inputMode = .text
+        draftFocused = true
     }
 
     private var textInput: some View {

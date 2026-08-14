@@ -87,6 +87,12 @@ struct PracticeDebriefScreen: View {
             guard stage == .recording else { return }
             plan.updatePracticeDebriefDraft(text)
         }
+        .onChange(of: speech.captureState) { _, captureState in
+            guard stage == .recording, captureState == .needsReview else { return }
+            let transcript = speech.transcript
+            speech.stop()
+            enterTextMode(with: transcript.isEmpty ? nil : transcript)
+        }
         .onDisappear {
             speech.stop()
             plan.flushPracticeDebriefDraft()
@@ -338,8 +344,7 @@ struct PracticeDebriefScreen: View {
                 HStack(spacing: 10) {
                     SecondaryButton(title: "Type", fillsWidth: false) {
                         speech.stop()
-                        plan.flushPracticeDebriefDraft()
-                        stage = .text
+                        enterTextMode()
                     }
                     PrimaryButton(title: "Stop") { finishRecording() }
                 }
@@ -386,10 +391,14 @@ struct PracticeDebriefScreen: View {
     private func finishRecording() {
         Task {
             let text = await speech.finish()
-            plan.updatePracticeDebriefDraft(text)
-            plan.flushPracticeDebriefDraft()
-            stage = .text
+            enterTextMode(with: text)
         }
+    }
+
+    private func enterTextMode(with text: String? = nil) {
+        if let text { plan.updatePracticeDebriefDraft(text) }
+        plan.flushPracticeDebriefDraft()
+        stage = .text
     }
 
     private func submit() {

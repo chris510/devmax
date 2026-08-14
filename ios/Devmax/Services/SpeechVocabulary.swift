@@ -24,7 +24,7 @@ enum SpeechVocabulary {
         "gRPC", "REST", "GraphQL", "UUID", "JSON",
         // Short words the recognizer resolves to an everyday homophone.
         "SYN", "ACK", "SYN-ACK", "shard", "sharding", "quorum", "replica",
-        "idempotent", "idempotency", "throughput", "latency", "backpressure",
+        "idempotent", "idempotency", "idempotency key", "throughput", "latency", "backpressure",
         // Multi-word terms that only cohere if recognized together.
         "consistent hashing", "virtual nodes", "leader election", "write-ahead log",
         "connection pooling", "keep-alive", "round trip", "cache stampede",
@@ -43,28 +43,32 @@ enum SpeechVocabulary {
     ///
     /// The whole topic goes in as one phrase *and* its individual words, so both
     /// "TTL propagation" and a bare "TTL" get the bias.
-    static func terms(for topic: String?) -> [String] {
-        guard let topic, !topic.isEmpty else { return standing }
-
-        // Splitting on non-alphanumerics rather than spaces: a quarter of the
-        // topics carry punctuation ("HTTP caching: ETags, Cache-Control, and
-        // revalidation"), and "ETags," is not a term anything will match. The
+    static func terms(for topic: String?, prompt: String? = nil) -> [String] {
+        // Splitting on non-alphanumerics rather than spaces: topics and prompts
+        // carry punctuation, and "ETags," is not a term anything will match. The
         // hyphen survives so "write-ahead" and "at-least-once" stay whole.
-        let words = topic
-            .split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" })
-            .map(String.init)
-            // Function words carry no bias. An initialism is never one, and is
-            // the class the recognizer handles worst — so length alone would
-            // throw away exactly the terms most worth biasing.
-            .filter { $0.count > 3 || $0 == $0.uppercased() }
+        func keywords(_ value: String?) -> [String] {
+            guard let value, !value.isEmpty else { return [] }
+            return value
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" })
+                .map(String.init)
+                // Function words carry no bias. An initialism is never one, and is
+                // the class the recognizer handles worst — so length alone would
+                // throw away exactly the terms most worth biasing.
+                .filter { $0.count > 3 || $0 == $0.uppercased() }
+        }
 
         // A duplicate spends a slot in a budget that works by staying short —
         // and a one-word topic would otherwise be added as both phrase and word.
         var seen = standingSet
         var additions: [String] = []
-        for term in [topic] + words where seen.insert(term).inserted {
+        let topicPhrase = topic.flatMap { $0.isEmpty ? nil : $0 }
+        let candidates = [topicPhrase].compactMap { $0 } + keywords(topic) + keywords(prompt)
+        for term in candidates where seen.insert(term).inserted {
             additions.append(term)
         }
-        return standing + additions
+        // Apple caps contextual strings at 100. Staying deterministic here makes
+        // it impossible for a long generated probe to push the request past it.
+        return Array((standing + additions).prefix(100))
     }
 }
