@@ -249,7 +249,7 @@ uv run python -m app.seed_study_plan \
   --start-date <monday-of-this-week>
 ```
 
-`api/plans/senior-backend-12-week.json` is the deterministic content-version-5
+`api/plans/senior-backend-12-week.json` is the deterministic content-version-6
 manifest. It retains the version-4 canonical lineage key and all `V4-*` stable
 item identities; `version` is the content revision. That lets an older binary
 still discover a newer plan and refuse a downgrade rather than creating a
@@ -260,20 +260,25 @@ the app: card reviews continue in Today, item completion remains an explicit
 plan-only signal, and a completed mapped lesson opens each owned, active,
 grounded card through Card History.
 
-Eight version-5 Learn items are marked `requires_fresh_completion`. A content
-upgrade rewrites them only while they are unfinished. If one is already
-complete, its historical row—including resources and recall mappings—is
-preserved rather than pretending the learner completed newly introduced AI
-work. Curriculum revisions carry that skipped-work debt forward even after a
-later manifest drops the marker; it resolves only if the new content is applied
-while the row is unfinished. Completion and curriculum updates use an item
+Version 6 retains all eight version-5 `requires_fresh_completion` markers and
+adds the two materially replaced Learn items, `V4-W2-L3` and `V4-W3-L2`. The
+first new marker now teaches reversible online migration instead of a generic
+WAL slot; the second adds quorum-safe leader/follower replication in place of
+basic hash sharding. Keeping the full ten-key union makes a direct version-4 to
+version-6 upgrade safe even when no version-5 revision exists to record skipped
+work. An upgrade rewrites these items only while they are unfinished. If one is
+already complete, its historical row—including resources and recall mappings—is
+preserved rather than pretending the learner completed the replacement. The
+revision ledger also carries unresolved skipped-work debt after a future release
+drops a marker; it resolves only if the newer content is applied while the row
+is unfinished. Completion and curriculum updates use an item
 snapshot guard so simultaneous database writers cannot merge old completion
 with newly swapped content. Item detail also returns `plan_revision`, which the
 current client echoes on completion. A stale revision returns 409, reloads the
 item, and requires a fresh explicit tap. Clients that omit the token are blocked
-from these eight protected items while conventional and generic items remain
+from protected fresh work while conventional and generic items remain
 compatible. If the upgrade reports a skipped completed key, assign a fresh
-later activity before activating the corresponding foundation card.
+later activity before activating the corresponding recall card.
 
 ## Retirement rule
 
@@ -307,8 +312,8 @@ conditions, and hard dependencies; this table is the journey-level map.
 | Week | System design and practice | Python coding | Behavioral and retrieval |
 |---|---|---|---|
 | 1 | Delivery, API design, hosted inference lifecycle, retry semantics, then a blind-first Bitly design | Two pointers, sliding window, intervals | Evidence inventory, sourced repair, closed-book reconstruction |
-| 2 | AI application state and authority, data modeling, indexing, PostgreSQL internals, then Design LeetCode | Stacks, linked lists, binary search | Scope and ownership stories |
-| 3 | Caching, sharding, consistent hashing, CAP, then Distributed Cache | Heaps, DFS, BFS | Ambiguity and perseverance stories |
+| 2 | AI application state and authority, access-pattern modeling, indexing, online migration, MVCC, then Design LeetCode | Stacks, linked lists, binary search | Scope and ownership stories |
+| 3 | Cache-aside, expiration-herd control, range ownership, leader/follower replication, consistent hashing, CAP, then Distributed Cache | Heaps, DFS, BFS | Ambiguity and perseverance stories |
 | 4 | Scaling reads/writes, bounded inference workers, a measured eval, Twitter-style timeline, ad-click aggregation | Topological ordering and shortest paths | Conflict and growth stories |
 | 5 | Contention, recoverable AI workflows, bounded tool authority, Ticketmaster, payments | Backtracking, dynamic programming, greedy | Communication and leadership stories |
 | 6 | Realtime recovery, blobs, outbox, durable AI jobs, WhatsApp, Dropbox | Tries, prefix sums, matrices | Finish story catalog and Big Three |

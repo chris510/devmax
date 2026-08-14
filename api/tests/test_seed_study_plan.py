@@ -56,8 +56,8 @@ BASE_CARDS = API / "cards.json"
 AI_FOUNDATIONS = API / "modules" / "ai-foundations.json"
 AI_FOUNDATION_EVALS = API / "evals" / "ai-foundations-v1.json"
 AI_RETRIEVAL_LAB = API / "evals" / "ai-retrieval-lab-v1.json"
-V4_PLAN_SHAPE_SHA256 = "58a14697f8d5941eb4c9b2cf54e054c13fdd78726004a7b07ae7287fde4bf7c7"
-AI_ITEM_KEYS = {
+V4_PLAN_SHAPE_SHA256 = "881bc15d24ae77bed47c1b549747e4ab81bce171c2108c36f1bb4b857c73d5f3"
+V5_FRESH_ITEM_KEYS = {
     "V4-W1-L3",
     "V4-W2-L1",
     "V4-W4-L3",
@@ -67,6 +67,8 @@ AI_ITEM_KEYS = {
     "V4-W8-L2",
     "V4-W9-L5",
 }
+V6_NEW_FRESH_ITEM_KEYS = {"V4-W2-L3", "V4-W3-L2"}
+V6_FRESH_ITEM_KEYS = V5_FRESH_ITEM_KEYS | V6_NEW_FRESH_ITEM_KEYS
 
 
 def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
@@ -81,7 +83,7 @@ def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
         "devmax.senior-backend-12-week.v2",
         "devmax.senior-backend-12-week.v3",
     ]
-    assert manifest["version"] == 5
+    assert manifest["version"] == 6
     assert manifest["coding_language"] == "Python"
     assert [phase["overview_title"] for phase in result.preview["phases"]] == [
         "Foundations",
@@ -96,10 +98,13 @@ def test_the_committed_bundle_is_a_complete_twelve_week_timeline() -> None:
     assert {check.status for check in result.checks} == {"ok"}
 
 
-def test_v5_reallocates_exactly_eleven_hours_without_changing_the_plan_shape() -> None:
+def test_v6_preserves_the_ai_reallocation_and_plan_shape() -> None:
     manifest, result = validate_bundle(DEFAULT_MANIFEST, start_date=START)
     raw_items = [item for week in manifest["weeks"] for item in week["items"]]
-    ai_items = [item for item in raw_items if item.get("requires_fresh_completion")]
+    ai_items = [item for item in raw_items if item["key"] in V5_FRESH_ITEM_KEYS]
+    fresh_items = [
+        item for item in raw_items if item.get("requires_fresh_completion")
+    ]
     base_topics = {entry["topic"] for entry in json.loads(BASE_CARDS.read_text())}
     stable_items = []
     base_mappings = []
@@ -132,7 +137,8 @@ def test_v5_reallocates_exactly_eleven_hours_without_changing_the_plan_shape() -
         json.dumps(frozen_shape, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
-    assert {item["key"] for item in ai_items} == AI_ITEM_KEYS
+    assert {item["key"] for item in ai_items} == V5_FRESH_ITEM_KEYS
+    assert {item["key"] for item in fresh_items} == V6_FRESH_ITEM_KEYS
     assert sum(item["minutes"] for item in ai_items) == 660
     assert len({item["key"] for item in raw_items}) == 116
     assert len(result.preview["dependencies"]) == 31
@@ -323,8 +329,8 @@ async def test_the_seed_creates_an_active_week_one_plan_graph(db) -> None:
     assert len(weeks) == 12
     assert len(items) == 116
     assert revision.after["seed_key"] == "devmax.senior-backend-12-week.v4"
-    assert revision.after["seed_version"] == 5
-    assert set(revision.after["fresh_completion_keys"]) == AI_ITEM_KEYS
+    assert revision.after["seed_version"] == 6
+    assert set(revision.after["fresh_completion_keys"]) == V6_FRESH_ITEM_KEYS
 
 
 async def test_rerunning_the_same_seed_is_idempotent(db) -> None:
@@ -650,10 +656,87 @@ async def test_v4_replaces_only_the_reviewed_pristine_production_v2_shape(
         await load_first_party_plan(path, start_date=START, activate=True, db=db)
 
 
-async def test_v4_to_v6_keeps_skipped_fresh_work_as_durable_debt(
+async def test_direct_v4_to_v6_preserves_completed_v5_fresh_work(
+    db, tmp_path
+) -> None:
+    target_key = "V4-W1-L3"
+    v4_manifest = json.loads(DEFAULT_MANIFEST.read_text())
+    v4_manifest["version"] = 4
+    v4_manifest["guide_text"] = "reviewed version-4 baseline"
+    v4_manifest["guide_sha256"] = hashlib.sha256(
+        v4_manifest["guide_text"].encode()
+    ).hexdigest()
+    v4_manifest.pop("source_guide_path", None)
+    v4_manifest.pop("source_guide_sha256", None)
+    for week_entry in v4_manifest["weeks"]:
+        for item in week_entry["items"]:
+            item.pop("requires_fresh_completion", None)
+            if item["key"] == target_key:
+                item["title"] = "Version 4 inference baseline"
+                item["why"] = "Historical version-4 rationale."
+                item["done_when"] = "Complete the historical version-4 activity."
+                item["mapped_recall_topics"] = []
+    v4_path = tmp_path / "direct-v4.json"
+    v4_path.write_text(json.dumps(v4_manifest))
+
+    seeded = await load_first_party_plan(
+        v4_path, start_date=START, activate=True, db=db
+    )
+    plan_id = uuid.UUID(seeded.plan_id)
+    completed = (
+        await db.exec(
+            select(StudyPlanItem).where(
+                StudyPlanItem.plan_id == plan_id,
+                StudyPlanItem.curriculum_key == target_key,
+            )
+        )
+    ).one()
+    completed.status = ITEM_COMPLETE
+    completed.completed_at = datetime(2026, 8, 12, 20, tzinfo=UTC)
+    completed.notes = "Historical completion evidence."
+    db.add(completed)
+    await db.commit()
+    await db.refresh(completed)
+    completed_before = completed.model_dump()
+
+    upgraded = await load_first_party_plan(
+        DEFAULT_MANIFEST, start_date=UPGRADE_START, activate=True, db=db
+    )
+
+    assert upgraded.updated and upgraded.version == 6
+    assert upgraded.skipped_completed_keys == (target_key,)
+    completed_after = (
+        await db.exec(select(StudyPlanItem).where(StudyPlanItem.id == completed.id))
+    ).one()
+    assert completed_after.model_dump() == completed_before
+    assert completed_after.full_title == "Version 4 inference baseline"
+    revision = (
+        await db.exec(
+            select(StudyPlanRevision)
+            .where(StudyPlanRevision.plan_id == plan_id)
+            .order_by(StudyPlanRevision.created_at.desc())
+        )
+    ).first()
+    assert revision.after["from_version"] == 4
+    assert revision.after["seed_version"] == 6
+    assert set(revision.after["fresh_completion_keys"]) == V6_FRESH_ITEM_KEYS
+    assert revision.after["skipped_completed_keys"] == [target_key]
+
+
+async def test_v4_to_v5_to_marker_free_v6_keeps_skipped_work_as_durable_debt(
     db, tmp_path
 ) -> None:
     v5_manifest = json.loads(DEFAULT_MANIFEST.read_text())
+    v5_manifest["version"] = 5
+    v5_manifest["guide_text"] = "reviewed version-5 curriculum"
+    v5_manifest["guide_sha256"] = hashlib.sha256(
+        v5_manifest["guide_text"].encode()
+    ).hexdigest()
+    for week_entry in v5_manifest["weeks"]:
+        for item in week_entry["items"]:
+            item.pop("requires_fresh_completion", None)
+            if item["key"] in V5_FRESH_ITEM_KEYS:
+                item["requires_fresh_completion"] = True
     v5_manifest.pop("source_guide_path", None)
     v5_manifest.pop("source_guide_sha256", None)
     v5_path = tmp_path / "v5.json"
@@ -673,7 +756,7 @@ async def test_v4_to_v6_keeps_skipped_fresh_work_as_durable_debt(
     v4_manifest.pop("source_guide_sha256", None)
     for week in v4_manifest["weeks"]:
         for item in week["items"]:
-            if item["key"] not in AI_ITEM_KEYS:
+            if item["key"] not in V5_FRESH_ITEM_KEYS:
                 continue
             item.pop("requires_fresh_completion", None)
             item["title"] = f"Version 4 baseline · {item['key']}"
@@ -868,7 +951,7 @@ async def test_v4_to_v6_keeps_skipped_fresh_work_as_durable_debt(
     ).first()
     assert revision.after["from_version"] == 4
     assert revision.after["seed_version"] == 5
-    assert set(revision.after["fresh_completion_keys"]) == AI_ITEM_KEYS
+    assert set(revision.after["fresh_completion_keys"]) == V5_FRESH_ITEM_KEYS
     assert revision.after["skipped_completed_keys"] == ["V4-W1-L3"]
 
     again = await load_first_party_plan(
@@ -878,9 +961,10 @@ async def test_v4_to_v6_keeps_skipped_fresh_work_as_durable_debt(
     assert again.version == 5
     assert again.skipped_completed_keys == ("V4-W1-L3",)
 
-    # v6 no longer carries v5's release-local marker. The skipped key remains
+    # A synthetic marker-free later release proves the skipped key remains
     # protected by the revision ledger until its row is reopened and an upgrade
-    # actually applies the fresh content.
+    # actually applies the fresh content. The committed v6 manifest retains the
+    # markers as a defense for plans that upgrade directly from v4.
     v6_manifest = json.loads(DEFAULT_MANIFEST.read_text())
     v6_manifest["version"] = 6
     v6_manifest["guide_text"] = "reviewed version-6 curriculum"

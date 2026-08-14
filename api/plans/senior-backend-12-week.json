@@ -4,11 +4,11 @@
     "devmax.senior-backend-12-week.v2",
     "devmax.senior-backend-12-week.v3"
   ],
-  "version": 5,
+  "version": 6,
   "source_guide_path": "../../docs/CURRICULUM.md",
-  "source_guide_sha256": "d4428b5f658a5c95b37ff479f005605ff49f7152aa86f072fe356c0253f81e3a",
-  "guide_text": "# Senior backend and AI systems interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles at AI companies. Distributed systems remains the spine. Version 5 applies those same boundaries to hosted inference, application-owned state and authority, evaluation, recoverable model workflows, model routing, and retrieval-augmented generation. It does not target research, model training infrastructure, GPU kernels, or inference-runtime implementation.\n\nEach week remains exactly twenty dependable hours. Eleven existing Learn hours are reallocated to explicit AI application-systems work; the existing five hours of ChatGPT design practice bring the explicit AI total to sixteen hours without increasing the 240-hour plan. Hello Interview retains the conventional system-design foundation, every coding exercise is implemented in Python, and full designs and mocks remain external performance evidence. Global Unprompted reviews remain separate from plan capacity and begin only after the mapped source lesson and reviewed card authority are complete.\n\nAn additional stretch menu offers up to twenty hours each week without blocking advancement or changing the forecast. Stretch work deepens the current week through unseen Python problems, additional designs, case studies, behavioral rehearsal, and sourced gap repair; it never pre-teaches the next week or creates generic card volume. Resume work, job applications, and professional networking are intentionally deferred.",
-  "guide_sha256": "a88d756d38917102eb7664e15a947133ba11e6d973348b5385917652bddb5d33",
+  "source_guide_sha256": "52b783298d5854a915f7bae13454725dba95b0a9725e3c40efb2e0de4a8481eb",
+  "guide_text": "# Senior backend and AI systems interview preparation\n\nA twelve-week program for senior backend or backend-leaning platform and product roles at AI companies. Distributed systems remains the spine. Version 6 keeps the hosted-inference, application-state, evaluation, recoverable-workflow, routing, and retrieval boundaries introduced in version 5, while replacing a generic WAL slot with reversible online migration, replacing basic hash sharding with quorum-safe leader/follower replication, and narrowing cache stampede work to expiration herds, request coalescing, and TTL jitter. It does not target research, model training infrastructure, GPU kernels, or inference-runtime implementation.\n\nEach week remains exactly twenty dependable hours. Eleven existing Learn hours are reallocated to explicit AI application-systems work; the existing five hours of ChatGPT design practice bring the explicit AI total to sixteen hours without increasing the 240-hour plan. Primary technical sources now ground the changed Week 2 and Week 3 retrieval work, every coding exercise is implemented in Python, and full designs and mocks remain external performance evidence. Global Unprompted reviews remain separate from plan capacity and begin only after the mapped source lesson and reviewed card authority are complete.\n\nAn additional stretch menu offers up to twenty hours each week without blocking advancement or changing the forecast. Stretch work deepens the current week through unseen Python problems, additional designs, case studies, behavioral rehearsal, and sourced gap repair; it never pre-teaches the next week or creates generic card volume. Resume work, job applications, and professional networking are intentionally deferred.",
+  "guide_sha256": "af3712d1017811ad19126f5e9a640fbf9313916ae3bc58399b0e7c5521ab16fd",
   "title": "Senior backend and AI systems interview preparation",
   "subject": "Senior backend and AI systems interview preparation",
   "subject_slug": "senior-backend-interview-prep",
@@ -462,22 +462,31 @@
           "key": "V4-W2-L3",
           "type": "learn",
           "priority": "core",
-          "title": "Trace PostgreSQL writes and concurrent snapshots",
+          "requires_fresh_completion": true,
+          "title": "Migrate live data and reason about concurrent snapshots",
           "minutes": 120,
-          "why": "A backend engineer should connect durability and isolation claims to the database write path.",
-          "done_when": "Finish the relevant lesson sections and trace one commit and one overlapping reader/writer timeline through recovery and visibility.",
+          "why": "Senior backend work requires both reversible live-schema changes and an exact account of what concurrent transactions can see and safely update.",
+          "done_when": "Read both sources, then write one no-downtime migration sequence from dual write through retirement and trace one Repeatable Read conflict through full-transaction retry.",
           "resources": [
             {
-              "kind": "lesson",
-              "provider": "Hello Interview",
-              "label": "PostgreSQL",
-              "action_label": "Open lesson",
-              "url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
+              "kind": "case_study",
+              "provider": "Stripe Engineering",
+              "label": "Online migrations at scale",
+              "action_label": "Open case study",
+              "url": "https://stripe.com/blog/online-migrations",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "PostgreSQL",
+              "label": "Transaction isolation",
+              "action_label": "Open reference",
+              "url": "https://www.postgresql.org/docs/18/transaction-iso.html",
               "language": ""
             }
           ],
           "mapped_recall_topics": [
-            "Write-ahead logging: committing before data pages and recovering after a crash",
+            "Online data migration: dual writing, backfill, compare, cutover, and rollback",
             "MVCC snapshots: letting readers and writers proceed while isolation anomalies remain bounded"
           ]
         },
@@ -666,23 +675,31 @@
           "key": "V4-W3-L1",
           "type": "learn",
           "priority": "core",
-          "title": "Design cache-aside paths and contain hot keys",
+          "title": "Design cache-aside paths and contain expiration herds",
           "minutes": 120,
-          "why": "Caching improves latency only when population, invalidation, and overload behavior are explicit.",
-          "done_when": "Finish the lesson and trace a hit, miss, invalidation, stampede, negative lookup, and hot-key response.",
+          "why": "Caching improves latency only when miss population, write invalidation, synchronized expiry, and same-key refill behavior are explicit.",
+          "done_when": "Read both sources, trace one hit/miss/update race, then explain how TTL jitter spreads cross-key expiry while single-flight refill suppresses same-key concurrency.",
           "resources": [
             {
-              "kind": "lesson",
-              "provider": "Hello Interview",
-              "label": "Caching",
-              "action_label": "Open lesson",
-              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/caching",
+              "kind": "reference",
+              "provider": "Microsoft",
+              "label": "Cache-Aside Pattern",
+              "action_label": "Open reference",
+              "url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside",
+              "language": ""
+            },
+            {
+              "kind": "reference",
+              "provider": "Redis",
+              "label": "Cache Layer Architecture · Cache stampede",
+              "action_label": "Open guide",
+              "url": "https://redis.io/blog/cache-layer-architecture-guide/",
               "language": ""
             }
           ],
           "mapped_recall_topics": [
             "Cache-aside reads: miss handling, population, invalidation, and stale-data windows",
-            "Cache stampede and hot keys: request coalescing, jitter, replication, and negative caching"
+            "Cache stampede: expiration herds, request coalescing, and TTL jitter"
           ],
           "stretch_actions": [
             {
@@ -726,39 +743,48 @@
           "key": "V4-W3-L2",
           "type": "learn",
           "priority": "core",
-          "title": "Partition, rebalance, and choose partition behavior",
+          "requires_fresh_completion": true,
+          "title": "Partition, rebalance, replicate, and choose partition behavior",
           "minutes": 180,
-          "why": "Partitioning decisions determine routing, movement during growth, scan support, and failure semantics.",
-          "done_when": "Finish all three lessons and compare hash, range, and ring ownership, then choose the allowed behavior during one partition.",
+          "why": "Partition ownership and replication together determine routing, movement during growth, ordered scans, acknowledged-write safety, and behavior during a network partition.",
+          "done_when": "Read all four sources, then trace one ordered-tablet split including client routing, one virtual-node join, and one majority-committed leader failover before assigning operation-specific behavior during a partition.",
           "resources": [
             {
-              "kind": "lesson",
-              "provider": "Hello Interview",
-              "label": "Sharding",
-              "action_label": "Open lesson",
-              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/sharding",
+              "kind": "paper",
+              "provider": "Google Research",
+              "label": "Bigtable · Distributed Storage System",
+              "action_label": "Open paper",
+              "url": "https://research.google.com/archive/bigtable-osdi06.pdf",
               "language": ""
             },
             {
-              "kind": "lesson",
-              "provider": "Hello Interview",
-              "label": "Consistent Hashing",
-              "action_label": "Open lesson",
-              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/consistent-hashing",
+              "kind": "paper",
+              "provider": "Amazon",
+              "label": "Dynamo · Highly Available Key-value Store",
+              "action_label": "Open paper",
+              "url": "https://www.amazon.science/publications/dynamo-amazons-highly-available-key-value-store",
               "language": ""
             },
             {
-              "kind": "lesson",
-              "provider": "Hello Interview",
-              "label": "CAP Theorem",
-              "action_label": "Open lesson",
-              "url": "https://www.hellointerview.com/learn/system-design/core-concepts/cap-theorem",
+              "kind": "paper",
+              "provider": "Stanford",
+              "label": "Raft consensus algorithm",
+              "action_label": "Open paper",
+              "url": "https://raft.github.io/raft.pdf",
+              "language": ""
+            },
+            {
+              "kind": "paper",
+              "provider": "IEEE",
+              "label": "CAP Twelve Years Later",
+              "action_label": "Open paper",
+              "url": "https://doi.org/10.1109/MC.2012.37",
               "language": ""
             }
           ],
           "mapped_recall_topics": [
-            "Hash sharding: routing a key, adding capacity, and migrating ownership",
-            "Range sharding: preserving scans while detecting and splitting hot ranges",
+            "Leader/follower replication: majority commit, lagging followers, and safe failover",
+            "Range sharding: ordered tablets, split boundaries, and scan-preserving routing",
             "Consistent hashing: ring ownership, virtual nodes, and bounded key movement",
             "CAP during a partition: choosing which operations remain available and which must reject"
           ]

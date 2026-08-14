@@ -222,8 +222,10 @@ primary mode has passed.
 
 Run each command with `--help` before use. Paid runners still refuse pending
 labels and require an explicit maximum spend. The checked-in
-`grounded_recall_v2_cases_week1_draft.json` is a pending six-card canary draft,
-not the approved 18-card qualification pack.
+`grounded_recall_v2_cases_stage2_draft.json` now contains 38 pending cases over
+18 Week 1–3 cards and exercises every required boundary and risk shape. It is a
+review worksheet, not an approved qualification pack: all 38 labels and all 12
+Week 2–3 card groundings remain explicitly unapproved.
 
 ## Stage 1 — activate and stabilize V2 on Claude
 
@@ -274,10 +276,11 @@ approval, all Recall values and decision boundaries, exact production V2
 request construction, and fail-closed parsing. Stage 2 makes no provider call.
 
 The current curriculum manifest has complete approved grounding only for the
-six Week 1 cards. Weeks 2 and 3 cannot be included until their canonical
-questions, answer bases, rubrics, and provenance are owner-approved. Do not
-copy Week 1 authority, invent missing authority, or relabel the draft as
-approved to bypass this gate.
+six Week 1 cards. Content version 6 adds complete `draft_review` grounding for
+the twelve Week 2–3 cards and the 38-case file covers all three weeks, but no
+assistant or automation may convert those source claims, rubrics, questions, or
+case labels to `approved`. The owner must review each one against its linked
+source. Do not copy Week 1 authority or relabel the draft to bypass this gate.
 
 ## Stage 3 — run three independent fresh Luna trials
 

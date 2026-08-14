@@ -1294,7 +1294,7 @@ async def test_first_party_fresh_work_requires_a_revision_after_later_markers_dr
         await db.exec(
             select(StudyPlanItem).where(
                 StudyPlanItem.plan_id == plan_id,
-                StudyPlanItem.curriculum_key == "V4-W1-L3",
+                StudyPlanItem.curriculum_key == "V4-W2-L3",
             )
         )
     ).one()
@@ -1320,8 +1320,8 @@ async def test_first_party_fresh_work_requires_a_revision_after_later_markers_dr
             plan_id=plan_id,
             kind="curriculum_update",
             base_plan_revision=opened["plan_revision"],
-            before={"seed_version": 5},
-            after={"seed_version": 6},
+            before={"seed_version": 6},
+            after={"seed_version": 7},
             summary="Later release without a fresh-work marker",
         )
     )
