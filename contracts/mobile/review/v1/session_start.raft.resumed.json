@@ -1,0 +1,7 @@
+{
+  "session_id": "00000000-0000-0000-0000-00000000a11f",
+  "question": "A follower stops hearing heartbeats and starts an election. What stops it from becoming leader with an incomplete log?",
+  "is_follow_up": false,
+  "draft_text": "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate, then it asks",
+  "resumed": true
+}

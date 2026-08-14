@@ -1,0 +1,15 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-0000000000c2",
+    "topic": "Raft leader election",
+    "category": "Distributed Systems",
+    "mastery_summary": "can describe terms and voting; fuzzy on log-matching safety",
+    "last_score": 1,
+    "recall_score": 1,
+    "score_kind": "recall",
+    "scoring_contract_version": 1,
+    "due_label": "1 day overdue",
+    "resumable": false,
+    "missed_count": 2
+  }
+]
