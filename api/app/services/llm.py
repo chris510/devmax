@@ -1042,6 +1042,15 @@ def _turn_state_lines(probes: Sequence[tuple[str, str]]) -> list[str]:
     ]
 
 
+def _probe_transcript_lines(probes: Sequence[tuple[str, str]]) -> list[str]:
+    """Flatten ordered probe pairs into the transcript shared by both contracts."""
+    return [
+        line
+        for question, answer in probes
+        for line in (f"FOLLOW-UP: {question}", f"ANSWER: {answer}")
+    ]
+
+
 def build_score_answer_completion(
     *,
     model: str,
@@ -1075,9 +1084,8 @@ def build_score_answer_completion(
         "",
         f"QUESTION: {question_asked}",
         f"ANSWER: {answer_text}",
+        *_probe_transcript_lines(probes),
     ]
-    for probe_question, probe_answer in probes:
-        transcript += [f"FOLLOW-UP: {probe_question}", f"ANSWER: {probe_answer}"]
 
     return {
         "model": model,
@@ -1117,9 +1125,8 @@ def build_score_v2_completion(
         "",
         f"QUESTION: {question_asked}",
         f"ANSWER: {answer_text}",
+        *_probe_transcript_lines(probes),
     ]
-    for probe_question, probe_answer in probes:
-        transcript += [f"FOLLOW-UP: {probe_question}", f"ANSWER: {probe_answer}"]
 
     return {
         "model": model,
@@ -1184,6 +1191,13 @@ async def score_answer(
     return result
 
 
+def _should_probe(score: int, probes_used: int, needs_more_evidence: bool) -> bool:
+    """The shared band/insufficiency/cap policy for both scoring contracts."""
+    if probes_used == 0:
+        return FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH
+    return probes_used < MAX_SCORED_FOLLOW_UPS and needs_more_evidence
+
+
 def parse_score_result(data: dict[str, Any], *, probes_used: int) -> ScoreResult:
     """Apply the production scoring contract to provider-structured data.
 
@@ -1205,18 +1219,11 @@ def parse_score_result(data: dict[str, Any], *, probes_used: int) -> ScoreResult
     score = derive_composite(accuracy, depth, boundaries)
     probe = str(data.get("follow_up_question", "")).strip()
 
-    if probes_used == 0:
-        # The first probe is the band rule the app already ships, unchanged.
-        # `needs_more_evidence` is deliberately ignored on turn 1, so a stray
-        # `true` from the model cannot widen who gets probed.
-        should_probe = FOLLOW_UP_LOW <= score <= FOLLOW_UP_HIGH
-    else:
-        # Past the first, only the model's own insufficiency claim earns another
-        # turn — and never at the cap, whatever it claims.
-        should_probe = (
-            probes_used < MAX_SCORED_FOLLOW_UPS
-            and data.get("needs_more_evidence") is True
-        )
+    # On turn 1 the band decides, so a stray insufficiency claim cannot widen it.
+    # Past the first, only the model's claim earns another turn, never at the cap.
+    should_probe = _should_probe(
+        score, probes_used, data.get("needs_more_evidence") is True
+    )
 
     if should_probe and probe:
         return ScoreResult(status="follow_up", follow_up_question=probe)
@@ -1256,9 +1263,7 @@ def parse_score_v2_result(data: dict[str, Any], *, probes_used: int) -> ScoreRes
         raise LLMError(f"V2 scoring response had non-boolean needs_more_evidence: {needs!r}")
 
     probe = str(data.get("follow_up_question", "")).strip()
-    should_probe = (probes_used == 0 and FOLLOW_UP_LOW <= recall <= FOLLOW_UP_HIGH) or (
-        0 < probes_used < MAX_SCORED_FOLLOW_UPS and needs is True
-    )
+    should_probe = _should_probe(recall, probes_used, needs)
     # An insufficiency claim has to carry the probe that would settle it. This is
     # also what rejects `needs_more_evidence` at the cap, where no probe is legal.
     if needs is True and not probe:

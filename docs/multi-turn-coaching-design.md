@@ -1,8 +1,9 @@
 # Multi-turn coaching — design
 
-**Status:** accepted, not built. This document exists to make one decision:
-whether a Devmax session should ever contain more than two turns, and if so,
-under what rule.
+**Status:** accepted and implemented. This document records the decision about
+whether a Devmax session may contain more than two turns and under what rule;
+the opening sections retain the pre-implementation context, while §5.1 records
+the later two-probe amendment.
 
 §4 is the accepted design; §3 records the rejected alternative and why. §7 closes
 every question the first draft left open, and §8 is the build order.

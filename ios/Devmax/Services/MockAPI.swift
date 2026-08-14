@@ -151,12 +151,12 @@ actor MockAPI: DevmaxAPI {
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.
     private var sessionIsPractice = false
-    /// How many scored follow-ups a session may be asked, fixed when it starts,
-    /// and how many it has already been asked. The budget belongs to the session
-    /// rather than to the app run, the way the server's does: two cards answered
-    /// back to back each get their own, and a Review Sprint card gets none.
-    private var probeBudget: [UUID: Int] = [:]
-    private var probesIssued: [UUID: Int] = [:]
+    /// How many scored follow-ups this fixture session may ask and has asked.
+    private struct ProbeProgress {
+        let budget: Int
+        var issued = 0
+    }
+    private var probeProgress: [UUID: ProbeProgress] = [:]
     private var storedSettings = AppSettings.placeholder
     private var extraCards: [DueCard] = []
     private var capturedGaps: [PendingCapture] = [
@@ -562,14 +562,15 @@ actor MockAPI: DevmaxAPI {
         }
         sessionIsPractice = practice
         let sessionID = UUID()
-        // The probe budget is settled here, before a word has been said, because
-        // the server settles it here too. A daily review may be probed once —
-        // twice when `WC_SECOND_PROBE` stands in for the model reporting it still
-        // lacks the evidence to score. A Review Sprint card is never probed: the
-        // recap walks six cards, and a probe apiece buys the screenshot nothing
-        // but latency.
+        // Freeze the fixture budget for this session. A daily review may be
+        // probed once — twice when `WC_SECOND_PROBE` stands in for the model
+        // reporting, after probe 1, that it still lacks evidence. A Review Sprint
+        // fixture is never probed: the recap walks six cards, and a probe apiece
+        // buys the screenshot nothing but latency.
         let allowsSecondProbe = await MainActor.run { DebugFlags.shared.secondProbe }
-        probeBudget[sessionID] = practice ? 0 : (allowsSecondProbe ? 2 : 1)
+        probeProgress[sessionID] = ProbeProgress(
+            budget: practice ? 0 : (allowsSecondProbe ? 2 : 1)
+        )
         if cardID == Self.raftID {
             return SessionStart(
                 sessionId: sessionID,
@@ -626,10 +627,12 @@ actor MockAPI: DevmaxAPI {
         //
         // A session this mock never started — a test that assigns `sessionID` by
         // hand — is treated as a daily review, which is the case it is standing in for.
-        let issued = probesIssued[sessionID] ?? 0
-        if issued < (probeBudget[sessionID] ?? 1) {
-            probesIssued[sessionID] = issued + 1
-            return .followUp(question: issued == 0 ? Self.firstProbe : Self.secondProbe)
+        var progress = probeProgress[sessionID] ?? ProbeProgress(budget: 1)
+        if progress.issued < progress.budget {
+            let question = progress.issued == 0 ? Self.firstProbe : Self.secondProbe
+            progress.issued += 1
+            probeProgress[sessionID] = progress
+            return .followUp(question: question)
         }
         // Sprint runs vary so the recap has something to show; a daily review
         // keeps the fixture the Conversation screenshots were taken against.
