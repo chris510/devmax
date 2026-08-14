@@ -421,6 +421,7 @@ struct ConversationScreen: View {
                 }
                 .buttonStyle(.plain)
                 .frame(minHeight: Metrics.minTapTarget)
+                .accessibilityIdentifier("conversation-reattempt")
             }
 
             if state.result?.coachingOffered == true {
@@ -539,6 +540,7 @@ struct ConversationScreen: View {
             }
             .buttonStyle(.plain)
             .frame(minHeight: Metrics.minTapTarget)
+            .accessibilityIdentifier("conversation-type-instead")
         }
     }
 
@@ -617,7 +619,6 @@ struct ConversationScreen: View {
         state.updateDraft(text)
         state.stage = state.stage.answeringTwin
         state.inputMode = .text
-        draftFocused = true
     }
 
     private var textInput: some View {
@@ -643,6 +644,14 @@ struct ConversationScreen: View {
                     RoundedRectangle(cornerRadius: Metrics.inputRadius)
                         .strokeBorder(draftFocused ? Theme.accent : Theme.borderStrong, lineWidth: 1)
                 )
+                // Scoring removes the footer, which removes this editor and clears
+                // its FocusState. A typed follow-up, re-attempt, or coaching turn
+                // then inserts a fresh editor. Request focus after that editor is
+                // mounted; setting FocusState in the same mutation that switches
+                // `inputMode` races the conditional view insertion and can leave a
+                // visible text box with no keyboard.
+                .onAppear { focusDraftAfterMount() }
+                .accessibilityIdentifier("conversation-answer-editor")
 
             PrimaryButton(
                 title: "Submit answer",
@@ -651,12 +660,24 @@ struct ConversationScreen: View {
                 state.submitError = false
                 Task { await state.submit(state.draft) }
             }
+            .accessibilityIdentifier("conversation-submit-answer")
 
             SecondaryButton(title: "Voice") {
                 speech.restore(state.draft)
                 state.inputMode = .voice
                 draftFocused = false
             }
+        }
+    }
+
+    private func focusDraftAfterMount() {
+        Task { @MainActor in
+            // Let SwiftUI commit the conditional TextEditor before asking it to
+            // become first responder. This also makes submit-failure recovery put
+            // the keyboard back without another tap.
+            await Task.yield()
+            guard state.inputMode == .text, canAnswer else { return }
+            draftFocused = true
         }
     }
 
