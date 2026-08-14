@@ -5,6 +5,10 @@ extension MockAPI {
         UUID(uuidString: "00000000-0000-0000-0000-0000000000c1")!
     }
 
+    private static var secondPublicCardID: UUID {
+        UUID(uuidString: "00000000-0000-0000-0000-0000000000c2")!
+    }
+
     private static var sourceID: UUID {
         UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
     }
@@ -75,6 +79,9 @@ extension MockAPI {
                     id: Self.topicID, position: 1, sectionTitle: "Formation", topic: "Offer",
                     answerAnchor: "An offer is an objective manifestation of willingness to bargain, with definite terms and an invitation to accept.",
                     sourceExcerpt: "An offer requires definite terms and intent to be bound.",
+                    canonicalQuestion: "How does consistent hashing limit key movement when membership changes?",
+                    answerRubric: Self.lessonRubric,
+                    recallQuestions: Self.lessonPrompts(for: "consistent hashing"),
                     status: "clean", issue: ""
                 ),
                 MaterialTopic(
@@ -82,8 +89,11 @@ extension MockAPI {
                     position: 2, sectionTitle: "Formation", topic: "Acceptance",
                     answerAnchor: "Acceptance is assent to the offer's terms in the manner invited by the offer.",
                     sourceExcerpt: "Acceptance must mirror the terms and be communicated.",
+                    canonicalQuestion: "How does Raft elect a leader without losing log safety?",
+                    answerRubric: Self.lessonRubric,
+                    recallQuestions: Self.lessonPrompts(for: "Raft leader election"),
                     status: "clean", issue: ""
-                ),
+                )
             ], createdAt: Date(), updatedAt: Date()
         )
     }
@@ -108,7 +118,75 @@ extension MockAPI {
     }
 
     func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
-        MaterialConfirmation(sourceId: id, createdCardIds: [Self.publicCardID])
+        let cards = topics.map { topic in
+            topic == Self.topicID ? Self.publicCardID : Self.secondPublicCardID
+        }
+        return MaterialConfirmation(
+            sourceId: id,
+            createdCardIds: cards
+        )
+    }
+
+    func lessonProgress(_ id: UUID) async throws -> LessonProgress {
+        LessonProgress(
+            sourceId: id, title: "Contracts — formation", conceptCount: 2,
+            reviewedCount: 2, weakCount: 1, complete: true, nextCardId: nil,
+            concepts: [
+                LessonConceptProgress(
+                    proposalId: Self.topicID, cardId: Self.publicCardID,
+                    concept: "Consistent hashing",
+                    masterySummary: "solid on ring ownership; virtual-node trade-offs need review",
+                    lastScore: 3, recallScore: 3, scoreKind: "recall",
+                    scoringContractVersion: 2, lastReviewedAt: Date(),
+                    nextReviewAt: "2026-08-17", intervalDays: 3
+                ),
+                LessonConceptProgress(
+                    proposalId: UUID(uuidString: "00000000-0000-0000-0000-000000000903")!,
+                    cardId: Self.secondPublicCardID, concept: "Raft leader election",
+                    masterySummary: "can explain terms and voting; log safety is still thin",
+                    lastScore: 2, recallScore: 2, scoreKind: "recall",
+                    scoringContractVersion: 2, lastReviewedAt: Date(),
+                    nextReviewAt: "2026-08-15", intervalDays: 1
+                )
+            ]
+        )
+    }
+
+    func distillLesson(_ id: UUID) async throws -> MaterialArtifacts {
+        try await materialArtifacts(id)
+    }
+
+    func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
+        MaterialArtifacts(
+            sourceId: id, title: "Contracts — formation",
+            sourceUrl: "https://example.com/lesson", distilledAt: Date(),
+            canonicalNoteMarkdown: "# Contracts — formation\n\nA concise canonical note.",
+            recallExportMarkdown: "# Recall questions\n\n- Explain the mechanism.",
+            concepts: []
+        )
+    }
+
+    private static var lessonRubric: [String: String] {
+        [
+            "mechanism": "Explain the causal mechanism.",
+            "acceptable_alternative": "An equivalent accurate account is acceptable.",
+            "trade_off": "Name the operational cost.",
+            "failure_mode": "Describe where the mechanism breaks.",
+            "misconception": "Do not confuse bounded movement with no movement."
+        ]
+    }
+
+    private static func lessonPrompts(for concept: String) -> [LessonRecallPrompt] {
+        [
+            .init(level: "definition_recognition", question: "What is \(concept)?"),
+            .init(level: "mechanism", question: "How does \(concept) work?"),
+            .init(level: "derivation", question: "Why does \(concept) have that behavior?"),
+            .init(level: "application", question: "Where would you apply \(concept)?"),
+            .init(
+                level: "failure_tradeoff",
+                question: "Where does \(concept) fail, and what does it cost?"
+            )
+        ]
     }
 
     func createManualMaterial(

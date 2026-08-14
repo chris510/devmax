@@ -3,6 +3,22 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 
+private enum LessonSourceKind: String, CaseIterable, Identifiable {
+    case article, documentation, book, course, notes, other
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .article: "Article"
+        case .documentation: "Documentation"
+        case .book: "Book or paper"
+        case .course: "Course lesson"
+        case .notes: "Notes"
+        case .other: "Other"
+        }
+    }
+}
+
 struct PublicOnboardingView: View {
     @EnvironmentObject private var flow: PublicOnboardingState
     @EnvironmentObject private var app: AppState
@@ -14,7 +30,7 @@ struct PublicOnboardingView: View {
             switch flow.step {
             case .welcome: welcome
             case .material: chooseMaterial
-            case .guide, .fileError: guide
+            case .guide, .lesson, .fileError: guide
             case .planPath: planPath
             case .planIntent: planIntent
             case .planSetup: planSetup
@@ -133,9 +149,18 @@ struct PublicOnboardingView: View {
     }
 
     private var guide: some View {
-        PublicPage(back: { flow.step = .material }, kicker: "YOUR SOURCE", title: "Add your study guide") {
-            TextField("Guide title", text: $flow.draft.title)
+        PublicPage(
+            back: { backFromSourceEntry() },
+            kicker: flow.isLessonDraft ? "NEW LESSON" : "YOUR SOURCE",
+            title: flow.isLessonDraft ? "Add a lesson" : "Add your study guide"
+        ) {
+            TextField(
+                flow.isLessonDraft ? "Lesson title" : "Guide title",
+                text: $flow.draft.title
+            )
                 .publicField()
+                .onChange(of: flow.draft.title) { _, _ in flow.schedulePersist() }
+            if flow.isLessonDraft { lessonSourceFields }
             TextEditor(text: $flow.draft.guideText)
                 .font(WCFont.sans(14.5))
                 .foregroundStyle(Theme.text)
@@ -146,15 +171,35 @@ struct PublicOnboardingView: View {
                 .overlay(RoundedRectangle(cornerRadius: Metrics.inputRadius).stroke(Theme.border))
                 .onChange(of: flow.draft.guideText) { _, _ in flow.schedulePersist() }
             HStack {
-                MetaText(text: "\(flow.draft.guideText.count) CHARACTERS", font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint)
+                MetaText(
+                    text: "\(flow.draft.guideText.count) CHARACTERS",
+                    font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
+                )
                 Spacer()
                 Button("Choose a file") { flow.filePickerShown = true }
                     .font(TypeRole.secondaryAction).foregroundStyle(Theme.meta)
             }
             if flow.step == .fileError || !flow.error.isEmpty { PublicError(flow.error) }
-            PublicNote("Devmax sends the guide text needed to propose review topics to its AI provider. The source stays attached to your account so you can review or delete it later.")
+            if flow.isLessonDraft {
+                PublicNote(
+                    "The URL is attribution only and is never fetched. "
+                        + "Pasted text is stored with this lesson until you delete it. "
+                        + "Only distilled notes and recall prompts are exported."
+                )
+            } else {
+                PublicNote("Devmax sends the guide text needed to propose review topics to its AI provider. The source stays attached to your account so you can review or delete it later.")
+            }
         } footer: {
-            PrimaryButton(title: "Continue", enabled: flow.guideIsValid) { flow.step = .planPath }
+            if flow.isLessonDraft {
+                PrimaryButton(title: "Extract concepts", enabled: flow.lessonIsValid) {
+                    flow.persist()
+                    flow.prepareGuideImport(authenticated: auth.isAuthenticated)
+                }
+            } else {
+                PrimaryButton(title: "Continue", enabled: flow.guideIsValid) {
+                    flow.step = .planPath
+                }
+            }
         }
         .fileImporter(
             isPresented: $flow.filePickerShown,
@@ -203,7 +248,7 @@ struct PublicOnboardingView: View {
             PublicMaterialCard(title: flow.preparedTitle, meta: "\(flow.draft.guideText.count) CHARACTERS · SAVED TO YOUR ACCOUNT")
             PublicNote("You can leave this screen or close the app. Processing continues, and the result will remain in Study material.")
         } footer: {
-            SecondaryButton(title: "Go to Today") { flow.step = .empty }
+            SecondaryButton(title: "Go to Today") { leaveToToday() }
         }
     }
 
@@ -213,7 +258,9 @@ struct PublicOnboardingView: View {
             PublicMaterialCard(title: flow.preparedTitle, meta: "FULL SOURCE RETAINED · NOTHING CREATED")
         } footer: {
             PrimaryButton(title: "Try processing again") { Task { await flow.retryImport() } }
-            Button("Back to my guide") { flow.step = .guide }.publicSecondary()
+            Button(flow.isLessonDraft ? "Back to my lesson" : "Back to my guide") {
+                flow.step = flow.isLessonDraft ? .lesson : .guide
+            }.publicSecondary()
         }
     }
 
@@ -232,13 +279,19 @@ struct PublicOnboardingView: View {
             }
             Text("Clean proposals can be approved by section. Exceptions stay separate so a 16-week guide does not become a 100-row chore.").publicBody()
         } footer: {
-            PrimaryButton(title: "Review proposals") { Task { await flow.openImportedResult(plan: plan) } }
-            Button("Later — keep it in Study material") { flow.step = .empty }.publicSecondary()
+            PrimaryButton(title: flow.isLessonDraft ? "Review concepts" : "Review proposals") {
+                Task { await flow.openImportedResult(plan: plan) }
+            }
+            Button("Later — keep it in Study material") { leaveToToday() }.publicSecondary()
         }
     }
 
     private var topics: some View {
-        PublicPage(back: { flow.step = .importReady }, kicker: "REVIEW TOPICS", title: "Confirm what you'll practice") {
+        PublicPage(
+            back: { flow.step = .importReady },
+            kicker: flow.isLessonDraft ? "REVIEW CONCEPTS" : "REVIEW TOPICS",
+            title: "Confirm what you'll practice"
+        ) {
             if let job = flow.job {
                 ForEach(job.topics) { topic in
                     Button {
@@ -250,8 +303,19 @@ struct PublicOnboardingView: View {
                                 .foregroundStyle(topic.isClean ? Theme.accent : Theme.metaFaint)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(topic.topic).font(WCFont.sans(15, weight: 500)).foregroundStyle(Theme.text)
-                                Text(topic.answerAnchor.isEmpty ? topic.issue : topic.answerAnchor)
+                                Text(
+                                    topicSubtitle(topic)
+                                )
                                     .font(WCFont.sans(12.5)).foregroundStyle(Theme.textMuted).lineLimit(3)
+                                if flow.isLessonDraft,
+                                   let prompts = topic.recallQuestions, !prompts.isEmpty
+                                {
+                                    MetaText(
+                                        text: prompts.map(\.levelLabel).joined(separator: " · "),
+                                        font: WCFont.mono(9), tracking: 0.3,
+                                        color: Theme.metaFaint, uppercased: true
+                                    )
+                                }
                                 if !topic.sectionTitle.isEmpty {
                                     MetaText(text: topic.sectionTitle, font: WCFont.mono(9.5), tracking: 0.5, color: Theme.metaFaint)
                                 }
@@ -282,8 +346,67 @@ struct PublicOnboardingView: View {
             }
             if !flow.error.isEmpty { PublicError(flow.error) }
         } footer: {
-            PrimaryButton(title: flow.busy ? "Creating…" : "Create selected topics", enabled: !flow.selectedTopics.isEmpty && !flow.busy) {
+            PrimaryButton(
+                title: flow.busy
+                    ? "Creating…"
+                    : (flow.isLessonDraft
+                        ? (flow.selectedTopics.count == 1
+                            ? "Study 1 concept"
+                            : "Study \(flow.selectedTopics.count) concepts")
+                        : "Create selected topics"),
+                enabled: !flow.selectedTopics.isEmpty && !flow.busy
+            ) {
                 Task { await flow.confirmTopics(app: app) }
+            }
+        }
+    }
+
+    private var lessonSourceFields: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MetaText(
+                text: "SOURCE TYPE", font: WCFont.mono(9.5),
+                tracking: 0.8, color: Theme.meta
+            )
+            Menu {
+                ForEach(LessonSourceKind.allCases) { kind in
+                    Button(kind.label) {
+                        flow.draft.sourceType = kind.rawValue
+                        flow.schedulePersist()
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(LessonSourceKind(rawValue: flow.draft.sourceType)?.label ?? "Other")
+                        .font(WCFont.sans(14.5))
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    Text("Change")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.meta)
+                }
+                .padding(.horizontal, 13)
+                .frame(minHeight: Metrics.minTapTarget)
+                .background(
+                    Theme.inputFill,
+                    in: RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            }
+
+            TextField("Source URL (optional)", text: $flow.draft.sourceURL)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+                .publicField()
+                .onChange(of: flow.draft.sourceURL) { _, _ in flow.schedulePersist() }
+            if !flow.lessonSourceURLIsValid {
+                MetaText(
+                    text: "USE A FULL HTTP OR HTTPS URL",
+                    font: WCFont.mono(9.5), tracking: 0.7, color: Theme.scoreLow
+                )
             }
         }
     }
@@ -495,6 +618,31 @@ struct PublicOnboardingView: View {
         }
     }
 
+    private func backFromSourceEntry() {
+        if flow.isLessonDraft, !app.path.isEmpty {
+            app.path.removeLast()
+        } else {
+            flow.step = .material
+        }
+    }
+
+    private func topicSubtitle(_ topic: MaterialTopic) -> String {
+        if flow.isLessonDraft {
+            return topic.canonicalQuestion?.isEmpty == false
+                ? (topic.canonicalQuestion ?? topic.answerAnchor)
+                : topic.answerAnchor
+        }
+        return topic.answerAnchor.isEmpty ? topic.issue : topic.answerAnchor
+    }
+
+    private func leaveToToday() {
+        if auth.profile?.onboardingCompleted == true, !app.path.isEmpty {
+            app.path.removeLast()
+        } else {
+            flow.step = .empty
+        }
+    }
+
     private func importFile(_ result: Result<URL, Error>) {
         let url: URL
         do {
@@ -512,7 +660,7 @@ struct PublicOnboardingView: View {
                 flow.draft.originalFilename = imported.filename
                 if flow.draft.title.isEmpty { flow.draft.title = imported.title }
                 flow.error = ""
-                flow.step = .guide
+                flow.step = flow.isLessonDraft ? .lesson : .guide
                 flow.persist()
             } catch {
                 showFileError()

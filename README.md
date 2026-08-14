@@ -127,6 +127,9 @@ build, and the triage steps for when a push doesn't show up.
 
 `docs/DEVIATIONS.md` records where the code intentionally differs from `spec.md`, and why.
 
+`docs/ADAPTIVE-STUDY-MVP.md` documents the source-grounded **Add lesson → Study → Lesson
+results** workflow and the safe, local-only second-brain export path.
+
 ## Notes
 
 - The app hides the system status bar because the design draws its own 44px mono status row.

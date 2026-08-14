@@ -431,6 +431,9 @@ class MaterialSource(SQLModel, table=True):
     title: str
     # Verbatim. File text is extracted on-device before upload.
     source_text: str
+    # Provenance only. The import worker never fetches this URL; source_text is
+    # still the exact authority transmitted for extraction and scoring.
+    source_url: str = ""
     original_filename: str = ""
     mime_type: str = "text/plain"
     import_path: str = "topics"
@@ -451,6 +454,12 @@ class MaterialSource(SQLModel, table=True):
     result_summary: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
     )
+    # Distilled artifacts are deliberately separate from the verbatim source.
+    # They are written only from confirmed concept proposals after the lesson's
+    # first-pass recall is complete, never from session transcripts.
+    canonical_note_markdown: str = ""
+    recall_export_markdown: str = ""
+    distilled_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     error: str = ""
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
@@ -458,7 +467,10 @@ class MaterialSource(SQLModel, table=True):
 
 class MaterialTopicProposal(SQLModel, table=True):
     __tablename__ = "material_topic_proposals"
-    __table_args__ = (Index("ix_material_topic_proposals_source", "source_id", "position"),)
+    __table_args__ = (
+        Index("ix_material_topic_proposals_source", "source_id", "position"),
+        Index("uq_material_topic_proposals_card_id", "card_id", unique=True),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     source_id: uuid.UUID = Field(foreign_key="material_sources.id", ondelete="CASCADE")
@@ -467,10 +479,26 @@ class MaterialTopicProposal(SQLModel, table=True):
     topic: str
     answer_anchor: str
     source_excerpt: str = ""
+    # Lesson extraction crosses the same complete-grounding boundary as Capture
+    # and Study Plan proposals. Legacy guide/manual proposals keep empty defaults.
+    canonical_question: str = ""
+    answer_rubric: dict[str, str] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    # Five durable practice/export cues for one concept. The scheduled Card still
+    # owns exactly one canonical question so mastery and SM-2 are not fragmented.
+    recall_questions: list[dict[str, str]] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
     status: str = PROPOSAL_CLEAN
     issue: str = ""
     merged_into_id: uuid.UUID | None = Field(
         default=None, foreign_key="material_topic_proposals.id", ondelete="SET NULL"
+    )
+    # Stable concept -> mastery join. Set in the same confirmation transaction
+    # that creates the Card; null for unconfirmed and legacy pre-0018 proposals.
+    card_id: uuid.UUID | None = Field(
+        default=None, foreign_key="cards.id", ondelete="SET NULL"
     )
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)

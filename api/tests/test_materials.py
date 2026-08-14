@@ -11,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models import (
     FOUNDER_USER_ID,
+    SOURCE_CONFIRMED,
     SOURCE_FAILED,
     SOURCE_NEEDS_ATTENTION,
     SOURCE_PENDING,
@@ -19,6 +20,7 @@ from app.models import (
     Card,
     MaterialSource,
     MaterialTopicProposal,
+    Session,
     StudyPlanGuideDraft,
 )
 from app.services import llm, materials, usage
@@ -29,6 +31,56 @@ from tests.conftest import (
     import_payload,
     make_card,
 )
+
+LESSON_RUBRIC = {
+    "mechanism": "A request crosses named routing stages before storage answers it.",
+    "acceptable_alternative": "Equivalent names for the routing stages are acceptable.",
+    "trade_off": "Each extra boundary adds latency in exchange for isolation or scale.",
+    "failure_mode": "A failed routing stage can stop the request before storage.",
+    "misconception": "The request does not jump directly from DNS to the database.",
+}
+
+
+def lesson_concept(source_text: str, **overrides) -> dict:
+    prompts = [
+        {
+            "level": "definition_recognition",
+            "question": "What signals distinguish this request path from a direct database call?",
+        },
+        {
+            "level": "mechanism",
+            "question": (
+                "How does a request move through the routing stages before storage responds?"
+            ),
+        },
+        {
+            "level": "derivation",
+            "question": "Why does adding a routing boundary change both isolation and latency?",
+        },
+        {
+            "level": "application",
+            "question": "Given a stalled request, how would you locate the failing routing stage?",
+        },
+        {
+            "level": "failure_tradeoff",
+            "question": "Where can this request path fail, and what does each boundary cost?",
+        },
+    ]
+    base = {
+        "topic": "Request routing path",
+        "section_title": "Week 1: The request path",
+        "source_excerpt": source_text[:120],
+        "answer_basis": (
+            "A request passes through DNS and a load balancer before application "
+            "and storage work return a response."
+        ),
+        "canonical_question": (
+            "How would you trace a request from DNS to storage and back?"
+        ),
+        "answer_rubric": LESSON_RUBRIC,
+        "recall_questions": prompts,
+    }
+    return {**base, **overrides}
 
 
 async def _claim(db, source: MaterialSource) -> uuid.UUID:
@@ -68,6 +120,147 @@ async def test_import_saves_the_complete_source_before_background_work(client, d
     assert source.status == SOURCE_PENDING
     assert source.requested_weeks == 16
     assert calls == [source.id]
+
+
+async def test_lesson_import_persists_safe_url_provenance_and_source_type(
+    client, db, monkeypatch
+):
+    calls: list[uuid.UUID] = []
+
+    async def no_work(source_id):
+        calls.append(source_id)
+
+    monkeypatch.setattr(materials, "process_import", no_work)
+    response = await client.post(
+        "/materials/imports",
+        headers=API_HEADERS,
+        json={
+            "title": "Request path notes",
+            "source_text": GUIDE,
+            "source_url": "https://example.com/engineering/request-path?view=full",
+            "kind": "article",
+            "import_path": "lesson",
+            "intent": "learn",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["source_url"] == (
+        "https://example.com/engineering/request-path?view=full"
+    )
+    assert response.json()["kind"] == "article"
+    source = (await db.exec(select(MaterialSource))).one()
+    assert source.import_path == "lesson"
+    assert source.kind == "article"
+    assert source.source_text == GUIDE
+    assert calls == [source.id]
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "example.com/no-scheme",
+        "ftp://example.com/source",
+        "https://reader:secret@example.com/source",
+    ],
+)
+async def test_lesson_import_rejects_unsafe_source_provenance(
+    client, source_url
+):
+    response = await client.post(
+        "/materials/imports",
+        headers=API_HEADERS,
+        json={
+            "title": "Request path notes",
+            "source_text": GUIDE,
+            "source_url": source_url,
+            "kind": "article",
+            "import_path": "lesson",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "absolute http(s) URL without credentials" in response.text
+
+
+async def test_lesson_url_is_metadata_and_never_replaces_pasted_text(client):
+    response = await client.post(
+        "/materials/imports",
+        headers=API_HEADERS,
+        json={
+            "title": "URL only",
+            "source_url": "https://example.com/source",
+            "kind": "article",
+            "import_path": "lesson",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "provenance metadata only" in response.text
+
+
+async def test_lesson_extraction_stores_one_complete_concept_pack(
+    db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request path notes",
+        source_text=GUIDE,
+        source_url="https://example.com/request-path",
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [lesson_concept(GUIDE)]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    processed = await materials._process_lesson(db, source, await _claim(db, source))
+    await db.flush()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    assert processed.status == SOURCE_READY
+    assert processed.result_summary["concept_count"] == 1
+    assert proposal.canonical_question.startswith("How would you trace")
+    assert proposal.answer_rubric == LESSON_RUBRIC
+    assert [prompt["level"] for prompt in proposal.recall_questions] == list(
+        llm.LESSON_RECALL_LEVELS
+    )
+    assert proposal.source_excerpt in source.source_text
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_invalid_lesson_extraction_writes_no_proposals_or_cards(
+    db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request path notes",
+        source_text=GUIDE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+    invalid = lesson_concept(GUIDE)
+    invalid["recall_questions"][2] = {
+        "level": "application",
+        "question": "Is this useful?",
+    }
+
+    async def extract(**_kwargs):
+        return [invalid]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    with pytest.raises(llm.LLMError, match="invalid derivation recall"):
+        await materials._process_lesson(db, source, await _claim(db, source))
+
+    assert not (await db.exec(select(MaterialTopicProposal))).all()
+    assert not (await db.exec(select(Card))).all()
 
 
 @pytest.mark.parametrize("status", [SOURCE_PENDING, SOURCE_PROCESSING, SOURCE_READY])
@@ -540,6 +733,144 @@ async def test_topics_are_proposals_until_the_user_confirms(client, db, stub_imp
     assert len(cards) == 4
     assert all(card.answer_anchor and card.source_id == source.id for card in cards)
     assert all(card.last_score is None for card in cards)
+
+
+async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
+    client, db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request path notes",
+        source_text=GUIDE,
+        source_url="https://example.com/request-path",
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [lesson_concept(GUIDE)]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    processed = await materials._process_lesson(db, source, await _claim(db, source))
+    db.add(processed)
+    await db.commit()
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    preview = await client.get(
+        f"/materials/imports/{source.id}", headers=API_HEADERS
+    )
+    assert preview.status_code == 200
+    assert preview.json()["topics"][0]["canonical_question"] == (
+        proposal.canonical_question
+    )
+    assert preview.json()["topics"][0]["answer_rubric"] == LESSON_RUBRIC
+    assert len(preview.json()["topics"][0]["recall_questions"]) == 5
+    assert preview.json()["topics"][0]["card_id"] is None
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    card = (await db.exec(select(Card))).one()
+    await db.refresh(proposal)
+    assert proposal.card_id == card.id
+    assert card.canonical_question == proposal.canonical_question
+    assert card.answer_basis == proposal.answer_anchor
+    assert card.answer_rubric == LESSON_RUBRIC
+    assert card.source_url == source.source_url
+    assert card.source_id == source.id
+
+    progress = await client.get(
+        f"/materials/imports/{source.id}/progress", headers=API_HEADERS
+    )
+    assert progress.status_code == 200, progress.text
+    assert progress.json()["complete"] is False
+    assert progress.json()["reviewed_count"] == 0
+    assert progress.json()["next_card_id"] == str(card.id)
+
+    incomplete = await client.post(
+        f"/materials/imports/{source.id}/distill", headers=API_HEADERS
+    )
+    assert incomplete.status_code == 409
+    assert incomplete.json()["detail"] == {
+        "code": "lesson_incomplete",
+        "reviewed_count": 0,
+        "concept_count": 1,
+    }
+
+    reviewed_at = datetime.now(UTC)
+    session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        answer_text="private spoken answer that must never be exported",
+        score=4,
+        accuracy=4,
+        depth=3,
+        boundaries=3,
+        feedback="Reconstructed the routing stages and their boundary cost.",
+        status="complete",
+        ended_at=reviewed_at,
+    )
+    card.last_score = 4
+    card.last_accuracy = 4
+    card.last_depth = 3
+    card.last_boundaries = 3
+    card.last_score_contract_version = 1
+    card.last_reviewed_at = reviewed_at
+    card.mastery_summary = "recalled the request routing mechanism unaided"
+    db.add(session)
+    db.add(card)
+    await db.commit()
+
+    progress = await client.get(
+        f"/materials/imports/{source.id}/progress", headers=API_HEADERS
+    )
+    body = progress.json()
+    assert body["complete"] is True
+    assert body["reviewed_count"] == 1
+    assert body["weak_count"] == 0
+    assert body["next_card_id"] is None
+    assert body["concepts"][0]["recall_score"] == 4
+    assert body["concepts"][0]["mastery_summary"].startswith("recalled")
+
+    distilled = await client.post(
+        f"/materials/imports/{source.id}/distill", headers=API_HEADERS
+    )
+    assert distilled.status_code == 200, distilled.text
+    artifact = distilled.json()
+    assert artifact["source_url"] == source.source_url
+    assert GUIDE not in artifact["canonical_note_markdown"]
+    assert "private spoken answer" not in distilled.text
+    assert artifact["concepts"][0]["concept"] == proposal.topic
+    assert artifact["concepts"][0]["mental_model"] == proposal.answer_anchor
+    assert artifact["concepts"][0]["how_it_works"] == LESSON_RUBRIC["mechanism"]
+    assert len(artifact["concepts"][0]["gotchas"]) == 4
+    assert len(artifact["concepts"][0]["recall_prompts"]) == 5
+    assert artifact["concepts"][0]["confidence"] == "established"
+    assert artifact["concepts"][0]["quiz_results"][0]["recall_score"] == 4
+    assert artifact["concepts"][0]["quiz_results"][0]["question"] == (
+        card.canonical_question
+    )
+
+    replayed = await client.post(
+        f"/materials/imports/{source.id}/distill", headers=API_HEADERS
+    )
+    assert replayed.status_code == 200
+    assert replayed.json()["distilled_at"] == artifact["distilled_at"]
+    fetched = await client.get(
+        f"/materials/imports/{source.id}/artifacts", headers=API_HEADERS
+    )
+    assert fetched.status_code == 200
+    assert fetched.json() == replayed.json()
+
+    await db.refresh(source)
+    assert source.status == SOURCE_CONFIRMED
+    assert source.canonical_note_markdown == artifact["canonical_note_markdown"]
+    assert source.recall_export_markdown == artifact["recall_export_markdown"]
 
 
 async def test_plan_import_reuses_its_preview_for_review_topics(db, stub_import):

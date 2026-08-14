@@ -19,16 +19,24 @@ from app.models import (
     SOURCE_CONFIRMED,
     SOURCE_FAILED,
     SOURCE_PENDING,
+    SOURCE_SUPERSEDED,
+    STATUS_COMPLETE,
     Card,
     MaterialSource,
     MaterialTopicProposal,
+    Session,
 )
 from app.routers.deps import local_today
 from app.schemas import (
     CollectionDetail,
     CollectionSummary,
+    LearningNoteConcept,
+    LessonConceptProgress,
+    LessonProgressOut,
+    LessonQuizResult,
     ManualMaterialIn,
     ManualTopicIn,
+    MaterialArtifactsOut,
     MaterialConfirmIn,
     MaterialConfirmOut,
     MaterialImportIn,
@@ -37,6 +45,12 @@ from app.schemas import (
     MaterialTopicOut,
 )
 from app.services import materials, study_plan
+from app.services.card_lifecycle import (
+    Grounding,
+    GroundingError,
+    build_grounded_card,
+)
+from app.services.scoring_contract import project_card_score
 
 router = APIRouter(prefix="/materials", tags=["study material"])
 
@@ -113,17 +127,27 @@ async def _owned_source(db: AsyncSession, source_id: uuid.UUID) -> MaterialSourc
     return source
 
 
+def _artifacts_ready(source: MaterialSource) -> bool:
+    return bool(
+        source.distilled_at
+        and source.canonical_note_markdown
+        and source.recall_export_markdown
+    )
+
+
 def _response_from_topics(
     source: MaterialSource,
     topics: list[MaterialTopicProposal],
     *,
     character_count: int | None = None,
+    artifacts_ready: bool | None = None,
 ) -> MaterialImportOut:
     summary = source.result_summary
     return MaterialImportOut(
         id=source.id,
         title=source.title,
         kind=source.kind,
+        source_url=source.source_url,
         version=source.version,
         status=source.status,
         import_path=source.import_path,
@@ -136,6 +160,10 @@ def _response_from_topics(
         plan_draft_id=source.plan_draft_id,
         comparison={key: int(value) for key, value in (summary.get("comparison") or {}).items()},
         topics=[MaterialTopicOut.model_validate(row) for row in topics],
+        artifacts_ready=(
+            _artifacts_ready(source) if artifacts_ready is None else artifacts_ready
+        ),
+        distilled_at=source.distilled_at,
         created_at=source.created_at,
         updated_at=source.updated_at,
     )
@@ -166,8 +194,10 @@ async def start_import(
         lineage_id=previous.lineage_id if previous else uuid.uuid4(),
         previous_version_id=previous.id if previous else None,
         version=previous.version + 1 if previous else 1,
+        kind=body.kind,
         title=body.title.strip(),
         source_text=body.source_text,
+        source_url=body.source_url,
         original_filename=body.original_filename,
         mime_type=body.mime_type,
         import_path=body.import_path,
@@ -190,7 +220,11 @@ async def list_imports(db: AsyncSession = Depends(get_session)) -> list[Material
     rows = (
         await db.exec(
             select(MaterialSource, func.length(MaterialSource.source_text))
-            .options(defer(MaterialSource.source_text))
+            .options(
+                defer(MaterialSource.source_text),
+                defer(MaterialSource.canonical_note_markdown),
+                defer(MaterialSource.recall_export_markdown),
+            )
             .where(MaterialSource.user_id == current_user_id())
             .order_by(col(MaterialSource.updated_at).desc())
         )
@@ -212,6 +246,7 @@ async def list_imports(db: AsyncSession = Depends(get_session)) -> list[Material
             source,
             by_source.get(source.id, []),
             character_count=character_count or 0,
+            artifacts_ready=source.distilled_at is not None,
         )
         for source, character_count in rows
     ]
@@ -332,21 +367,50 @@ async def confirm_topics(
     if len(set(normalized)) != len(normalized) or any(key in existing for key in normalized):
         raise HTTPException(status_code=409, detail="duplicate topic")
     today = await local_today(db)
-    cards = [
-        Card(
-            user_id=current_user_id(),
-            topic=row.topic,
-            category=row.section_title or "Imported guide",
-            delivery_mode=DELIVERY_CONVERSATIONAL,
-            next_review_at=today,
-            answer_anchor=row.answer_anchor,
-            source_excerpt=row.source_excerpt,
-            source_id=source.id,
-        )
-        for row in rows
-    ]
+    cards: list[Card] = []
+    for row in rows:
+        if source.import_path == "lesson":
+            try:
+                card = build_grounded_card(
+                    user_id=current_user_id(),
+                    topic=row.topic,
+                    category=row.section_title or source.title,
+                    grounding=Grounding(
+                        source_url=source.source_url,
+                        source_section=row.section_title,
+                        source_label=source.title,
+                        answer_basis=row.answer_anchor,
+                        answer_rubric=row.answer_rubric,
+                        canonical_question=row.canonical_question,
+                    ),
+                    today=today,
+                    schedule="now",
+                )
+            except GroundingError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "missing_grounding", "missing": exc.missing},
+                ) from exc
+            # Compatibility fields keep the existing learning/scoring fallback
+            # available while the full grounding fields are the authority.
+            card.answer_anchor = row.answer_anchor
+            card.source_excerpt = row.source_excerpt
+            card.source_id = source.id
+        else:
+            card = Card(
+                user_id=current_user_id(),
+                topic=row.topic,
+                category=row.section_title or "Imported guide",
+                delivery_mode=DELIVERY_CONVERSATIONAL,
+                next_review_at=today,
+                answer_anchor=row.answer_anchor,
+                source_excerpt=row.source_excerpt,
+                source_id=source.id,
+            )
+        cards.append(card)
     for card, row in zip(cards, rows, strict=True):
         db.add(card)
+        row.card_id = card.id
         row.status = PROPOSAL_CONFIRMED
         db.add(row)
     unselected = (
@@ -364,6 +428,227 @@ async def confirm_topics(
     await materials.confirm_source_version(db, source, current_user_id())
     await db.commit()
     return MaterialConfirmOut(source_id=source.id, created_card_ids=[card.id for card in cards])
+
+
+async def _lesson_graph(
+    db: AsyncSession, source: MaterialSource
+) -> tuple[
+    list[tuple[MaterialTopicProposal, Card]],
+    dict[uuid.UUID, list[Session]],
+]:
+    if source.import_path != "lesson":
+        raise HTTPException(status_code=409, detail={"code": "not_a_lesson"})
+    if source.status not in {SOURCE_CONFIRMED, SOURCE_SUPERSEDED}:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "lesson_not_confirmed"},
+        )
+    proposals = (
+        await db.exec(
+            select(MaterialTopicProposal)
+            .where(
+                MaterialTopicProposal.source_id == source.id,
+                MaterialTopicProposal.status == PROPOSAL_CONFIRMED,
+            )
+            .order_by(MaterialTopicProposal.position)
+        )
+    ).all()
+    if not proposals or any(row.card_id is None for row in proposals):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "lesson_has_no_confirmed_cards"},
+        )
+    card_ids = [row.card_id for row in proposals if row.card_id is not None]
+    cards = (
+        await db.exec(
+            select(Card).where(
+                Card.user_id == current_user_id(),
+                col(Card.id).in_(card_ids),
+            )
+        )
+    ).all()
+    by_id = {card.id: card for card in cards}
+    if any(row.card_id not in by_id for row in proposals):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "lesson_card_missing"},
+        )
+    sessions = (
+        await db.exec(
+            select(Session)
+            .where(
+                col(Session.card_id).in_(card_ids),
+                Session.status == STATUS_COMPLETE,
+                Session.practice == False,  # noqa: E712 - SQL expression
+            )
+            .order_by(Session.started_at)
+        )
+    ).all()
+    sessions_by_card: dict[uuid.UUID, list[Session]] = {}
+    for session in sessions:
+        sessions_by_card.setdefault(session.card_id, []).append(session)
+    return [(row, by_id[row.card_id]) for row in proposals], sessions_by_card
+
+
+def _learning_note_concepts(
+    source: MaterialSource,
+    graph: list[tuple[MaterialTopicProposal, Card]],
+    sessions_by_card: dict[uuid.UUID, list[Session]],
+) -> list[LearningNoteConcept]:
+    concepts: list[LearningNoteConcept] = []
+    for proposal, card in graph:
+        rubric = proposal.answer_rubric
+        gotchas = [
+            f"Alternative: {rubric.get('acceptable_alternative', '').strip()}",
+            f"Trade-off: {rubric.get('trade_off', '').strip()}",
+            f"Failure mode: {rubric.get('failure_mode', '').strip()}",
+            f"Misconception: {rubric.get('misconception', '').strip()}",
+        ]
+        gotchas = [value for value in gotchas if value.rsplit(":", 1)[-1].strip()]
+        quiz_results = [
+            LessonQuizResult(
+                reviewed_at=session.ended_at or session.started_at,
+                question=session.question_asked[:2000],
+                recall_score=session.accuracy,
+                graded_summary=(session.feedback or card.mastery_summary)[:4000],
+                feedback=session.feedback[:4000],
+            )
+            # The local writer intentionally caps durable quiz history at 20
+            # rows per concept. Keep the newest unaided evidence at that boundary.
+            for session in sessions_by_card.get(card.id, [])[-20:]
+        ]
+        latest_recall = quiz_results[-1].recall_score if quiz_results else None
+        concepts.append(
+            LearningNoteConcept(
+                proposal_id=proposal.id,
+                card_id=card.id,
+                concept=proposal.topic,
+                source_title=source.title,
+                source_url=source.source_url,
+                mental_model=proposal.answer_anchor,
+                how_it_works=(
+                    rubric.get("mechanism", "").strip() or proposal.answer_anchor
+                ),
+                gotchas=gotchas,
+                recall_prompts=proposal.recall_questions,
+                quiz_results=quiz_results,
+                confidence=materials.confidence_for(latest_recall),
+            )
+        )
+    return concepts
+
+
+def _artifacts_response(
+    source: MaterialSource, concepts: list[LearningNoteConcept]
+) -> MaterialArtifactsOut:
+    if not _artifacts_ready(source):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "artifacts_not_ready"},
+        )
+    return MaterialArtifactsOut(
+        source_id=source.id,
+        title=source.title,
+        source_url=source.source_url,
+        distilled_at=source.distilled_at,
+        canonical_note_markdown=source.canonical_note_markdown,
+        recall_export_markdown=source.recall_export_markdown,
+        concepts=concepts,
+    )
+
+
+@router.get("/imports/{source_id}/progress", response_model=LessonProgressOut)
+async def lesson_progress(
+    source_id: uuid.UUID, db: AsyncSession = Depends(get_session)
+) -> LessonProgressOut:
+    source = await _owned_source(db, source_id)
+    graph, sessions_by_card = await _lesson_graph(db, source)
+    concepts: list[LessonConceptProgress] = []
+    weak_count = 0
+    next_card_id: uuid.UUID | None = None
+    for proposal, card in graph:
+        projection = project_card_score(card)
+        reviewed = bool(sessions_by_card.get(card.id))
+        if not reviewed and next_card_id is None:
+            next_card_id = card.id
+        if projection.recall_score is not None and projection.recall_score <= 2:
+            weak_count += 1
+        concepts.append(
+            LessonConceptProgress(
+                proposal_id=proposal.id,
+                card_id=card.id,
+                concept=proposal.topic,
+                mastery_summary=card.mastery_summary,
+                last_score=card.last_score,
+                recall_score=projection.recall_score,
+                score_kind=projection.score_kind,
+                scoring_contract_version=projection.scoring_contract_version,
+                last_reviewed_at=card.last_reviewed_at,
+                next_review_at=card.next_review_at,
+                interval_days=card.interval_days,
+            )
+        )
+    reviewed_count = sum(bool(sessions_by_card.get(card.id)) for _, card in graph)
+    return LessonProgressOut(
+        source_id=source.id,
+        title=source.title,
+        concept_count=len(graph),
+        reviewed_count=reviewed_count,
+        weak_count=weak_count,
+        complete=reviewed_count == len(graph),
+        next_card_id=next_card_id,
+        concepts=concepts,
+    )
+
+
+@router.post("/imports/{source_id}/distill", response_model=MaterialArtifactsOut)
+async def distill_lesson(
+    source_id: uuid.UUID, db: AsyncSession = Depends(get_session)
+) -> MaterialArtifactsOut:
+    source = await _owned_source(db, source_id)
+    graph, sessions_by_card = await _lesson_graph(db, source)
+    reviewed_count = sum(bool(sessions_by_card.get(card.id)) for _, card in graph)
+    if reviewed_count != len(graph):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "lesson_incomplete",
+                "reviewed_count": reviewed_count,
+                "concept_count": len(graph),
+            },
+        )
+    concepts = _learning_note_concepts(source, graph, sessions_by_card)
+    note, recall = materials.render_lesson_markdown(
+        source, [concept.model_dump(mode="python") for concept in concepts]
+    )
+    if (
+        source.canonical_note_markdown != note
+        or source.recall_export_markdown != recall
+        or source.distilled_at is None
+    ):
+        source.canonical_note_markdown = note
+        source.recall_export_markdown = recall
+        source.distilled_at = datetime.now(UTC)
+        source.updated_at = source.distilled_at
+        db.add(source)
+        await db.commit()
+    return _artifacts_response(source, concepts)
+
+
+@router.get("/imports/{source_id}/artifacts", response_model=MaterialArtifactsOut)
+async def lesson_artifacts(
+    source_id: uuid.UUID, db: AsyncSession = Depends(get_session)
+) -> MaterialArtifactsOut:
+    source = await _owned_source(db, source_id)
+    if not _artifacts_ready(source):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "artifacts_not_ready"},
+        )
+    graph, sessions_by_card = await _lesson_graph(db, source)
+    return _artifacts_response(
+        source, _learning_note_concepts(source, graph, sessions_by_card)
+    )
 
 
 async def _create_manual(
@@ -401,6 +686,7 @@ async def _create_manual(
             answer_anchor=proposal.answer_anchor,
             source_id=source.id,
         )
+        proposal.card_id = card.id
         db.add(proposal)
         db.add(card)
         cards.append(card)

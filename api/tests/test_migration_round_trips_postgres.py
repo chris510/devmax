@@ -252,6 +252,25 @@ async def _material_snapshot(database_url: URL, source_id: uuid.UUID) -> dict:
     )
 
 
+async def _seed_material_proposal(
+    database_url: URL, proposal_id: uuid.UUID, source_id: uuid.UUID
+) -> None:
+    await _execute(
+        database_url,
+        """
+        INSERT INTO material_topic_proposals (
+            id, source_id, position, section_title, topic, answer_anchor,
+            source_excerpt, status, issue, created_at, updated_at
+        ) VALUES (
+            :proposal_id, :source_id, 1, 'Request path', 'Request routing',
+            'DNS routes before storage.', 'Keep this verbatim guide.',
+            'confirmed', '', now(), now()
+        )
+        """,
+        {"proposal_id": proposal_id, "source_id": source_id},
+    )
+
+
 async def _seed_guide_draft(database_url: URL, draft_id: uuid.UUID) -> None:
     await _execute(
         database_url,
@@ -494,6 +513,157 @@ async def _exercise_round_trips() -> None:
         await _assert_revision(database_url, "0017")
         assert await _material_snapshot(database_url, source_id) == material
         assert await _guide_draft_snapshot(database_url, draft_id) == draft
+
+        # 0018 adds lesson provenance, distilled artifacts, complete proposal
+        # grounding and one stable proposal -> Card edge. Existing material rows
+        # receive empty/null defaults and keep every pre-existing value.
+        proposal_id = uuid.uuid4()
+        await _seed_material_proposal(database_url, proposal_id, source_id)
+        _run_alembic(database_url, "upgrade", "0018")
+        await _assert_revision(database_url, "0018")
+        assert await _material_snapshot(database_url, source_id) == material
+        lesson_defaults = await _fetch_one(
+            database_url,
+            """
+            SELECT s.source_url, s.canonical_note_markdown,
+                   s.recall_export_markdown, s.distilled_at,
+                   p.canonical_question, p.answer_rubric,
+                   p.recall_questions, p.card_id
+            FROM material_sources AS s
+            JOIN material_topic_proposals AS p ON p.source_id = s.id
+            WHERE s.id = :source_id AND p.id = :proposal_id
+            """,
+            {"source_id": source_id, "proposal_id": proposal_id},
+        )
+        assert lesson_defaults == {
+            "source_url": "",
+            "canonical_note_markdown": "",
+            "recall_export_markdown": "",
+            "distilled_at": None,
+            "canonical_question": "",
+            "answer_rubric": {},
+            "recall_questions": [],
+            "card_id": None,
+        }
+
+        rubric = {
+            "mechanism": "Routes through named stages.",
+            "acceptable_alternative": "Equivalent stage names.",
+            "trade_off": "Boundaries add latency.",
+            "failure_mode": "A stage can fail.",
+            "misconception": "Storage is not contacted directly.",
+        }
+        prompts = [
+            {"level": level, "question": f"How does {level} work here?"}
+            for level in (
+                "definition_recognition",
+                "mechanism",
+                "derivation",
+                "application",
+                "failure_tradeoff",
+            )
+        ]
+        await _execute(
+            database_url,
+            """
+            UPDATE material_sources
+            SET import_path = 'lesson',
+                source_url = 'https://example.com/request-path',
+                canonical_note_markdown = '# Request routing',
+                recall_export_markdown = '# Recall',
+                distilled_at = now()
+            WHERE id = :source_id
+            """,
+            {"source_id": source_id},
+        )
+        await _execute(
+            database_url,
+            """
+            UPDATE material_topic_proposals
+            SET canonical_question = 'How does routing work?',
+                answer_rubric = CAST(:rubric AS jsonb),
+                recall_questions = CAST(:prompts AS jsonb),
+                card_id = :card_id
+            WHERE id = :proposal_id
+            """,
+            {
+                "proposal_id": proposal_id,
+                "card_id": card_id,
+                "rubric": json.dumps(rubric),
+                "prompts": json.dumps(prompts),
+            },
+        )
+        lesson_written = await _fetch_one(
+            database_url,
+            """
+            SELECT s.import_path, s.source_url, s.canonical_note_markdown,
+                   s.recall_export_markdown, s.distilled_at IS NOT NULL AS distilled,
+                   p.canonical_question, p.answer_rubric,
+                   p.recall_questions, p.card_id
+            FROM material_sources AS s
+            JOIN material_topic_proposals AS p ON p.source_id = s.id
+            WHERE s.id = :source_id AND p.id = :proposal_id
+            """,
+            {"source_id": source_id, "proposal_id": proposal_id},
+        )
+        assert lesson_written == {
+            "import_path": "lesson",
+            "source_url": "https://example.com/request-path",
+            "canonical_note_markdown": "# Request routing",
+            "recall_export_markdown": "# Recall",
+            "distilled": True,
+            "canonical_question": "How does routing work?",
+            "answer_rubric": rubric,
+            "recall_questions": prompts,
+            "card_id": card_id,
+        }
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
+
+        # Downgrade retains the raw source/proposal and maps the unsupported lesson
+        # path back to topics. Re-upgrade restores additive defaults without
+        # inventing a stale card link or artifact.
+        _run_alembic(database_url, "downgrade", "0017")
+        await _assert_revision(database_url, "0017")
+        assert await _material_snapshot(database_url, source_id) == material
+        path = await _fetch_one(
+            database_url,
+            "SELECT import_path FROM material_sources WHERE id = :source_id",
+            {"source_id": source_id},
+        )
+        assert path == {"import_path": "topics"}
+        assert not await _column_exists(database_url, "material_sources", "source_url")
+        assert not await _column_exists(
+            database_url, "material_topic_proposals", "card_id"
+        )
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
+
+        _run_alembic(database_url, "upgrade", "0018")
+        await _assert_revision(database_url, "0018")
+        reset_lesson = await _fetch_one(
+            database_url,
+            """
+            SELECT s.import_path, s.source_url, s.canonical_note_markdown,
+                   s.recall_export_markdown, s.distilled_at,
+                   p.canonical_question, p.answer_rubric,
+                   p.recall_questions, p.card_id
+            FROM material_sources AS s
+            JOIN material_topic_proposals AS p ON p.source_id = s.id
+            WHERE s.id = :source_id AND p.id = :proposal_id
+            """,
+            {"source_id": source_id, "proposal_id": proposal_id},
+        )
+        assert reset_lesson == {
+            "import_path": "topics",
+            "source_url": "",
+            "canonical_note_markdown": "",
+            "recall_export_markdown": "",
+            "distilled_at": None,
+            "canonical_question": "",
+            "answer_rubric": {},
+            "recall_questions": [],
+            "card_id": None,
+        }
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
 
 
 def test_scoring_migrations_preserve_numeric_and_scheduler_state() -> None:
