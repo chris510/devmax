@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.models import Card, PendingCapture, Session, SessionProbe
 from app.services import llm
 from app.services.llm import CoachingResult, ScoreResult
+from app.services.scoring_provider import ProviderCallTrace, ScoringTrace
 from tests.conftest import API_HEADERS, local_today, make_card
 
 
@@ -25,6 +26,7 @@ async def probes_of(db, session_id) -> list[SessionProbe]:
 
 
 def v2_result(recall: int, *, status: str = "complete", probe: str | None = None):
+    model = get_settings().scoring_model
     return ScoreResult(
         status=status,
         score=recall if status == "complete" else None,
@@ -33,6 +35,21 @@ def v2_result(recall: int, *, status: str = "complete", probe: str | None = None
         follow_up_question=probe,
         mastery_summary="recalled the essential account",
         scoring_contract_version=2,
+        trace=ScoringTrace(
+            route="anthropic",
+            authoritative_provider="anthropic",
+            qualification_fingerprint="",
+            calls=(
+                ProviderCallTrace(
+                    provider="anthropic",
+                    model=model,
+                    response_model=model,
+                    response_id=f"msg-v2-{uuid.uuid4()}",
+                    input_tokens=1,
+                    output_tokens=1,
+                ),
+            ),
+        ),
     )
 
 

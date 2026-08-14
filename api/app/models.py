@@ -78,7 +78,7 @@ class AIConsentEvent(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
-    provider: str = "Anthropic"
+    provider: str
     policy_version: str
     action: str
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
@@ -308,6 +308,12 @@ class Session(SQLModel, table=True):
     # V1 remains active until the staged V2 release gate is complete. Every row
     # carries its meaning so historical composites are never relabeled as Recall.
     scoring_contract_version: int = 1
+    # Server-selected provider/model/effort binding for every scored turn in this
+    # session. Empty means a historical session and resolves to Anthropic. JSON
+    # keeps the binding additive as the separately qualified route evolves.
+    scoring_route: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
 
     # Reserved for the optional post-result qualitative turn. Stage 1 adds only
     # storage; no endpoint writes these fields yet.
@@ -430,6 +436,11 @@ class MaterialSource(SQLModel, table=True):
     import_path: str = "topics"
     intent: str = "already_studied"
     status: str = SOURCE_DRAFT
+    # A worker must atomically replace both fields before it may transmit the
+    # guide or store a result.  The heartbeat lets a later process recover an
+    # orphaned claim without duplicating a still-live multi-minute import.
+    processing_run_id: uuid.UUID | None = None
+    processing_heartbeat_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     requested_weeks: int = 12
     weekly_capacity_minutes: int = 480
     mode: str = "flexible"
@@ -472,6 +483,11 @@ class LLMUsage(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
     operation: str
+    # Privacy-safe operational evidence only: provider/model/route, outcome,
+    # latency and token counts. Never prompt, transcript, grounding, or output.
+    details: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
@@ -834,6 +850,13 @@ class StudyPlanGuideDraft(SQLModel, table=True):
         default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
     )
     error: str = ""
+
+    # A preview can spend eleven minutes at the provider.  The token and
+    # heartbeat make that paid work a lease: one request owns the result, a
+    # concurrent Retry cannot transmit the guide again, and a late response
+    # cannot overwrite a newer claimant.
+    processing_run_id: uuid.UUID | None = None
+    processing_heartbeat_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
 
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)

@@ -12,6 +12,7 @@ from app.models import (
     AppleIdentity,
     AuthSession,
     Card,
+    LLMUsage,
     MaterialSource,
     Session,
     Settings,
@@ -130,8 +131,11 @@ async def me(db: AsyncSession = Depends(get_session)) -> CurrentUserOut:
 async def update_ai_consent(
     body: AIConsentIn, db: AsyncSession = Depends(get_session)
 ) -> AIConsentOut:
-    user, changed_at = await ai_consent.record(db, current_user_id(), body.action)
+    user, changed_at = await ai_consent.record(
+        db, current_user_id(), body.action, body.policy_version
+    )
     return AIConsentOut(
+        provider=ai_consent.PROVIDER,
         policy_version=ai_consent.POLICY_VERSION,
         status=user.ai_consent_status,
         updated_at=changed_at,
@@ -230,6 +234,13 @@ async def export_account(db: AsyncSession = Depends(get_session)) -> AccountExpo
             .order_by(AIConsentEvent.created_at)
         )
     ).all()
+    model_usage = (
+        await db.exec(
+            select(LLMUsage)
+            .where(LLMUsage.user_id == user_id)
+            .order_by(LLMUsage.created_at, LLMUsage.id)
+        )
+    ).all()
     return AccountExport(
         exported_at=datetime.now(UTC),
         account=user.model_dump() if user else {},
@@ -239,23 +250,37 @@ async def export_account(db: AsyncSession = Depends(get_session)) -> AccountExpo
         sessions=[row.model_dump() for row in sessions],
         study_plans=[row.model_dump() for row in plans],
         ai_consent_events=[row.model_dump() for row in consent_events],
+        llm_usage=[row.model_dump() for row in model_usage],
     )
 
 
 @router.delete("/account", status_code=204, dependencies=[Depends(require_user)])
 async def delete_account(db: AsyncSession = Depends(get_session)) -> Response:
+    # Read the Apple credential without locking the User.  The network revocation
+    # can be slow, and holding a User row lock across it would block independent
+    # provider-audit FK inserts and can deadlock a provider transaction.
     user = await db.get(User, current_user_id())
     if user is None:
         return Response(status_code=204)
     identity = (
         await db.exec(select(AppleIdentity).where(AppleIdentity.user_id == user.id))
     ).first()
-    if identity and identity.apple_refresh_token:
+    encrypted_apple_token = identity.apple_refresh_token if identity else None
+    # End the read transaction before external I/O.  No deletion state has been
+    # changed, so an Apple failure still leaves the account wholly intact.
+    await db.rollback()
+    if encrypted_apple_token:
         try:
-            token = authentication.decrypt_apple_token(identity.apple_refresh_token, get_settings())
+            token = authentication.decrypt_apple_token(encrypted_apple_token, get_settings())
             await authentication.revoke_apple_authorization(token, get_settings())
         except authentication.AuthenticationUnavailable as exc:
             raise HTTPException(status_code=503, detail="deletion_unavailable") from exc
+    # Provider authorization, consent changes, result finalization, and deletion
+    # share this per-user boundary.  Re-read after the external Apple revocation:
+    # another deletion may have completed while no database lock was held.
+    user = await ai_consent.lock_user_boundary(db, current_user_id())
+    if user is None:
+        return Response(status_code=204)
     await db.delete(user)
     await db.commit()
     return Response(status_code=204)

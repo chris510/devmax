@@ -164,6 +164,25 @@ async def prepare_question(
         ) from exc
 
     await usage.ensure_available(db, current_user_id(), "question", get_settings())
+    # A concurrent request may have filled the canonical question while this
+    # one waited on the account/provider boundary. Re-read at the boundary and
+    # reuse the winner unless this is an explicit regeneration request.
+    await db.refresh(capture)
+    if capture.status == CAPTURE_ACTIVATED:
+        raise HTTPException(status_code=409, detail="capture is already activated")
+    if capture.canonical_question and not regenerate:
+        response = _out(capture)
+        await db.rollback()
+        return response
+    try:
+        value = grounding_from_capture(capture).require_complete(
+            require_question=False
+        )
+    except GroundingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "missing_grounding", "missing": exc.missing},
+        ) from exc
     capture.canonical_question = await llm.generate_question(
         topic=capture.topic,
         category="Unsorted",

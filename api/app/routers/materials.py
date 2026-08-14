@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.orm import defer
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -17,6 +17,7 @@ from app.models import (
     PROPOSAL_EXCLUDED,
     PROPOSAL_NEEDS_ATTENTION,
     SOURCE_CONFIRMED,
+    SOURCE_FAILED,
     SOURCE_PENDING,
     Card,
     MaterialSource,
@@ -230,11 +231,30 @@ async def retry_import(
     db: AsyncSession = Depends(get_session),
 ) -> MaterialImportOut:
     source = await _owned_source(db, source_id)
-    source.status = SOURCE_PENDING
-    source.error = ""
-    source.updated_at = datetime.now(UTC)
-    db.add(source)
+    retried_id = (
+        await db.exec(
+            update(MaterialSource)
+            .where(
+                MaterialSource.id == source.id,
+                MaterialSource.user_id == current_user_id(),
+                MaterialSource.status == SOURCE_FAILED,
+            )
+            .values(
+                status=SOURCE_PENDING,
+                processing_run_id=None,
+                processing_heartbeat_at=None,
+                error="",
+                updated_at=datetime.now(UTC),
+            )
+            .returning(MaterialSource.id)
+        )
+    ).one_or_none()
+    if retried_id is None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="only a failed import can be retried")
     await db.commit()
+    source = await db.get(MaterialSource, retried_id, populate_existing=True)
+    assert source is not None
     background.add_task(materials.process_import, source.id)
     return await _response(db, source)
 
@@ -420,14 +440,15 @@ async def add_collection(
 
 @router.delete("/imports/{source_id}", status_code=204)
 async def delete_import(source_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> Response:
-    source = await _owned_source(db, source_id)
-    await db.delete(source)
-    await db.commit()
+    if not await materials.delete_source(
+        db, source_id=source_id, user_id=current_user_id()
+    ):
+        raise HTTPException(status_code=404, detail="material not found")
     return Response(status_code=204)
 
 
 async def schedule_pending_imports() -> list[asyncio.Task[None]]:
     return [
-        asyncio.create_task(materials.process_import(source_id), name=f"material-{source_id}")
+        asyncio.create_task(materials.resume_import(source_id), name=f"material-{source_id}")
         for source_id in await materials.resume_imports()
     ]

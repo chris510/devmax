@@ -72,7 +72,7 @@ final class AIConsentTests: XCTestCase {
         }
     }
 
-    func testAccountProfileDecodesVersionedAnthropicConsent() throws {
+    func testAccountProfileDecodesVersionedProviderConsent() throws {
         let data = Data(#"""
         {
           "id":"00000000-0000-0000-0000-000000000001",
@@ -82,8 +82,8 @@ final class AIConsentTests: XCTestCase {
           "email":"casey@privaterelay.appleid.com",
           "apple_user_identifier":"apple-subject",
           "ai_consent_status":"granted",
-          "ai_consent_version":"anthropic-2026-08-12-v1",
-          "ai_consent_updated_at":"2026-08-12T17:00:00Z",
+          "ai_consent_version":"anthropic-openai-2026-08-13-v2",
+          "ai_consent_updated_at":"2026-08-13T17:00:00Z",
           "ai_processing_allowed":true,
           "ai_consent_prompt_required":false
         }
@@ -91,7 +91,7 @@ final class AIConsentTests: XCTestCase {
 
         let profile = try LiveAPI.decoder.decode(AccountProfile.self, from: data)
         XCTAssertEqual(profile.aiConsentStatus, "granted")
-        XCTAssertEqual(profile.aiConsentVersion, "anthropic-2026-08-12-v1")
+        XCTAssertEqual(profile.aiConsentVersion, AIProcessingDisclosure.policyVersion)
         XCTAssertTrue(profile.aiProcessingAllowed)
         XCTAssertFalse(profile.aiConsentPromptRequired)
         XCTAssertNotNil(profile.aiConsentUpdatedAt)
@@ -105,19 +105,23 @@ final class AIConsentTests: XCTestCase {
             let object = try XCTUnwrap(
                 JSONSerialization.jsonObject(with: bodyData(for: request)) as? [String: String]
             )
-            XCTAssertEqual(object, ["action": "decline"])
+            XCTAssertEqual(object, [
+                "action": "decline",
+                "policy_version": AIProcessingDisclosure.policyVersion
+            ])
             return response(
                 for: request, status: 200,
                 json: """
-                {"provider":"Anthropic","policy_version":"anthropic-2026-08-12-v1",
-                "status":"declined","updated_at":"2026-08-12T17:00:00Z",
+                {"provider":"Anthropic and OpenAI",
+                "policy_version":"anthropic-openai-2026-08-13-v2",
+                "status":"declined","updated_at":"2026-08-13T17:00:00Z",
                 "processing_allowed":false,"prompt_required":false}
                 """
             )
         }
 
         let receipt = try await api().updateAIConsent(action: "decline")
-        XCTAssertEqual(receipt.provider, "Anthropic")
+        XCTAssertEqual(receipt.provider, "Anthropic and OpenAI")
         XCTAssertFalse(receipt.processingAllowed)
         XCTAssertFalse(receipt.promptRequired)
     }
@@ -127,8 +131,8 @@ final class AIConsentTests: XCTestCase {
             response(
                 for: request, status: 403,
                 json: """
-                {"detail":{"code":"ai_consent_required","provider":"Anthropic",
-                "policy_version":"anthropic-2026-08-12-v1"}}
+                {"detail":{"code":"ai_consent_required","provider":"Anthropic and OpenAI",
+                "policy_version":"anthropic-openai-2026-08-13-v2"}}
                 """
             )
         }

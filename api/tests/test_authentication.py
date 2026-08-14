@@ -1232,6 +1232,15 @@ async def test_legacy_api_key_can_be_disabled_without_disabling_bearer_auth(
 
 async def test_onboarding_completion_and_export_are_account_scoped(client, db):
     user, headers, card = await _account(db, topic="Exported topic")
+    db.add(
+        LLMUsage(
+            user_id=user.id,
+            operation="score_v2",
+            details={"provider": "openai", "outcome": "success"},
+        )
+    )
+    db.add(LLMUsage(user_id=FOUNDER_USER_ID, operation="question"))
+    await db.commit()
     profile = await client.post("/auth/onboarding/complete", headers=headers)
     assert profile.status_code == 200
     assert profile.json()["onboarding_completed"] is True
@@ -1242,6 +1251,11 @@ async def test_onboarding_completion_and_export_are_account_scoped(client, db):
     assert body["account"]["id"] == str(user.id)
     assert [row["id"] for row in body["cards"]] == [str(card.id)]
     assert all(row["topic"] != "Consistent hashing" for row in body["cards"])
+    assert [row["operation"] for row in body["llm_usage"]] == ["score_v2"]
+    assert body["llm_usage"][0]["details"] == {
+        "provider": "openai",
+        "outcome": "success",
+    }
 
 
 async def test_account_deletion_revokes_apple_before_cascading(client, db, monkeypatch):

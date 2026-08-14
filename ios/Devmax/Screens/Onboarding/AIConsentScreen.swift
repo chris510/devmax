@@ -14,8 +14,11 @@ struct AIConsentScreen: View {
                         .foregroundStyle(Theme.textStrong)
                         .accessibilityAddTraits(.isHeader)
                     Text(
-                        "Unprompted uses Anthropic to turn trusted study material into "
-                            + "focused practice and to score the answers you choose to submit."
+                        "Unprompted uses Anthropic for guide processing, question generation, "
+                            + "and optional coaching. Answers you submit may be scored by "
+                            + "Anthropic or OpenAI. During a limited provider evaluation, the "
+                            + "same answer may be sent to both while only Anthropic decides "
+                            + "the result you see."
                     )
                         .font(WCFont.sans(15))
                         .foregroundStyle(Theme.textSecondary)
@@ -31,12 +34,19 @@ struct AIConsentScreen: View {
                         "WHEN SCORING AN ANSWER",
                         "The topic, question, your transcript, any follow-up, the card's "
                             + "mastery summary, trusted answer basis, source excerpt, and "
-                            + "rubric are sent to Anthropic for scoring and optional coaching."
+                            + "rubric are sent to Anthropic or OpenAI for scoring. Optional "
+                            + "coaching is processed by Anthropic. During the limited provider "
+                            + "evaluation, that scoring context may be sent to both providers "
+                            + "at the same time. OpenAI's output cannot affect the result shown "
+                            + "or saved; only privacy-safe comparison and usage metadata are retained."
                     )
                     disclosure(
                         "WHAT ISN'T SENT",
                         "Your Apple sign-in credential and voice recording are not sent to "
-                            + "Anthropic. iOS provides a text transcript; Unprompted sends text."
+                            + "either AI provider. iOS provides a text transcript; Unprompted "
+                            + "sends text. OpenAI also receives a stable pseudonymous safety "
+                            + "identifier derived with a private app secret—not your Apple "
+                            + "credential, name, or email."
                     )
 
                     InlineNotice {
@@ -55,6 +65,10 @@ struct AIConsentScreen: View {
                         Link(
                             "Read Anthropic's API data policy ↗",
                             destination: PrivacyLinks.anthropicRetention
+                        )
+                        Link(
+                            "Read OpenAI's API data controls ↗",
+                            destination: PrivacyLinks.openAIDataControls
                         )
                     }
                     .font(TypeRole.secondaryAction)

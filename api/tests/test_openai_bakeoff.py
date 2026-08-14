@@ -1,11 +1,14 @@
 import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from app.services import llm
-from scripts import openai_bakeoff, structured_evidence_eval
+from app.services import llm, openai_responses, scoring_provider
+from app.services.scoring_provider import OPENAI_V2_SCHEMA_NAME
+from scripts import openai_bakeoff, structured_evidence_eval, v2_recall_eval
 from scripts.effort_sweep_support import (
     JsonlRecorder,
     Usage,
@@ -15,6 +18,9 @@ from scripts.effort_sweep_support import (
 from scripts.openai_eval_support import (
     INPUT_FRAMING_ALLOWANCE,
     INPUT_TOKENS_URL,
+    V2_EVAL_SAFETY_IDENTIFIER,
+    V2_EVAL_SAFETY_IDENTIFIER_FORMAT_VERSION,
+    OpenAIEvalError,
     complete,
     conservative_input_bound,
     count_input_tokens,
@@ -22,6 +28,13 @@ from scripts.openai_eval_support import (
     parse_response,
     response_request,
 )
+from scripts.openai_eval_support import (
+    actual_cost as openai_actual_cost,
+)
+
+QUALIFICATION_EXPIRES_AT = (
+    datetime.now(UTC) + timedelta(days=1)
+).isoformat()
 
 
 def scoring_completion() -> dict:
@@ -40,6 +53,7 @@ def response_payload(*, text: str) -> dict:
     return {
         "id": "resp_test",
         "model": "gpt-5.6-luna",
+        "status": "completed",
         "output": [
             {
                 "type": "reasoning",
@@ -54,6 +68,7 @@ def response_payload(*, text: str) -> dict:
             "input_tokens": 321,
             "output_tokens": 87,
             "input_tokens_details": {"cached_tokens": 12},
+            "cache_write_tokens": 20,
             "output_tokens_details": {"reasoning_tokens": 40},
         },
     }
@@ -134,6 +149,23 @@ async def test_exact_input_counter_sends_one_non_generating_request() -> None:
     assert "store" not in payload
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid_count", [True, -1, "7", 1.0, None])
+async def test_exact_input_counter_rejects_coercible_or_negative_counts(
+    invalid_count,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"input_tokens": invalid_count})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(OpenAIEvalError, match="non-negative exact integer"):
+            await count_input_tokens(
+                response_request(scoring_completion(), kind="scoring"),
+                api_key="test-key",
+                client=client,
+            )
+
+
 def test_openai_luna_rate_is_versioned_in_the_shared_guard() -> None:
     rate = rate_for_model("gpt-5.6-luna")
 
@@ -151,8 +183,72 @@ def test_response_parser_uses_total_output_tokens_including_reasoning() -> None:
     assert parsed.usage.input_tokens == 321
     assert parsed.usage.output_tokens == 87
     assert parsed.usage.cache_read_tokens == 12
+    assert parsed.usage.cache_write_tokens == 20
     assert parsed.response_id == "resp_test"
     assert parsed.elapsed_ms == 0
+
+
+def test_response_parser_rejects_noncompleted_or_overlapping_input_usage() -> None:
+    incomplete = response_payload(text='{"accuracy":5}')
+    incomplete["status"] = "incomplete"
+    incomplete["incomplete_details"] = {"reason": "max_output_tokens"}
+    with pytest.raises(
+        OpenAIEvalError, match="not completed: max_output_tokens"
+    ) as caught:
+        parse_response(incomplete)
+    assert caught.value.response_id == "resp_test"
+    assert caught.value.model == "gpt-5.6-luna"
+    assert caught.value.failure_type == "non_completed"
+    assert caught.value.usage.input_tokens == 321
+    assert caught.value.usage.output_tokens == 87
+
+    invalid_usage = response_payload(text='{"accuracy":5}')
+    invalid_usage["usage"]["input_tokens"] = 30
+    with pytest.raises(OpenAIEvalError, match="exceeded total input"):
+        parse_response(invalid_usage)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("id", ""),
+        ("id", "   "),
+        ("id", None),
+        ("id", 7),
+        ("model", ""),
+        ("model", None),
+        ("model", 7),
+    ],
+)
+def test_response_parser_requires_exact_nonempty_identity(field, value) -> None:
+    raw = response_payload(text='{"accuracy":5}')
+    raw[field] = value
+
+    with pytest.raises(OpenAIEvalError, match=f"response {field}") as caught:
+        parse_response(raw)
+
+    assert caught.value.failure_type == "invalid_response_identity"
+
+
+def test_openai_actual_cost_separates_uncached_cached_and_written_input() -> None:
+    cost = openai_actual_cost(
+        [
+            {
+                "usage": {
+                    "input_tokens": 321,
+                    "output_tokens": 87,
+                    "cache_read_tokens": 12,
+                    "cache_write_tokens": 20,
+                }
+            }
+        ],
+        input_per_million=Decimal("2"),
+        output_per_million=Decimal("3"),
+        cached_input_per_million=Decimal("0.2"),
+        cache_write_per_million=Decimal("1"),
+    )
+
+    assert cost == Decimal("0.0008614")
 
 
 @pytest.mark.anyio
@@ -224,6 +320,313 @@ def write_evidence_case(tmp_path):
         )
     )
     return path
+
+
+def write_v2_recall_case(
+    tmp_path, *, expected_recall=4, expected_flow="complete", probes=None
+):
+    path = tmp_path / "v2-recall-cases.json"
+    case = {
+        "name": "synthetic V2 Recall case",
+        "topic": "Consistent hashing",
+        "question": "Why does consistent hashing reduce remapping?",
+        "answer": "Only keys in the moved token range change owners.",
+        "answer_basis": "A node change moves only adjacent token ranges.",
+        "answer_rubric": {"required_mechanism": "Only adjacent ranges move."},
+        "expected_recall": expected_recall,
+        "expected_flow": expected_flow,
+        "review_status": "approved",
+        "review_note": "Synthetic unit-test judgement; not a human case-pack label.",
+    }
+    if probes is not None:
+        case["probes"] = probes
+    path.write_text(json.dumps([case]))
+    return path
+
+
+def test_v2_recall_kind_uses_the_production_prompt_schema_and_cap(tmp_path) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    case = json.loads(cases.read_text())[0]
+
+    prepared = openai_bakeoff.prepare_cases(
+        [case],
+        kind="v2-recall",
+        levels=["low"],
+        model="gpt-5.6-luna",
+        max_output_tokens=openai_bakeoff.DEFAULT_OUTPUT_CAPS["v2-recall"],
+    )[0]
+    request = response_request(prepared.completion, kind=prepared.kind)
+
+    assert prepared.kind == "v2-recall"
+    assert prepared.completion["rubric"] == llm.SCORING_V2_RUBRIC
+    assert prepared.completion["schema"] == llm.SCORE_V2_SCHEMA
+    assert prepared.completion["retry"] is False
+    assert request["max_output_tokens"] == 2048
+    assert request["text"]["format"]["name"] == "devmax_recall_score_v2"
+    assert request["text"]["format"]["schema"] == llm.SCORE_V2_SCHEMA
+    assert request["safety_identifier"] == V2_EVAL_SAFETY_IDENTIFIER
+    assert request == openai_responses.response_request(
+        prepared.completion,
+        schema_name=OPENAI_V2_SCHEMA_NAME,
+        safety_identifier=V2_EVAL_SAFETY_IDENTIFIER,
+    )
+
+
+def test_v2_eval_production_and_fingerprint_requests_have_wire_parity(
+    tmp_path,
+) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    case = json.loads(cases.read_text())[0]
+    completion = openai_bakeoff.prepare_cases(
+        [case],
+        kind="v2-recall",
+        levels=["low"],
+        model="gpt-5.6-luna",
+        max_output_tokens=openai_bakeoff.DEFAULT_OUTPUT_CAPS["v2-recall"],
+    )[0].completion
+    eval_request = response_request(completion, kind="v2-recall")
+    production_request = openai_responses.response_request(
+        completion,
+        schema_name=OPENAI_V2_SCHEMA_NAME,
+        safety_identifier="f" * 64,
+    )
+    fingerprint_request = scoring_provider.qualification_request(completion)
+
+    def normalized(request: dict) -> dict:
+        result = json.loads(json.dumps(request))
+        result["input"] = scoring_provider.QUALIFICATION_DYNAMIC_USER_CONTENT
+        result["safety_identifier"] = (
+            scoring_provider.QUALIFICATION_DYNAMIC_SAFETY_IDENTIFIER
+        )
+        return result
+
+    assert len(V2_EVAL_SAFETY_IDENTIFIER) == 64
+    assert set(V2_EVAL_SAFETY_IDENTIFIER) <= set("0123456789abcdef")
+    assert normalized(eval_request) == normalized(production_request)
+    assert normalized(eval_request) == fingerprint_request
+
+
+@pytest.mark.anyio
+async def test_v2_recall_dry_run_needs_no_openai_key_or_network(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        ["openai_bakeoff.py", "v2-recall", str(cases), "--dry-run"],
+    )
+
+    assert await openai_bakeoff.main() == 0
+    output = capsys.readouterr().out
+    assert "new paid calls     1" in output
+    assert "qualification     low:" in output
+    assert "no paid Responses calls were made" in output
+
+
+@pytest.mark.anyio
+async def test_v2_paid_run_flushes_manifest_and_all_failure_evidence(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(v2_recall_eval, "stage2_pack_failures", lambda _cases: [])
+    cases_path = write_v2_recall_case(tmp_path)
+    cases = json.loads(cases_path.read_text())
+    failed = {**cases[0], "name": "synthetic V2 failure", "answer": "fail"}
+    cases_path.write_text(json.dumps([cases[0], failed]))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    called: list[str] = []
+
+    async def fake_complete(request, *, api_key, client):
+        del api_key, client
+        called.append(request["input"])
+        if "ANSWER: fail" in request["input"]:
+            raise OpenAIEvalError(
+                "typed incomplete response",
+                response_id="resp_failed",
+                model="gpt-5.6-luna",
+                elapsed_ms=14,
+                usage=Usage(input_tokens=102, output_tokens=6),
+                failure_type="non_completed",
+            )
+        return SimpleNamespace(
+            data={
+                "recall_score": 4,
+                "feedback": "Grounded.",
+                "follow_up_question": "",
+                "needs_more_evidence": False,
+                "mastery_summary": "stable",
+            },
+            usage=Usage(input_tokens=100, output_tokens=8),
+            response_id="resp_success",
+            model="gpt-5.6-luna",
+            elapsed_ms=13,
+        )
+
+    monkeypatch.setattr(openai_bakeoff, "complete", fake_complete)
+    output = tmp_path / "luna-evidence.jsonl"
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "v2-recall",
+            str(cases_path),
+            "--max-cost-usd",
+            "1",
+            "--input-price-per-million",
+            "0.2",
+            "--output-price-per-million",
+            "1.2",
+            "--cached-input-price-per-million",
+            "0.02",
+            "--cache-write-price-per-million",
+            "0.2",
+            "--qualification-expires-at",
+            QUALIFICATION_EXPIRES_AT,
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 1
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    assert len(called) == 2
+    assert rows[0]["record_type"] == "run_manifest"
+    assert len(rows[0]["invocations"]) == 2
+    assert rows[0]["safety_identifier"] == {
+        "kind": "synthetic_non_user",
+        "format_version": V2_EVAL_SAFETY_IDENTIFIER_FORMAT_VERSION,
+        "value": V2_EVAL_SAFETY_IDENTIFIER,
+    }
+    assert rows[0]["preflight"]["approved_max_cost_usd"] == "1"
+    assert rows[0]["preflight"]["input_count_method"] == (
+        "local_utf8_byte_upper_bound"
+    )
+    assert set(rows[0]["preflight"]["input_counts"]) == {
+        item["fingerprint"] for item in rows[0]["invocations"]
+    }
+    assert rows[0]["preflight"]["rates_per_million_usd"] == {
+        "input": "0.2",
+        "output": "1.2",
+        "cached_input": "0.02",
+        "cache_write": "0.2",
+    }
+    evidence = rows[1:]
+    assert {row["evidence_outcome"] for row in evidence} == {
+        "success",
+        "failure",
+    }
+    assert {row["fingerprint"] for row in evidence} == {
+        item["fingerprint"] for item in rows[0]["invocations"]
+    }
+    failed_row = next(row for row in evidence if row["evidence_outcome"] == "failure")
+    assert failed_row["failure"]["type"] == "non_completed"
+    assert failed_row["provider_response_id"] == "resp_failed"
+    assert failed_row["provider_response_model"] == "gpt-5.6-luna"
+    assert failed_row["provider_elapsed_ms"] == 14
+    assert failed_row["usage"]["input_tokens"] == 102
+    assert failed_row["usage"]["output_tokens"] == 6
+
+
+@pytest.mark.anyio
+async def test_paid_v2_recall_requires_explicit_cache_rates_before_network(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    monkeypatch.setattr(v2_recall_eval, "stage2_pack_failures", lambda _cases: [])
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("missing cache rates reached an OpenAI endpoint")
+
+    monkeypatch.setattr(openai_bakeoff, "count_input_tokens", forbidden)
+    monkeypatch.setattr(openai_bakeoff, "complete", forbidden)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "v2-recall",
+            str(cases),
+            "--max-cost-usd",
+            "1",
+            "--input-price-per-million",
+            "0.2",
+            "--output-price-per-million",
+            "1.2",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        await openai_bakeoff.main()
+    assert "--cached-input-price-per-million is required" in capsys.readouterr().err
+
+
+@pytest.mark.anyio
+async def test_paid_v2_recall_requires_explicit_base_rates_before_network(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    monkeypatch.setattr(v2_recall_eval, "stage2_pack_failures", lambda _cases: [])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "v2-recall",
+            str(cases),
+            "--max-cost-usd",
+            "1",
+            "--cached-input-price-per-million",
+            "0.02",
+            "--cache-write-price-per-million",
+            "0.2",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        await openai_bakeoff.main()
+    assert "--input-price-per-million is required" in capsys.readouterr().err
+
+
+@pytest.mark.anyio
+async def test_paid_v2_refuses_a_reused_total_without_per_invocation_counts(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    monkeypatch.setattr(v2_recall_eval, "stage2_pack_failures", lambda _cases: [])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "v2-recall",
+            str(cases),
+            "--max-cost-usd",
+            "1",
+            "--input-price-per-million",
+            "0.2",
+            "--output-price-per-million",
+            "1.2",
+            "--cached-input-price-per-million",
+            "0.02",
+            "--cache-write-price-per-million",
+            "0.2",
+            "--reuse-exact-input-total",
+            "100",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        await openai_bakeoff.main()
+    assert "cannot attest per-invocation counts" in capsys.readouterr().err
 
 
 @pytest.mark.anyio
@@ -607,6 +1010,105 @@ async def test_paid_run_refuses_an_explicit_candidate_before_api_key(
 
     with pytest.raises(SystemExit, match="2"):
         await openai_bakeoff.main()
+
+
+@pytest.mark.anyio
+async def test_v2_recall_paid_run_requires_explicit_complete_human_labels(
+    monkeypatch, tmp_path
+) -> None:
+    cases = write_v2_recall_case(tmp_path)
+    payload = json.loads(cases.read_text())
+    payload[0].pop("review_note")
+    cases.write_text(json.dumps(payload))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "v2-recall",
+            str(cases),
+            "--max-cost-usd",
+            "1",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        await openai_bakeoff.main()
+
+
+@pytest.mark.anyio
+async def test_v2_recall_replay_enforces_terminal_scheduler_bucket_gate(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.setattr(v2_recall_eval, "stage2_pack_failures", lambda _cases: [])
+    probes = [
+        {"question": "Probe 1?", "answer": "Answer 1."},
+        {"question": "Probe 2?", "answer": "Answer 2."},
+    ]
+    cases_path = write_v2_recall_case(
+        tmp_path, expected_recall=2, expected_flow="complete", probes=probes
+    )
+    case = json.loads(cases_path.read_text())[0]
+    prepared = openai_bakeoff.prepare_cases(
+        [case],
+        kind="v2-recall",
+        levels=[openai_bakeoff.DEFAULT_EFFORT],
+        model=openai_bakeoff.DEFAULT_MODEL,
+        max_output_tokens=openai_bakeoff.DEFAULT_OUTPUT_CAPS["v2-recall"],
+    )[0]
+    result = v2_recall_eval.parse_result(
+        prepared,
+        {
+            "recall_score": 3,
+            "feedback": "The essential account is grounded.",
+            "follow_up_question": "",
+            "needs_more_evidence": False,
+            "mastery_summary": "recovered the essential account after probes",
+        },
+        Usage(),
+    )
+    resume = tmp_path / "v2-crossed.jsonl"
+    with JsonlRecorder(resume) as recorder:
+        record = make_result_record(
+                prepared,
+                model=openai_bakeoff.DEFAULT_MODEL,
+                result=v2_recall_eval.result_payload(result),
+                usage=Usage(),
+            )
+        record["stage2_pack_fingerprint"] = (
+            v2_recall_eval.stage2_pack_fingerprint([case])
+        )
+        record["qualification_fingerprint"] = (
+            v2_recall_eval.deployment_fingerprint(prepared.completion)
+        )
+        recorder.append(record)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        openai_bakeoff.sys,
+        "argv",
+        [
+            "openai_bakeoff.py",
+            "v2-recall",
+            str(cases_path),
+            "--resume",
+            str(resume),
+            "--output",
+            str(tmp_path / "v2-replay.jsonl"),
+            "--enforce-v2-recall-gate",
+        ],
+    )
+
+    assert await openai_bakeoff.main() == 1
+    output = capsys.readouterr()
+    assert "new paid calls     0" in output.out
+    assert "V2 Recall gate failed" in output.err
+    assert "product decisions" in output.err
+    assert "'scheduler': 'good'" in output.err
+    assert "'scheduler': 'again'" in output.err
 
 
 def test_eval_key_can_load_from_local_dotenv(monkeypatch, tmp_path) -> None:

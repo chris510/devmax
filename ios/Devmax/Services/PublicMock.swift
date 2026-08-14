@@ -28,7 +28,7 @@ extension MockAPI {
             displayName: "Casey", email: "casey@privaterelay.appleid.com",
             appleUserIdentifier: "fixture-apple-user",
             aiConsentStatus: consentPending ? "pending" : "granted",
-            aiConsentVersion: consentPending ? "" : "anthropic-2026-08-12-v1",
+            aiConsentVersion: consentPending ? "" : AIProcessingDisclosure.policyVersion,
             aiProcessingAllowed: !consentPending,
             aiConsentPromptRequired: consentPending
         )
@@ -39,7 +39,8 @@ extension MockAPI {
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             onboardingCompleted: true, isFounder: false, displayName: "Casey",
             email: "casey@privaterelay.appleid.com", appleUserIdentifier: "fixture-apple-user",
-            aiConsentStatus: "granted", aiConsentVersion: "anthropic-2026-08-12-v1",
+            aiConsentStatus: "granted",
+            aiConsentVersion: AIProcessingDisclosure.policyVersion,
             aiProcessingAllowed: true, aiConsentPromptRequired: false
         )
     }
@@ -53,7 +54,8 @@ extension MockAPI {
             "withdrawn"
         }
         return AIConsentReceipt(
-            provider: "Anthropic", policyVersion: "anthropic-2026-08-12-v1",
+            provider: "Anthropic and OpenAI",
+            policyVersion: AIProcessingDisclosure.policyVersion,
             status: status,
             updatedAt: Date(), processingAllowed: action == "grant", promptRequired: false
         )

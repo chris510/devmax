@@ -5,29 +5,47 @@ validation, transaction, and lifecycle rule below runs for real — only the
 network call is fake. No test here reaches Anthropic.
 """
 
+import asyncio
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app import auth
 from app.config import get_settings
 from app.models import (
+    DRAFT_FAILED,
+    DRAFT_PENDING,
+    DRAFT_READY,
+    FOUNDER_USER_ID,
     Card,
     StudyPlan,
     StudyPlanCardProposal,
     StudyPlanCardProposalAcceptance,
+    StudyPlanGuideDraft,
     StudyPlanItem,
     StudyPlanPracticeDebrief,
     StudyPlanRevision,
     User,
 )
+from app.routers import study_plan as study_plan_router
 from app.seed_study_plan import load_first_party_plan
 from app.services import llm
-from tests.conftest import API_HEADERS, GUIDE, _item, gate, import_payload, make_card
+from tests.conftest import (
+    API_HEADERS,
+    GUIDE,
+    TEST_DATABASE_URL,
+    _item,
+    gate,
+    import_payload,
+    make_card,
+)
 
 
 async def make_plan(client: AsyncClient, *, activate=True, **preview_overrides) -> dict:
@@ -217,8 +235,6 @@ async def test_a_failed_import_keeps_the_guide_and_every_setting(
     assert "unreachable" in body["error"]
     assert not body["can_create"]
 
-    from app.models import StudyPlanGuideDraft
-
     draft = (await db.exec(select(StudyPlanGuideDraft))).one()
     assert draft.guide_text == GUIDE
     assert draft.requested_weeks == 4
@@ -246,6 +262,351 @@ async def test_retrying_a_failed_import_reuses_the_stored_guide(client, stub_imp
     assert retried.status_code == 200
     assert retried.json()["status"] == "ready"
     assert retried.json()["can_create"]
+
+
+@pytest.mark.parametrize("status", [DRAFT_PENDING, DRAFT_READY])
+async def test_retry_rejects_every_preview_that_is_not_failed(
+    client, db, stub_import, status
+):
+    draft = StudyPlanGuideDraft(
+        user_id=FOUNDER_USER_ID,
+        guide_text=GUIDE,
+        requested_weeks=4,
+        weekly_capacity_minutes=720,
+        start_date=date(2026, 8, 17),
+        status=status,
+    )
+    db.add(draft)
+    await db.commit()
+
+    response = await client.post(
+        f"/study-plans/preview/{draft.id}/retry", headers=API_HEADERS
+    )
+
+    assert response.status_code == 409
+    await db.refresh(draft)
+    assert draft.status == status
+    assert draft.processing_run_id is None
+    assert stub_import.calls == 0
+
+
+async def test_postgres_concurrent_preview_retries_transmit_the_guide_once(
+    db, monkeypatch
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("atomic preview concurrency requires Postgres")
+
+    draft = StudyPlanGuideDraft(
+        user_id=FOUNDER_USER_ID,
+        guide_text=GUIDE,
+        requested_weeks=4,
+        weekly_capacity_minutes=720,
+        start_date=date(2026, 8, 17),
+        status=DRAFT_FAILED,
+        error="transient",
+    )
+    db.add(draft)
+    await db.commit()
+
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(study_plan_router, "session_factory", factory)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def blocked_import(**kwargs):
+        nonlocal calls
+        await kwargs["before_provider_call"](1)
+        calls += 1
+        entered.set()
+        await release.wait()
+        return import_payload()
+
+    async def run_retry():
+        async with factory() as request_db:
+            return await study_plan_router._run_import(
+                draft.id,
+                FOUNDER_USER_ID,
+                request_db,
+                expected_status=DRAFT_FAILED,
+            )
+
+    monkeypatch.setattr(llm, "import_guide", blocked_import)
+    first = asyncio.create_task(run_retry())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(run_retry(), timeout=2)
+        assert exc.value.status_code == 409
+        assert calls == 1
+
+        release.set()
+        result = await asyncio.wait_for(first, timeout=2)
+        assert result.status == DRAFT_READY
+        async with factory() as verify_db:
+            current = await verify_db.get(StudyPlanGuideDraft, draft.id)
+            assert current is not None
+            assert current.status == DRAFT_READY
+            assert current.processing_run_id is None
+            assert current.processing_heartbeat_at is None
+    finally:
+        release.set()
+        if not first.done():
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+        await engine.dispose()
+
+
+async def test_postgres_old_preview_worker_cannot_store_after_token_replacement(
+    db, monkeypatch
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("preview claim-token concurrency requires Postgres")
+
+    draft = StudyPlanGuideDraft(
+        user_id=FOUNDER_USER_ID,
+        guide_text=GUIDE,
+        requested_weeks=4,
+        weekly_capacity_minutes=720,
+        start_date=date(2026, 8, 17),
+        status=DRAFT_FAILED,
+        error="transient",
+    )
+    db.add(draft)
+    await db.commit()
+
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(study_plan_router, "session_factory", factory)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_import(**kwargs):
+        await kwargs["before_provider_call"](1)
+        entered.set()
+        await release.wait()
+        return import_payload()
+
+    async def run_retry():
+        async with factory() as request_db:
+            return await study_plan_router._run_import(
+                draft.id,
+                FOUNDER_USER_ID,
+                request_db,
+                expected_status=DRAFT_FAILED,
+            )
+
+    monkeypatch.setattr(llm, "import_guide", blocked_import)
+    old_worker = asyncio.create_task(run_retry())
+    replacement_run_id = uuid.uuid4()
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        async with factory() as control_db:
+            await control_db.exec(
+                update(StudyPlanGuideDraft)
+                .where(StudyPlanGuideDraft.id == draft.id)
+                .values(
+                    processing_run_id=replacement_run_id,
+                    processing_heartbeat_at=datetime.now(UTC),
+                )
+            )
+            await control_db.commit()
+
+        release.set()
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(old_worker, timeout=2)
+        assert exc.value.status_code == 409
+
+        async with factory() as verify_db:
+            current = await verify_db.get(StudyPlanGuideDraft, draft.id)
+            assert current is not None
+            assert current.status == DRAFT_PENDING
+            assert current.processing_run_id == replacement_run_id
+            assert current.preview == {}
+            assert current.raw_response == {}
+    finally:
+        release.set()
+        if not old_worker.done():
+            old_worker.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await old_worker
+        await engine.dispose()
+
+
+async def test_postgres_reclaimed_preview_cannot_transmit_a_parse_retry(
+    db, monkeypatch
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("preview retry boundary requires Postgres")
+
+    draft = StudyPlanGuideDraft(
+        user_id=FOUNDER_USER_ID,
+        guide_text=GUIDE,
+        requested_weeks=4,
+        weekly_capacity_minutes=720,
+        start_date=date(2026, 8, 17),
+        status=DRAFT_FAILED,
+        error="transient",
+    )
+    db.add(draft)
+    await db.commit()
+
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(study_plan_router, "session_factory", factory)
+    first_transmitted = asyncio.Event()
+    allow_retry = asyncio.Event()
+    calls = 0
+
+    async def retrying_import(**kwargs):
+        nonlocal calls
+        await kwargs["before_provider_call"](1)
+        calls += 1
+        first_transmitted.set()
+        await allow_retry.wait()
+        # Models may retry malformed structured output. Every physical retry
+        # must prove that this worker still owns the exact draft lease.
+        await kwargs["before_provider_call"](2)
+        calls += 1
+        return import_payload()
+
+    async def run_retry():
+        async with factory() as request_db:
+            return await study_plan_router._run_import(
+                draft.id,
+                FOUNDER_USER_ID,
+                request_db,
+                expected_status=DRAFT_FAILED,
+            )
+
+    monkeypatch.setattr(llm, "import_guide", retrying_import)
+    old_worker = asyncio.create_task(run_retry())
+    replacement_run_id = uuid.uuid4()
+    try:
+        await asyncio.wait_for(first_transmitted.wait(), timeout=3)
+        async with factory() as control_db:
+            await control_db.exec(
+                update(StudyPlanGuideDraft)
+                .where(StudyPlanGuideDraft.id == draft.id)
+                .values(
+                    processing_run_id=replacement_run_id,
+                    processing_heartbeat_at=datetime.now(UTC),
+                )
+            )
+            await control_db.commit()
+        allow_retry.set()
+
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(old_worker, timeout=3)
+        assert exc.value.status_code == 409
+        assert calls == 1
+        async with factory() as verify_db:
+            current = await verify_db.get(StudyPlanGuideDraft, draft.id)
+            assert current is not None
+            assert current.status == DRAFT_PENDING
+            assert current.processing_run_id == replacement_run_id
+            assert current.preview == {}
+    finally:
+        allow_retry.set()
+        if not old_worker.done():
+            old_worker.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await old_worker
+        await engine.dispose()
+
+
+async def test_postgres_preview_heartbeat_loss_cancels_before_retry_transmits(
+    db, monkeypatch
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("preview lease-loss cancellation requires Postgres")
+
+    draft = StudyPlanGuideDraft(
+        user_id=FOUNDER_USER_ID,
+        guide_text=GUIDE,
+        requested_weeks=4,
+        weekly_capacity_minutes=720,
+        start_date=date(2026, 8, 17),
+        status=DRAFT_FAILED,
+        error="transient",
+    )
+    db.add(draft)
+    await db.commit()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(study_plan_router, "session_factory", factory)
+    provider_entered = asyncio.Event()
+    provider_cancelled = asyncio.Event()
+    keep_provider_open = asyncio.Event()
+    calls = 0
+    active_calls = 0
+    max_active_calls = 0
+
+    async def import_with_first_call_blocked(**kwargs):
+        nonlocal calls, active_calls, max_active_calls
+        await kwargs["before_provider_call"](1)
+        calls += 1
+        active_calls += 1
+        max_active_calls = max(max_active_calls, active_calls)
+        try:
+            if calls == 1:
+                provider_entered.set()
+                try:
+                    await keep_provider_open.wait()
+                except asyncio.CancelledError:
+                    provider_cancelled.set()
+                    raise
+            return import_payload()
+        finally:
+            active_calls -= 1
+
+    async def failed_heartbeat(_draft_id, _run_id):
+        await provider_entered.wait()
+        raise HTTPException(
+            status_code=503, detail="preview import lease could not be renewed"
+        )
+
+    async def run_retry():
+        async with factory() as request_db:
+            return await study_plan_router._run_import(
+                draft.id,
+                FOUNDER_USER_ID,
+                request_db,
+                expected_status=DRAFT_FAILED,
+            )
+
+    monkeypatch.setattr(llm, "import_guide", import_with_first_call_blocked)
+    monkeypatch.setattr(
+        study_plan_router, "_heartbeat_preview_import", failed_heartbeat
+    )
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(run_retry(), timeout=3)
+        assert exc.value.status_code == 503
+        await asyncio.wait_for(provider_cancelled.wait(), timeout=3)
+        async with factory() as verify_db:
+            failed = await verify_db.get(StudyPlanGuideDraft, draft.id)
+            assert failed is not None
+            assert failed.status == DRAFT_FAILED
+            assert failed.processing_run_id is None
+
+        never = asyncio.Event()
+
+        async def stable_heartbeat(_draft_id, _run_id):
+            await never.wait()
+
+        monkeypatch.setattr(
+            study_plan_router, "_heartbeat_preview_import", stable_heartbeat
+        )
+        result = await asyncio.wait_for(run_retry(), timeout=3)
+        assert result.status == DRAFT_READY
+        assert calls == 2
+        assert max_active_calls == 1
+    finally:
+        keep_provider_open.set()
+        await engine.dispose()
 
 
 async def test_an_import_that_needs_review_blocks_creation_until_resolved(client, stub_import):
@@ -1156,6 +1517,83 @@ async def test_cards_are_only_proposed_after_the_item_is_complete(client, stub_i
     )
     assert early.status_code == 409
     assert stub_cards.calls == 0
+
+
+async def test_postgres_concurrent_card_proposal_posts_transmit_once(
+    client, db, stub_import, monkeypatch
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("proposal boundary concurrency requires Postgres")
+
+    plan = await make_plan(client)
+    item_id = await _complete_first_item(client, plan)
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    provider_entered = asyncio.Event()
+    release_provider = asyncio.Event()
+    calls = 0
+
+    async def blocked_proposals(**_kwargs):
+        nonlocal calls
+        calls += 1
+        provider_entered.set()
+        await release_provider.wait()
+        return [
+            {
+                "topic": "Postgres write path",
+                "category": "Databases",
+                "canonical_question": "Walk the write path for one row update.",
+                "answer_rubric": {
+                    "mechanism": "The source-supported mechanism.",
+                    "acceptable_alternative": "Equivalent terminology is valid.",
+                    "trade_off": "The source-supported trade-off.",
+                    "failure_mode": "The source-supported failure mode.",
+                    "misconception": "The source-contradicted misconception.",
+                },
+                "reason": "It tests the mechanism.",
+                "gate": gate(),
+            }
+        ]
+
+    async def run_request():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await study_plan_router.create_card_proposals(
+                    uuid.UUID(plan["id"]), uuid.UUID(item_id), request_db
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    monkeypatch.setattr(llm, "propose_cards", blocked_proposals)
+    first = asyncio.create_task(run_request())
+    second = None
+    try:
+        await asyncio.wait_for(provider_entered.wait(), timeout=3)
+        second = asyncio.create_task(run_request())
+        await asyncio.sleep(0.1)
+        assert calls == 1
+        assert not second.done()
+    finally:
+        release_provider.set()
+
+    first_result = await asyncio.wait_for(first, timeout=3)
+    second_result = await asyncio.wait_for(second, timeout=3)
+    assert calls == 1
+    assert [row.id for row in second_result.proposals] == [
+        row.id for row in first_result.proposals
+    ]
+    async with factory() as verify_db:
+        stored = (
+            await verify_db.exec(
+                select(StudyPlanCardProposal).where(
+                    StudyPlanCardProposal.source_plan_item_id == uuid.UUID(item_id)
+                )
+            )
+        ).all()
+        assert len(stored) == 1
+    await engine.dispose()
 
 
 async def test_an_unsupported_subject_never_reaches_the_card_model(client, stub_import, stub_cards):

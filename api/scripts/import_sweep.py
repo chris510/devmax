@@ -49,6 +49,13 @@ async def run(path: Path, weeks: int, capacity: int, mode: str, deadline: date |
     print(f"guide: {path}  ({len(guide)} chars, {counted.input_tokens} input tokens)")
 
     started = time.monotonic()
+
+    async def operator_authorized(attempt: int) -> None:
+        # This explicit paid-evaluation CLI has no end-user account/consent row.
+        # Supplying the boundary hook still disables hidden SDK retries and makes
+        # every physical importer attempt visible in its terminal output.
+        print(f"authorizing explicit operator import attempt {attempt}")
+
     raw = await llm.import_guide(
         guide_text=guide,
         requested_weeks=weeks,
@@ -57,6 +64,7 @@ async def run(path: Path, weeks: int, capacity: int, mode: str, deadline: date |
         deadline=deadline.isoformat() if deadline else None,
         subject_hint="",
         title_hint="",
+        before_provider_call=operator_authorized,
     )
     print(f"imported in {time.monotonic() - started:.1f}s\n")
 

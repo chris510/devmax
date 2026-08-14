@@ -630,12 +630,84 @@ device:
    latency, cache/input/output tokens, and invalid structured responses. No live
    canary beyond the answers you intentionally submit is part of deployment.
 
-Immediate rollback is configuration-only: set
-`SCORING_CONTRACT_VERSION=1` and redeploy. Existing V2 rows remain versioned and
+Immediate rollback is configuration-only: first set
+`OPENAI_V2_SCORING_MODE=off`, then set `SCORING_CONTRACT_VERSION=1` in the same
+deployment change and redeploy. The server deliberately refuses to boot with an
+OpenAI mode enabled against V1. Existing V2 rows remain versioned and
 visible; do not reverse migration 0011, clear coaching fields, copy Recall into a
 legacy composite, or rewrite history. Sessions already created retain the
 contract version they started with, so a rollback cannot change their scorer
 mid-session.
+
+## OpenAI V2 Recall scoring — staged rollout and kill switch
+
+The binding decision and every quality/cost gate live in
+`docs/OPENAI-V2-SCORING-ROLLOUT.md`. The runtime ships dark:
+`OPENAI_V2_SCORING_MODE=off` is both the default and the immediate provider kill
+switch. Do not set `shadow` or `primary` while activating V2; first complete and
+sign off the Claude-only V2 stabilization window above.
+
+Before any OpenAI transmission:
+
+1. Apply migrations 0016–0017. Verify historical `sessions.scoring_route` and
+   `llm_usage.details` are empty JSON objects; 0017 adds nullable run/heartbeat
+   metadata to material imports and direct Study Plan guide previews so one
+   claimant owns each paid transmission and its result. Neither migration
+   rewrites a score, guide, preview, status, or scheduling field. The disposable
+   Postgres migration test exercises 0016→0017→0016→0017 and verifies those
+   data/default claims in both directions.
+2. Deploy the combined-consent client and server procedure in **Public privacy
+   and Sign in with Apple operations** below. Confirm the allowlisted account has
+   granted the exact current policy, including the dual-provider shadow and
+   pseudonymous OpenAI safety-identifier disclosure.
+3. Pass the human-reviewed 18-card/three-week frozen pack and all three fresh
+   Luna trials. Copy only the production qualification digest printed by the
+   `v2-recall` runner and the strict UTC expiry accepted by all four run
+   manifests and the comparator; never invent or recompute a digest from a
+   different prompt. The expiry may be at most 30 days after every fresh run.
+4. Set the separately funded `OPENAI_API_KEY`, exact qualified model and effort,
+   qualification fingerprint, `OPENAI_V2_SCORING_QUALIFICATION_EXPIRES_AT`,
+   independent safety-identifier secret, a freshly generated predeclared
+   `OPENAI_V2_SCORING_SHADOW_STAGE_ID` UUID, and the owner UUID allowlist. Leave
+   the mode `off`, deploy, and run the default-off,
+   non-allowlist, fingerprint-mismatch, consent, and V1-isolation checks.
+   Generate the safety-identifier secret from at least 32 random bytes with
+   `openssl rand -hex 32`; do not reuse an app, cron, founder, Anthropic, or
+   OpenAI credential.
+5. After a separate approval, use `shadow` for stage ordinals 1–100 exactly.
+   Claude remains authoritative. Shadow may add candidate latency; measure it,
+   and stop if it harms the 1–3 minute session experience. Luna output must not
+   affect any response or write. Export the predeclared stage inclusively from
+   ordinal 1 with both its intent and terminal rows; pass the same UUID to
+   `openai_shadow_report.py --expected-shadow-stage-id`, pass the exact deployed
+   deadline with `--expected-qualification-expires-at`, and keep `--event-count
+   100`. The reporter requires every selected event to start before that exact
+   expiry. Pending/incomplete intents and missing providers are non-replaceable
+   failures; counts other than 100 are diagnostic only.
+6. Only after the shadow clears zero behavioral flips and at least 85% lower
+   observed cost per successful scoring call may a separate approval set
+   `primary` for the owner UUID. A valid Luna result is authoritative. Exactly
+   one no-retry Claude call is allowed only after a typed Luna technical or V2
+   contract failure.
+
+Every physical shadow or fallback call consumes a separate daily-budget row.
+Before orchestration, a content-free intent reserves the expected physical calls;
+terminal rows finalize it atomically, while an incomplete trace retains only its
+outstanding reservation and returns 503 before any score or schedule mutation.
+`llm_usage.details` records provider, model, route, outcome, request ID, latency,
+tokens, fingerprint, scoring-event/session correlation, consent/allowlist
+verification, the deployed qualification expiry, and comparison/fallback
+metadata; it must never contain the
+question, answer, grounding, feedback, or mastery text.
+
+Provider rollback is one variable: set `OPENAI_V2_SCORING_MODE=off` and deploy.
+Confirm subsequent V2 scoring uses Claude and no new OpenAI request IDs appear.
+The global `off` value, current-consent withdrawal, removal from the UUID
+allowlist, an expired qualification, or a fingerprint mismatch all prevent
+another OpenAI transmission. Expiry is checked again for already-open sessions
+immediately before each physical OpenAI request.
+Leave `SCORING_CONTRACT_VERSION=2` during a provider rollback; V2 contract
+rollback is the separate procedure above.
 
 ## The daily push cap — resolved, no `push_log` needed
 
@@ -658,11 +730,24 @@ The source of truth for App Store privacy answers is
 `docs/APP-STORE-PRIVACY-CHECKLIST.md`. The public privacy policy is
 `https://devmax-recall.christrinh5.chatgpt.site/privacy`.
 
-Deploy migration 0014 and the consent-capable client while
-`AI_CONSENT_ENFORCEMENT_ENABLED=false`. Record the current Anthropic disclosure
-from that client, verify `/auth/me` reports `ai_processing_allowed=true`, and
-only then enable enforcement and restart the API. This order prevents an older
-installed client from being trapped behind a choice it cannot render.
+Migration 0014 already supports arbitrary provider names and policy versions; a
+combined Anthropic and OpenAI disclosure needs no new migration. Before deploying
+a new policy version, ship the consent-capable client that renders both providers
+and explicitly describes simultaneous shadow transmission plus the stable
+pseudonymous OpenAI safety identifier. It then sends its shared `policy_version`
+with grant or decline. Keep OpenAI scoring
+disabled during this stage. Then deploy the matching server policy version,
+confirm missing or stale versions return 409 without recording a choice, and
+confirm withdrawal still succeeds without a current version. Record the renewed
+choice from that client and verify `/auth/me` reports
+`ai_processing_allowed=true` before enabling any OpenAI scoring path.
+
+The public policy must say that OpenAI scoring uses the Responses API with
+`store: false`: response application state is not retained for that request, but
+standard API data is not used for training only by default and default
+abuse-monitoring logs may contain prompts and responses for up to 30 days. Do not
+describe `store: false` as Zero Data Retention. Keep the public policy, App Store
+privacy answers, and both provider-policy links synchronized with the client.
 
 In Apple Developer → Certificates, Identifiers & Profiles → Identifiers →
 `com.christrinh.devmax` → Sign in with Apple → Configure, set the server-to-server

@@ -11,19 +11,22 @@ Two rules shape this module:
   request's inputs and refuses a stale `base_plan_revision` with a 409.
 """
 
+import asyncio
+import logging
 import uuid
+from contextlib import suppress
 from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, func, or_, update
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import current_user_id
 from app.config import get_settings
-from app.db import get_session
+from app.db import get_session, session_factory
 from app.models import (
     ACCEPTANCE_COMMITTED,
     ACCEPTANCE_FAILED,
@@ -32,6 +35,8 @@ from app.models import (
     DISPOSITION_EXISTING,
     DISPOSITION_SKIPPED,
     DISPOSITION_SUGGESTED,
+    DRAFT_FAILED,
+    DRAFT_PENDING,
     DRAFT_READY,
     DUPLICATE_EXACT,
     ITEM_COMPLETE,
@@ -123,6 +128,8 @@ from app.services.scoring_contract import (
 )
 
 router = APIRouter(tags=["study-plan"])
+
+_INTERRUPTED_IMPORT_ERROR = "Import interrupted before completion. Retry to continue."
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -437,14 +444,258 @@ def _preview_response(draft: StudyPlanGuideDraft) -> PreviewOut:
     )
 
 
-async def _run_import(draft: StudyPlanGuideDraft) -> None:
-    """Import, validate, and store — or store the failure with the guide intact.
+async def _claim_preview_import(
+    db: AsyncSession,
+    *,
+    draft_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expected_status: str,
+) -> tuple[StudyPlanGuideDraft, uuid.UUID] | None:
+    """Atomically bind one request to a pending draft or one failed Retry."""
+    now = datetime.now(UTC)
+    run_id = uuid.uuid4()
+    statement = (
+        update(StudyPlanGuideDraft)
+        .where(
+            StudyPlanGuideDraft.id == draft_id,
+            StudyPlanGuideDraft.user_id == user_id,
+            StudyPlanGuideDraft.status == expected_status,
+        )
+        .values(
+            # A failed Retry becomes pending while its one paid call runs.  The
+            # public response schema already models this durable state.
+            status=DRAFT_PENDING,
+            processing_run_id=run_id,
+            processing_heartbeat_at=now,
+            error="",
+            updated_at=now,
+        )
+        .returning(StudyPlanGuideDraft.id)
+    )
+    if expected_status == DRAFT_PENDING:
+        # Only the newly-created, as-yet-unclaimed draft may enter this path.
+        statement = statement.where(StudyPlanGuideDraft.processing_run_id.is_(None))
 
-    A failed import never raises past this point. The draft keeps the guide text,
-    the duration, the capacity, the mode, the deadline, and every edit, so Retry
-    is one tap and loses nothing the user typed.
+    claimed_id = (await db.exec(statement)).one_or_none()
+    if claimed_id is None:
+        await db.rollback()
+        return None
+    await db.commit()
+    draft = await db.get(StudyPlanGuideDraft, claimed_id, populate_existing=True)
+    if draft is None:  # Concurrent account deletion cascaded immediately after claim.
+        await db.rollback()
+        return None
+    return draft, run_id
+
+
+async def _heartbeat_preview_import(draft_id: uuid.UUID, run_id: uuid.UUID) -> None:
+    """Renew a live preview lease without pinning the request's connection."""
+    consecutive_failures = 0
+    while True:
+        await asyncio.sleep(guide_import.GUIDE_IMPORT_HEARTBEAT_SECONDS)
+        try:
+            async with session_factory() as heartbeat_db:
+                result = await heartbeat_db.exec(
+                    update(StudyPlanGuideDraft)
+                    .where(
+                        StudyPlanGuideDraft.id == draft_id,
+                        StudyPlanGuideDraft.status == DRAFT_PENDING,
+                        StudyPlanGuideDraft.processing_run_id == run_id,
+                    )
+                    .values(processing_heartbeat_at=datetime.now(UTC))
+                )
+                await heartbeat_db.commit()
+                if result.rowcount != 1:
+                    raise HTTPException(
+                        status_code=409, detail="preview import claim lost"
+                    )
+            consecutive_failures = 0
+        except HTTPException:
+            raise
+        except SQLAlchemyError as exc:
+            consecutive_failures += 1
+            logging.getLogger(__name__).warning(
+                "study-plan preview heartbeat failed draft_id=%s attempt=%d",
+                draft_id,
+                consecutive_failures,
+            )
+            if consecutive_failures >= 3:
+                raise HTTPException(
+                    status_code=503,
+                    detail="preview import lease could not be renewed",
+                ) from exc
+
+
+async def _lock_preview_result(
+    db: AsyncSession,
+    *,
+    draft_id: uuid.UUID,
+    user_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> StudyPlanGuideDraft:
+    """Lock account then child and prove this response still owns its lease."""
+    if not await usage.lock_account_for_provider_result(db, user_id):
+        await db.rollback()
+        raise HTTPException(status_code=401, detail="unauthorized")
+    draft = (
+        await db.exec(
+            select(StudyPlanGuideDraft)
+            .where(
+                StudyPlanGuideDraft.id == draft_id,
+                StudyPlanGuideDraft.user_id == user_id,
+                StudyPlanGuideDraft.status == DRAFT_PENDING,
+                StudyPlanGuideDraft.processing_run_id == run_id,
+                StudyPlanGuideDraft.processing_heartbeat_at
+                > datetime.now(UTC) - guide_import.GUIDE_IMPORT_STALE_AFTER,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).first()
+    if draft is None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="preview import claim lost")
+    return draft
+
+
+async def _store_preview_failure(
+    db: AsyncSession,
+    *,
+    draft_id: uuid.UUID,
+    user_id: uuid.UUID,
+    run_id: uuid.UUID,
+    error: str,
+) -> None:
+    """Best-effort terminal write, conditional on this request's exact token."""
+    try:
+        draft = await _lock_preview_result(
+            db,
+            draft_id=draft_id,
+            user_id=user_id,
+            run_id=run_id,
+        )
+    except HTTPException:
+        return
+    draft.status = DRAFT_FAILED
+    draft.error = error
+    draft.processing_run_id = None
+    draft.processing_heartbeat_at = None
+    draft.updated_at = datetime.now(UTC)
+    db.add(draft)
+    await db.commit()
+
+
+def _preview_import_authorizer(
+    db: AsyncSession,
+    *,
+    draft_id: uuid.UUID,
+    user_id: uuid.UUID,
+    run_id: uuid.UUID,
+):
+    """Authorize only while this request owns the exact durable draft lease."""
+    config = get_settings()
+
+    async def require_live_claim(boundary_db: AsyncSession) -> None:
+        draft = (
+            await boundary_db.exec(
+                select(StudyPlanGuideDraft.id)
+                .where(
+                    StudyPlanGuideDraft.id == draft_id,
+                    StudyPlanGuideDraft.user_id == user_id,
+                    StudyPlanGuideDraft.status == DRAFT_PENDING,
+                    StudyPlanGuideDraft.processing_run_id == run_id,
+                    StudyPlanGuideDraft.processing_heartbeat_at
+                    > datetime.now(UTC) - guide_import.GUIDE_IMPORT_STALE_AFTER,
+                )
+                .with_for_update()
+            )
+        ).first()
+        if draft is None:
+            raise HTTPException(status_code=409, detail="preview import claim lost")
+
+    return usage.provider_call_authorizer(
+        db,
+        user_id,
+        "guide_import",
+        config=config,
+        provider="anthropic",
+        model=config.studyplan_model,
+        boundary_check=require_live_claim,
+    )
+
+
+async def _run_import(
+    draft_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    expected_status: str,
+) -> StudyPlanGuideDraft:
+    """Claim, import, and store only the current request's provider result.
+
+    New previews claim ``pending`` once. Retry claims ``failed`` once and moves
+    it back to ``pending`` before any transmission, so simultaneous retries
+    cannot both authorize or send the full guide. The long provider await holds
+    no database lock or connection; only the short authorization, heartbeat,
+    and claimant-only result transactions touch the database.
     """
-    await guide_import.run_plan_draft(draft)
+    claim = await _claim_preview_import(
+        db,
+        draft_id=draft_id,
+        user_id=user_id,
+        expected_status=expected_status,
+    )
+    if claim is None:
+        raise HTTPException(status_code=409, detail="preview import is not retryable")
+    claimed, run_id = claim
+    # Import into a detached working copy.  Re-reading the claimed row under
+    # FOR UPDATE after the provider call cannot erase the in-memory result.
+    working = StudyPlanGuideDraft.model_validate(claimed.model_dump())
+    heartbeat = asyncio.create_task(
+        _heartbeat_preview_import(draft_id, run_id),
+        name=f"study-plan-preview-heartbeat-{draft_id}",
+    )
+    try:
+        await guide_import.run_while_heartbeat_live(
+            guide_import.run_plan_draft(
+                working,
+                before_provider_call=_preview_import_authorizer(
+                    db,
+                    draft_id=draft_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                ),
+            ),
+            heartbeat,
+        )
+        draft = await _lock_preview_result(
+            db,
+            draft_id=draft_id,
+            user_id=user_id,
+            run_id=run_id,
+        )
+        guide_import.copy_plan_draft_result(draft, working)
+        draft.processing_run_id = None
+        draft.processing_heartbeat_at = None
+        db.add(draft)
+        await db.commit()
+        await db.refresh(draft)
+        return draft
+    except Exception as exc:
+        detail = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        await _store_preview_failure(
+            db,
+            draft_id=draft_id,
+            user_id=user_id,
+            run_id=run_id,
+            error=detail or "preview import failed",
+        )
+        raise
+    finally:
+        if not heartbeat.done():
+            heartbeat.cancel()
+        with suppress(asyncio.CancelledError, HTTPException):
+            await heartbeat
 
 
 def _revalidate(draft: StudyPlanGuideDraft) -> None:
@@ -483,13 +734,12 @@ async def preview_guide(
     db.add(draft)
     await db.commit()
 
-    await usage.ensure_available(db, current_user_id(), "guide_import", get_settings())
-    await db.commit()
-    await _run_import(draft)
-    usage.record(db, current_user_id(), "guide_import")
-    db.add(draft)
-    await db.commit()
-    await db.refresh(draft)
+    draft = await _run_import(
+        draft.id,
+        draft.user_id,
+        db,
+        expected_status=DRAFT_PENDING,
+    )
     return _preview_response(draft)
 
 
@@ -503,6 +753,50 @@ async def _get_draft(db: AsyncSession, draft_id: uuid.UUID) -> StudyPlanGuideDra
     ).first()
     if draft is None:
         raise HTTPException(status_code=404, detail="draft not found")
+    if draft.status == DRAFT_PENDING:
+        # A process can die after durably claiming but before it stores a
+        # terminal state. Expire only an unclaimed/heartbeat-stale row; a live
+        # eleven-minute request keeps renewing and remains pending.
+        stale_before = datetime.now(UTC) - guide_import.GUIDE_IMPORT_STALE_AFTER
+        expired_id = (
+            await db.exec(
+                update(StudyPlanGuideDraft)
+                .where(
+                    StudyPlanGuideDraft.id == draft.id,
+                    StudyPlanGuideDraft.user_id == current_user_id(),
+                    StudyPlanGuideDraft.status == DRAFT_PENDING,
+                    or_(
+                        and_(
+                            StudyPlanGuideDraft.processing_run_id.is_(None),
+                            StudyPlanGuideDraft.updated_at <= stale_before,
+                        ),
+                        and_(
+                            StudyPlanGuideDraft.processing_run_id.is_not(None),
+                            or_(
+                                StudyPlanGuideDraft.processing_heartbeat_at.is_(None),
+                                StudyPlanGuideDraft.processing_heartbeat_at <= stale_before,
+                            ),
+                        ),
+                    ),
+                )
+                .values(
+                    status=DRAFT_FAILED,
+                    error=_INTERRUPTED_IMPORT_ERROR,
+                    processing_run_id=None,
+                    processing_heartbeat_at=None,
+                    updated_at=datetime.now(UTC),
+                )
+                .returning(StudyPlanGuideDraft.id)
+            )
+        ).one_or_none()
+        if expired_id is not None:
+            await db.commit()
+            refreshed = await db.get(
+                StudyPlanGuideDraft, draft.id, populate_existing=True
+            )
+            if refreshed is None:
+                raise HTTPException(status_code=404, detail="draft not found")
+            draft = refreshed
     return draft
 
 
@@ -515,13 +809,14 @@ async def get_preview(draft_id: uuid.UUID, db: AsyncSession = Depends(get_sessio
 @router.post("/study-plans/preview/{draft_id}/retry", response_model=PreviewOut)
 async def retry_preview(draft_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PreviewOut:
     draft = await _get_draft(db, draft_id)
-    await usage.ensure_available(db, current_user_id(), "guide_import", get_settings())
-    await db.commit()
-    await _run_import(draft)
-    usage.record(db, current_user_id(), "guide_import")
-    db.add(draft)
-    await db.commit()
-    await db.refresh(draft)
+    if draft.status != DRAFT_FAILED:
+        raise HTTPException(status_code=409, detail="only a failed preview can be retried")
+    draft = await _run_import(
+        draft.id,
+        draft.user_id,
+        db,
+        expected_status=DRAFT_FAILED,
+    )
     return _preview_response(draft)
 
 
@@ -1701,6 +1996,50 @@ def _proposal_response(p: StudyPlanCardProposal, existing_context: str = "") -> 
     )
 
 
+async def _card_proposal_list(
+    db: AsyncSession,
+    *,
+    plan_id: uuid.UUID,
+    item_id: uuid.UUID,
+    proposals: list[StudyPlanCardProposal],
+    active_contract: int,
+) -> CardProposalList:
+    """Render durable proposals without crossing another paid-call boundary."""
+    rows: list[CardProposalOut] = []
+    for proposal in proposals:
+        context = ""
+        if proposal.duplicate_card_id:
+            card = (
+                await db.exec(
+                    select(Card).where(
+                        col(Card.id) == proposal.duplicate_card_id,
+                        Card.user_id == current_user_id(),
+                    )
+                )
+            ).first()
+            if card is not None:
+                if active_contract == SCORING_CONTRACT_V2:
+                    score = card.last_accuracy if card.last_accuracy is not None else "—"
+                    label = "recall"
+                else:
+                    score = card.last_score if card.last_score is not None else "—"
+                    label = "score"
+                context = (
+                    f"Existing · {label} {score} · due {card.next_review_at.isoformat()}"
+                )
+        rows.append(_proposal_response(proposal, context))
+
+    suggested = sum(1 for row in rows if row.disposition == DISPOSITION_SUGGESTED)
+    return CardProposalList(
+        plan_id=plan_id,
+        item_id=item_id,
+        supports_recall_cards=True,
+        suggested_count=suggested,
+        proposals=rows,
+        note=CARD_BOUNDARY_NOTE,
+    )
+
+
 @router.post(
     "/study-plans/{plan_id}/items/{item_id}/card-proposals",
     response_model=CardProposalList,
@@ -1778,6 +2117,24 @@ async def create_card_proposals(
             )
         ).all()
         await usage.ensure_available(db, current_user_id(), "card_proposal", get_settings())
+        # Paid generation is serialized at the account boundary. A concurrent
+        # request may have committed this item's proposal set while we waited,
+        # so refresh the idempotency condition before any transmission.
+        existing = (
+            await db.exec(
+                select(StudyPlanCardProposal).where(
+                    col(StudyPlanCardProposal.source_plan_item_id) == item_id
+                )
+            )
+        ).all()
+        if existing:
+            return await _card_proposal_list(
+                db,
+                plan_id=plan_id,
+                item_id=item_id,
+                proposals=existing,
+                active_contract=active_contract,
+            )
         candidates = await llm.propose_cards(
             subject=graph.plan.subject,
             item_title=item.full_title,
@@ -1835,38 +2192,12 @@ async def create_card_proposals(
             existing.append(row)
         await db.commit()
 
-    rows: list[CardProposalOut] = []
-    for proposal in existing:
-        context = ""
-        if proposal.duplicate_card_id:
-            card = (
-                await db.exec(
-                    select(Card).where(
-                        col(Card.id) == proposal.duplicate_card_id,
-                        Card.user_id == current_user_id(),
-                    )
-                )
-            ).first()
-            if card is not None:
-                if active_contract == SCORING_CONTRACT_V2:
-                    score = card.last_accuracy if card.last_accuracy is not None else "—"
-                    label = "recall"
-                else:
-                    score = card.last_score if card.last_score is not None else "—"
-                    label = "score"
-                context = (
-                    f"Existing · {label} {score} · due {card.next_review_at.isoformat()}"
-                )
-        rows.append(_proposal_response(proposal, context))
-
-    suggested = sum(1 for r in rows if r.disposition == DISPOSITION_SUGGESTED)
-    return CardProposalList(
+    return await _card_proposal_list(
+        db,
         plan_id=plan_id,
         item_id=item_id,
-        supports_recall_cards=True,
-        suggested_count=suggested,
-        proposals=rows,
-        note=CARD_BOUNDARY_NOTE,
+        proposals=existing,
+        active_contract=active_contract,
     )
 
 

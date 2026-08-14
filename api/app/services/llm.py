@@ -4,19 +4,41 @@ Pure-ish functions independent of FastAPI request context so they're directly
 unit-testable — the callers pass plain values, not ORM sessions.
 """
 
+import asyncio
 import json
 import logging
 import time
-from collections.abc import Sequence
-from dataclasses import dataclass
+import uuid
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any
 
 from anthropic import AsyncAnthropic
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.services.card_lifecycle import RUBRIC_FIELDS, scoring_rubric
+from app.services.openai_responses import (
+    OpenAIResponsesError,
+)
+from app.services.openai_responses import (
+    complete as complete_openai_response,
+)
 from app.services.scoring_contract import SCORING_CONTRACT_V1, SCORING_CONTRACT_V2
+from app.services.scoring_provider import (
+    OPENAI_V2_SCHEMA_NAME,
+    ROUTE_ANTHROPIC,
+    ROUTE_PRIMARY,
+    ROUTE_SHADOW,
+    ProviderCallTrace,
+    ScoringRoute,
+    ScoringTrace,
+    ShadowComparison,
+    compare_shadow_results,
+    openai_route_eligibility,
+    qualification_fingerprint,
+    safety_identifier,
+)
 
 # The gate is a product rule, not a prompt detail, so it is owned by the domain
 # module and interpolated into the rubric below. One source of truth for the five
@@ -45,6 +67,13 @@ MAX_SCORED_FOLLOW_UPS = 2
 # phone in their hand.
 SDK_MAX_RETRIES = 2
 SDK_TIMEOUT_SECONDS = 45.0
+
+# Long guide imports cannot keep a database consent lock (and its pooled
+# connection) open for the several minutes a provider response may take.  Their
+# caller supplies this hook instead.  `_complete` invokes it immediately before
+# each explicit SDK request, and uses the no-retry client so the SDK cannot make
+# an unguarded physical retry behind that boundary.
+BeforeProviderCall = Callable[[int], Awaitable[None]]
 
 # The three session rubrics below are byte-identical across calls — but none is a
 # prompt-cache breakpoint. The minimum cacheable prefix is 1024 tokens on Sonnet 5
@@ -742,6 +771,18 @@ def derive_composite(mechanism: int, trade_offs: int, failure_modes: int) -> int
 class LLMError(RuntimeError):
     """Raised when the model can't be reached or its output can't be parsed."""
 
+    def __init__(self, message: str, *, trace: ScoringTrace | None = None) -> None:
+        super().__init__(message)
+        self.trace = trace
+
+
+class OpenAIRouteUnavailableError(LLMError):
+    """Raised before transmission when a mutable OpenAI gate closes."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"OpenAI V2 scoring route unavailable: {reason}")
+        self.reason = reason
+
 
 @dataclass(frozen=True)
 class ScoreResult:
@@ -764,6 +805,7 @@ class ScoreResult:
     follow_up_question: str | None = None
     mastery_summary: str = ""
     scoring_contract_version: int = SCORING_CONTRACT_V1
+    trace: ScoringTrace | None = None
 
     def __post_init__(self) -> None:
         """A completed result carries exactly the numeric signals its contract owns.
@@ -890,6 +932,9 @@ async def _complete(
     stream: bool = False,
     retry: bool = True,
     purpose: str = "unknown",
+    call_traces: list[ProviderCallTrace] | None = None,
+    client_override: AsyncAnthropic | None = None,
+    before_provider_call: BeforeProviderCall | None = None,
 ) -> dict[str, Any]:
     """One structured-output call, optionally retrying one parse failure.
 
@@ -920,11 +965,18 @@ async def _complete(
         cache_rubric=cache_rubric,
     )
 
-    client = _client() if retry else _no_retry_client()
+    # A guarded long-running call must expose every physical transmission to
+    # `before_provider_call`; hidden SDK retries would bypass that consent
+    # recheck.  Parse retries remain explicit in the loop below.
+    client = client_override or (
+        _no_retry_client() if before_provider_call is not None or not retry else _client()
+    )
     last_error: Exception | None = None
 
     attempts = (1, 2) if retry else (1,)
     for attempt in attempts:
+        if before_provider_call is not None:
+            await before_provider_call(attempt)
         started = time.monotonic()
         try:
             if stream:
@@ -934,8 +986,18 @@ async def _complete(
                 response = await client.messages.create(**kwargs)
         except Exception as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
+            if call_traces is not None:
+                call_traces.append(
+                    ProviderCallTrace(
+                        provider=ROUTE_ANTHROPIC,
+                        model=model,
+                        latency_ms=elapsed_ms,
+                        outcome="transport_error",
+                        error_type=type(exc).__name__,
+                    )
+                )
             log.warning(
-                "llm model=%s attempt=%d ms=%d purpose=%s "
+                "llm model=%s provider=anthropic attempt=%d ms=%d purpose=%s "
                 "event=transport_error error_type=%s",
                 model,
                 attempt,
@@ -949,8 +1011,10 @@ async def _complete(
         usage = response.usage
         stop_reason = getattr(response, "stop_reason", "") or ""
         request_id = getattr(response, "_request_id", "") or ""
+        response_model = getattr(response, "model", "") or model
         log.info(
-            "llm model=%s attempt=%d ms=%d in=%d out=%d cache_read=%d cache_write=%d "
+            "llm model=%s provider=anthropic attempt=%d ms=%d in=%d out=%d "
+            "cache_read=%d cache_write=%d "
             "purpose=%s stop=%s request_id=%s",
             model,
             attempt,
@@ -966,9 +1030,25 @@ async def _complete(
 
         text = next((b.text for b in response.content if b.type == "text"), "")
         try:
-            return json.loads(text)
+            data = json.loads(text)
         except json.JSONDecodeError as exc:
             last_error = exc
+            if call_traces is not None:
+                call_traces.append(
+                    ProviderCallTrace(
+                        provider=ROUTE_ANTHROPIC,
+                        model=model,
+                        response_model=response_model,
+                        response_id=request_id,
+                        latency_ms=elapsed_ms,
+                        input_tokens=usage.input_tokens,
+                        output_tokens=usage.output_tokens,
+                        cached_input_tokens=usage.cache_read_input_tokens or 0,
+                        cache_write_tokens=usage.cache_creation_input_tokens or 0,
+                        outcome="invalid_json",
+                        error_type=type(exc).__name__,
+                    )
+                )
             log.warning(
                 "llm model=%s attempt=%d purpose=%s stop=%s request_id=%s "
                 "event=invalid_json",
@@ -978,6 +1058,22 @@ async def _complete(
                 stop_reason,
                 request_id,
             )
+            continue
+        if call_traces is not None:
+            call_traces.append(
+                ProviderCallTrace(
+                    provider=ROUTE_ANTHROPIC,
+                    model=model,
+                    response_model=response_model,
+                    response_id=request_id,
+                    latency_ms=elapsed_ms,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cached_input_tokens=usage.cache_read_input_tokens or 0,
+                    cache_write_tokens=usage.cache_creation_input_tokens or 0,
+                )
+            )
+        return data
 
     raise LLMError(f"{model} returned unparseable output") from last_error
 
@@ -1139,6 +1235,202 @@ def build_score_v2_completion(
     }
 
 
+def _mark_last_trace_failed(
+    calls: list[ProviderCallTrace],
+    *,
+    provider: str,
+    outcome: str,
+    error: Exception,
+    error_type: str | None = None,
+) -> None:
+    """Reclassify a successful transport whose structured contract was unusable."""
+    for index in range(len(calls) - 1, -1, -1):
+        if calls[index].provider == provider and calls[index].outcome == "success":
+            calls[index] = replace(
+                calls[index],
+                outcome=outcome,
+                error_type=error_type or type(error).__name__,
+            )
+            return
+
+
+def _openai_failure_code(error: BaseException) -> str:
+    if isinstance(error, OpenAIResponsesError):
+        return error.code
+    if isinstance(error, OpenAIRouteUnavailableError):
+        return error.reason
+    if isinstance(error, LLMError):
+        return "invalid_v2_contract"
+    return type(error).__name__
+
+
+def _raw_recall(data: dict[str, Any]) -> int | None:
+    value = data.get("recall_score")
+    if isinstance(value, bool):
+        return None
+    try:
+        recall = int(value)
+    except (TypeError, ValueError):
+        return None
+    return recall if recall in range(6) else None
+
+
+async def _score_with_anthropic(
+    completion: dict[str, Any],
+    *,
+    probes_used: int,
+    scoring_contract_version: int,
+    purpose: str,
+    calls: list[ProviderCallTrace],
+) -> tuple[ScoreResult, dict[str, Any]]:
+    data = await _complete(**completion, purpose=purpose, call_traces=calls)
+    try:
+        result = (
+            parse_score_v2_result(data, probes_used=probes_used)
+            if scoring_contract_version == SCORING_CONTRACT_V2
+            else parse_score_result(data, probes_used=probes_used)
+        )
+    except LLMError as exc:
+        _mark_last_trace_failed(
+            calls,
+            provider=ROUTE_ANTHROPIC,
+            outcome="invalid_contract",
+            error=exc,
+        )
+        raise
+    return result, data
+
+
+async def _score_v2_with_openai(
+    completion: dict[str, Any],
+    *,
+    probes_used: int,
+    api_key: str,
+    user_safety_identifier: str,
+    settings: Settings,
+    route: ScoringRoute,
+    user_id: uuid.UUID,
+    actual_fingerprint: str,
+    calls: list[ProviderCallTrace],
+) -> tuple[ScoreResult, dict[str, Any]]:
+    # Re-check every mutable gate at the physical-call boundary, not merely at
+    # session creation. An open session cannot outlive revoked configuration or
+    # its evidence deadline.
+    eligibility = openai_route_eligibility(
+        settings,
+        route=route,
+        user_id=user_id,
+        actual_fingerprint=actual_fingerprint,
+    )
+    if not eligibility.allowed:
+        raise OpenAIRouteUnavailableError(eligibility.reason)
+    started = time.monotonic()
+    try:
+        response = await complete_openai_response(
+            completion,
+            api_key=api_key,
+            schema_name=OPENAI_V2_SCHEMA_NAME,
+            safety_identifier=user_safety_identifier,
+        )
+        if response.model != str(completion["model"]):
+            raise OpenAIResponsesError(
+                "OpenAI Responses returned a model outside the qualified snapshot",
+                code="model_mismatch",
+                response_id=response.response_id,
+                model=response.model,
+                elapsed_ms=response.elapsed_ms,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                cached_input_tokens=response.cached_input_tokens,
+                cache_write_tokens=response.cache_write_tokens,
+            )
+    except OpenAIResponsesError as exc:
+        calls.append(
+            ProviderCallTrace(
+                provider="openai",
+                model=str(completion["model"]),
+                response_model=exc.model,
+                response_id=exc.response_id,
+                latency_ms=(
+                    exc.elapsed_ms
+                    or int((time.monotonic() - started) * 1000)
+                ),
+                input_tokens=exc.input_tokens,
+                output_tokens=exc.output_tokens,
+                cached_input_tokens=exc.cached_input_tokens,
+                cache_write_tokens=exc.cache_write_tokens,
+                outcome="technical_error",
+                error_type=exc.code,
+            )
+        )
+        log.warning(
+            "llm model=%s provider=openai purpose=score_v2 event=technical_error "
+            "error_type=%s",
+            completion["model"],
+            exc.code,
+        )
+        raise
+
+    calls.append(
+        ProviderCallTrace(
+            provider="openai",
+            model=str(completion["model"]),
+            response_model=response.model,
+            response_id=response.response_id,
+            latency_ms=response.elapsed_ms,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cached_input_tokens=response.cached_input_tokens,
+            cache_write_tokens=response.cache_write_tokens,
+        )
+    )
+    log.info(
+        "llm model=%s provider=openai ms=%d in=%d out=%d cache_read=%d "
+        "cache_write=%d "
+        "purpose=score_v2 request_id=%s",
+        completion["model"],
+        response.elapsed_ms,
+        response.input_tokens,
+        response.output_tokens,
+        response.cached_input_tokens,
+        response.cache_write_tokens,
+        response.response_id,
+    )
+    try:
+        result = parse_score_v2_result(response.data, probes_used=probes_used)
+    except LLMError as exc:
+        _mark_last_trace_failed(
+            calls,
+            provider="openai",
+            outcome="invalid_contract",
+            error=exc,
+            error_type="invalid_v2_contract",
+        )
+        raise
+    return result, response.data
+
+
+def _scoring_trace(
+    route: ScoringRoute,
+    *,
+    authoritative_provider: str,
+    fingerprint: str,
+    calls: list[ProviderCallTrace],
+    fallback_reason: str = "",
+    candidate_error: str = "",
+    shadow: ShadowComparison | None = None,
+) -> ScoringTrace:
+    return ScoringTrace(
+        route=route.mode,
+        authoritative_provider=authoritative_provider,
+        qualification_fingerprint=fingerprint,
+        calls=tuple(calls),
+        fallback_reason=fallback_reason,
+        candidate_error=candidate_error,
+        shadow=shadow,
+    )
+
+
 async def score_answer(
     *,
     topic: str,
@@ -1151,18 +1443,28 @@ async def score_answer(
     answer_basis: str = "",
     answer_rubric: dict[str, str] | None = None,
     scoring_contract_version: int = SCORING_CONTRACT_V1,
+    scoring_route: dict[str, Any] | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> ScoreResult:
     """Score the session so far, or return a probe if the answer was partial."""
     settings = get_settings()
     probes_used = len(probes)
+    purpose = (
+        "score_v2" if scoring_contract_version == SCORING_CONTRACT_V2 else "score_v1"
+    )
+    try:
+        route = ScoringRoute.from_json(scoring_route, settings)
+    except ValueError as exc:
+        raise LLMError(str(exc)) from exc
+
     builder = (
         build_score_v2_completion
         if scoring_contract_version == SCORING_CONTRACT_V2
         else build_score_answer_completion
     )
-    completion = builder(
-        model=settings.scoring_model,
-        effort=settings.scoring_effort,
+    anthropic_completion = builder(
+        model=route.anthropic_model,
+        effort=route.anthropic_effort,
         topic=topic,
         mastery_summary=mastery_summary,
         question_asked=question_asked,
@@ -1173,22 +1475,216 @@ async def score_answer(
         answer_basis=answer_basis,
         answer_rubric=answer_rubric,
     )
-    purpose = (
-        "score_v2" if scoring_contract_version == SCORING_CONTRACT_V2 else "score_v1"
-    )
-    data = await _complete(**completion, purpose=purpose)
 
-    try:
-        result = (
-            parse_score_v2_result(data, probes_used=probes_used)
-            if scoring_contract_version == SCORING_CONTRACT_V2
-            else parse_score_result(data, probes_used=probes_used)
+    # V1 is immutable during this migration. Legacy sessions with no frozen route
+    # also resolve here, so no OpenAI setting can affect the shipping contract.
+    if scoring_contract_version != SCORING_CONTRACT_V2 or route.mode == ROUTE_ANTHROPIC:
+        calls: list[ProviderCallTrace] = []
+        try:
+            result, _ = await _score_with_anthropic(
+                anthropic_completion,
+                probes_used=probes_used,
+                scoring_contract_version=scoring_contract_version,
+                purpose=purpose,
+                calls=calls,
+            )
+        except LLMError as exc:
+            trace = _scoring_trace(
+                route,
+                authoritative_provider=ROUTE_ANTHROPIC,
+                fingerprint="",
+                calls=calls,
+            )
+            log.warning("llm purpose=%s event=invalid_contract", purpose)
+            raise LLMError(str(exc), trace=trace) from exc
+        trace = _scoring_trace(
+            route,
+            authoritative_provider=ROUTE_ANTHROPIC,
+            fingerprint="",
+            calls=calls,
         )
-    except LLMError:
-        log.warning("llm purpose=%s event=invalid_contract", purpose)
-        raise
-    log.info("llm purpose=%s event=scoring_outcome status=%s", purpose, result.status)
-    return result
+        log.info("llm purpose=%s event=scoring_outcome status=%s", purpose, result.status)
+        return replace(result, trace=trace)
+
+    openai_completion = build_score_v2_completion(
+        model=route.openai_model,
+        effort=route.openai_effort,
+        topic=topic,
+        mastery_summary=mastery_summary,
+        question_asked=question_asked,
+        answer_text=answer_text,
+        probes=probes,
+        answer_anchor=answer_anchor,
+        source_excerpt=source_excerpt,
+        answer_basis=answer_basis,
+        answer_rubric=answer_rubric,
+    )
+    actual_fingerprint = qualification_fingerprint(openai_completion)
+    eligibility = openai_route_eligibility(
+        settings,
+        route=route,
+        user_id=user_id,
+        actual_fingerprint=actual_fingerprint,
+    )
+    if eligibility.reason == "authenticated_user_missing":
+        raise LLMError("OpenAI V2 scoring requires an authenticated user identifier")
+    if not eligibility.allowed:
+        calls = []
+        try:
+            result, _ = await _score_with_anthropic(
+                anthropic_completion,
+                probes_used=probes_used,
+                scoring_contract_version=SCORING_CONTRACT_V2,
+                purpose=purpose,
+                calls=calls,
+            )
+        except LLMError as exc:
+            trace = _scoring_trace(
+                route,
+                authoritative_provider=ROUTE_ANTHROPIC,
+                fingerprint=actual_fingerprint,
+                calls=calls,
+                fallback_reason=eligibility.reason,
+            )
+            raise LLMError(str(exc), trace=trace) from exc
+        trace = _scoring_trace(
+            route,
+            authoritative_provider=ROUTE_ANTHROPIC,
+            fingerprint=actual_fingerprint,
+            calls=calls,
+            fallback_reason=eligibility.reason,
+        )
+        return replace(result, trace=trace)
+
+    assert user_id is not None  # eligibility proves the authenticated boundary
+    user_safety_identifier = safety_identifier(settings, user_id)
+
+    if route.mode == ROUTE_SHADOW:
+        anthropic_calls: list[ProviderCallTrace] = []
+        openai_calls: list[ProviderCallTrace] = []
+        authoritative, candidate = await asyncio.gather(
+            _score_with_anthropic(
+                anthropic_completion,
+                probes_used=probes_used,
+                scoring_contract_version=SCORING_CONTRACT_V2,
+                purpose=purpose,
+                calls=anthropic_calls,
+            ),
+            _score_v2_with_openai(
+                openai_completion,
+                probes_used=probes_used,
+                api_key=settings.openai_api_key,
+                user_safety_identifier=user_safety_identifier,
+                settings=settings,
+                route=route,
+                user_id=user_id,
+                actual_fingerprint=actual_fingerprint,
+                calls=openai_calls,
+            ),
+            return_exceptions=True,
+        )
+        calls = [*anthropic_calls, *openai_calls]
+        if isinstance(authoritative, BaseException):
+            trace = _scoring_trace(
+                route,
+                authoritative_provider=ROUTE_ANTHROPIC,
+                fingerprint=actual_fingerprint,
+                calls=calls,
+                candidate_error=(
+                    _openai_failure_code(candidate)
+                    if isinstance(candidate, BaseException)
+                    else ""
+                ),
+            )
+            raise LLMError(str(authoritative), trace=trace) from authoritative
+
+        authoritative_result, authoritative_data = authoritative
+        if isinstance(candidate, BaseException):
+            trace = _scoring_trace(
+                route,
+                authoritative_provider=ROUTE_ANTHROPIC,
+                fingerprint=actual_fingerprint,
+                calls=calls,
+                candidate_error=_openai_failure_code(candidate),
+            )
+        else:
+            candidate_result, candidate_data = candidate
+            comparison = compare_shadow_results(
+                authoritative_status=authoritative_result.status,
+                authoritative_recall=_raw_recall(authoritative_data),
+                candidate_status=candidate_result.status,
+                candidate_recall=_raw_recall(candidate_data),
+            )
+            trace = _scoring_trace(
+                route,
+                authoritative_provider=ROUTE_ANTHROPIC,
+                fingerprint=actual_fingerprint,
+                calls=calls,
+                shadow=comparison,
+            )
+        log.info(
+            "llm purpose=score_v2 route=shadow event=scoring_outcome status=%s",
+            authoritative_result.status,
+        )
+        return replace(authoritative_result, trace=trace)
+
+    if route.mode != ROUTE_PRIMARY:  # pragma: no cover - ScoringRoute validates this
+        raise LLMError(f"unsupported V2 scoring route: {route.mode}")
+
+    calls = []
+    try:
+        result, _ = await _score_v2_with_openai(
+            openai_completion,
+            probes_used=probes_used,
+            api_key=settings.openai_api_key,
+            user_safety_identifier=user_safety_identifier,
+            settings=settings,
+            route=route,
+            user_id=user_id,
+            actual_fingerprint=actual_fingerprint,
+            calls=calls,
+        )
+    except (OpenAIResponsesError, LLMError) as openai_error:
+        # Exactly one Claude transmission, and only for a typed technical or
+        # contract failure. A valid Luna score is authoritative even if surprising.
+        try:
+            result, _ = await _score_with_anthropic(
+                anthropic_completion,
+                probes_used=probes_used,
+                scoring_contract_version=SCORING_CONTRACT_V2,
+                purpose="score_v2_fallback",
+                calls=calls,
+            )
+        except LLMError as anthropic_error:
+            trace = _scoring_trace(
+                route,
+                authoritative_provider=ROUTE_ANTHROPIC,
+                fingerprint=actual_fingerprint,
+                calls=calls,
+                fallback_reason=_openai_failure_code(openai_error),
+            )
+            raise LLMError(str(anthropic_error), trace=trace) from anthropic_error
+        trace = _scoring_trace(
+            route,
+            authoritative_provider=ROUTE_ANTHROPIC,
+            fingerprint=actual_fingerprint,
+            calls=calls,
+            fallback_reason=_openai_failure_code(openai_error),
+        )
+        return replace(result, trace=trace)
+
+    trace = _scoring_trace(
+        route,
+        authoritative_provider="openai",
+        fingerprint=actual_fingerprint,
+        calls=calls,
+    )
+    log.info(
+        "llm purpose=score_v2 route=primary provider=openai "
+        "event=scoring_outcome status=%s",
+        result.status,
+    )
+    return replace(result, trace=trace)
 
 
 def _should_probe(score: int, probes_used: int, needs_more_evidence: bool) -> bool:
@@ -1246,23 +1742,32 @@ def parse_score_v2_result(data: dict[str, Any], *, probes_used: int) -> ScoreRes
     LLMError rather than a silent coercion, because V2 is still dark and a
     tolerated violation would be invisible until activation.
     """
-    try:
-        recall = int(data["recall_score"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise LLMError(f"V2 scoring response had no usable Recall score: {data!r}") from exc
+    if not isinstance(data, dict):
+        raise LLMError("V2 scoring response was not an object")
+    required = set(SCORE_V2_SCHEMA["required"])
+    if set(data) != required:
+        missing = sorted(required - set(data))
+        extra = sorted(set(data) - required)
+        raise LLMError(
+            "V2 scoring response violated the strict schema: "
+            f"missing={missing}, extra={extra}"
+        )
+
+    recall = data["recall_score"]
+    if type(recall) is not int:
+        raise LLMError("V2 scoring response had non-integer Recall")
     if recall not in range(6):
         raise LLMError(f"V2 scoring response had out-of-range Recall: {recall}")
 
-    try:
-        needs = data["needs_more_evidence"]
-    except KeyError as exc:
-        raise LLMError(
-            f"V2 scoring response omitted needs_more_evidence: {data!r}"
-        ) from exc
-    if not isinstance(needs, bool):
-        raise LLMError(f"V2 scoring response had non-boolean needs_more_evidence: {needs!r}")
+    needs = data["needs_more_evidence"]
+    if type(needs) is not bool:
+        raise LLMError("V2 scoring response had non-boolean needs_more_evidence")
 
-    probe = str(data.get("follow_up_question", "")).strip()
+    for field in ("feedback", "follow_up_question", "mastery_summary"):
+        if not isinstance(data[field], str):
+            raise LLMError(f"V2 scoring response had non-string {field}")
+
+    probe = data["follow_up_question"].strip()
     should_probe = _should_probe(recall, probes_used, needs)
     # An insufficiency claim has to carry the probe that would settle it. This is
     # also what rejects `needs_more_evidence` at the cap, where no probe is legal.
@@ -1280,8 +1785,8 @@ def parse_score_v2_result(data: dict[str, Any], *, probes_used: int) -> ScoreRes
             scoring_contract_version=SCORING_CONTRACT_V2,
         )
 
-    feedback = str(data.get("feedback", "")).strip()
-    mastery_summary = clean_summary(str(data.get("mastery_summary", "")))
+    feedback = data["feedback"].strip()
+    mastery_summary = clean_summary(data["mastery_summary"])
     if not feedback or not mastery_summary:
         raise LLMError("V2 scoring response omitted required completion text")
     return ScoreResult(
@@ -1363,6 +1868,7 @@ async def import_guide(
     deadline: str | None,
     subject_hint: str,
     title_hint: str,
+    before_provider_call: BeforeProviderCall,
 ) -> dict[str, Any]:
     """Turn a pasted study guide into structured plan data. Returns raw fields.
 
@@ -1413,6 +1919,7 @@ async def import_guide(
         stream=True,
         cache_rubric=True,
         purpose="guide_import",
+        before_provider_call=before_provider_call,
     )
 
 

@@ -1,11 +1,18 @@
 import Foundation
 
+enum AIProcessingDisclosure {
+    static let policyVersion = "anthropic-openai-2026-08-13-v2"
+}
+
 enum PrivacyLinks {
     static let policy = URL(
         string: "https://devmax-recall.christrinh5.chatgpt.site/privacy"
     )!
     static let anthropicRetention = URL(
         string: "https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data"
+    )!
+    static let openAIDataControls = URL(
+        string: "https://developers.openai.com/api/docs/guides/your-data#default-usage-policies-by-endpoint"
     )!
 }
 

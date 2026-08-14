@@ -20,6 +20,9 @@ and V2 semantics without the version and compatibility rules below.
 
 This document does not authorize a provider change or a live evaluation. Claude
 remains the production scorer. Provider selection is a separate decision.
+`OPENAI-V2-SCORING-ROLLOUT.md` records that later, separately gated provider
+decision; it begins only after this contract is activated and stable on Claude,
+so it does not weaken the no-simultaneous-change rule in this specification.
 
 ## Decision
 

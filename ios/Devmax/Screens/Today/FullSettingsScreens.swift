@@ -110,28 +110,44 @@ struct DataPrivacyScreen: View {
             privacyNote(
                 "Provider",
                 "Unprompted uses Anthropic for guide processing, question generation, "
-                    + "answer scoring, and optional coaching."
+                    + "and optional coaching. Answer scoring may use Anthropic or OpenAI. "
+                    + "During a limited evaluation, the same answer may go to both while "
+                    + "only Anthropic decides the result."
             )
             privacyNote(
                 "Guide processing",
                 "Unprompted sends guide text, its title, and the plan length, weekly "
                     + "capacity, mode, deadline, and subject hints you chose to Anthropic "
-                    + "to propose topics and plan structure. The source remains attached "
-                    + "to your account until you remove it or delete the account."
+                    + "to propose topics and plan structure. Removing an imported source "
+                    + "deletes that source and its transient import copy. A Study Plan you "
+                    + "explicitly create keeps its guide provenance until you delete the account."
             )
             privacyNote(
                 "Answer scoring",
                 "Unprompted sends the topic, question, your transcript, any follow-up, "
                     + "the card's mastery summary, trusted answer basis, source excerpt, "
-                    + "and rubric to Anthropic for scoring and optional coaching. It "
-                    + "receives text, not an audio recording; iOS handles speech recognition."
+                    + "and rubric to Anthropic or OpenAI for scoring. Optional coaching "
+                    + "stays with Anthropic. During the limited provider evaluation, the "
+                    + "same scoring context may go to both at once. OpenAI's output cannot "
+                    + "affect the result shown or saved; only privacy-safe comparison and "
+                    + "usage metadata are retained. Both receive text, not an audio recording; iOS handles speech "
+                    + "recognition. OpenAI also receives a stable pseudonymous safety "
+                    + "identifier, not your Apple credential, name, or email."
             )
             privacyNote(
-                "AI-provider retention",
+                "Anthropic data handling",
                 "Anthropic states that standard API inputs and outputs are deleted from "
                     + "its systems within 30 days and are not used for model training by "
                     + "default. Exceptions can apply for abuse prevention, legal obligations, "
                     + "explicit opt-in, or a different agreement."
+            )
+            privacyNote(
+                "OpenAI data handling",
+                "OpenAI scoring uses the Responses API with store: false, so response "
+                    + "application state is not retained for that request. OpenAI states "
+                    + "standard API data is not used for training by default. Its default "
+                    + "abuse-monitoring logs may include prompts and responses and are "
+                    + "retained for up to 30 days, with limited legal and safety exceptions."
             )
             privacyNote(
                 "Your control",
@@ -142,7 +158,7 @@ struct DataPrivacyScreen: View {
             privacyNote(
                 "AI processing choice",
                 auth.profile?.aiProcessingAllowed == true
-                    ? "Allowed · recorded for the current Anthropic disclosure."
+                    ? "Allowed · recorded for the current Anthropic and OpenAI disclosure."
                     : "Not allowed · AI features are unavailable, while saved lessons, "
                         + "plans, history, and settings remain usable."
             )
@@ -162,6 +178,9 @@ struct DataPrivacyScreen: View {
                 .font(WCFont.sans(14)).foregroundStyle(Theme.meta)
                 .frame(minHeight: Metrics.minTapTarget)
             Link("Read Anthropic's API data policy", destination: PrivacyLinks.anthropicRetention)
+                .font(WCFont.sans(14)).foregroundStyle(Theme.meta)
+                .frame(minHeight: Metrics.minTapTarget)
+            Link("Read OpenAI's API data controls", destination: PrivacyLinks.openAIDataControls)
                 .font(WCFont.sans(14)).foregroundStyle(Theme.meta)
                 .frame(minHeight: Metrics.minTapTarget)
 
@@ -189,8 +208,10 @@ struct DataPrivacyScreen: View {
             Button("Withdraw", role: .destructive) { updateConsent("withdraw") }
         } message: {
             Text(
-                "Future guide processing, scoring, question generation, and AI coaching "
-                    + "will stop. Your saved data and review schedule will not be deleted."
+                "New guide processing, scoring, question generation, and AI coaching "
+                    + "will stop when withdrawal completes. A guide request already "
+                    + "authorized for transmission may finish. Your saved data and review "
+                    + "schedule will not be deleted."
             )
         }
     }

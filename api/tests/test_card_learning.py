@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.routers import cards as cards_router
 from app.routers import internal
+from app.routers import sessions as sessions_router
 from app.services import llm, usage
 from tests.conftest import (
     API_HEADERS,
@@ -56,6 +57,15 @@ async def open_learning_as_founder(factory, card_id):
     try:
         async with factory() as learning_db:
             return await cards_router.open_learning(card_id, learning_db)
+    finally:
+        auth._current_user_id.reset(token)
+
+
+async def start_session_as_founder(factory, card_id):
+    token = auth._current_user_id.set(FOUNDER_USER_ID)
+    try:
+        async with factory() as session_db:
+            return await sessions_router.start_session(card_id, False, session_db)
     finally:
         auth._current_user_id.reset(token)
 
@@ -518,6 +528,57 @@ async def test_trigger_review_skips_a_live_card_and_offers_the_next_due_card(
     # Resumable work remains in the due count; it just is not pushed again.
     assert response.json()["due_count"] == 2
     assert sent[0]["body"] == "Next honest offer"
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_concurrent_first_opens_generate_one_canonical_question(
+    db, monkeypatch, concurrent_session_factory
+):
+    card = grounded_card(canonical_question=None)
+    db.add(card)
+    await db.commit()
+
+    provider_entered = asyncio.Event()
+    release_provider = asyncio.Event()
+    calls = 0
+
+    async def paused_question(**_kwargs):
+        nonlocal calls
+        calls += 1
+        provider_entered.set()
+        await release_provider.wait()
+        return "Which keys move when a node joins the ring?"
+
+    monkeypatch.setattr(llm, "generate_question", paused_question)
+    first = asyncio.create_task(
+        start_session_as_founder(concurrent_session_factory, card.id)
+    )
+    second = None
+    try:
+        await asyncio.wait_for(provider_entered.wait(), timeout=3)
+        second = asyncio.create_task(
+            start_session_as_founder(concurrent_session_factory, card.id)
+        )
+        await asyncio.sleep(0.1)
+        assert calls == 1
+        assert not second.done()
+    finally:
+        release_provider.set()
+
+    first_result = await asyncio.wait_for(first, timeout=3)
+    second_result = await asyncio.wait_for(second, timeout=3)
+    assert calls == 1
+    assert second_result.session_id == first_result.session_id
+    assert second_result.question == first_result.question
+    assert second_result.resumed is True
+
+    async with concurrent_session_factory() as verify_db:
+        stored = await verify_db.get(type(card), card.id)
+        sessions = (
+            await verify_db.exec(select(Session).where(Session.card_id == card.id))
+        ).all()
+        assert stored.canonical_question == first_result.question
+        assert len(sessions) == 1
 
 
 @pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")

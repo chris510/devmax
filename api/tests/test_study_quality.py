@@ -1,12 +1,24 @@
+import asyncio
 import uuid
 from datetime import timedelta
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models import CARD_ACTIVE, CARD_ARCHIVED, Card, PendingCapture, Session
+from app import auth
+from app.models import (
+    CARD_ACTIVE,
+    CARD_ARCHIVED,
+    FOUNDER_USER_ID,
+    Card,
+    PendingCapture,
+    Session,
+)
+from app.routers import captures as captures_router
 from app.services import llm
-from tests.conftest import API_HEADERS, local_today, make_card
+from tests.conftest import API_HEADERS, TEST_DATABASE_URL, local_today, make_card
 
 RUBRIC = {
     "mechanism": "A leader appends the entry locally before replication.",
@@ -120,6 +132,61 @@ async def test_question_generation_is_grounded_idempotent_and_explicitly_regener
     assert len(stub_question) == 2
     assert stub_question[0]["answer_basis"].startswith("An entry commits")
     assert stub_question[0]["answer_rubric"] == RUBRIC
+
+
+async def test_postgres_concurrent_capture_question_posts_transmit_once(
+    client, db, monkeypatch
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("capture question concurrency requires Postgres")
+
+    capture = await _capture(client)
+    await _ground(client, capture["id"])
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    provider_entered = asyncio.Event()
+    release_provider = asyncio.Event()
+    calls = 0
+
+    async def blocked_question(**_kwargs):
+        nonlocal calls
+        calls += 1
+        provider_entered.set()
+        await release_provider.wait()
+        return "When is a Raft entry committed?"
+
+    async def run_request():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await captures_router.prepare_question(
+                    uuid.UUID(capture["id"]), False, request_db
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    monkeypatch.setattr(llm, "generate_question", blocked_question)
+    first = asyncio.create_task(run_request())
+    second = None
+    try:
+        await asyncio.wait_for(provider_entered.wait(), timeout=3)
+        second = asyncio.create_task(run_request())
+        await asyncio.sleep(0.1)
+        assert calls == 1
+        assert not second.done()
+    finally:
+        release_provider.set()
+
+    first_result = await asyncio.wait_for(first, timeout=3)
+    second_result = await asyncio.wait_for(second, timeout=3)
+    assert calls == 1
+    assert second_result.canonical_question == first_result.canonical_question
+    async with factory() as verify_db:
+        stored = await verify_db.get(PendingCapture, uuid.UUID(capture["id"]))
+        assert stored is not None
+        assert stored.canonical_question == first_result.canonical_question
+    await engine.dispose()
 
 
 async def test_activation_is_atomic_and_replays_the_same_card(client, db, stub_question):
