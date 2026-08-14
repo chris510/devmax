@@ -1,8 +1,9 @@
 """Pure card-derived values. No request context, so all directly unit-testable."""
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
-from app.models import Card, Session
+from app.models import Card, Session, SessionProbe
 from app.schemas import Turn
 from app.services.scoring_contract import active_card_score
 
@@ -102,15 +103,22 @@ def classify_tier(card: Card, today: date) -> str:
     return DEVELOPING
 
 
-def build_turns(session: Session) -> list[Turn]:
-    """Assemble transcript ordering server-side — the client must not do this."""
+def build_turns(session: Session, probes: Sequence[SessionProbe]) -> list[Turn]:
+    """Assemble transcript ordering server-side — the client must not do this.
+
+    `probes` is this session's scored follow-ups in `idx` order, and each one
+    contributes the pair the transcript already had — so a two-probe session reads
+    question, answer, follow-up, answer, follow-up, answer, score. The caller
+    passes them in because loading them per session would be an N+1 on a card with
+    a long history.
+    """
     turns = [Turn(role="question", text=session.question_asked)]
     if session.answer_text:
         turns.append(Turn(role="answer", text=session.answer_text))
-    if session.follow_up_question:
-        turns.append(Turn(role="follow_up", text=session.follow_up_question))
-        if session.follow_up_answer:
-            turns.append(Turn(role="answer", text=session.follow_up_answer))
+    for probe in probes:
+        turns.append(Turn(role="follow_up", text=probe.question))
+        if probe.answer:
+            turns.append(Turn(role="answer", text=probe.answer))
     if session.score is not None:
         turns.append(Turn(role="score", text=f"{session.score} — {session.feedback}"))
     return turns

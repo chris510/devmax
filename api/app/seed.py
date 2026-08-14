@@ -54,6 +54,7 @@ from app.models import (
     Card,
     PendingCapture,
     Session,
+    SessionProbe,
 )
 from app.routers.deps import get_settings_row, now_in
 from app.services.card_lifecycle import Grounding, GroundingError, storage_rubric
@@ -449,21 +450,32 @@ async def load_fixtures(db: AsyncSession | None = None) -> int:
             await db.flush()
 
             for s in spec["sessions"]:
-                db.add(
-                    Session(
-                        card_id=card.id,
-                        question_asked=s["question"],
-                        answer_text=s["answer"],
-                        follow_up_question=s.get("follow_up"),
-                        follow_up_answer=s.get("follow_up_answer", ""),
-                        follow_up_used=bool(s.get("follow_up")),
-                        score=s["score"],
-                        feedback=s["feedback"],
-                        status=STATUS_COMPLETE,
-                        started_at=now - timedelta(days=s["days_ago"]),
-                        ended_at=now - timedelta(days=s["days_ago"]),
-                    )
+                started = now - timedelta(days=s["days_ago"])
+                session = Session(
+                    card_id=card.id,
+                    question_asked=s["question"],
+                    answer_text=s["answer"],
+                    follow_up_used=bool(s.get("follow_up")),
+                    score=s["score"],
+                    feedback=s["feedback"],
+                    status=STATUS_COMPLETE,
+                    started_at=started,
+                    ended_at=started,
                 )
+                db.add(session)
+                # A probe is a row, not a column pair — the same shape a real
+                # session writes, so fixture history renders through exactly the
+                # path production history does.
+                if s.get("follow_up"):
+                    db.add(
+                        SessionProbe(
+                            session_id=session.id,
+                            idx=1,
+                            question=s["follow_up"],
+                            answer=s.get("follow_up_answer", ""),
+                            created_at=started,
+                        )
+                    )
 
             if spec.get("draft"):
                 db.add(

@@ -559,7 +559,15 @@ struct ConversationScreen: View {
 
     private var textInput: some View {
         VStack(spacing: 12) {
-            TextEditor(text: $state.draft)
+            // Only edits made through the control are drafts. `sendAnswer` clears
+            // the in-memory copy while scoring so the committed answer is not
+            // drawn twice, but the disk backup must survive until the response
+            // lands. A blanket `onChange(of: state.draft)` could not distinguish
+            // those two writes and erased that backup mid-request.
+            TextEditor(text: Binding(
+                get: { state.draft },
+                set: { state.updateDraft($0) }
+            ))
                 .font(WCFont.sans(15))
                 .foregroundStyle(Theme.textSecondary)
                 .scrollContentBackground(.hidden)
@@ -572,9 +580,6 @@ struct ConversationScreen: View {
                     RoundedRectangle(cornerRadius: Metrics.inputRadius)
                         .strokeBorder(draftFocused ? Theme.accent : Theme.borderStrong, lineWidth: 1)
                 )
-                // The TextEditor binds $state.draft directly, so this only needs to
-                // schedule the write that updateDraft would otherwise have done.
-                .onChange(of: state.draft) { _, text in state.updateDraft(text) }
 
             PrimaryButton(
                 title: "Submit answer",

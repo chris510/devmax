@@ -4,6 +4,14 @@
 
 **Decision date:** 2026-08-10.
 
+**Amended 2026-08-13** for the dynamic follow-up cap: at most
+`llm.MAX_SCORED_FOLLOW_UPS` (2) scored follow-ups, the second requested by the
+model through `needs_more_evidence` and granted by the server. The amendment
+changes invariant 4, the follow-up truth table, the call budget, and the
+acceptance matrix below. **It does not begin activation.**
+`scoring_contract_version` stays 1 and V1 remains the runtime contract; the V2
+parser's tightened rules stay dark until the activation stage is complete.
+
 This document owns the target scoring contract, its historical-data boundary,
 the migration of every score consumer, and the release gates for activating it.
 Until the activation stage in this document is complete, the V1 three-axis
@@ -70,8 +78,11 @@ band, but no V2 interface may imply that Recall alone measures total mastery.
    `scheduler.quality_for` remains byte-for-byte equivalent.
 3. **The complete-answer path remains one transaction.** Scoring completes
    before any answer, score, card, or schedule write begins.
-4. **At most one scored follow-up is enforced server-side.** A prompt cannot
-   weaken this limit.
+4. **At most `MAX_SCORED_FOLLOW_UPS` (2) scored follow-ups are enforced
+   server-side.** The model may request the second through
+   `needs_more_evidence`; the server grants it. A prompt cannot weaken this
+   limit — the parser refuses a probe past the cap and the write site refuses it
+   again.
 5. **Nothing after corrective feedback reaches the score or scheduler.** The
    existing coached re-attempt and the new qualitative practice turn are
    post-result work.
@@ -102,32 +113,37 @@ the same trusted grounding and transcript it receives today, then returns:
   "recall_score": 0,
   "feedback": "",
   "follow_up_question": "",
+  "needs_more_evidence": false,
   "mastery_summary": ""
 }
 ```
 
-All four keys are required. `recall_score` is an integer from 0 through 5.
-`follow_up_question` is non-empty only when the provisional score is 1–3 and no
-follow-up has already been used. The server still validates that policy and,
-not the model, decides whether a candidate probe is shown.
+All five keys are required. `recall_score` is an integer from 0 through 5.
+`needs_more_evidence` is true only when the transcript cannot honestly
+distinguish adjacent Recall scores and one further probe would settle it — it
+reports missing signal, not a wrong answer. The server still validates the
+policy below and, not the model, decides whether a candidate probe is shown.
 
 ### Scored follow-up policy
 
-The server uses the provisional Recall score:
+The server decides from the provisional Recall score and how many scored probes
+have already been answered (`probes_used`, which is `len(probes)`):
 
-| Provisional Recall | Server action | Reason |
+| `probes_used` | Server action | Reason |
 | --- | --- | --- |
-| 0 | Complete; show correction | The essential account is absent or wrong; a narrow probe would reveal coached, not unaided, performance. |
-| 1–3 | Ask one scored follow-up | One clarification can distinguish partial retrieval from a missing essential link. |
-| 4–5 | Complete | Recall is already sufficient; deeper exploration belongs to optional qualitative practice. |
+| 0 | Recall decides: 0 complete with correction; 1–3 ask a scored follow-up prefaced "One more — "; 4–5 complete. `needs_more_evidence` must be false wherever a probe is forbidden. | The band rule, unchanged from V1: one clarification can distinguish partial retrieval from a missing essential link, and a wrong essential account is corrected rather than probed. |
+| 1 | `needs_more_evidence` decides: true asks the second scored follow-up, prefaced "Last one — "; false completes. | Past the band, only the model's own insufficiency claim earns another turn, and it must carry the probe that would settle it. |
+| 2 (`MAX_SCORED_FOLLOW_UPS`) | Complete only. `needs_more_evidence` must be false and the probe must be empty. | The cap. There is no turn left for a probe to be answered in. |
 
 This preserves the implemented V1 lower-bound decision documented in
-`docs/DEVIATIONS.md`: a score of 0 is corrected rather than probed. It also
-preserves the server-side `follow_up_used` guard.
+`docs/DEVIATIONS.md`: a score of 0 is corrected rather than probed.
 
-If a follow-up is used, the second scoring call sees both learner turns and
-returns the final Recall result. There is no third scored call and no retry that
-selects between valid results.
+The V2 parser is fail-closed on every cell: a missing or non-boolean
+`needs_more_evidence`, an insufficiency claim without a probe, a probe where the
+table forbids one, or an absent probe where the table requires one is an
+`LLMError`, not a coercion. Each scored turn's call sees every prior probe pair,
+so at most three scoring calls exist in a session and no retry selects between
+valid results.
 
 ### Feedback and mastery summary
 
@@ -206,7 +222,9 @@ V2 removes the evaluated structured-evidence prepass, numeric-secondary grading,
 best-of-N selection, and semantic retries. The request budget is structural:
 
 - one scoring call for every submitted initial answer;
-- at most one additional scoring call when the server uses the 1–3 follow-up;
+- at most two additional scoring calls — one when the server uses the 1–3
+  follow-up, and one more only when the model then reports
+  `needs_more_evidence`;
 - zero calls merely to offer qualitative practice; and
 - at most one additional call only after the learner submits an optional
   qualitative answer.
@@ -512,9 +530,13 @@ into one release.
   same SM-2 output as V1 Accuracy.
 - The V2 response schema rejects `depth`, `boundaries`, `composite`, and
   model-supplied scheduler quality.
-- Follow-up truth table is exactly: 0 no; 1–3 yes; 4–5 no.
-- A session cannot accept more than one scored follow-up, including replay and
-  concurrent-submission cases.
+- Follow-up truth table is exactly the table above: at `probes_used` 0, Recall
+  decides (0 no; 1–3 yes; 4–5 no) and `needs_more_evidence` must be false
+  wherever a probe is forbidden; at 1, `needs_more_evidence` decides; at 2,
+  complete only, with `needs_more_evidence` false and no probe.
+- A session cannot accept more than `MAX_SCORED_FOLLOW_UPS` scored follow-ups,
+  including replay and concurrent-submission cases. Replay of the last answered
+  turn returns the pending probe at every probe, not only the first.
 - A valid V2 completion writes `score == accuracy == recall_score`, null legacy
   secondary axes, and contract version 2.
 - An LLM failure leaves session, card, mastery summary, and schedule untouched.

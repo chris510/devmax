@@ -276,7 +276,9 @@ turn/stage change):
 - Live transcript — same position, **no bubble**, 15px/1.5 `#a8afb5` (AA-compliant on
   `#0d0f11`) with a trailing accent `▍` caret (`screenshots/conversation-recording.png`).
 - Follow-up question — serif 21px, prefaced "One more — " so it reads as a probe, not a new
-  card (`screenshots/conversation-followup.png`). Max **one** follow-up per session.
+  card (`screenshots/conversation-followup.png`). Max **two** follow-ups per session; the
+  second is prefaced "Last one — " and is asked only when the model still lacks the signal
+  to score.
 - Scoring indicator — mono `SCORING` + 3 pulsing accent dots, inline, left-aligned. Never a
   full-screen spinner.
 
@@ -559,7 +561,9 @@ Client state the prototype exercises (name them however the codebase prefers):
 ### Transitions
 
 `idle → rec` (mic) → `proc` (stop / submit) → `follow` if 2 ≤ score ≤ 3 and no follow-up
-yet, else `result`. `follow → recFollow → proc → result`. Any `proc` failure →
+yet, else `result`. `follow → recFollow → proc → follow` again if the server asks a second
+probe, else `result`. `proc → follow` may occur **up to twice** in a session; the server
+decides, and the second probe reads "Last one — ". Any `proc` failure →
 back to `idle`/`follow` + `submitError`. `result → Next card` resets to `idle` with the next
 card's question; `result → Done` → Today.
 

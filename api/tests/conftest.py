@@ -73,7 +73,8 @@ async def db() -> AsyncIterator[AsyncSession]:
             # next one. New tables must be added here as well as to models.py.
             await conn.execute(
                 text(
-                    "TRUNCATE pending_captures, cards, sessions, device_tokens, settings, "
+                    "TRUNCATE pending_captures, cards, sessions, session_probes, "
+                    "device_tokens, settings, "
                     "study_plans, study_plan_phases, study_plan_weeks, "
                     "study_plan_items, study_plan_item_dependencies, "
                     "study_plan_revisions, study_plan_guide_drafts, "

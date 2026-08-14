@@ -315,9 +315,9 @@ range, so both edges of the band are pinned.
 
 ## 16. A session may carry a third turn: the coached re-attempt
 
-`spec.md` §LLM integration says "maximum one follow-up per session". A session can
-now hold one more turn after that — but not another follow-up, and not another
-score.
+`spec.md` §LLM integration said "maximum one follow-up per session" (since amended
+— see §30). A session can now hold one more turn after that — but not another
+follow-up, and not another score.
 
 This is §15's argument carried one step further. §15 widened the probe band down to
 1 because *"corrective feedback alone is recognition, not recall"* — a targeted
@@ -597,3 +597,51 @@ This also keeps the card boundary intact. A mapped topic is not a
 `study_plan_card_link`, never creates or activates a card, and cannot make an
 unapproved card actionable. External Premium URLs are navigation and provenance,
 not trusted answer text.
+
+## 30. Scored follow-ups are rows, and there may be two of them
+
+`spec.md` §LLM integration said "maximum one follow-up per session", and
+`sessions` carried exactly one probe in two scalar columns. Both are now amended:
+the cap is `llm.MAX_SCORED_FOLLOW_UPS = 2`, and each probe is a `session_probes`
+row (`session_id`, `idx`, `question`, `answer`) added by migration 0015. The spec
+sections carry the amended text; this entry records why, and what it cost.
+
+**The trigger is a gap in signal, not a wish for more turns.** The band rule
+(§15) asks the first probe when the score would be 1–3, and that is a decision
+about the *answer*. It has nothing to say about the case where the transcript
+still cannot separate a 3 from a 4 after the probe — the model had no way to say
+"I cannot score this honestly yet", so it guessed. `needs_more_evidence` is that
+channel, and it is a request: at `probes_used == 1` the server grants it, at the
+cap it refuses it, and at `probes_used == 0` it is ignored outright so a stray
+`true` cannot widen who gets probed. §15 still governs probe #1 unchanged,
+including 0 staying excluded.
+
+**The schema reversal was prescribed, not drifted into.**
+`docs/multi-turn-coaching-design.md` §5.1 chose scalar columns for the coached
+re-attempt and wrote the condition for flipping: "if the cap ever legitimately
+becomes N, the turns table is the right move and this decision should be reversed
+on purpose". The cap became N. Only the *scored, pre-correction* probes moved —
+every row in `session_probes` is scored and pre-correction by definition, which is
+the same argument that keeps the `reattempt_*` and `coaching_*` columns scalar.
+There is deliberately no `CHECK (idx <= 2)`: the cap is one decision, living in
+one named constant, re-checked at the write site in `submit_answer` so a parser
+bug cannot extend a session.
+
+**The legacy scalars are frozen, not dropped.** `sessions.follow_up_question` and
+`follow_up_answer` keep every historical row's own evidence and give the
+downgrade somewhere to put a probe back. Nothing reads or writes them any more —
+the replay guard, the resume question, the scoring input, `build_turns`, and the
+seed fixtures all read `session_probes`. `follow_up_used` is the exception: it is
+still written, and still true, because its meaning ("a scored probe was issued in
+this session") did not change when the count moved.
+
+**Downgrading past 0015 loses second probes.** The downgrade copies `idx = 1`
+back into the scalars where they are null; there is no second pair of columns for
+`idx = 2`, and inventing one would recreate the schema-level cap this migration
+exists not to have. No score, axis, feedback, or SM-2 field is touched either
+way.
+
+**The V2 contract is amended, not activated.** `docs/SCORING-CONTRACT-V2-SPEC.md`
+carries the two-stage truth table and the "at most two additional scoring calls"
+budget, and the V2 parser enforces them fail-closed. `scoring_contract_version`
+stays 1.

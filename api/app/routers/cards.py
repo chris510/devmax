@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, tzinfo
 from typing import Literal
 
@@ -17,6 +18,7 @@ from app.models import (
     Card,
     MaterialSource,
     Session,
+    SessionProbe,
 )
 from app.routers.deps import get_settings_row, local_calendar, local_today, now_in
 from app.schemas import (
@@ -165,7 +167,7 @@ def _overview_columns():
     )
 
 
-def _session_history(session: Session) -> SessionHistory:
+def _session_history(session: Session, probes: Sequence[SessionProbe]) -> SessionHistory:
     score = project_session_score(session)
     return SessionHistory(
         id=session.id,
@@ -175,12 +177,35 @@ def _session_history(session: Session) -> SessionHistory:
         legacy_composite_score=score.legacy_composite_score,
         scoring_contract_version=score.scoring_contract_version,
         feedback=session.feedback,
-        turns=build_turns(session),
+        turns=build_turns(session, probes),
         coaching_focus=session.coaching_focus,
         coaching_question=session.coaching_question,
         coaching_answer=session.coaching_answer,
         coaching_feedback=session.coaching_feedback,
     )
+
+
+async def _probes_by_session(
+    db: AsyncSession, session_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[SessionProbe]]:
+    """Every scored probe on the card, in one query, grouped by session.
+
+    A card's history is read whole, so loading probes per session would be an N+1
+    that grows with how long the card has been reviewed. `idx` orders each group.
+    """
+    if not session_ids:
+        return {}
+    rows = (
+        await db.exec(
+            select(SessionProbe)
+            .where(col(SessionProbe.session_id).in_(session_ids))
+            .order_by(col(SessionProbe.idx))
+        )
+    ).all()
+    grouped: dict[uuid.UUID, list[SessionProbe]] = {}
+    for probe in rows:
+        grouped.setdefault(probe.session_id, []).append(probe)
+    return grouped
 
 
 async def _resumable_card_ids(db: AsyncSession, card_ids: list[uuid.UUID]) -> set[uuid.UUID]:
@@ -328,6 +353,7 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
             .order_by(col(Session.started_at).desc())
         )
     ).all()
+    probes = await _probes_by_session(db, [session.id for session in sessions])
     source_title = ""
     has_linked_source = False
     if card.source_id is not None:
@@ -353,7 +379,9 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
         ),
         source_label=card.source_label or source_title,
         source_section=card.source_section,
-        sessions=[_session_history(session) for session in sessions],
+        sessions=[
+            _session_history(session, probes.get(session.id, ())) for session in sessions
+        ],
     )
 
 
