@@ -247,7 +247,7 @@ arrived. Coding patterns live in `api/library/` and overlays live in
 The second command bootstraps or upgrades the separate first-party Study Plan
 that powers Today's plan line and the phase/week timeline. It makes no LLM call
 and never writes cards, sessions, scores, mastery, or SM-2 state. The committed
-content-version-5 manifest is 12 weeks, four phases, 116 scheduled items, and
+content-version-6 manifest is 12 weeks, four phases, 116 scheduled items, and
 exactly 20 scheduled hours per week, plus an untracked 20-hour stretch menu. It
 retains the canonical version-4 lineage key and reviewed version-2/version-3
 aliases; the manifest version makes a same-version rerun a no-op and an older
@@ -257,11 +257,14 @@ Week 1/revision 1 with no progress, notes,
 reminders, overrides, or advancement—and otherwise fails without changing it.
 This prevents old item keys from attaching history to unrelated new work. On
 that pristine legacy upgrade only, the explicit `--start-date` becomes the
-corrected plan start; later version upgrades preserve it. Version-5 items that
-add new study work are marked `requires_fresh_completion`; an already-complete
-row is preserved rather than receiving retroactive AI credit, and the revision
-records the skipped key. Later curriculum revisions carry that unresolved debt
-even if their manifest drops the marker, and idempotent reruns keep printing the
+corrected plan start; later version upgrades preserve it. Version 6 retains the
+eight version-5 `requires_fresh_completion` keys and adds `V4-W2-L3` and
+`V4-W3-L2` because they replace historical lesson content with online migration
+and quorum-safe replication. The ten-key union protects a direct version-4 to
+version-6 upgrade even when no intermediate revision ledger exists. An
+already-complete row is preserved rather than receiving retroactive credit, and
+the revision records the skipped key. That debt remains in the revision ledger
+if a future release drops its marker, and idempotent reruns keep printing the
 warning until fresh content is applied while the item is unfinished. Completion
 and upgrade writes use the same plan lock plus an item snapshot guard, so two
 simultaneous database writers cannot merge old completion with new content.
@@ -269,8 +272,8 @@ Item detail returns `plan_revision`; the current client sends that loaded value
 on completion, and the server rejects a stale value before writing. The client
 then reloads and requires another explicit tap. Deploy the backend before the
 client during a rolling release: older clients may still complete conventional
-or generic items, but the eight version-5 fresh-work keys return 409 until a
-current client supplies the revision. `--activate` refuses to displace another
+or generic items, but protected fresh-work keys return 409 until a current
+client supplies the revision. `--activate` refuses to displace another
 active plan when creating a new one; pause that plan
 in the app first if switching is intentional. Use the Monday containing the first
 practice day so Week 1 aligns with the timeline's calendar labels.

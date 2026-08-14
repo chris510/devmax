@@ -123,109 +123,241 @@
     "topic": "Data modeling from access patterns: deriving entities, relationships, and query shapes",
     "category": "Core Concept",
     "target_week": 2,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/data-modeling",
-    "source_section": "Data Modeling",
-    "activation_prerequisite": "Complete Data Modeling",
-    "evidence": "official_course"
+    "source_url": "https://www.mongodb.com/docs/manual/data-modeling/handle-duplicate-data/",
+    "source_section": "Example: Duplicate Data for Product Reviews → Steps; Benefits of Duplicating Data",
+    "activation_prerequisite": "Complete V4-W2-L1 · Model prompts, conversations, and eval evidence from access patterns",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "source_label": "MongoDB Database Manual · Handle Duplicate Data",
+    "answer_basis": "A hot product-detail read returns product data plus five recent reviews, while a separate path paginates every review. Model the Product–Review one-to-many relationship from those query shapes: keep a bounded recentReviews subset with the product and store every review separately with its productId. When a review is created, write the full review and refresh the bounded subset. The schema follows concrete reads and writes, not entity nouns alone.",
+    "answer_rubric": {
+      "mechanism": "Derives the Product–Review relationship from the two endpoints, keeps the bounded hot subset with the product, and retains the complete review collection for pagination.",
+      "acceptable_alternative": "Keeping every review separate and joining on read is valid if measured workload and latency make the extra lookup acceptable; the choice must still be justified from the access patterns.",
+      "trade_off": "The hot endpoint becomes one read with a smaller working set, at the cost of duplicated recent reviews and coordinated writes.",
+      "failure_mode": "Embedding an unbounded review array makes the product document and working set grow, while normalizing reflexively can impose a lookup on the dominant read.",
+      "misconception": "Entity relationships alone do not determine storage shape, and duplication is not automatically incorrect when it serves a bounded access pattern."
+    },
+    "canonical_question": "A product page must return product details and the five newest reviews in one hot read, while another endpoint paginates every review. How would you shape the product and review data from those access patterns?"
   },
   {
     "topic": "Denormalization: duplicating data for a read path without losing update correctness",
     "category": "Core Concept",
     "target_week": 2,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/data-modeling",
-    "source_section": "Data Modeling",
-    "activation_prerequisite": "Complete Data Modeling",
-    "evidence": "official_course"
+    "source_url": "https://www.mongodb.com/docs/manual/data-modeling/enforce-consistency/transactions/",
+    "source_section": "Enforce Data Consistency with Transactions → Steps → Configure a transaction to handle updates",
+    "activation_prerequisite": "Complete V4-W2-L1 · Model prompts, conversations, and eval evidence from access patterns",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "source_label": "MongoDB Database Manual · Enforce Data Consistency with Transactions",
+    "answer_basis": "A seller read is optimized by duplicating product name and price inside the seller document while the product collection serves product reads. When prices must never disagree, update both copies in one transaction so either both changes commit or neither does. Transactions add contention and performance cost; if prices change frequently enough that this is unacceptable, remove the duplicate or reference one canonical copy.",
+    "answer_rubric": {
+      "mechanism": "Names the duplicated seller read model and updates both the product and seller copies atomically in one transaction.",
+      "acceptable_alternative": "Embedding the value in one atomic document or replacing the duplicate with a reference is valid when it still satisfies the required reads.",
+      "trade_off": "Denormalization removes a read-time lookup but adds storage, coordinated writes, and transaction cost.",
+      "failure_mode": "Two independent writes, or an asynchronous repair without an explicitly permitted stale window, can expose conflicting prices.",
+      "misconception": "Two writes issued by the same service are not automatically atomic, and denormalization does not make inconsistency unavoidable."
+    },
+    "canonical_question": "A seller endpoint embeds current product prices so it can answer in one read, while product pages read the product collection; the two prices must never disagree. How would you preserve that read optimization without losing update correctness?"
   },
   {
     "topic": "B-tree lookup and range scans: how page locality shapes read cost",
     "category": "Core Concept",
     "target_week": 2,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/db-indexing",
-    "source_section": "Database Indexing",
-    "activation_prerequisite": "Complete Database Indexing",
-    "evidence": "official_course"
+    "source_url": "https://www.postgresql.org/docs/18/indexes.html",
+    "source_section": "§11.2.1 B-Tree; §11.9 Index-Only Scans and Covering Indexes",
+    "activation_prerequisite": "Complete V4-W2-L2 · Choose indexes from query shape",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "source_label": "PostgreSQL 18 · Indexes",
+    "answer_basis": "A B-tree can seek to the beginning of a timestamp range and scan ordered matching entries. PostgreSQL's secondary index is separate from the heap, so nearby index entries can point to rows scattered across many heap pages, producing expensive random fetches. If the query only returns created_at and event_id, (created_at) INCLUDE (event_id) makes an index-only scan physically possible, although recently modified pages without an all-visible bit still require heap visits. A broad range can still favor a bitmap or sequential plan.",
+    "answer_rubric": {
+      "mechanism": "Connects the ordered B-tree range scan to separate, potentially scattered heap fetches and explains how a covering index can avoid many of them.",
+      "acceptable_alternative": "A bitmap heap scan is acceptable when it is explicitly chosen to batch or reorder heap access rather than pretending the heap is already index-ordered.",
+      "trade_off": "A covering index reduces heap I/O for suitable, mostly visible data but increases index size and write maintenance.",
+      "failure_mode": "Treating cost as only tree descent plus matching entries ignores random heap-page reads for returned columns.",
+      "misconception": "Adjacent entries in a secondary B-tree do not imply adjacent table rows, and INCLUDE does not guarantee an index-only scan."
+    },
+    "canonical_question": "An events endpoint reads event_id and created_at for a one-hour created_at range in timestamp order. It already has a B-tree on created_at, but the index scan is still slow. Where are the page reads coming from, and what index change could remove many of them?"
   },
   {
     "topic": "Composite indexes: left-prefix matching, column order, and covering a query",
     "category": "Core Concept",
     "target_week": 2,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/db-indexing",
-    "source_section": "Database Indexing",
-    "activation_prerequisite": "Complete Database Indexing",
-    "evidence": "official_course"
+    "source_url": "https://www.postgresql.org/docs/18/indexes.html",
+    "source_section": "§11.3 Multicolumn Indexes; §11.4 Indexes and ORDER BY; §11.9 Index-Only Scans and Covering Indexes",
+    "activation_prerequisite": "Complete V4-W2-L2 · Choose indexes from query shape",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "source_label": "PostgreSQL 18 · Indexes",
+    "answer_basis": "For SELECT created_at, total_cents FROM orders WHERE tenant_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 50, use (tenant_id, status, created_at DESC) INCLUDE (total_cents). The leading equality columns bound the relevant index region, created_at supplies the requested order and early LIMIT, and total_cents is payload for a possible index-only scan. An ascending created_at key scanned backward is equivalent here. A time-first index does not align the leading equality filters and can scan across many tenants.",
+    "answer_rubric": {
+      "mechanism": "Places the equality filters first, the ordered range/output key next, and non-search payload in INCLUDE.",
+      "acceptable_alternative": "(tenant_id, status, created_at) scanned backward is equivalent for this query.",
+      "trade_off": "The index can avoid sorting and heap reads, but wider indexes consume space, increase write cost, and only gain index-only behavior when visibility permits.",
+      "failure_mode": "(created_at, tenant_id, status) may scan a much larger time region because tenant and status no longer form the leading equality prefix.",
+      "misconception": "Composite-index permutations are not interchangeable, and choosing columns solely by global cardinality ignores the actual predicate and ordering."
+    },
+    "canonical_question": "For SELECT created_at, total_cents FROM orders WHERE tenant_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 50, what composite B-tree would you create, and why is that column order useful?"
   },
   {
-    "topic": "Write-ahead logging: committing before data pages and recovering after a crash",
+    "topic": "Online data migration: dual writing, backfill, compare, cutover, and rollback",
     "category": "Core Concept",
     "target_week": 2,
-    "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
-    "source_section": "PostgreSQL",
-    "activation_prerequisite": "Complete the PostgreSQL write-path section",
-    "evidence": "official_course"
+    "source_url": "https://stripe.com/blog/online-migrations",
+    "source_section": "A pattern for online migrations; Part 1: Dual writing; Part 2: Changing all read paths; Part 3: Changing all write paths; Part 4: Removing old data",
+    "activation_prerequisite": "Complete V4-W2-L3 · Migrate live data and reason about concurrent snapshots",
+    "evidence": "official_engineering_guidance",
+    "grounding_status": "draft_review",
+    "source_label": "Stripe Engineering · Online migrations at scale",
+    "answer_basis": "Create the new subscriptions representation, deploy dual writes for live changes, and backfill historical rows without stopping traffic. Compare old and new reads and repair mismatches before switching reads. Continue dual writing while reads move, then make the new store authoritative for writes. Keep the old data and path as the rollback boundary until parity and the cutover have remained healthy; remove them only in the final phase.",
+    "answer_rubric": {
+      "mechanism": "Orders dual write, backfill, parity comparison, read cutover, write cutover, and final retirement while retaining the old path for rollback.",
+      "acceptable_alternative": "CDC, an outbox, checksums, or shadow reads are valid alternatives when they preserve incremental synchronization, observable parity, and a reversible cutover.",
+      "trade_off": "The staged migration preserves uptime and rollback but temporarily doubles writes, adds database load, and requires repair and observability.",
+      "failure_mode": "A one-shot backfill followed immediately by cutover misses concurrent writes; deleting the old path before confidence removes rollback.",
+      "misconception": "Dual writing alone does not prove consistency—historical backfill, comparison, discrepancy repair, and staged authority changes are still required."
+    },
+    "canonical_question": "You must move a live subscriptions representation into a new table without downtime. What sequence keeps old and new data consistent, proves the new reads before cutover, and preserves rollback until the migration is complete?"
   },
   {
     "topic": "MVCC snapshots: letting readers and writers proceed while isolation anomalies remain bounded",
     "category": "Core Concept",
     "target_week": 2,
-    "source_url": "https://www.hellointerview.com/learn/system-design/deep-dives/postgres",
-    "source_section": "PostgreSQL",
-    "activation_prerequisite": "Complete the PostgreSQL concurrency section",
-    "evidence": "official_course"
+    "source_url": "https://www.postgresql.org/docs/18/mvcc.html",
+    "source_section": "§13.1 Introduction; §13.2.2 Repeatable Read Isolation Level",
+    "activation_prerequisite": "Complete V4-W2-L3 · Migrate live data and reason about concurrent snapshots",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "source_label": "PostgreSQL 18 · Concurrency Control",
+    "answer_basis": "A Repeatable Read transaction keeps the snapshot established by its first statement, so after another transaction changes stock from 1 to 0 and commits, a second ordinary SELECT still sees 1. If the first transaction then tries to update that same row, PostgreSQL cannot let it write through the stale snapshot: it raises 'could not serialize access due to concurrent update.' The application must abort and retry the whole transaction against a fresh snapshot.",
+    "answer_rubric": {
+      "mechanism": "Explains stable row-version visibility, the concurrent writer's commit, the stale transaction's update conflict, and full-transaction retry.",
+      "acceptable_alternative": "The answer may describe old and new row versions without saying MVCC, provided it predicts the same second-read and update outcome.",
+      "trade_off": "Repeatable Read provides a stable view without making readers lock out writers, but updating transactions must handle retries and the snapshot is not current state.",
+      "failure_mode": "Continuing after the serialization failure, retrying only the final statement, or overwriting the committed row would use decisions derived from a stale snapshot.",
+      "misconception": "Repeatable Read does not mean the concurrent writer is blocked or that the older snapshot remains valid for an unchecked write."
+    },
+    "canonical_question": "A Repeatable Read transaction reads stock = 1. Another transaction changes that row to 0 and commits. What does the first transaction see on a second SELECT, and what happens if it then tries to update that row?"
   },
   {
     "topic": "Cache-aside reads: miss handling, population, invalidation, and stale-data windows",
     "category": "Core Concept",
     "target_week": 3,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/caching",
-    "source_section": "Caching",
-    "activation_prerequisite": "Complete Caching",
-    "evidence": "official_course"
+    "source_url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside",
+    "source_section": "Solution; Problems and considerations; Example · UpdateEntityAsync",
+    "activation_prerequisite": "Complete V4-W3-L1 · Design cache-aside paths and contain expiration herds",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "source_label": "Microsoft Azure Architecture Center · Cache-Aside Pattern",
+    "answer_basis": "On a read, check the cache; on a miss, read the authoritative store, cache that result with a suitable expiration, and return it. On an update, commit the authoritative store before deleting the cached entry so the next read repopulates from the new value. Deleting first opens a race in which another reader sees a miss, reads the still-old store value, and puts it back. Cache-aside is not an atomic transaction across both stores, so invalidation and TTLs bound rather than eliminate stale-data windows.",
+    "answer_rubric": {
+      "mechanism": "Traces cache hit or miss, authoritative-store fetch and population, then store-first/cache-invalidate update ordering.",
+      "acceptable_alternative": "A read-through cache is equivalent if it still treats the durable store as authority and makes write invalidation and ordering explicit.",
+      "trade_off": "Cache hits reduce read latency and source load, while application-managed population and invalidation add coordination and permit bounded staleness.",
+      "failure_mode": "Deleting the cache entry before the database commit lets a concurrent miss fetch and repopulate the old value.",
+      "misconception": "A TTL does not make the cache authoritative or guarantee fresh reads; it only bounds how long an uncorrected stale entry can survive."
+    },
+    "canonical_question": "A cached profile is updated while another request misses. What exact cache-aside read and write order keeps that miss from repopulating the old profile?"
   },
   {
-    "topic": "Cache stampede and hot keys: request coalescing, jitter, replication, and negative caching",
+    "topic": "Cache stampede: expiration herds, request coalescing, and TTL jitter",
     "category": "Core Concept",
     "target_week": 3,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/caching",
-    "source_section": "Caching",
-    "activation_prerequisite": "Complete Caching",
-    "evidence": "official_course"
+    "source_url": "https://redis.io/blog/cache-layer-architecture-guide/",
+    "source_section": "What breaks a cache layer as traffic grows? → Cache stampede",
+    "activation_prerequisite": "Complete V4-W3-L1 · Design cache-aside paths and contain expiration herds",
+    "evidence": "official_engineering_guidance",
+    "grounding_status": "draft_review",
+    "source_label": "Redis · Cache Layer Architecture · Cache stampede",
+    "answer_basis": "When popular entries expire together, simultaneous misses can multiply into one origin request per caller. Add random jitter to expiration times so different keys do not expire as one batch. For each individual key, use request coalescing or single-flight loading so only the first caller fetches from the database while concurrent callers wait for that result. Jitter does not stop a herd on one key, and coalescing alone does not desynchronize many different keys.",
+    "answer_rubric": {
+      "mechanism": "Combines per-key single-flight refill with randomized TTL offsets across keys.",
+      "acceptable_alternative": "Application- or cache-level singleflight is equivalent to request coalescing when one request fetches and concurrent callers share its result; a small random TTL offset is equivalent to expiration jitter.",
+      "trade_off": "Coalescing protects the origin but makes waiters depend on one loader; jitter spreads load but makes exact expiration time variable.",
+      "failure_mode": "Fixed synchronized TTLs recreate a cross-key batch herd, while omitting same-key coalescing still lets every concurrent miss hit the database after one popular key expires.",
+      "misconception": "Jitter alone does not suppress concurrent misses for one expired key, and replication, negative caching, or consistent hashing is not a substitute for this refill mechanism."
+    },
+    "canonical_question": "A deployment warms thousands of popular cache keys at once; an hour later they expire together and each key receives many concurrent requests. How should expiration and refill behavior change to keep the database from seeing the herd?"
   },
   {
-    "topic": "Hash sharding: routing a key, adding capacity, and migrating ownership",
+    "topic": "Leader/follower replication: majority commit, lagging followers, and safe failover",
     "category": "Core Concept",
     "target_week": 3,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/sharding",
-    "source_section": "Sharding",
-    "activation_prerequisite": "Complete Sharding",
-    "evidence": "official_course"
+    "source_url": "https://raft.github.io/raft.pdf",
+    "source_section": "§5.2 Leader election; §5.3 Log replication; §5.4 Safety",
+    "activation_prerequisite": "Complete V4-W3-L2 · Partition, rebalance, replicate, and choose partition behavior",
+    "evidence": "primary_paper",
+    "grounding_status": "draft_review",
+    "source_label": "Ongaro and Ousterhout · In Search of an Understandable Consensus Algorithm",
+    "answer_basis": "The leader appends a command and acknowledges it only after replication to a majority, not merely after a local append or delivery to every follower. A slow minority can catch up later. Failover requires a majority election in a newer term and an up-to-date-log restriction, which ensures a candidate missing a committed entry cannot win. An isolated former leader cannot commit new work without a majority. Quorum intersection and term-based leadership preserve acknowledged entries and prevent two partitioned leaders from both committing conflicting histories.",
+    "answer_rubric": {
+      "mechanism": "Requires majority replication before acknowledgment and a majority, log-fresh election before a replacement leader may commit.",
+      "acceptable_alternative": "Another quorum-based leader protocol using epochs or terms, intersecting quorums, and fencing of stale leaders is equivalent.",
+      "trade_off": "Majority acknowledgment adds network latency and makes writes unavailable without a quorum, while allowing a lagging minority not to block normal commits.",
+      "failure_mode": "Acknowledging a local asynchronous write and then promoting a lagging replica can lose acknowledged data; health-check promotion without quorum or fencing can create conflicting leaders.",
+      "misconception": "Merely having several replicas does not make failover safe, and an isolated old leader cannot safely keep committing because it still believes it is primary."
+    },
+    "canonical_question": "In a three-node leader/follower log, the leader acknowledges an order and then becomes isolated before one follower receives it. What commit and election rules allow failover without losing that acknowledged order or letting two leaders commit?"
   },
   {
-    "topic": "Range sharding: preserving scans while detecting and splitting hot ranges",
+    "topic": "Range sharding: ordered tablets, split boundaries, and scan-preserving routing",
     "category": "Core Concept",
     "target_week": 3,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/sharding",
-    "source_section": "Sharding",
-    "activation_prerequisite": "Complete Sharding",
-    "evidence": "official_course"
+    "source_url": "https://research.google.com/archive/bigtable-osdi06.pdf",
+    "source_section": "§2 Data model; §5 Implementation; §5.1 Tablet location; §5.2 Tablet assignment; §7 Performance evaluation",
+    "activation_prerequisite": "Complete V4-W3-L2 · Partition, rebalance, replicate, and choose partition behavior",
+    "evidence": "primary_paper",
+    "grounding_status": "draft_review",
+    "source_label": "Google Research · Bigtable: A Distributed Storage System for Structured Data",
+    "answer_basis": "Keep the row-key space in lexicographic order and partition it dynamically into contiguous tablets. Tablet boundaries are row keys; the master assigns each tablet to one tablet server, while clients use cached tablet-location metadata to route reads and writes directly to the serving tablet. When a tablet grows, split it at a row-key boundary and assign the ordered children independently. A row-range scan still follows the global key order across every tablet covering that interval. Choose row keys that keep intended scans local: splitting manages distribution and size, but it does not repair a key layout that concentrates every important access in one narrow interval.",
+    "answer_rubric": {
+      "mechanism": "Defines contiguous ordered tablet boundaries, splits a growing tablet at a row key, assigns the children, and uses tablet-location metadata to route each part of a range scan.",
+      "acceptable_alternative": "Any ordered range partitioner is equivalent if split boundaries, placement, and routing metadata remain explicit and scans traverse the tablets covering the requested key interval.",
+      "trade_off": "Range ownership preserves locality and ordered scans but is more exposed to skew than hash distribution and requires split/routing management.",
+      "failure_mode": "Stale or missing tablet-location metadata sends the client to the wrong server and requires a metadata lookup before retry; a poor row-key layout can still destroy useful locality.",
+      "misconception": "Splitting a tablet does not hash or reorder its keys, and a row-range scan does not stop at the new tablet boundary."
+    },
+    "canonical_question": "A lexicographically keyed event table has one growing tablet but must preserve range scans. How should that tablet be split and placed, and how does a client route a scan that crosses the new boundary?"
   },
   {
     "topic": "Consistent hashing: ring ownership, virtual nodes, and bounded key movement",
     "category": "Core Concept",
     "target_week": 3,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/consistent-hashing",
-    "source_section": "Consistent Hashing",
-    "activation_prerequisite": "Complete Consistent Hashing",
-    "evidence": "official_course"
+    "source_url": "https://www.amazon.science/publications/dynamo-amazons-highly-available-key-value-store",
+    "source_section": "§4.2 Partitioning Algorithm; §4.9 Adding/Removing Storage Nodes",
+    "activation_prerequisite": "Complete V4-W3-L2 · Partition, rebalance, replicate, and choose partition behavior",
+    "evidence": "primary_paper",
+    "grounding_status": "draft_review",
+    "source_label": "Amazon Dynamo · Highly Available Key-value Store",
+    "answer_basis": "Hash keys and ownership tokens into one circular space, and route a key to the first owning token clockwise. Give each physical node multiple virtual-node tokens so load and capacity changes are spread across many intervals. When a node joins, its new tokens take only the intervals that now precede those tokens; former owners transfer those intervals while membership, routing, and data handoff are coordinated. Other intervals remain owned where they were. Virtual nodes improve balance but do not eliminate migration work or make ordered range scans natural.",
+    "answer_rubric": {
+      "mechanism": "Places keys and virtual-node tokens on one ring, routes clockwise, and transfers only intervals captured by the joining node's tokens.",
+      "acceptable_alternative": "A token-range implementation without drawing a literal ring is equivalent if ownership and bounded reassignment are the same.",
+      "trade_off": "Virtual nodes improve balance and incremental growth but add token metadata and migration work, while hashing gives up natural key-order scans.",
+      "failure_mode": "Publishing new routing before the corresponding ranges are available can create misses or divergent writes; inconsistent membership views can route the same key to different owners.",
+      "misconception": "Consistent hashing is not hash(key) mod node_count, and virtual nodes are ownership positions rather than replicas."
+    },
+    "canonical_question": "A five-node key-value cluster adds a sixth node during live traffic. How should virtual-node ownership determine exactly which keys move and when clients may route them to the new node?"
   },
   {
     "topic": "CAP during a partition: choosing which operations remain available and which must reject",
     "category": "Core Concept",
     "target_week": 3,
-    "source_url": "https://www.hellointerview.com/learn/system-design/core-concepts/cap-theorem",
-    "source_section": "CAP Theorem",
-    "activation_prerequisite": "Complete CAP Theorem",
-    "evidence": "official_course"
+    "source_url": "https://doi.org/10.1109/MC.2012.37",
+    "source_section": "CAP Confusion; The partition decision; Partition recovery",
+    "activation_prerequisite": "Complete V4-W3-L2 · Partition, rebalance, replicate, and choose partition behavior",
+    "evidence": "primary_paper",
+    "grounding_status": "draft_review",
+    "source_label": "Eric Brewer · CAP Twelve Years Later",
+    "answer_basis": "CAP's operational decision occurs when communication exceeds the operation's time bound. For each operation or data invariant, either reject, block, or constrain one side to preserve single-copy consistency, or allow both sides to proceed and accept a defined inconsistency that recovery can reconcile or compensate. A last-seat reservation can require quorum authority and reject on the minority side, while a catalog-description read can remain available with explicitly stale data. The choice can vary by operation; it is not one permanent database-wide label.",
+    "answer_rubric": {
+      "mechanism": "Detects partition mode and explicitly assigns each operation either consistency-preserving rejection/authority or available execution with defined reconciliation.",
+      "acceptable_alternative": "Serving stale noncritical reads while rejecting invariant-sensitive writes is equivalent if the semantics and recovery path are explicit.",
+      "trade_off": "Preserving the invariant sacrifices availability or latency for affected operations; proceeding on both sides preserves responsiveness but risks divergence and recovery work.",
+      "failure_mode": "Allowing both regions to reserve the same last unit can violate the invariant, while rejecting every harmless read needlessly discards availability.",
+      "misconception": "CAP is not 'choose two forever,' and partition tolerance is not a feature a distributed system can simply disable when communication fails."
+    },
+    "canonical_question": "Two regions lose contact while one seat remains. Which reservation and catalog-read operations should continue or reject, and what consistency consequence does each choice accept?"
   },
   {
     "topic": "PostgreSQL query path: indexes, transactions, replicas, and the write bottleneck",

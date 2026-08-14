@@ -335,7 +335,7 @@ change faster than this file does — do not write Anthropic calls from memory.
   *plus* output). **The post-fix re-run did not happen: the Anthropic account ran
   out of credit.** The fixes are unit-tested; they are not live-tested.
   The deterministic first-party plan does not use that model path: its reviewed
-  content-version-5 manifest has 116 stable items, exact resources,
+  content-version-6 manifest has 116 stable items, exact resources,
   dependencies, and mapped topics, and its create/upgrade path makes no LLM
   call. Eight existing Learn rows integrate 11 hours of application-side AI
   systems without changing weekly capacity; `requires_fresh_completion`

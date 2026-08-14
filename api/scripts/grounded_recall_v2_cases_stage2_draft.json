@@ -9,7 +9,7 @@
     "review_note": "Proposed Recall 0 initial-flow label only; learner text and label require owner human review against approved grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-0-1",
@@ -26,7 +26,7 @@
     "review_note": "Proposed Recall 1 initial-flow label for fluent but reversed sequencing; learner text and label require owner human review against approved grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-0-1",
@@ -54,7 +54,7 @@
     "review_note": "Proposed terminal Recall 2 at the two-probe cap; the transcript still omits the external interface and requirement-driven end-to-end sequence, but text and label require owner human review before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "terminal-turn",
       "two-probe-cap",
@@ -73,7 +73,7 @@
     "review_note": "Proposed Recall 5 self-correction case; whether the correction is precise and complete enough for 5 requires owner human review against approved grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "partial-self-correction",
@@ -100,7 +100,7 @@
     "review_note": "Proposed terminal Recall 1 for a still-generic checklist after two probes; learner text and label require owner human review against approved grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "terminal-turn",
       "two-probe-cap",
@@ -129,7 +129,7 @@
     "review_note": "Proposed terminal Recall 2 because one useful latency constraint is supplied but the essential prioritization and reliability/consistency account remains materially incomplete; owner human review is required before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "terminal-turn",
       "two-probe-cap",
@@ -148,7 +148,7 @@
     "review_note": "Proposed Recall 4 for a source-compatible SLO framing; precision and completeness require owner human review against approved grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
@@ -166,7 +166,7 @@
     "review_note": "Proposed Recall 3 initial-flow label for a noisy but substantially correct account with a possible bounded omission; owner human review must decide the exact Recall before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
@@ -184,7 +184,7 @@
     "review_note": "Proposed Recall 3 because authentication and resource authorization are present while the client-controlled body identity boundary is only implicit; owner human review is required before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
@@ -201,7 +201,7 @@
     "review_note": "Proposed Recall 4 initial-flow label for a substantially complete account; owner human review must decide whether any omission changes the exact numeral before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
@@ -228,7 +228,7 @@
     "review_note": "Proposed terminal Recall 3 at the cap with the essential authentication/authorization boundary recovered but one bounded omission; exact scoring requires owner human review before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "terminal-turn",
       "two-probe-cap",
@@ -257,7 +257,7 @@
     "review_note": "Proposed terminal Recall 4 at the two-probe cap for a recovered, substantially complete account; owner human review is required before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "terminal-turn",
       "two-probe-cap",
@@ -276,7 +276,7 @@
     "review_note": "Proposed Recall 1 current-turn label despite a correct stale summary; learner text and label require owner human review before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "prior-summary-contradiction",
@@ -299,7 +299,7 @@
     "review_note": "Proposed one-probe insufficiency at Recall 3 because recognizing the key may not yet distinguish returning or awaiting one recorded result; owner human review must approve both text and flow before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "one-probe-insufficiency",
       "follow-up-anchored",
@@ -322,7 +322,7 @@
     "review_note": "Proposed terminal Recall 4 after one probe supplies the essential replay-safe account; exact label and learner evidence require owner human review before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "one-probe-terminal",
       "follow-up-anchored",
@@ -339,7 +339,7 @@
     "review_note": "Proposed Recall 5 self-correction case; precision and completeness require owner human review against approved grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "partial-self-correction",
@@ -357,7 +357,7 @@
     "review_note": "Proposed Recall 1 current-turn label for an encoded-offset misconception despite the stale correct summary; owner human review is required before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "prior-summary-contradiction",
@@ -375,7 +375,7 @@
     "review_note": "Proposed Recall 4 for an approved-equivalent keyset framing; the exact numeral requires owner human review against grounding before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "source-compatible-alternative",
@@ -392,7 +392,7 @@
     "review_note": "Proposed Recall 3 for the essential stable-boundary mechanism with ordering and insertion consequences abbreviated; owner human review is required before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
@@ -409,7 +409,7 @@
     "review_note": "Proposed Recall 1 because fluent ritual arithmetic does not identify the decision-changing bound; learner text and label require owner human review before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "adjacent-jargon",
@@ -426,7 +426,7 @@
     "review_note": "Proposed Recall 3 initial-flow label for a noisy essential account with abbreviated application; exact scoring requires owner human review before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
@@ -444,11 +444,395 @@
     "review_note": "Proposed Recall 4 for a substantially complete decision-linked estimate; owner human review must decide whether it is precise enough for this numeral before any live call.",
     "tags": [
       "v2-recall-draft",
-      "week1-canary-only",
+      "stage2-week1-draft",
       "pending-owner-review",
       "initial-turn",
       "initial-boundary-3-4",
       "source-compatible-alternative",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft week2 data model — initial no recall",
+    "topic": "Data modeling from access patterns: deriving entities, relationships, and query shapes",
+    "target_week": 2,
+    "answer": "I don't remember how those endpoints should change the schema.",
+    "expected_recall": 0,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 0 initial-flow label; the learner text and label require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-0-1",
+      "recall-0"
+    ]
+  },
+  {
+    "name": "draft week2 denormalization — initial fluent wrong repair",
+    "topic": "Denormalization: duplicating data for a read path without losing update correctness",
+    "target_week": 2,
+    "answer": "Copy the prices into the seller document, make that copy canonical, and let the product collection catch up through a TTL refresh. Since both are in MongoDB, clients will not observe a mismatch.",
+    "expected_recall": 1,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 1 initial-flow label for a fluent but incorrect consistency repair; the learner text and label require owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-0-1",
+      "adjacent-jargon",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft week2 btree — initial locality with bounded omission",
+    "topic": "B-tree lookup and range scans: how page locality shapes read cost",
+    "target_week": 2,
+    "answer": "the tree seeks to the first timestamp then scans matching keys um but the rows can be scattered through heap pages so payload fetches turn random a covering created at index including event id could keep the read in the index",
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 3 initial-flow label for a noisy, substantially correct locality account with a bounded omission; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "speech-noise",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft week2 composite — initial backward-scan alternative",
+    "topic": "Composite indexes: left-prefix matching, column order, and covering a query",
+    "target_week": 2,
+    "answer": "Use tenant_id, status, then created_at, with total_cents included. The equality prefix narrows one tenant's open orders, created_at lets LIMIT stop early, and PostgreSQL can scan an ascending created_at key backward for DESC. INCLUDE can avoid fetching the total from the heap when index-only conditions hold.",
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 4 initial-flow label for a source-compatible backward-scan account; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "source-compatible-alternative",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft week2 migration — terminal one-shot cutover at cap",
+    "topic": "Online data migration: dual writing, backfill, compare, cutover, and rollback",
+    "target_week": 2,
+    "mastery_summary": "previously recalled the staged online-migration sequence unaided",
+    "answer": "Run one backfill, switch the application to the new table, and delete the old column in the same release.",
+    "probes": [
+      {
+        "question": "How do live writes stay represented while the backfill runs?",
+        "answer": "Pause writes briefly at the end; dual writing would only complicate it."
+      },
+      {
+        "question": "What proves new reads are safe before the old path is removed?",
+        "answer": "If the backfill process exits successfully, that is enough to cut over and drop the old data."
+      }
+    ],
+    "expected_recall": 1,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 1 at the two-probe cap despite a stale correct summary; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "prior-summary-contradiction",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft week2 mvcc — terminal snapshot but wrong conflict outcome",
+    "topic": "MVCC snapshots: letting readers and writers proceed while isolation anomalies remain bounded",
+    "target_week": 2,
+    "answer": "Repeatable Read keeps the first snapshot, so I think the writer has to wait until the reader commits.",
+    "probes": [
+      {
+        "question": "The writer has already committed; what does the reader's second SELECT see?",
+        "answer": "It still sees stock 1 from its original snapshot."
+      },
+      {
+        "question": "What happens if that transaction now updates the same row?",
+        "answer": "It probably overwrites the newer value—actually the database may notice, but I don't remember whether only that statement retries."
+      }
+    ],
+    "expected_recall": 2,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 2 for recovering snapshot visibility but not the correct conflict-and-retry outcome; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "terminal-boundary-2-3",
+      "partial-self-correction",
+      "recall-2"
+    ]
+  },
+  {
+    "name": "draft week2 data model — terminal reconstruction after probe",
+    "topic": "Data modeling from access patterns: deriving entities, relationships, and query shapes",
+    "target_week": 2,
+    "answer": "Product and Review are related, so I would put every review inside the product.",
+    "probes": [
+      {
+        "question": "The hot endpoint needs only five recent reviews and another endpoint paginates all reviews; how does that change the shape?",
+        "answer": "Keep a bounded five-review subset with the product for the hot read, store every review separately by product for pagination, and update both when a new review arrives."
+      }
+    ],
+    "expected_recall": 3,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 3 after one probe reconstructs the essential access-pattern shape; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "terminal-boundary-2-3",
+      "terminal-boundary-3-4",
+      "follow-up-anchored",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft week2 denormalization — terminal atomic repair",
+    "topic": "Denormalization: duplicating data for a read path without losing update correctness",
+    "target_week": 2,
+    "answer": "Write the canonical product first and propagate the seller copy asynchronously.",
+    "probes": [
+      {
+        "question": "The contract permits no stale-price window; what consistency repair fits?",
+        "answer": "Update the product and seller copies in one transaction so both commit or neither does. If that cost is unacceptable for a frequently changing price, stop duplicating it and reference the canonical product instead."
+      }
+    ],
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 4 after one probe supplies an atomic repair and source-compatible fallback; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week2-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "terminal-boundary-3-4",
+      "follow-up-anchored",
+      "source-compatible-alternative",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft week3 cache-aside — initial no recall",
+    "topic": "Cache-aside reads: miss handling, population, invalidation, and stale-data windows",
+    "target_week": 3,
+    "answer": "I know Redis makes reads faster, but I cannot reconstruct the miss path or the update order.",
+    "expected_recall": 0,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 0 initial-flow label; the learner text and label require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-0-1",
+      "recall-0"
+    ]
+  },
+  {
+    "name": "draft week3 stampede — initial adjacent cache jargon",
+    "topic": "Cache stampede: expiration herds, request coalescing, and TTL jitter",
+    "target_week": 3,
+    "answer": "Replicate the Redis shard, negative-cache misses, and use consistent hashing so hot keys spread out. Fixed one-hour TTLs are fine once there are enough replicas.",
+    "expected_recall": 1,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 1 initial-flow label for adjacent cache jargon that misses expiration-herd controls; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-0-1",
+      "adjacent-jargon",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft week3 replication — initial noisy majority account",
+    "topic": "Leader/follower replication: majority commit, lagging followers, and safe failover",
+    "target_week": 3,
+    "answer": "the leader appends and waits for a majority before ack um not every follower, a lagging minority catches up, and only a majority-elected candidate whose log is not behind can take over; I do not remember the exact term and index comparison",
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 3 initial-flow label for a noisy majority account with a bounded election-detail omission; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "speech-noise",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft week3 range — initial ordered-tablet account",
+    "topic": "Range sharding: ordered tablets, split boundaries, and scan-preserving routing",
+    "target_week": 3,
+    "answer": "Keep the global row-key space sorted in contiguous tablets, split the growing tablet at a row-key boundary, and assign the ordered children independently. Clients use tablet-location metadata to route each part of a range scan, so the scan continues in key order across the new boundary.",
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 4 initial-flow label for a substantially complete ordered-tablet account; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "source-compatible-alternative",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft week3 consistent hashing — terminal wrong ownership at cap",
+    "topic": "Consistent hashing: ring ownership, virtual nodes, and bounded key movement",
+    "target_week": 3,
+    "answer": "Use virtual nodes to keep the load even when the sixth node joins.",
+    "probes": [
+      {
+        "question": "You said virtual nodes keep load even; which keys should the joining node take?",
+        "answer": "It takes some nearby ranges, but I do not remember how those ranges are selected."
+      },
+      {
+        "question": "What selects those ranges, and when should routing switch?",
+        "answer": "Recompute hash of every key modulo six and move every key to its new modulo owner immediately; virtual nodes are replicas."
+      }
+    ],
+    "expected_recall": 1,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 1 at the two-probe cap for a wrong modulo-based ownership account; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft week3 cap — terminal unsafe reservation at cap",
+    "topic": "CAP during a partition: choosing which operations remain available and which must reject",
+    "target_week": 3,
+    "answer": "During a partition the service has to decide which side keeps handling operations, but I would usually keep both regions available.",
+    "probes": [
+      {
+        "question": "For the last-seat reservation, can both available regions accept the write?",
+        "answer": "Maybe one should reject if they cannot coordinate, but we could also let both accept and merge afterward."
+      },
+      {
+        "question": "Which behavior preserves the one-seat invariant?",
+        "answer": "Keep both available and let last-write-wins choose one reservation after the partition."
+      }
+    ],
+    "expected_recall": 2,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 2 at the cap for recognizing the choice but preserving the invariant incorrectly; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "terminal-boundary-2-3",
+      "recall-2"
+    ]
+  },
+  {
+    "name": "draft week3 cache-aside — terminal correct order with bounded omission",
+    "topic": "Cache-aside reads: miss handling, population, invalidation, and stale-data windows",
+    "target_week": 3,
+    "answer": "Check the cache, read the database on a miss, and cache that result.",
+    "probes": [
+      {
+        "question": "You described the read path; when the profile changes, which write comes first?",
+        "answer": "Commit the database update first, then delete the cache entry."
+      },
+      {
+        "question": "What specific stale-value failure does that ordering avoid?",
+        "answer": "It makes the next reader repopulate only after the durable change instead of leaving the prior cached value around."
+      }
+    ],
+    "expected_recall": 3,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 3 at the cap for the correct update order with a bounded stale-race omission; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "follow-up-anchored",
+      "terminal-boundary-2-3",
+      "terminal-boundary-3-4",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft week3 stampede — terminal coalescing and jitter at cap",
+    "topic": "Cache stampede: expiration herds, request coalescing, and TTL jitter",
+    "target_week": 3,
+    "answer": "Add random variation to TTLs so all the warmed keys do not expire in the same second.",
+    "probes": [
+      {
+        "question": "Jitter spreads different keys; what happens when many callers still miss the same popular key?",
+        "answer": "Only the first request should fetch from the database while the other same-key misses wait for and share that result."
+      },
+      {
+        "question": "What different expiration load pattern does each mechanism address?",
+        "answer": "Jitter staggers expiration across different keys; coalescing makes concurrent misses for one expired key wait for the first request's database result."
+      }
+    ],
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 4 at the cap for a complete coalescing-and-jitter account; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week3-stage2-draft",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "follow-up-anchored",
+      "terminal-boundary-3-4",
       "recall-4"
     ]
   }

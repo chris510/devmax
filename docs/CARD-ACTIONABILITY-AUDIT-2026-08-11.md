@@ -8,6 +8,14 @@
 > findings below; they do not change the content-approval result: six cards are
 > ready, one is a reviewed draft candidate, and 47 remain blocked until grounded.
 
+> **2026-08-14 follow-up:** Curriculum v6 authors complete `draft_review`
+> grounding for all twelve Week 2–3 cards from primary or official technical
+> sources. WAL is replaced by reversible online migration, basic hash sharding
+> by quorum-safe leader/follower replication, and cache stampede is narrowed to
+> expiration herds, request coalescing, and TTL jitter. These drafts are not
+> approved or activated; their source claims, questions, rubrics, and 38-case V2
+> evaluation pack still require explicit owner review.
+
 ## Verdict
 
 The 54-card base deck is a credible recall spine, but only Week 1 is ready for
@@ -17,8 +25,8 @@ approved retrieval.
 | Activation state | Cards |
 |---|---:|
 | Ready: approved basis, rubric, question, and source | 6 |
-| Draft: fully authored but awaiting human approval | 1 |
-| Blocked: topic-level provenance only | 47 |
+| Draft: fully authored but awaiting human approval | 13 |
+| Blocked: topic-level provenance only | 35 |
 | **Total** | **54** |
 
 Question shape is a separate judgment from activation:
@@ -28,18 +36,21 @@ Question shape is a separate judgment from activation:
 | Atomic: can support one scenario and one central retrieval | 35 |
 | Narrow first: currently bundles multiple decisions or mechanisms | 19 |
 
-“Atomic” does not mean approved. Except for the six ready cards and the one
-Twitter draft, every card still needs a trusted answer basis, five-field rubric,
-fixed canonical question, spoken-answer check, source review, and evaluation
-cases.
+“Atomic” does not mean approved. The six ready cards are unchanged. The twelve
+Week 2–3 drafts and one Twitter draft now have a basis, rubric, and question, but
+still need owner source review, spoken-answer review, and evaluation approval.
+The other 35 cards still need complete grounding.
 
 ## Structural blockers
 
 - All 54 entries have source URL, section, evidence, and a written activation
-  prerequisite. There are 31 unique URLs: 53 cards cite Hello Interview and one
-  cites a primary practitioner talk.
-- The six Week 1 cards are approved. The historical Twitter fan-out card is a
-  complete draft. The remaining 47 have no approved answer authority.
+  prerequisite. After the curriculum v6 draft update there are 36 unique URLs:
+  41 cards cite Hello Interview, six cite official documentation, two cite
+  official engineering guidance, four cite primary papers, and one cites a
+  primary practitioner talk.
+- The six Week 1 cards are approved. The twelve Week 2–3 cards and historical
+  Twitter fan-out card are complete drafts. The remaining 35 have no approved
+  answer authority.
 - At audit time, the curated Study Plan had 84 generic items, empty source
   excerpts, no actionable source links, and no explicit card mapping. Curriculum
   v4 resolves those structural findings with direct resources, specific
@@ -50,10 +61,12 @@ cases.
 
 ### Source-access risk
 
-Hello Interview is the provenance for 53 cards. In this audit, 13 of the 31
-distinct source pages displayed an explicit Premium gate; those pages support 28
-cards. The user subsequently confirmed Premium access, so those links are usable
-for this private plan.
+At the original 2026-08-11 snapshot, Hello Interview was the provenance for 53
+cards. Thirteen of the 31 distinct source pages displayed an explicit Premium
+gate and supported 28 cards. The user subsequently confirmed Premium access, so
+those links are usable for this private plan. Curriculum v6 replaces twelve of
+those card citations with official or primary technical sources; the historical
+Premium figures are retained here only to document the original audit.
 
 Before a card is exposed, the product must either confirm that its complete
 source is accessible or provide a concise, human-approved, internally authored
@@ -77,34 +90,34 @@ The active Week 1 cohort requires Delivery Framework, API Design, and Networking
 Essentials. The current Week 1 Plan teaches only Delivery and requirements; API
 and networking are still placed in Week 2.
 
-### Week 2 — blocked
+### Week 2 — draft review
 
 | Card | State | Shape | Required action |
 |---|---|---|---|
-| Data modeling from access patterns | Blocked | Atomic | Author one endpoint-driven schema scenario, basis, rubric, and question. |
-| Denormalization without losing update correctness | Blocked | Atomic | Ground one read-optimized duplicate and its consistency repair. |
-| B-tree lookup and range scans | Blocked | Atomic | Ground one equality/range query and page-locality decision. |
-| Composite indexes and left-prefix matching | Blocked | Atomic | Ground one concrete query and index-column order. |
-| Write-ahead logging and crash recovery | Blocked | Atomic | Replace with online data migration before grounding. |
-| MVCC snapshots and bounded anomalies | Blocked | Atomic | Ground one concurrent-update snapshot scenario; do not quiz every isolation anomaly. |
+| Data modeling from access patterns | Draft | Atomic | Owner-review the endpoint-driven schema scenario, basis, rubric, and question. |
+| Denormalization without losing update correctness | Draft | Atomic | Owner-review the read-optimized duplicate and its consistency repair. |
+| B-tree lookup and range scans | Draft | Atomic | Owner-review the concrete range query and page-locality decision. |
+| Composite indexes and left-prefix matching | Draft | Atomic | Owner-review the concrete query and index-column order. |
+| Online data migration | Draft | Atomic | Owner-review the reversible dual-write, backfill, comparison, cutover, and rollback sequence. |
+| MVCC snapshots and bounded anomalies | Draft | Atomic | Owner-review the concurrent-update snapshot scenario and retry boundary. |
 
-None of these prerequisites appears as a source-bearing Week 2 Learn item. The
-Plan currently teaches the API and networking material already required by the
-active Week 1 cohort.
+Curriculum v6 now provides source-bearing Week 2 Learn items and complete card
+drafts. None is actionable until the owner verifies the linked source claims,
+question, basis, rubric, and pending V2 labels.
 
-### Week 3 — blocked
+### Week 3 — draft review
 
 | Card | State | Shape | Required action |
 |---|---|---|---|
-| Cache-aside reads and stale-data windows | Blocked | Atomic | Ground one miss/populate/invalidate race. |
-| Cache stampede and hot keys | Blocked | Narrow first | Keep expiration herd, request coalescing, and jitter; remove unrelated negative-cache and replication branches. |
-| Hash sharding and ownership migration | Blocked | Atomic | Replace with leader/follower replication and safe failover. |
-| Range sharding and hot-range splitting | Blocked | Atomic | Ground one scan-preserving split under skew. |
-| Consistent hashing and virtual nodes | Blocked | Atomic | Ground one add-capacity/key-movement scenario. |
-| CAP behavior during a partition | Blocked | Atomic | Ask which specific operations remain available or reject; never ask for a definition. |
+| Cache-aside reads and stale-data windows | Draft | Atomic | Owner-review the miss/populate/invalidate race. |
+| Cache stampede under synchronized expiry | Draft | Atomic | Owner-review expiration jitter and same-key request coalescing. |
+| Leader/follower replication and safe failover | Draft | Atomic | Owner-review majority commit, lagging followers, and the failover safety boundary. |
+| Range sharding and scan-preserving routing | Draft | Atomic | Owner-review one ordered-tablet split, placement, and cross-boundary scan. |
+| Consistent hashing and virtual nodes | Draft | Atomic | Owner-review the add-capacity/key-movement scenario. |
+| CAP behavior during a partition | Draft | Atomic | Owner-review which specific operations remain available or reject. |
 
-The Plan promises replication, but no current card retrieves replication or
-failover safety.
+Curriculum v6 now maps all six Week 3 drafts to source-bearing Learn items,
+including replication and failover safety. Owner approval remains mandatory.
 
 ### Week 4 — five blocked, one draft
 
@@ -288,9 +301,11 @@ A card is actionable only when all of the following are true:
    prerequisite links, and specific done-when conditions. Do not silently
    rewrite the active Plan or touch card history/scheduling through a Plan
    operation.
-5. Ground the redesigned Week 2 cohort next: keep four topics, narrow MVCC, and
-   replace WAL with online migration. Apply the Week 1 human/evaluation gate.
-6. Ground Week 3 after the replication swap, then finish Week 4. The Twitter
+5. Owner-review the redesigned Week 2 drafts: keep four original topics, narrow
+   MVCC, and approve or revise the online-migration replacement. Apply the Week
+   1 human/evaluation gate before activation.
+6. Owner-review Week 3 after the replication swap and stampede narrowing, then
+   finish Week 4. The Twitter
    draft may be reviewed independently but must not appear in the existing
    production Plan without the versioned content migration.
 7. Ground a company overlay only after a real role makes it relevant; all 18

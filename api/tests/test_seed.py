@@ -200,11 +200,22 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     ]
     assert len(practitioner_sources) == 1
     assert practitioner_sources[0]["evidence"] == "primary_practitioner_talk"
-    assert all(
-        entry["source_url"].startswith("https://www.hellointerview.com/")
-        or entry in practitioner_sources
+    official_sources = [
+        entry
         for entry in entries
-    )
+        if not entry["source_url"].startswith("https://www.hellointerview.com/")
+        and entry not in practitioner_sources
+    ]
+    assert len(official_sources) == 12
+    assert {entry["target_week"] for entry in official_sources} == {2, 3}
+    assert {entry["grounding_status"] for entry in official_sources} == {
+        "draft_review"
+    }
+    assert {entry["evidence"] for entry in official_sources} <= {
+        "official_documentation",
+        "official_engineering_guidance",
+        "primary_paper",
+    }
     assert all(e.get("activation_prerequisite") for e in entries)
     assert all(
         e["category"] == "System Design Pattern" for e in entries if 4 <= e["target_week"] <= 6
@@ -224,7 +235,7 @@ def test_the_shipped_study_plan_matches_its_documented_shape() -> None:
     )
 
 
-def test_the_week_one_grounding_pack_is_approved_and_complete() -> None:
+def test_week_one_is_approved_and_future_grounding_stays_draft() -> None:
     entries = study_plan()
     approved = [entry for entry in entries if entry.get("grounding_status") == "approved"]
     drafts = [entry for entry in entries if entry.get("grounding_status") == "draft_review"]
@@ -233,11 +244,17 @@ def test_the_week_one_grounding_pack_is_approved_and_complete() -> None:
     assert len(approved) == 6
     assert {entry["target_week"] for entry in approved} == {1}
     assert all(_validated_grounding(entry) is not None for entry in approved)
-    assert len(drafts) == 1
-    assert drafts[0]["target_week"] == 4
-    assert drafts[0]["topic"].startswith("Fan-out mechanics")
+    assert len(drafts) == 13
+    assert {entry["target_week"] for entry in drafts} == {2, 3, 4}
+    assert sum(entry["target_week"] in {2, 3} for entry in drafts) == 12
+    assert sum(
+        entry["target_week"] == 4
+        and entry["topic"].startswith("Fan-out mechanics")
+        for entry in drafts
+    ) == 1
     assert all(
-        drafts[0].get(field)
+        entry.get(field)
+        for entry in drafts
         for field in (
             "canonical_question",
             "source_url",
@@ -247,7 +264,11 @@ def test_the_week_one_grounding_pack_is_approved_and_complete() -> None:
             "answer_rubric",
         )
     )
-    assert len(remaining) == 47
+    assert all(
+        _validated_grounding({**entry, "grounding_status": "approved"}) is not None
+        for entry in drafts
+    )
+    assert len(remaining) == 35
 
 
 def test_ai_foundations_are_complete_drafts_not_self_approved_cards() -> None:

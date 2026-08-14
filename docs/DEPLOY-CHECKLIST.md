@@ -125,17 +125,22 @@ rerun is a no-op. The one-time version-2/version-3→v4 upgrade preserves the sa
 plan id but requires the old plan to be pristine; any progress, personalization,
 override, or advancement makes that legacy rewrite fail closed rather than
 misattach history. Its explicit `--start-date` becomes the corrected start for
-that legacy upgrade. The later content-version-5 upgrade keeps the same 116
-stable keys, weeks, minutes, and dependency semantics. Unfinished items receive
-the reviewed content update; a completed item marked `requires_fresh_completion`
-is preserved in full so newly added AI work cannot receive retroactive credit.
-That skipped-work debt survives later versions and same-version confirmation
-runs; completion and upgrade writes also share an item snapshot guard. The
+that legacy upgrade. The content-version-6 upgrade keeps the same 116 stable
+keys, weeks, minutes, and dependency semantics. Its two materially replaced
+lessons teach online data migration and quorum-safe replication. The manifest
+retains the eight version-5 fresh-work markers and adds both replacements, so a
+direct version-4 to version-6 upgrade has the full ten-key protection even
+without an intermediate revision. Unfinished items receive the reviewed content
+update; a completed item marked
+`requires_fresh_completion` is preserved in full so replacement work cannot
+receive retroactive credit. Skipped-work debt is also protected by the revision
+ledger and survives later marker removal and same-version confirmation runs;
+completion and upgrade writes share an item snapshot guard. The
 item-detail response carries `plan_revision`, and the current client echoes that
 loaded revision on completion. A stale value returns 409, reloads the item, and
 requires a new explicit tap. Deploy the backend first: an older client remains
-compatible for conventional and generic items but cannot complete any of the
-eight protected fresh-work keys without the revision token.
+compatible for conventional and generic items but cannot complete protected
+fresh-work keys without the revision token.
 Completing a mapped Learn item makes its already-owned, grounded cards actionable
 through Card History. Missing or unapproved future cards—including the draft AI
 foundations overlay—remain `Not ready`; they are never created or activated by
