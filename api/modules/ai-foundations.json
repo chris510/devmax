@@ -1,0 +1,86 @@
+[
+  {
+    "topic": "Training versus hosted inference: parameter updates versus prediction with a deployed model",
+    "category": "AI Foundations",
+    "target_week": 1,
+    "activation_item_key": "V4-W1-L3",
+    "activation_prerequisite": "Complete V4-W1-L3 · Trace hosted LLM inference and make ambiguous retries safe, then review this card's authority before activation.",
+    "source_url": "https://developers.google.com/machine-learning/crash-course/llm/tuning",
+    "source_section": "Fine-tuning; Prompt engineering; Offline inference",
+    "source_label": "Google Machine Learning Crash Course · Fine-tuning, distillation, and prompt engineering",
+    "evidence": "official_course",
+    "grounding_status": "draft_review",
+    "answer_basis": "Training optimizes a model from examples: loss and backpropagation update all or some parameters. Fine-tuning is additional training. Hosted online inference applies an already trained deployment to a request and generates a prediction; prompt instructions and examples condition that run but do not update its parameters. The request input and generated prediction change while the deployed parameters stay fixed. Turning logged interactions or feedback into training requires a separate data, optimization, evaluation, and deployment process that produces changed model parameters.",
+    "answer_rubric": {
+      "mechanism": "Contrasts loss-driven parameter updates during training or fine-tuning with prediction from fixed deployed parameters during ordinary inference.",
+      "acceptable_alternative": "Parameter-efficient tuning that updates only adapters or another subset still counts as training; few-shot prompting or retrieval that only changes request context does not.",
+      "trade_off": "Fine-tuning can encode task behavior into model parameters but adds dataset, training, evaluation, and deployment work; prompting is faster to change and leaves weights fixed but must supply the needed context at inference.",
+      "failure_mode": "Assuming each inference request trains the model confuses input conditioning with optimization and makes the surrounding system reason about parameter updates that did not occur.",
+      "misconception": "Calling prompt examples few-shot learning does not mean the request ran backpropagation or changed model weights."
+    },
+    "canonical_question": "A study app sends a learner's answer to a hosted language model and receives a score. What changes during that request, what stays fixed, and what would have to happen for this to count as training?"
+  },
+  {
+    "topic": "Hosted LLM request lifecycle: tokenization, prefill, autoregressive decode, and latency boundaries",
+    "category": "AI Foundations",
+    "target_week": 1,
+    "activation_item_key": "V4-W1-L3",
+    "activation_prerequisite": "Complete V4-W1-L3 · Trace hosted LLM inference and make ambiguous retries safe, then review this card's authority before activation.",
+    "source_url": "https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html",
+    "source_section": "Time to First Token; End-to-End Request Latency; Inter-token Latency",
+    "source_label": "NVIDIA NIM LLM Benchmarking · Metrics",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "answer_basis": "The application assembles a prompt and submits the API request across the network. Inside the provider's serving stack, the input is tokenized and may wait in one or more queues; their exact order is implementation-dependent. During prefill, the model processes the input context and builds the intermediate state needed for generation. Decode then generates output tokens one at a time, conditioned on the input and earlier output, until a stop condition; tokens are detokenized and may be streamed back across the network. Time to first token runs from request submission to the first received token and includes more than model compute. End-to-end latency runs through the final token; inter-token latency characterizes decode. Long input mainly pressures the first-token path, while long output or slow decode extends completion.",
+    "answer_rubric": {
+      "mechanism": "Traces prompt assembly and network submission through provider tokenization and queueing, prefill of the whole input context, autoregressive token-by-token decode, and streamed or final delivery without assuming a provider-internal queue order.",
+      "acceptable_alternative": "Calling the phases prompt processing and generation is sufficient if the answer correctly separates first-token work from subsequent sequential token generation; KV-cache internals are not required.",
+      "trade_off": "Streaming exposes the first token earlier, while a consumer that needs the complete response still pays end-to-end generation latency; input and output length pressure different portions of the path.",
+      "failure_mode": "Watching only total latency cannot distinguish transport or queueing and prefill from slow decode, so a team can optimize output generation while leaving the actual first-token bottleneck untouched.",
+      "misconception": "Time to first token is neither pure GPU prefill time nor full completion time, and decode does not generate the whole answer in one parallel step."
+    },
+    "canonical_question": "A chat endpoint waits a long time before showing any text, but tokens arrive quickly once output begins. Trace the request from prompt to final token and identify which latency boundary is probably unhealthy."
+  },
+  {
+    "topic": "Context windows versus durable conversation state: explicit history, storage, retention, and compaction",
+    "category": "AI Foundations",
+    "target_week": 2,
+    "activation_item_key": "V4-W2-L1",
+    "activation_prerequisite": "Complete V4-W2-L1 · Model prompts, conversations, and eval evidence from access patterns, then review this card's authority before activation.",
+    "source_url": "https://developers.openai.com/api/docs/guides/conversation-state",
+    "source_section": "Manually manage conversation state; Conversation objects; Data retention for model responses; Managing the context window",
+    "source_label": "OpenAI API · Conversation state",
+    "evidence": "official_documentation",
+    "grounding_status": "draft_review",
+    "answer_basis": "A text-generation request is independent and stateless unless conversation state is supplied explicitly. An application can resend prior messages, chain a previous-response identifier, or use a persisted conversation object; in every case the history lives in application or provider storage and must be referenced or sent again. A context window is the maximum token budget for one request, including input, output, and sometimes reasoning tokens—not durable memory. Stored conversation history can outlive what fits in that window, so the application must bound what enters each request through selection, summarization, or compaction. If the product requires independent retention and deletion control, it can keep an application-owned canonical record. Self-managed history gives the application more control; provider-managed state reduces replay plumbing but has explicit storage, retention, and token-billing semantics.",
+    "answer_rubric": {
+      "mechanism": "Explains that each request needs explicit prior state through replayed messages, a previous-response link, or a persisted conversation object, and distinguishes that storage from the per-request context window.",
+      "acceptable_alternative": "Either self-managed history or provider-managed conversation state is valid if the answer names where it is stored, how the next request references it, and who owns retention and deletion; an application-owned canonical copy is required only when the product needs that independent control.",
+      "trade_off": "Full replay is explicit but increases input tokens and reaches the context limit; selection or compaction lowers cost and fits longer histories but can omit information, while provider-managed persistence trades local control for convenience.",
+      "failure_mode": "Assuming the model remembers prior requests loses state after a restart or stateless call; replaying an unbounded transcript raises cost and can exceed the context window or truncate useful output.",
+      "misconception": "A context window is per-request token capacity, not a durable database, and linking a previous response does not make the earlier input tokens free."
+    },
+    "canonical_question": "A chat feature must resume a conversation next week after the app restarts. What state survives a single model request, where can the history live, and how does the next request regain useful context without exceeding the context window?"
+  },
+  {
+    "topic": "Evaluation-driven reliability: realistic cases, repeated trials, calibrated graders, and regression gates",
+    "category": "AI Foundations",
+    "target_week": 4,
+    "activation_item_key": "V4-W4-L3",
+    "activation_prerequisite": "Complete V4-W4-L3 · Operate bounded inference workers and measure reliability, then review this card's authority before activation.",
+    "source_url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+    "source_section": "The structure of an evaluation; Types of graders; How to think about non-determinism; Going from zero to one",
+    "source_label": "Anthropic Engineering · Demystifying evals for AI agents",
+    "evidence": "official_engineering_guidance",
+    "grounding_status": "draft_review",
+    "answer_basis": "Schema validation establishes output shape, not whether AI behavior is correct. An evaluation specifies realistic task input, success criteria, and grading logic. Use reviewed reference outcomes or ground truth and include both cases where a behavior should occur and where it should not. Prefer deterministic graders for objective outcomes, calibrate model graders against human judgment for scalable subjective assessment, and use domain experts where their judgment is the authority. Because outputs vary, run multiple independent trials when reliability matters and report meaningful failure categories and rates rather than one demo or only an average. Version the model, prompt, harness, and configuration; require product-specific acceptance and regression thresholds before rollout, then combine automated evals with production monitoring and sampled human review.",
+    "answer_rubric": {
+      "mechanism": "Builds a task-specific reviewed case set with explicit success criteria, suitable graders, repeated trials for variable behavior, and a predeployment regression gate tied to product risk.",
+      "acceptable_alternative": "A small high-quality suite drawn from real failures with reference solutions is a valid start; production monitoring or an A/B test can complement but not replace predeployment evaluation.",
+      "trade_off": "Deterministic graders are cheap and reproducible but can be brittle; model and human graders capture nuance but cost more and model graders require calibration against expert judgment.",
+      "failure_mode": "A happy-path demo, schema check, single trial, or undifferentiated average can hide stochastic and asymmetric critical failures, allowing a model change to regress the product while appearing healthy.",
+      "misconception": "Valid JSON, a higher generic benchmark score, or a faster response does not by itself establish application readiness, and an LLM grader is not self-validating."
+    },
+    "canonical_question": "A new hosted model always returns schema-valid scoring JSON and is substantially faster. Before routing learner scores to it, what evaluation evidence would justify the change?"
+  }
+]

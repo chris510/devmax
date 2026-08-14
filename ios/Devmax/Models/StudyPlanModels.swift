@@ -210,6 +210,9 @@ struct PlanMappedRecallCard: Codable, Equatable, Identifiable {
 struct PlanItemDetail: Codable, Equatable, Identifiable {
     let id: UUID
     let planId: UUID
+    /// The exact plan snapshot this item was loaded from. Optional only for
+    /// rolling compatibility with a server that predates completion guards.
+    let planRevision: Int?
     let fullTitle: String
     let phaseTitle: String
     let weekIndex: Int

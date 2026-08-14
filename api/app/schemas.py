@@ -589,6 +589,10 @@ class MappedRecallCard(BaseModel):
 class ItemDetail(BaseModel):
     id: uuid.UUID
     plan_id: uuid.UUID
+    # The exact plan revision whose graph produced this item. Completion may
+    # bind to it so curriculum content cannot change between opening the screen
+    # and claiming the work as complete.
+    plan_revision: int
     full_title: str
     phase_title: str
     week_index: int

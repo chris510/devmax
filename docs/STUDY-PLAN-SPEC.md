@@ -300,10 +300,11 @@ answer authority:
 - `resources` is an ordered list of direct HTTPS destinations. Each entry has a
   kind, provider, label, action label, URL, and optional language. Opening one
   never marks the item complete.
-- `mapped_recall_topics` contains exact canonical topics from `cards.json`.
-  Item reads resolve those topics against the current user's active cards. This
-  is a read-only lookup; it writes no `study_plan_card_links`, calls no model,
-  and changes no card or plan state.
+- `mapped_recall_topics` contains exact canonical topics from `cards.json` or a
+  reviewed first-party overlay such as `modules/ai-foundations.json`. Item reads
+  resolve those topics against the current user's active cards. This is a
+  read-only lookup; it writes no `study_plan_card_links`, calls no model, and
+  changes no card or plan state.
 - A resolved card is `Learn first`, `Waiting for delayed recall`, `Ready for
   recall`, or `In review rotation`. Missing or incompletely grounded cards are
   `Not ready` and carry no destination.
@@ -315,10 +316,12 @@ answer authority:
 
 External URLs are provenance and navigation, not permission to copy Premium
 text. They never populate `source_excerpt`, `answer_basis`, or an answer rubric.
-The 54-card spine remains cohort-gated: a future mapping stays `Not ready` until
-that card has reviewed authority and is deliberately activated. Coding work and
-full designs create no broad card automatically; a sourced debrief may still
-propose zero to three focused gaps through the ordinary acceptance path.
+The 54-card spine and the four-card AI-foundations overlay remain cohort-gated:
+a future mapping stays `Not ready` until that card has reviewed authority and is
+deliberately activated. Draft overlay content is not activation authority.
+Coding work and full designs create no broad card automatically; a sourced
+debrief may still propose zero to three focused gaps through the ordinary
+acceptance path.
 
 ### Versioned seed upgrades
 
@@ -343,6 +346,37 @@ Monday supplied to the seed command as its corrected start date. Cards,
 sessions, and all SM-2 fields are unchanged. Later v4+ revisions use stable keys
 normally, preserve completed rows, and do not reset the start date. A
 `curriculum_update` revision records the before/after versions.
+
+A manifest item may set `requires_fresh_completion: true` when a content release
+adds genuinely new work rather than improving navigation for the same lesson.
+On a later stable-key upgrade, a completed marked row is preserved in full:
+title, completion condition, resources, mappings, stretch work, status, notes,
+reminders, and history do not change. The revision records the skipped key so an
+operator can assign fresh work instead of granting retroactive completion. An
+unfinished marked row receives the normal content update. Skipped keys form a
+durable debt ledger in curriculum revisions; a later manifest cannot erase the
+protection by dropping the marker. Debt is resolved only when the new content
+is applied while that row is unfinished, and same-version operator reruns keep
+reporting unresolved keys. The marker is seed metadata only and is not stored
+on the Study Plan item.
+
+Completion and curriculum upgrades serialize on the plan row in Postgres and
+also compare-and-swap each item on `status + updated_at`. The item-level guard
+is the SQLite-compatible backstop: if simultaneous writers inspect the same old
+database snapshot, exactly one may commit. An upgrade that loses to completion
+preserves the historical row and records the skipped key; a completion that
+loses returns 409 and requires the item to be reopened before retrying.
+
+The view-to-tap interval has a separate precondition. Item detail returns the
+exact `plan_revision` whose content was rendered, and the client sends it as
+`base_plan_revision` on completion. The server checks it while holding the plan
+lock, before the item compare-and-swap. A mismatch returns 409 without writing;
+the client discards and reloads the stale item and requires another explicit
+tap. Every key introduced as fresh work is persisted in curriculum-revision
+metadata and completion uses the durable union, so an old client that omits the
+token is rejected for those protected keys even if a later manifest drops its
+marker. Missing tokens remain accepted for generic and legacy items, preserving
+rolling compatibility.
 
 ## Practice Debrief
 
@@ -484,12 +518,17 @@ database. `/study-plans/active/summary` is declared before `/{plan_id}` so
 `active` is never parsed as an id, and it returns `{"active": false}` rather than
 404 when there is no active plan.
 
-`GET /study-plans/{id}/items/{item_id}` additionally returns `resources`,
-`mapped_recall_cards`, and `stretch_actions`. These fields are additive and
-default to empty arrays. `mapped_recall_cards.card_id` is nullable; the server
-returns it only for an owned, active, fully grounded card. Its human-readable
-availability label is server-shaped so the client does not duplicate learning
-gate or review-state logic.
+`GET /study-plans/{id}/items/{item_id}` additionally returns `plan_revision`,
+`resources`, `mapped_recall_cards`, and `stretch_actions`. The three collection
+fields are additive and default to empty arrays. `mapped_recall_cards.card_id`
+is nullable; the server returns it only for an owned, active, fully grounded
+card. Its human-readable availability label is server-shaped so the client does
+not duplicate learning-gate or review-state logic. The client must echo the
+loaded `plan_revision` as the `base_plan_revision` query parameter on
+`POST /study-plans/{id}/items/{item_id}/complete`. A stale value is a 409. A
+missing value is also a 409 for any item durably recorded as fresh work; it is
+accepted for generic and legacy items so a backend-first rolling deployment
+does not disable their existing completion path.
 
 ## iOS
 

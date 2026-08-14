@@ -270,6 +270,7 @@ final class WireFormatTests: XCTestCase {
     private static let actionablePlanItem = Data(#"""
     {"id":"00000000-0000-0000-0000-000000000010",
      "plan_id":"00000000-0000-0000-0000-000000000001",
+     "plan_revision":7,
      "full_title":"Practice sliding window in Python","phase_title":"Foundations",
      "week_index":1,"type":"practice","priority":"core","status":"pending",
      "why_it_matters":"State the invariant before coding.",
@@ -299,6 +300,7 @@ final class WireFormatTests: XCTestCase {
         )
 
         XCTAssertEqual(item.actionableResources.first?.provider, "Hello Interview")
+        XCTAssertEqual(item.planRevision, 7)
         XCTAssertEqual(item.actionableResources.first?.language, "Python")
         XCTAssertEqual(item.advisoryStretchActions.first?.minutes, 45)
         XCTAssertNil(item.recallMappings.first?.cardId)
@@ -323,6 +325,7 @@ final class WireFormatTests: XCTestCase {
 
         let item = try LiveAPI.decoder.decode(PlanItemDetail.self, from: json)
 
+        XCTAssertNil(item.planRevision)
         XCTAssertTrue(item.actionableResources.isEmpty)
         XCTAssertTrue(item.advisoryStretchActions.isEmpty)
         XCTAssertTrue(item.recallMappings.isEmpty)

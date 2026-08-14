@@ -42,6 +42,7 @@ START = date(2026, 8, 3)
 API = Path(__file__).resolve().parent.parent
 CARDS_JSON = API / "cards.json"
 LEGACY_JSON = API / "archive" / "cards-legacy-126.json"
+AI_FOUNDATIONS_JSON = API / "modules" / "ai-foundations.json"
 
 
 def study_plan() -> list[dict]:
@@ -249,6 +250,89 @@ def test_the_week_one_grounding_pack_is_approved_and_complete() -> None:
     assert len(remaining) == 47
 
 
+def test_ai_foundations_are_complete_drafts_not_self_approved_cards() -> None:
+    entries = json.loads(AI_FOUNDATIONS_JSON.read_text())
+
+    assert len(entries) == 4
+    assert {entry["category"] for entry in entries} == {"AI Foundations"}
+    assert {entry["grounding_status"] for entry in entries} == {"draft_review"}
+    assert all(entry["activation_item_key"].startswith("V4-") for entry in entries)
+    assert all(
+        _validated_grounding({**entry, "grounding_status": "approved"}) is not None
+        for entry in entries
+    )
+
+
+async def test_ai_foundation_drafts_fail_closed_before_any_card_is_added(db) -> None:
+    with pytest.raises(SeedGroundingError, match="grounding status is 'draft_review'"):
+        await load_from_file(
+            AI_FOUNDATIONS_JSON,
+            weeks_through=1,
+            start=START,
+            activate_week=1,
+            db=db,
+        )
+
+    assert (await db.exec(select(Card))).all() == []
+
+
+async def test_reviewed_ai_foundation_cohort_seeds_authority_idempotently(
+    db, tmp_path
+) -> None:
+    entries = json.loads(AI_FOUNDATIONS_JSON.read_text())
+    for entry in entries:
+        entry["grounding_status"] = "approved"
+    path = tmp_path / "approved-ai-foundations.json"
+    path.write_text(json.dumps(entries))
+
+    assert await load_from_file(
+        path,
+        weeks_through=1,
+        start=START,
+        activate_week=1,
+        db=db,
+    ) == 2
+    assert await load_from_file(
+        path,
+        weeks_through=1,
+        start=START,
+        activate_week=1,
+        db=db,
+    ) == 0
+
+    cards = (await db.exec(select(Card).order_by(Card.topic))).all()
+    assert len(cards) == 2
+    assert all(card.category == "AI Foundations" for card in cards)
+    assert all(card.canonical_question and card.answer_basis for card in cards)
+    assert all(set(card.answer_rubric) == {
+        "mechanism",
+        "acceptable_alternative",
+        "trade_off",
+        "failure_mode",
+        "misconception",
+    } for card in cards)
+
+
+async def test_one_malformed_ai_foundation_blocks_its_whole_cohort(db, tmp_path) -> None:
+    entries = json.loads(AI_FOUNDATIONS_JSON.read_text())
+    for entry in entries:
+        entry["grounding_status"] = "approved"
+    entries[1]["answer_rubric"]["failure_mode"] = ""
+    path = tmp_path / "malformed-ai-foundations.json"
+    path.write_text(json.dumps(entries))
+
+    with pytest.raises(SeedGroundingError, match="answer_rubric.failure_mode"):
+        await load_from_file(
+            path,
+            weeks_through=1,
+            start=START,
+            activate_week=1,
+            db=db,
+        )
+
+    assert (await db.exec(select(Card))).all() == []
+
+
 def test_an_approved_conversational_seed_still_requires_every_grounding_field() -> None:
     entry = approved_entry(answer_rubric={"mechanism": "Only one field."})
 
@@ -383,6 +467,18 @@ def test_local_databases_still_accept_fixtures(url: str) -> None:
 
 def legacy_manifest() -> list[dict]:
     return json.loads(LEGACY_JSON.read_text())
+
+
+def test_every_live_manifest_topic_is_unique() -> None:
+    paths = [CARDS_JSON]
+    paths += sorted((API / "library").glob("*.json"))
+    paths += sorted((API / "modules").glob("*.json"))
+    owners: dict[str, list[str]] = collections.defaultdict(list)
+    for path in paths:
+        for entry in json.loads(path.read_text()):
+            owners[entry["topic"]].append(path.name)
+
+    assert {topic: files for topic, files in owners.items() if len(files) > 1} == {}
 
 
 def test_the_retire_manifest_shares_no_topic_with_any_live_deck() -> None:

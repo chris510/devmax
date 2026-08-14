@@ -22,6 +22,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -65,6 +66,7 @@ class SeedResult:
     weeks: int
     items: int
     version: int
+    skipped_completed_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,7 @@ class ExistingSeed:
     creation_revision: StudyPlanRevision
     current_revision: StudyPlanRevision
     version: int
+    fresh_completion_debt: tuple[str, ...] = ()
 
 
 # Reviewed legacy identities. Production was created from the 72-item v2
@@ -363,6 +366,7 @@ async def _existing_seed(
         creation_revision=creation,
         current_revision=current,
         version=version,
+        fresh_completion_debt=tuple(sorted(_fresh_completion_debt(matching))),
     )
 
 
@@ -423,6 +427,99 @@ def _apply_item_content(
     item.updated_at = datetime.now(UTC)
 
 
+def _fresh_completion_keys(manifest: Mapping[str, Any]) -> set[str]:
+    """Return activities whose new content must not be credited retroactively.
+
+    Most curriculum releases can safely improve links or recall navigation on a
+    completed activity. A release that adds genuinely new study work is
+    different: if the stable row is already complete, attaching that new work or
+    its recall mapping would make old history look like evidence for a lesson the
+    learner never took. The committed manifest marks only those activities, and
+    an upgrade preserves every field on an already-completed row.
+    """
+    keys: set[str] = set()
+    for week in manifest["weeks"]:
+        for item in week["items"]:
+            value = item.get("requires_fresh_completion", False)
+            if not isinstance(value, bool):
+                raise PlanSeedError(
+                    f"{item.get('key', '<missing key>')}: "
+                    "requires_fresh_completion must be a boolean"
+                )
+            if value:
+                keys.add(str(item["key"]))
+    return keys
+
+
+def _fresh_completion_debt(revisions: Sequence[StudyPlanRevision]) -> set[str]:
+    """Rebuild unresolved fresh-work debt from the durable revision ledger.
+
+    The manifest marker describes one release, so it cannot be the durable
+    source of truth: a later manifest may legitimately omit it. Curriculum
+    revisions therefore add keys they skipped and subtract keys whose updated
+    content was later applied while the row was unfinished. Replaying those
+    small sets avoids a schema change and keeps old v5 revisions readable.
+    """
+    def revision_order(row: StudyPlanRevision) -> tuple[int, datetime, str]:
+        try:
+            version = int((row.after or {}).get("seed_version", 0))
+        except (TypeError, ValueError):
+            version = 0
+        return version, row.created_at, str(row.id)
+
+    debt: set[str] = set()
+    ordered = sorted(revisions, key=revision_order)
+    for revision in ordered:
+        after = revision.after or {}
+        for field, target in (
+            ("skipped_completed_keys", debt.update),
+            ("resolved_fresh_completion_keys", debt.difference_update),
+        ):
+            raw_keys = after.get(field, [])
+            if not isinstance(raw_keys, list) or any(
+                not isinstance(key, str) or not key.strip() for key in raw_keys
+            ):
+                raise PlanSeedError(f"curriculum revision has malformed {field}")
+            target(key.strip() for key in raw_keys)
+    return debt
+
+
+async def _claim_item_for_upgrade(
+    db: AsyncSession, item: StudyPlanItem, *, claimed_at: datetime
+) -> bool:
+    """CAS an unfinished row before changing its curriculum content.
+
+    ``SELECT FOR UPDATE`` coordinates production requests through the plan row,
+    but SQLite ignores it. This item-level compare-and-swap is the portable
+    backstop: a concurrent completion changes both status and ``updated_at``, so
+    exactly one writer can win. ``False`` means completion won and the caller
+    must treat the refreshed row as immutable history.
+    """
+    observed_status = item.status
+    observed_updated_at = item.updated_at
+    result = await db.exec(
+        update(StudyPlanItem)
+        .where(
+            StudyPlanItem.id == item.id,
+            StudyPlanItem.status == observed_status,
+            StudyPlanItem.updated_at == observed_updated_at,
+        )
+        .values(updated_at=claimed_at)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 1:
+        item.updated_at = claimed_at
+        return True
+
+    await db.refresh(item)
+    if item.status == ITEM_COMPLETE:
+        return False
+    raise PlanSeedError(
+        f"{item.curriculum_key or item.id}: item changed during curriculum upgrade; "
+        "nothing was updated"
+    )
+
+
 def _legacy_pristine_violations(graph: sp.PlanGraph) -> list[str]:
     """State that cannot be assigned honestly to v4's new item lineage."""
     violations: list[str] = []
@@ -461,8 +558,19 @@ async def _upgrade_existing_plan(
     start_date: date,
 ) -> SeedResult:
     """Apply a reviewed manifest version in place without touching review state."""
-    plan = existing.plan
+    plan = (
+        await db.exec(
+            select(StudyPlan)
+            .where(StudyPlan.id == existing.plan.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one()
     graph = await sp.load_plan_graph(db, plan)
+    fresh_completion_keys = _fresh_completion_keys(manifest)
+    fresh_completion_debt = set(existing.fresh_completion_debt)
+    skipped_completed_keys: list[str] = []
+    resolved_fresh_completion_keys: list[str] = []
     legacy_upgrade = existing.version <= 3
     if legacy_upgrade:
         violations = _legacy_pristine_violations(graph)
@@ -529,15 +637,32 @@ async def _upgrade_existing_plan(
                 full_title=str(entry["full_title"]),
                 estimate_minutes=int(entry["estimate_minutes"]),
             )
+        elif item.status != ITEM_COMPLETE:
+            claimed = await _claim_item_for_upgrade(
+                db, item, claimed_at=datetime.now(UTC)
+            )
+            if not claimed:
+                # A completion committed after the graph read but before our
+                # CAS. Continue through the completed-row policy below.
+                pass
         if item.status == ITEM_COMPLETE:
             # A completed row records work the user actually did. A curriculum
             # release may attach safer navigation and recall mappings to the
             # same stable concept, but must not move or redefine that history.
-            item.resources = list(entry["resources"])
-            item.mapped_recall_topics = list(entry["mapped_recall_topics"])
-            item.stretch_actions = list(entry["stretch_actions"])
+            # A manifest-marked content addition is stricter: preserve the row
+            # byte-for-byte so new work cannot inherit old completion credit.
+            if key in fresh_completion_keys or key in fresh_completion_debt:
+                skipped_completed_keys.append(key)
+                fresh_completion_debt.add(key)
+            else:
+                item.resources = list(entry["resources"])
+                item.mapped_recall_topics = list(entry["mapped_recall_topics"])
+                item.stretch_actions = list(entry["stretch_actions"])
         else:
             _apply_item_content(item, entry, phase_id=phase.id, week_id=week.id)
+            if key in fresh_completion_debt:
+                fresh_completion_debt.remove(key)
+                resolved_fresh_completion_keys.append(key)
         db.add(item)
         item_by_key[key] = item
 
@@ -545,10 +670,15 @@ async def _upgrade_existing_plan(
     # links. A completed historical row remains complete; an unfinished one is
     # retained as removed and no longer participates in capacity.
     for key, item in existing_by_key.items():
-        if key not in target_by_key and item.status != ITEM_COMPLETE:
-            item.status = ITEM_REMOVED
-            item.updated_at = datetime.now(UTC)
-            db.add(item)
+        if key not in target_by_key and item.status not in (
+            ITEM_COMPLETE,
+            ITEM_REMOVED,
+        ):
+            removed_at = datetime.now(UTC)
+            if await _claim_item_for_upgrade(db, item, claimed_at=removed_at):
+                item.status = ITEM_REMOVED
+                item.updated_at = removed_at
+                db.add(item)
 
     await db.flush()
     for key, entry in target_by_key.items():
@@ -616,9 +746,14 @@ async def _upgrade_existing_plan(
                 "seed_key": manifest["seed_key"],
                 "seed_version": int(manifest["version"]),
                 "from_version": existing.version,
+                "fresh_completion_keys": sorted(fresh_completion_keys),
                 "start_date": plan.start_date.isoformat(),
                 "weeks": len(preview["weeks"]),
                 "items": len(preview["items"]),
+                "skipped_completed_keys": sorted(skipped_completed_keys),
+                "resolved_fresh_completion_keys": sorted(
+                    resolved_fresh_completion_keys
+                ),
             },
             summary=f"Curriculum updated to version {manifest['version']}",
         )
@@ -633,6 +768,7 @@ async def _upgrade_existing_plan(
         weeks=len(preview["weeks"]),
         items=len(preview["items"]),
         version=int(manifest["version"]),
+        skipped_completed_keys=tuple(sorted(skipped_completed_keys)),
     )
 
 
@@ -660,6 +796,7 @@ async def load_first_party_plan(
                 f"{begin.strftime('%A')}"
             )
         manifest, validated = validate_bundle(path, start_date=begin)
+        fresh_completion_keys = _fresh_completion_keys(manifest)
         seed_key = str(manifest["seed_key"])
         raw_legacy_keys = manifest.get("legacy_seed_keys", [])
         if not isinstance(raw_legacy_keys, list) or not raw_legacy_keys:
@@ -706,6 +843,7 @@ async def load_first_party_plan(
                 weeks=int((revision.after or {}).get("weeks", 0)),
                 items=int((revision.after or {}).get("items", 0)),
                 version=existing.version,
+                skipped_completed_keys=existing.fresh_completion_debt,
             )
 
         if activate and await sp.active_plan(session, FOUNDER_USER_ID) is not None:
@@ -731,6 +869,7 @@ async def load_first_party_plan(
                 after={
                     "seed_key": seed_key,
                     "seed_version": manifest["version"],
+                    "fresh_completion_keys": sorted(fresh_completion_keys),
                     "weeks": len(rows["weeks"]),
                     "items": len(rows["items"]),
                 },
@@ -785,6 +924,11 @@ def main() -> None:
         f"{verb}: {result.title} · {result.weeks} weeks · "
         f"{result.items} items · v{result.version} · {state} · {result.plan_id}"
     )
+    if result.skipped_completed_keys:
+        print(
+            "preserved completed historical items without applying new work: "
+            + ", ".join(result.skipped_completed_keys)
+        )
 
 
 if __name__ == "__main__":

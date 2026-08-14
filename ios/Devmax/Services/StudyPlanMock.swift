@@ -284,6 +284,7 @@ enum StudyPlanFixtures {
 
     static func itemDetail(
         _ itemID: UUID = firstItemID, planID: UUID = backendPlanID, complete: Bool = true,
+        planRevision: Int? = 7,
         debrief: PracticeDebrief? = nil, fullTitle: String? = nil,
         itemType: String? = nil, why: String? = nil, doneWhen: String? = nil,
         sourceLabel: String? = nil, sourceExcerpt: String? = nil,
@@ -300,7 +301,8 @@ enum StudyPlanFixtures {
         let resolvedType = itemType ?? row.2
         let resolvedRecallSupport = recallSupported ?? true
         return PlanItemDetail(
-            id: itemID, planId: planID, fullTitle: fullTitle ?? row.1,
+            id: itemID, planId: planID, planRevision: planRevision,
+            fullTitle: fullTitle ?? row.1,
             phaseTitle: phaseTitle ?? "Technologies",
             weekIndex: weekIndex ?? 4,
             type: resolvedType, priority: row.3 ? "optional" : "core",
@@ -922,9 +924,13 @@ extension MockAPI {
         return StudyPlanFixtures.itemDetail(itemID, planID: id)
     }
 
-    func completePlanItem(_ id: UUID, itemID: UUID) async throws -> PlanItemDetail {
+    func completePlanItem(
+        _ id: UUID, itemID: UUID, revision: Int?
+    ) async throws -> PlanItemDetail {
         await settle(400)
-        return StudyPlanFixtures.itemDetail(itemID, planID: id, complete: true)
+        return StudyPlanFixtures.itemDetail(
+            itemID, planID: id, complete: true, planRevision: revision
+        )
     }
 
     func savePracticeDebriefDraft(
