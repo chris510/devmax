@@ -267,6 +267,26 @@ struct ThreadEntry: Identifiable, Equatable {
     var text: String
 }
 
+extension ThreadEntry.Role {
+    /// Only question turns belong to read-aloud. In particular, an optimistic
+    /// answer or coaching feedback must not make the preceding question play
+    /// again while the request is being scored.
+    var isSpokenPrompt: Bool {
+        switch self {
+        case .question, .followUpQuestion, .reattemptQuestion, .coachingQuestion:
+            return true
+        case .answer, .coachingFeedback:
+            return false
+        }
+    }
+}
+
+extension Array where Element == ThreadEntry {
+    var latestSpokenPrompt: ThreadEntry? {
+        last(where: { $0.role.isSpokenPrompt })
+    }
+}
+
 /// The Conversation state machine, exactly as the handoff specifies.
 enum Stage: Equatable {
     case loadingQuestion

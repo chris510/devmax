@@ -37,10 +37,12 @@ struct ConversationScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        .onChange(of: state.thread.count) { _, _ in readLatestQuestion() }
-        .onChange(of: state.stage) { _, stage in
-            if stage.acceptsAnswer && !stage.isRecording { readLatestQuestion() }
-        }
+        // Observe the prompt itself, not every thread or stage mutation. Appending
+        // the optimistic answer used to fire the count observer and replay the
+        // preceding question while the UI said SCORING; the stage observer could
+        // then play a newly appended probe a second time. The observed prompt
+        // changes exactly when there is a new question turn to read.
+        .onChange(of: state.thread.latestSpokenPrompt) { _, prompt in readQuestion(prompt) }
         // The transcript used to reach the draft only when recording stopped, so
         // backgrounding mid-answer persisted a stale draft and lost everything
         // spoken since the tap — the worst failure mode in the product. Mirror each
@@ -592,14 +594,12 @@ struct ConversationScreen: View {
 
     // MARK: - TTS
 
-    private func readLatestQuestion() {
+    private func readQuestion(_ question: ThreadEntry?) {
         // Two independent gates. `WC_TTS` is the screenshot override and stays
         // debug-only; `readAloud` is the user's, and is the one that works in a
         // Release build — where `WC_TTS` reads its default and is always true.
-        guard flags.ttsEnabled, readAloud,
-              let last = state.thread.last(where: { $0.role != .answer })
-        else { return }
-        speaker.speak(last.text)
+        guard flags.ttsEnabled, readAloud, let question else { return }
+        speaker.speak(question.text)
     }
 
     /// Fixture answers for the simulated-speech path, matching the prototype.
