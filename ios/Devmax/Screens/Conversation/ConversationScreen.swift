@@ -12,10 +12,6 @@ struct ConversationScreen: View {
     /// stage is still a recording one during that gap, so without this a second
     /// tap would submit the same answer twice.
     @State private var finalizing = false
-    /// The last thread entry spoken. A stage change is also how the app comes
-    /// *back* to a turn — a failed submit rewinds to the stage it was answering —
-    /// so without this the question restarts over an answer already half given.
-    @State private var lastReadID: UUID?
 
     /// Answer bubbles and the live transcript cap at 84% — of the thread's content
     /// width, not the screen's.
@@ -41,13 +37,12 @@ struct ConversationScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        // The stage is the only read trigger, because every question arrives with
-        // the stage that makes it answerable — a card opening, each probe through
-        // `.processing`, turn 3. The thread also grows when the *user* answers,
-        // which is what read the question back over the scoring indicator.
-        .onChange(of: state.stage) { _, stage in
-            if stage.acceptsAnswer && !stage.isRecording { readLatestQuestion() }
-        }
+        // Observe the prompt itself, not every thread or stage mutation. Appending
+        // the optimistic answer used to fire the count observer and replay the
+        // preceding question while the UI said SCORING; the stage observer could
+        // then play a newly appended probe a second time. The observed prompt
+        // changes exactly when there is a new question turn to read.
+        .onChange(of: state.thread.latestSpokenPrompt) { _, prompt in readQuestion(prompt) }
         // The transcript used to reach the draft only when recording stopped, so
         // backgrounding mid-answer persisted a stale draft and lost everything
         // spoken since the tap — the worst failure mode in the product. Mirror each
@@ -604,32 +599,12 @@ struct ConversationScreen: View {
 
     // MARK: - TTS
 
-    /// What may be read aloud: the four roles that ask the user something. An
-    /// answer is the user's own words, and coaching feedback is prose the score
-    /// block already shows — neither is a question waiting to be answered.
-    private static let spokenRoles: [ThreadEntry.Role] = [
-        .question, .followUpQuestion, .reattemptQuestion, .coachingQuestion,
-    ]
-
-    /// The entry to speak, or nil when the newest question was already spoken.
-    /// Static and pure so the rule is exercised without a view: it decides what
-    /// TTS says, and getting it wrong re-reads a question mid-answer.
-    static func entryToSpeak(in thread: [ThreadEntry], lastSpoken: UUID?) -> ThreadEntry? {
-        guard let entry = thread.last(where: { Self.spokenRoles.contains($0.role) }),
-              entry.id != lastSpoken
-        else { return nil }
-        return entry
-    }
-
-    private func readLatestQuestion() {
+    private func readQuestion(_ question: ThreadEntry?) {
         // Two independent gates. `WC_TTS` is the screenshot override and stays
         // debug-only; `readAloud` is the user's, and is the one that works in a
         // Release build — where `WC_TTS` reads its default and is always true.
-        guard flags.ttsEnabled, readAloud,
-              let entry = Self.entryToSpeak(in: state.thread, lastSpoken: lastReadID)
-        else { return }
-        lastReadID = entry.id
-        speaker.speak(entry.text)
+        guard flags.ttsEnabled, readAloud, let question else { return }
+        speaker.speak(question.text)
     }
 
     /// Fixture answers for the simulated-speech path, matching the prototype.

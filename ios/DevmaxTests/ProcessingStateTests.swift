@@ -110,19 +110,21 @@ final class ProcessingStateTests: XCTestCase {
         let question = entry(.question, "Walk me through what data moves.")
         let thread = [question, entry(.answer, "the user's own words, spoken back")]
 
-        XCTAssertEqual(
-            ConversationScreen.entryToSpeak(in: thread, lastSpoken: nil)?.id, question.id
-        )
+        XCTAssertEqual(thread.latestSpokenPrompt?.id, question.id)
     }
 
-    /// The regression: submitting appended an answer, the newest non-answer entry
-    /// was still the card's question, and it was read again over the SCORING dots.
+    /// The regression: submitting appended an answer and the thread-count observer
+    /// read the question again over the SCORING dots. The prompt observer must not
+    /// change for an answer-only mutation.
     @MainActor
-    func testAQuestionAlreadySpokenIsNotSpokenAgain() {
+    func testAppendingAnAnswerDoesNotChangeTheObservedPrompt() {
         let question = entry(.question, "Walk me through what data moves.")
-        let thread = [question, entry(.answer, "an answer under way")]
+        var thread = [question]
+        let observed = thread.latestSpokenPrompt
 
-        XCTAssertNil(ConversationScreen.entryToSpeak(in: thread, lastSpoken: question.id))
+        thread.append(entry(.answer, "an answer under way"))
+
+        XCTAssertEqual(thread.latestSpokenPrompt, observed)
     }
 
     /// Coaching feedback is prose stating the answer, not a question — and the
@@ -138,10 +140,7 @@ final class ProcessingStateTests: XCTestCase {
             entry(.coachingFeedback, "The causal link is explicit."),
         ]
 
-        XCTAssertNil(
-            ConversationScreen.entryToSpeak(in: thread, lastSpoken: probe.id),
-            "the newest speakable entry is the probe, and it was already read"
-        )
+        XCTAssertEqual(thread.latestSpokenPrompt?.id, probe.id)
     }
 
     @MainActor
@@ -150,9 +149,7 @@ final class ProcessingStateTests: XCTestCase {
         let probe = entry(.followUpQuestion, "One more — how do virtual nodes change it?")
         let thread = [question, entry(.answer, "a first answer"), probe]
 
-        XCTAssertEqual(
-            ConversationScreen.entryToSpeak(in: thread, lastSpoken: question.id)?.id, probe.id
-        )
+        XCTAssertEqual(thread.latestSpokenPrompt?.id, probe.id)
     }
 
     @MainActor
@@ -166,19 +163,13 @@ final class ProcessingStateTests: XCTestCase {
             reattempt,
         ]
 
-        XCTAssertEqual(
-            ConversationScreen.entryToSpeak(in: thread, lastSpoken: nil)?.id, reattempt.id
-        )
+        XCTAssertEqual(thread.latestSpokenPrompt?.id, reattempt.id)
     }
 
     @MainActor
     func testAThreadWithNothingToAskSpeaksNothing() {
-        XCTAssertNil(ConversationScreen.entryToSpeak(in: [], lastSpoken: nil))
-        XCTAssertNil(
-            ConversationScreen.entryToSpeak(
-                in: [entry(.answer, "an answer with no question above it")], lastSpoken: nil
-            )
-        )
+        XCTAssertNil([ThreadEntry]().latestSpokenPrompt)
+        XCTAssertNil([entry(.answer, "an answer with no question above it")].latestSpokenPrompt)
     }
 
     // MARK: - The draft during a submit
