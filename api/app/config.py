@@ -8,6 +8,12 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.consent_policy import (
+    DEFAULT_REQUIRED_POLICY_VERSION,
+    LATEST_POLICY_VERSION,
+    POLICIES_BY_VERSION,
+)
+
 # Values that ship in this repo, in .env.example, or in the docs. They are public,
 # so a deploy that reaches production still carrying one is not authenticated at all.
 PLACEHOLDER_SECRETS = frozenset(
@@ -177,10 +183,16 @@ class Settings(BaseSettings):
     llm_calls_per_day: int = Field(default=200, ge=10, le=10_000)
     guide_imports_per_day: int = Field(default=3, ge=1, le=100)
 
-    # Deploy the consent schema and client before turning this on. The app still
-    # presents the current disclosure while false; this switch only prevents an
-    # older installed client from being stranded during the staged rollout.
+    # Deploy the consent schema before turning this on. This controls whether a
+    # missing grant blocks provider work; policy-version activation is the
+    # separate setting below.
     ai_consent_enforcement_enabled: bool = False
+    # Code may understand a newer disclosure before production requires it. Keep
+    # this on the already-shipped client's policy during that compatibility
+    # window, then activate the newer policy explicitly after its minimum iOS
+    # build is distributed. A code deploy alone can therefore never advance the
+    # consent contract again.
+    ai_consent_required_policy_version: str = DEFAULT_REQUIRED_POLICY_VERSION
 
     # The production API is a single always-on Railway replica. Keeping the dumb
     # trigger-review poll in that process removes an unreliable external schedule;
@@ -200,6 +212,18 @@ class Settings(BaseSettings):
             if normalized in {"1", "2"}:
                 return int(normalized)
         return value
+
+    @field_validator("ai_consent_required_policy_version")
+    @classmethod
+    def _known_ai_consent_policy_version(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in POLICIES_BY_VERSION:
+            supported = ", ".join(POLICIES_BY_VERSION)
+            raise ValueError(
+                "AI_CONSENT_REQUIRED_POLICY_VERSION must be a supported policy "
+                f"version: {supported}."
+            )
+        return normalized
 
     @model_validator(mode="after")
     def _reject_placeholder_secrets(self) -> "Settings":
@@ -240,6 +264,12 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "SCORING_CONTRACT_VERSION must already be 2 before OpenAI V2 "
                     "scoring can be enabled."
+                )
+            if self.ai_consent_required_policy_version != LATEST_POLICY_VERSION:
+                raise ValueError(
+                    "AI_CONSENT_REQUIRED_POLICY_VERSION must require the combined "
+                    "Anthropic and OpenAI disclosure before OpenAI V2 scoring can "
+                    "be enabled."
                 )
             missing = [
                 name

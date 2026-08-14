@@ -317,7 +317,8 @@ class AIConsentIn(BaseModel):
     action: Literal["grant", "decline", "withdraw"]
     # The client sends the version embedded beside the disclosure it rendered.
     # Optional at the schema boundary so even an older client can always withdraw;
-    # the service requires an exact current match for grant and decline.
+    # the service recognizes the omitted version as the original Anthropic-only
+    # client and accepts it only while that policy still satisfies deployment.
     policy_version: str | None = Field(default=None, max_length=128)
 
 

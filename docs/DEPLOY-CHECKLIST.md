@@ -233,6 +233,14 @@ preview claim metadata only. They rewrite no score, guide, preview, status, or
 scheduling state; the disposable Postgres test proves the 0016→0017→0016→0017
 round trip before deployment.
 
+**AI consent policy activation is separate from code deployment.** Keep
+`AI_CONSENT_REQUIRED_POLICY_VERSION=anthropic-2026-08-12-v1` while build 7 may
+still be installed. Code may report the combined policy as latest-supported in
+`/health`; that alone does not activate it. Distribute build 8+, record its
+combined choice, and only then change the required-policy variable to
+`anthropic-openai-2026-08-13-v2`. The server refuses every OpenAI mode until that
+activation is complete.
+
 Before a separately approved shadow stage, predeclare a fresh
 `OPENAI_V2_SCORING_SHADOW_STAGE_ID` UUID. Qualification is the immutable,
 inclusive ordinal 1–100 export for that exact stage; pending/incomplete intents

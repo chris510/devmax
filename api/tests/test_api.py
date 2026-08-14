@@ -1287,7 +1287,14 @@ async def test_health_needs_no_api_key_and_checks_the_database(client):
     resp = await client.get("/health")
 
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    assert resp.json() == {
+        "status": "ok",
+        "ai_consent_required_policy_version": "anthropic-2026-08-12-v1",
+        "ai_consent_latest_supported_policy_version": (
+            "anthropic-openai-2026-08-13-v2"
+        ),
+        "ai_consent_minimum_ios_build": 7,
+    }
 
 
 # --- coached re-attempt (turn 3) --------------------------------------------

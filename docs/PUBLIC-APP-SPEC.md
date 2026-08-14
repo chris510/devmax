@@ -254,9 +254,11 @@ before confirmation.
 Before either paid path is available, the app names Anthropic and OpenAI,
 describes the guide/title/plan settings or question/transcript/answer
 authority/context sent, states which provider may perform each purpose, and
-records a versioned Allow or Decline decision on the server. Grant and decline
-must identify the exact disclosure version rendered by the client; withdrawal
-must remain available without it. A current grant is required at every physical
+records a versioned Allow or Decline decision on the server. A grant must
+identify a disclosure version covering every provider the deployment requires.
+Decline records the rendered version when known, but an older decline remains a
+valid global refusal so a legacy client can always continue without AI;
+withdrawal likewise remains available without a version. A current grant is required at every physical
 provider-call boundary. Direct calls keep that decision serialized through the
 provider call. A multi-minute guide import instead rechecks consent and records
 a durable authorization while the consent lock is held immediately before each
@@ -266,6 +268,16 @@ Withdrawal or deletion that wins before authorization blocks that transmission.
 Once a request has been authorized and handed to the provider client, neither
 action can recall it; account deletion discards any result that returns later. A
 material disclosure change requires consent again.
+
+Consent-policy support and production activation are separate. The server may
+understand a newer disclosure before requiring it so backend deployment cannot
+strand an installed client. The one shipped pre-versioned client is interpreted
+only as the exact Anthropic-only v1 disclosure it rendered; it does not authorize
+OpenAI. A newer disclosure may satisfy an older required provider set, but never
+the reverse for a grant. A decline authorizes no provider and therefore stays
+valid across a policy advance. The required policy advances explicitly only after the cataloged
+minimum iOS build is distributed. Any OpenAI mode fails startup unless the
+combined Anthropic-and-OpenAI policy is the required version.
 
 If an owner-only provider shadow is enabled, the disclosure also states that the
 same answer context is sent to Anthropic and OpenAI simultaneously, Anthropic

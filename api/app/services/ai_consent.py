@@ -9,6 +9,13 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import Settings
+from app.consent_policy import (
+    LATEST_POLICY_VERSION,
+    LEGACY_POLICY_VERSION,
+    POLICIES_BY_VERSION,
+    policy_for,
+    satisfies,
+)
 from app.models import (
     AI_CONSENT_DECLINED,
     AI_CONSENT_GRANTED,
@@ -17,8 +24,11 @@ from app.models import (
     User,
 )
 
-PROVIDER = "Anthropic and OpenAI"
-POLICY_VERSION = "anthropic-openai-2026-08-13-v2"
+# Backward-compatible aliases for callers that mean "latest understood by this
+# source tree." Activation is separately owned by Settings so merging code cannot
+# silently make an already-installed client stale.
+POLICY_VERSION = LATEST_POLICY_VERSION
+PROVIDER = policy_for(POLICY_VERSION).provider
 RECORDED_STATUSES = frozenset(
     {AI_CONSENT_GRANTED, AI_CONSENT_DECLINED, AI_CONSENT_WITHDRAWN}
 )
@@ -28,17 +38,22 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def processing_allowed(user: User) -> bool:
+def processing_allowed(user: User, required_policy_version: str = POLICY_VERSION) -> bool:
     return (
         user.ai_consent_status == AI_CONSENT_GRANTED
-        and user.ai_consent_version == POLICY_VERSION
+        and satisfies(user.ai_consent_version, required_policy_version)
         and user.ai_consent_granted_at is not None
     )
 
 
-def prompt_required(user: User) -> bool:
+def prompt_required(user: User, required_policy_version: str = POLICY_VERSION) -> bool:
+    # A refusal never authorizes provider work, so it remains safe across a
+    # disclosure expansion. Do not trap an older client on the consent screen;
+    # the next explicit attempt to use AI can present the newer disclosure.
+    if user.ai_consent_status in {AI_CONSENT_DECLINED, AI_CONSENT_WITHDRAWN}:
+        return False
     return (
-        user.ai_consent_version != POLICY_VERSION
+        not satisfies(user.ai_consent_version, required_policy_version)
         or user.ai_consent_status not in RECORDED_STATUSES
     )
 
@@ -85,23 +100,44 @@ async def record(
     user_id: uuid.UUID,
     action: str,
     policy_version: str | None,
+    required_policy_version: str = POLICY_VERSION,
 ) -> tuple[User, datetime]:
     user = await lock_user_boundary(db, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
-    # A grant or decline is meaningful only for the disclosure the person saw.
-    # Withdrawal is deliberately exempt: an old or partially upgraded client
-    # must always be able to revoke permission for future provider calls.
-    if action != "withdraw" and policy_version != POLICY_VERSION:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "ai_consent_policy_version_mismatch",
-                "provider": PROVIDER,
-                "policy_version": POLICY_VERSION,
-            },
+    required_policy = policy_for(required_policy_version)
+    if action == "withdraw":
+        # An old or partially upgraded client must always be able to revoke.
+        # Preserve the disclosure it had recorded when possible; otherwise use
+        # the deployment's required policy solely as event metadata.
+        recorded_policy_version = (
+            user.ai_consent_version
+            if user.ai_consent_version in POLICIES_BY_VERSION
+            else required_policy_version
         )
+    else:
+        # The pre-versioned v1 client rendered the Anthropic-only disclosure and
+        # omitted policy_version. Treat that exact legacy shape as v1. Any named
+        # unknown version still fails closed.
+        recorded_policy_version = policy_version or LEGACY_POLICY_VERSION
+        known_policy = recorded_policy_version in POLICIES_BY_VERSION
+        # A legacy decline grants nothing and remains a valid way to continue
+        # without AI. A grant must cover every provider in the required policy.
+        if not known_policy or (
+            action == "grant"
+            and not satisfies(recorded_policy_version, required_policy_version)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "ai_consent_policy_version_mismatch",
+                    "provider": required_policy.provider,
+                    "policy_version": required_policy.version,
+                },
+            )
+
+    recorded_policy = policy_for(recorded_policy_version)
 
     now = _now()
     user.ai_consent_status = {
@@ -109,7 +145,7 @@ async def record(
         "decline": AI_CONSENT_DECLINED,
         "withdraw": AI_CONSENT_WITHDRAWN,
     }[action]
-    user.ai_consent_version = POLICY_VERSION
+    user.ai_consent_version = recorded_policy.version
     user.ai_consent_updated_at = now
     user.ai_consent_granted_at = now if action == "grant" else None
     user.updated_at = now
@@ -117,8 +153,8 @@ async def record(
     db.add(
         AIConsentEvent(
             user_id=user_id,
-            provider=PROVIDER,
-            policy_version=POLICY_VERSION,
+            provider=recorded_policy.provider,
+            policy_version=recorded_policy.version,
             action=action,
             created_at=now,
         )
@@ -137,12 +173,15 @@ async def require_ai_processing(
     user = await lock_user_boundary(db, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="unauthorized")
-    if config.ai_consent_enforcement_enabled and not processing_allowed(user):
+    if config.ai_consent_enforcement_enabled and not processing_allowed(
+        user, config.ai_consent_required_policy_version
+    ):
+        required_policy = policy_for(config.ai_consent_required_policy_version)
         raise HTTPException(
             status_code=403,
             detail={
                 "code": "ai_consent_required",
-                "provider": PROVIDER,
-                "policy_version": POLICY_VERSION,
+                "provider": required_policy.provider,
+                "policy_version": required_policy.version,
             },
         )

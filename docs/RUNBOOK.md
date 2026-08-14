@@ -47,7 +47,10 @@ openssl rand -hex 32      # FOUNDER_CLAIM_TOKEN (temporary; xcconfig-safe)
 | `APNS_PRIVATE_KEY` | Railway | The `.p8` file, offline |
 | `API_BASE_URL` | GitHub repo secret | Your Railway public domain |
 
-`APNS_USE_SANDBOX` and `LOG_LEVEL` are ordinary Railway variables, not secrets.
+`APNS_USE_SANDBOX`, `LOG_LEVEL`, and
+`AI_CONSENT_REQUIRED_POLICY_VERSION` are ordinary Railway variables, not
+secrets. The last one is a release gate: do not advance it as part of an
+ordinary code deploy.
 
 ### Rotation
 
@@ -171,6 +174,8 @@ FOUNDER_CLAIM_TOKEN = <a third, temporary openssl rand -hex 32 value>
 # Explicitly on only so the already-installed private build survives this deploy.
 LEGACY_API_KEY_AUTH_ENABLED = true
 ANTHROPIC_API_KEY  = <your key>
+# A code deploy may understand v2, but production still requires the installed client.
+AI_CONSENT_REQUIRED_POLICY_VERSION = anthropic-2026-08-12-v1
 APNS_USE_SANDBOX   = true
 LOG_LEVEL          = INFO
 ```
@@ -732,15 +737,24 @@ The source of truth for App Store privacy answers is
 
 Migration 0014 already supports arbitrary provider names and policy versions; a
 combined Anthropic and OpenAI disclosure needs no new migration. Before deploying
-a new policy version, ship the consent-capable client that renders both providers
-and explicitly describes simultaneous shadow transmission plus the stable
-pseudonymous OpenAI safety identifier. It then sends its shared `policy_version`
-with grant or decline. Keep OpenAI scoring
-disabled during this stage. Then deploy the matching server policy version,
-confirm missing or stale versions return 409 without recording a choice, and
-confirm withdrawal still succeeds without a current version. Record the renewed
-choice from that client and verify `/auth/me` reports
-`ai_processing_allowed=true` before enabling any OpenAI scoring path.
+a new policy version, deploy code support while leaving
+`AI_CONSENT_REQUIRED_POLICY_VERSION` on the policy already shipped. This is a
+compatibility deploy, not activation: the old v1 client and the v2-capable client
+both work, a v2 choice may be recorded early, and every provider route remains
+within the required policy's provider set. `/health` must report the expected
+required policy, latest supported policy, and minimum iOS build.
+
+Then ship the consent-capable client that renders both providers and explicitly
+describes simultaneous shadow transmission plus the stable pseudonymous OpenAI
+safety identifier. It sends its exact `policy_version` with grant or decline.
+After that minimum build is distributed and a renewed choice is recorded, change
+`AI_CONSENT_REQUIRED_POLICY_VERSION` to the combined version and redeploy. Confirm
+the three `/health` fields, verify `/auth/me` reports
+`ai_processing_allowed=true`, confirm a legacy grant now receives 409 without a
+write, and confirm legacy decline plus withdrawal still succeed without
+authorizing processing. Keep
+OpenAI scoring disabled throughout; its startup validator independently refuses
+to boot unless the combined policy is required.
 
 The public policy must say that OpenAI scoring uses the Responses API with
 `store: false`: response application state is not retained for that request, but

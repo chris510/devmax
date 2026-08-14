@@ -14,6 +14,7 @@ from sqlmodel import SQLModel
 
 from app import models  # noqa: F401  — registers tables on SQLModel.metadata
 from app.config import Settings
+from app.consent_policy import LATEST_POLICY_VERSION, LEGACY_POLICY_VERSION
 from app.db import engine_kwargs
 
 GOOD = dict(
@@ -104,6 +105,20 @@ def test_the_founder_claim_is_disabled_by_default() -> None:
 
 def test_ai_consent_enforcement_is_staged_off_by_default() -> None:
     assert build().ai_consent_enforcement_enabled is False
+
+
+def test_ai_consent_policy_activation_is_explicit_and_starts_legacy_compatible() -> None:
+    assert build().ai_consent_required_policy_version == LEGACY_POLICY_VERSION
+    assert (
+        build(ai_consent_required_policy_version=LATEST_POLICY_VERSION)
+        .ai_consent_required_policy_version
+        == LATEST_POLICY_VERSION
+    )
+
+
+def test_unknown_ai_consent_policy_cannot_boot() -> None:
+    with pytest.raises(ValidationError, match="supported policy version"):
+        build(ai_consent_required_policy_version="future-policy")
 
 
 @pytest.mark.parametrize("shared_with", ["api_key", "cron_secret"])

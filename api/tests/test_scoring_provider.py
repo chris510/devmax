@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from app.config import Settings
+from app.consent_policy import LATEST_POLICY_VERSION
 from app.services import scoring_provider
 
 GOOD = {
@@ -42,6 +43,7 @@ def settings(**overrides: object) -> Settings:
         "openai_v2_scoring_shadow_stage_id": SHADOW_STAGE_ID,
         "openai_safety_identifier_secret": SAFETY_SECRET,
         "ai_consent_enforcement_enabled": True,
+        "ai_consent_required_policy_version": LATEST_POLICY_VERSION,
         "scoring_contract_version": 2,
     }
     values.update(overrides)
