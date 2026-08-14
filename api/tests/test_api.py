@@ -4,7 +4,13 @@ from datetime import timedelta
 import pytest
 from sqlmodel import select
 
-from app.models import STATUS_AWAITING_FOLLOW_UP, STATUS_COMPLETE, DeviceToken, Session
+from app.models import (
+    STATUS_AWAITING_FOLLOW_UP,
+    STATUS_COMPLETE,
+    DeviceToken,
+    Session,
+    SessionProbe,
+)
 from app.routers import internal
 from app.services import llm
 from app.services.llm import LLMError, ReattemptResult, ScoreResult
@@ -52,6 +58,23 @@ def stub_llm(monkeypatch):
     monkeypatch.setattr(llm, "generate_question", _question)
     monkeypatch.setattr(llm, "score_answer", _score)
     return _score, calls
+
+
+async def probe_rows(db, session_id) -> list[SessionProbe]:
+    """This session's scored probes in `idx` order — the transcript's own record."""
+    return list(
+        (
+            await db.exec(
+                select(SessionProbe)
+                .where(SessionProbe.session_id == session_id)
+                .order_by(SessionProbe.idx)
+            )
+        ).all()
+    )
+
+
+def schedule_of(card):
+    return (card.ease_factor, card.interval_days, card.repetitions, card.next_review_at)
 
 
 # --- auth -------------------------------------------------------------------
@@ -138,6 +161,9 @@ async def test_score_of_two_returns_a_follow_up(client, db, stub_llm):
     await db.refresh(session)
     assert session.status == STATUS_AWAITING_FOLLOW_UP
     assert session.follow_up_used is True
+    # The probe is a row, written unanswered the moment its question is issued.
+    probes = await probe_rows(db, session.id)
+    assert [(p.idx, p.question, p.answer) for p in probes] == [(1, "One more — why?", "")]
 
 
 async def test_exact_initial_answer_replay_returns_the_committed_probe_without_rescoring(
@@ -149,12 +175,7 @@ async def test_exact_initial_answer_replay_returns_the_committed_probe_without_r
     card = make_card(repetitions=1, interval_days=6, ease_factor=2.36)
     db.add(card)
     await db.commit()
-    schedule_before = (
-        card.ease_factor,
-        card.interval_days,
-        card.repetitions,
-        card.next_review_at,
-    )
+    schedule_before = schedule_of(card)
 
     start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
     endpoint = f"/sessions/{start['session_id']}/answers"
@@ -167,51 +188,263 @@ async def test_exact_initial_answer_replay_returns_the_committed_probe_without_r
         "question": "One more — why?",
     }
     assert len(calls) == 1
+    assert calls[0]["probes"] == []
     session = await db.get(Session, uuid.UUID(start["session_id"]))
     await db.refresh(session)
     await db.refresh(card)
     assert session.status == STATUS_AWAITING_FOLLOW_UP
     assert session.answer_text == payload["text"]
-    assert session.follow_up_answer == ""
-    assert (
-        card.ease_factor,
-        card.interval_days,
-        card.repetitions,
-        card.next_review_at,
-    ) == schedule_before
+    probes = await probe_rows(db, session.id)
+    assert [(p.idx, p.answer) for p in probes] == [(1, "")]
+    assert schedule_of(card) == schedule_before
 
     # A genuinely new turn still follows the existing V1 completion path.
-    score.result = completed(3, mastery_summary="recovered after one probe")
+    score.result = completed(3, mastery_summary="recovered after a probe")
     completed_response = await client.post(
         endpoint, headers=API_HEADERS, json={"text": "the missing causal link"}
     )
     assert completed_response.json()["status"] == "complete"
     assert len(calls) == 2
-    assert calls[1]["follow_up_answer"] == "the missing causal link"
+    assert calls[1]["probes"] == [("One more — why?", "the missing causal link")]
 
 
-async def test_follow_up_used_is_passed_so_a_second_probe_cannot_happen(client, db, stub_llm):
-    """Maximum one follow-up per session, enforced by the server."""
+async def test_replaying_the_first_probe_answer_returns_the_second_probe_unscored(
+    client, db, stub_llm
+):
+    """The replay guard covers every probe, not only the first.
+
+    Turn 2's response can be lost exactly like turn 1's. Scoring the resent text
+    as turn 3's answer would spend the last scored turn on evidence already used.
+    """
     score, calls = stub_llm
+    card = make_card(repetitions=1, interval_days=6, ease_factor=2.36)
+    db.add(card)
+    await db.commit()
+    schedule_before = schedule_of(card)
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{start['session_id']}/answers"
 
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "a partial answer"})
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="Last one — how?")
+    payload = {"text": "the probe answer that was saved"}
+    first = await client.post(endpoint, headers=API_HEADERS, json=payload)
+    replay = await client.post(endpoint, headers=API_HEADERS, json=payload)
+
+    assert first.json() == replay.json() == {
+        "status": "follow_up",
+        "question": "Last one — how?",
+    }
+    assert len(calls) == 2
+    session = await db.get(Session, uuid.UUID(start["session_id"]))
+    await db.refresh(session)
+    await db.refresh(card)
+    assert session.status == STATUS_AWAITING_FOLLOW_UP
+    assert [(p.idx, p.question, p.answer) for p in await probe_rows(db, session.id)] == [
+        (1, "One more — why?", payload["text"]),
+        (2, "Last one — how?", ""),
+    ]
+    assert schedule_of(card) == schedule_before
+
+
+async def test_two_scored_follow_ups_are_the_cap_and_the_third_turn_completes(
+    client, db, stub_llm
+):
+    """`MAX_SCORED_FOLLOW_UPS` scored probes per session, enforced by the server.
+
+    The scorer sees the whole transcript so far in `probes`, one pair longer each
+    turn; after the cap there is no turn left to submit against.
+    """
+    score, calls = stub_llm
     card = make_card()
     db.add(card)
     await db.commit()
     start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{start['session_id']}/answers"
 
     score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
-    await client.post(
-        f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "partial"}
-    )
-    assert calls[0]["follow_up_used"] is False
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "partial"})
 
-    score.result = completed(3, mastery_summary="s")
-    resp = await client.post(
-        f"/sessions/{start['session_id']}/answers", headers=API_HEADERS, json={"text": "more"}
+    score.result = ScoreResult(status="follow_up", follow_up_question="Last one — how?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "still partial"})
+
+    score.result = completed(3, mastery_summary="recovered after a probe")
+    final = await client.post(endpoint, headers=API_HEADERS, json={"text": "the missing link"})
+    assert final.json()["status"] == "complete"
+
+    assert llm.MAX_SCORED_FOLLOW_UPS == 2
+    assert [call["probes"] for call in calls] == [
+        [],
+        [("One more — why?", "still partial")],
+        [
+            ("One more — why?", "still partial"),
+            ("Last one — how?", "the missing link"),
+        ],
+    ]
+
+    # There is no fourth turn to take: the session is already complete.
+    fourth = await client.post(endpoint, headers=API_HEADERS, json={"text": "one more thought"})
+    assert fourth.status_code == 409
+    assert len(calls) == 3
+
+
+async def test_a_probe_past_the_cap_is_refused_at_the_write_site(client, db, stub_llm):
+    """The router re-checks the cap the parsers already enforce.
+
+    A parser bug that let a third probe through must not be able to extend a
+    session — so a follow-up returned at the cap fails the request instead, and
+    leaves the session and card exactly as they were.
+    """
+    score, calls = stub_llm
+    card = make_card(repetitions=1, interval_days=6, ease_factor=2.36)
+    db.add(card)
+    await db.commit()
+    session = Session(
+        card_id=card.id,
+        question_asked="What moves when a node joins?",
+        answer_text="the initial answer",
+        follow_up_used=True,
+        status=STATUS_AWAITING_FOLLOW_UP,
     )
-    # Second call sees follow_up_used=True, so the scorer cannot probe again.
-    assert calls[1]["follow_up_used"] is True
-    assert resp.json()["status"] == "complete"
+    db.add(session)
+    db.add(SessionProbe(session_id=session.id, idx=1, question="One more — why?", answer="first"))
+    db.add(SessionProbe(session_id=session.id, idx=2, question="Last one — how?"))
+    await db.commit()
+    schedule_before = schedule_of(card)
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="Actually — one more?")
+    resp = await client.post(
+        f"/sessions/{session.id}/answers", headers=API_HEADERS, json={"text": "second"}
+    )
+
+    assert resp.status_code == 503
+    assert resp.json() == {"detail": "scoring_unavailable"}
+    assert calls[0]["probes"] == [
+        ("One more — why?", "first"),
+        ("Last one — how?", "second"),
+    ]
+    db.expire_all()
+    await db.refresh(card)
+    await db.refresh(session)
+    assert schedule_of(card) == schedule_before
+    assert card.last_score is None
+    assert card.last_reviewed_at is None
+    assert session.status == STATUS_AWAITING_FOLLOW_UP
+    assert session.score is None
+    assert [(p.idx, p.answer) for p in await probe_rows(db, session.id)] == [
+        (1, "first"),
+        (2, ""),
+    ]
+
+
+async def test_an_insufficiency_probe_defers_sm2_until_the_final_turn(client, db, stub_llm):
+    """Probe 1 by band, probe 2 by insufficiency, one SM-2 application at the end."""
+    score, _ = stub_llm
+    card = make_card(repetitions=1, interval_days=1, ease_factor=2.5)
+    db.add(card)
+    await db.commit()
+    schedule_before = schedule_of(card)
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{start['session_id']}/answers"
+    session_id = uuid.UUID(start["session_id"])
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "a partial answer"})
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="Last one — how?")
+    second = await client.post(endpoint, headers=API_HEADERS, json={"text": "still thin"})
+    assert second.json() == {"status": "follow_up", "question": "Last one — how?"}
+
+    session = await db.get(Session, session_id)
+    await db.refresh(session)
+    await db.refresh(card)
+    assert session.status == STATUS_AWAITING_FOLLOW_UP
+    assert session.score is None
+    assert [(p.idx, p.question, p.answer) for p in await probe_rows(db, session_id)] == [
+        (1, "One more — why?", "still thin"),
+        (2, "Last one — how?", ""),
+    ]
+    assert schedule_of(card) == schedule_before
+
+    score.result = completed(4, 3, mastery_summary="recovered after a probe")
+    final = (
+        await client.post(endpoint, headers=API_HEADERS, json={"text": "the missing link"})
+    ).json()
+
+    assert final["status"] == "complete"
+    # One SM-2 application, from the final turn's Accuracy: the `good` bucket on a
+    # second successful review. Two applications would have taken it past 6 days.
+    assert final["interval_days"] == 6
+    await db.refresh(card)
+    await db.refresh(session)
+    assert schedule_of(card) == (2.5, 6, 2, local_today() + timedelta(days=6))
+    assert session.status == STATUS_COMPLETE
+    assert session.accuracy == 4
+    assert [p.answer for p in await probe_rows(db, session_id)] == [
+        "still thin",
+        "the missing link",
+    ]
+
+
+async def test_resuming_mid_second_probe_returns_that_probe(client, db, stub_llm):
+    """Resume shows the turn the session is actually waiting on."""
+    score, _ = stub_llm
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{start['session_id']}/answers"
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "partial"})
+    resumed = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    assert resumed["question"] == "One more — why?"
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="Last one — how?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "still partial"})
+
+    resumed = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    assert resumed["session_id"] == start["session_id"]
+    assert resumed["question"] == "Last one — how?"
+    assert resumed["is_follow_up"] is True
+    assert resumed["resumed"] is True
+
+
+async def test_card_history_renders_both_probes_in_order(client, db, stub_llm):
+    score, _ = stub_llm
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    start = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{start['session_id']}/answers"
+
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "the first answer"})
+    score.result = ScoreResult(status="follow_up", follow_up_question="Last one — how?")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "the second answer"})
+    score.result = completed(3, feedback="Recovered the link.", mastery_summary="ok")
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "the third answer"})
+
+    detail = (await client.get(f"/cards/{card.id}", headers=API_HEADERS)).json()
+    turns = detail["sessions"][0]["turns"]
+    assert [turn["role"] for turn in turns] == [
+        "question",
+        "answer",
+        "follow_up",
+        "answer",
+        "follow_up",
+        "answer",
+        "score",
+    ]
+    assert [turn["text"] for turn in turns[1:6]] == [
+        "the first answer",
+        "One more — why?",
+        "the second answer",
+        "Last one — how?",
+        "the third answer",
+    ]
+    assert turns[6]["text"] == "3 — Recovered the link."
 
 
 async def test_completing_a_session_applies_sm2_and_updates_the_card(client, db, stub_llm):

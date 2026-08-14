@@ -105,10 +105,10 @@ argument and fails with `Invalid device`.
 
 | Variable | Values |
 |---|---|
-| `WC_ROUTE` | `question` `recording` `processing` `text` `followup` `score` `resume` `submit-failure` `history` `history-empty` `settings` `add` `filter` `setup` (alias `sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded` |
+| `WC_ROUTE` | `question` `recording` `processing` `text` `followup` `followup-second` `score` `resume` `submit-failure` `history` `history-empty` `settings` `add` `filter` `setup` (alias `sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded` |
 | `WC_LOAD` | `auto` `loading` `error` |
 | `WC_RAIL_STYLE` | `dots` (ships) `chips` (exists only for the side-by-side) |
-| `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS` `WC_SIM_SPEECH` | `1` / `0` |
+| `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS` `WC_SIM_SPEECH` `WC_SECOND_PROBE` | `1` / `0` |
 
 `WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
 `WC_BASE_URL` overrides where it points.

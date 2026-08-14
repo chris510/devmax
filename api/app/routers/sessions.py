@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -17,6 +18,7 @@ from app.models import (
     STATUS_OPEN,
     Card,
     Session,
+    SessionProbe,
 )
 from app.routers.deps import as_utc, local_today
 from app.schemas import (
@@ -65,23 +67,76 @@ def _reattempt_eligible(session: Session) -> bool:
     return session.accuracy is not None and session.accuracy <= REATTEMPT_MAX_ACCURACY
 
 
-def _replayed_initial_answer(session: Session, submitted_text: str) -> FollowUpOut | None:
-    """Return the already-committed probe for an exact turn-1 replay.
+async def _session_probes(db: AsyncSession, session_id: uuid.UUID) -> list[SessionProbe]:
+    """This session's scored probes, oldest first. `idx` is the whole ordering."""
+    return list(
+        (
+            await db.exec(
+                select(SessionProbe)
+                .where(SessionProbe.session_id == session_id)
+                .order_by(col(SessionProbe.idx))
+            )
+        ).all()
+    )
+
+
+def _pending_probe(session: Session, probes: Sequence[SessionProbe]) -> SessionProbe | None:
+    """The probe this session is waiting on, or None when it is on its first turn.
+
+    `awaiting_follow_up` means "a scored probe is pending"; *which* one is the
+    last row, written unanswered the moment its question was issued. Reading it
+    here is what keeps the status column free of a probe number.
+    """
+    if session.status != STATUS_AWAITING_FOLLOW_UP or not probes:
+        return None
+    last = probes[-1]
+    return last if not last.answer else None
+
+
+def _replayed_answer(
+    session: Session, probes: Sequence[SessionProbe], submitted_text: str
+) -> FollowUpOut | None:
+    """Return the already-committed probe for an exact replay of the last turn.
 
     The client deliberately retries a failed submission with the same saved text.
     If the server committed a follow-up but its response was lost, the session is
-    already awaiting turn 2 when that retry arrives. Treating the duplicate text as
-    the follow-up answer would let one piece of recall evidence occupy both scored
-    turns. Returning the stored probe is both idempotent and free of another model
-    call; an actual turn-2 answer must differ from the stored turn-1 transcript.
+    already awaiting the next turn when that retry arrives. Treating the duplicate
+    text as the *next* answer would let one piece of recall evidence occupy two
+    scored turns. Returning the stored probe is both idempotent and free of another
+    model call; a genuine new answer must differ from the turn it follows.
+
+    The comparison is against the last *answered* turn — the initial answer while
+    only probe 1 is outstanding, the previous probe's answer after that — so the
+    guard covers every probe, not just the first.
     """
-    if (
-        session.status == STATUS_AWAITING_FOLLOW_UP
-        and session.answer_text == submitted_text
-        and session.follow_up_question
-    ):
-        return FollowUpOut(question=session.follow_up_question)
+    pending = _pending_probe(session, probes)
+    if pending is None or not pending.question:
+        return None
+    answered = probes[-2].answer if len(probes) >= 2 else session.answer_text
+    if answered == submitted_text:
+        return FollowUpOut(question=pending.question)
     return None
+
+
+async def _resumed(db: AsyncSession, existing: Session) -> SessionStart:
+    """Re-enter a live session at the turn it is actually waiting on.
+
+    On a probe turn the displayed question is the pending probe's, not the card's
+    — the same shared read both resume paths in `start_session` use, so a second
+    probe cannot show the first one's text on one path and not the other.
+    """
+    is_follow_up = existing.status == STATUS_AWAITING_FOLLOW_UP
+    question = existing.question_asked
+    if is_follow_up:
+        pending = _pending_probe(existing, await _session_probes(db, existing.id))
+        question = pending.question if pending else ""
+    return SessionStart(
+        session_id=existing.id,
+        question=question,
+        is_follow_up=is_follow_up,
+        draft_text=existing.draft_text,
+        resumed=True,
+    )
 
 
 async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
@@ -151,15 +206,7 @@ async def start_session(
     if existing is not None:
         # Returning the live session instead of creating a new one is what makes
         # resume work.
-        is_follow_up = existing.status == STATUS_AWAITING_FOLLOW_UP
-        question = existing.follow_up_question or "" if is_follow_up else existing.question_asked
-        return SessionStart(
-            session_id=existing.id,
-            question=question,
-            is_follow_up=is_follow_up,
-            draft_text=existing.draft_text,
-            resumed=True,
-        )
+        return await _resumed(db, existing)
 
     question = card.canonical_question
     generated_question: str | None = None
@@ -203,19 +250,7 @@ async def start_session(
     # question. Resume its session rather than creating a second one.
     existing = await _live_session(db, card_id)
     if existing is not None:
-        is_follow_up = existing.status == STATUS_AWAITING_FOLLOW_UP
-        existing_question = (
-            existing.follow_up_question or ""
-            if is_follow_up
-            else existing.question_asked
-        )
-        return SessionStart(
-            session_id=existing.id,
-            question=existing_question,
-            is_follow_up=is_follow_up,
-            draft_text=existing.draft_text,
-            resumed=True,
-        )
+        return await _resumed(db, existing)
 
     question = card.canonical_question or generated_question
     if not question:  # pragma: no cover - generation rejects an empty question
@@ -278,11 +313,12 @@ async def submit_answer(
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     # The card lock serializes reviews without blocking PATCH /draft, which only
-    # touches the session row. Refresh after any wait. An exact initial-answer
-    # replay may observe the committed follow-up either before the lock or after
+    # touches the session row. Refresh after any wait. An exact replay of the last
+    # answered turn may observe the committed probe either before the lock or after
     # waiting on it; in both cases return that same probe without scoring again.
     await db.refresh(session)
-    replay = _replayed_initial_answer(session, body.text)
+    probes = await _session_probes(db, session.id)
+    replay = _replayed_answer(session, probes, body.text)
     if replay is not None:
         return replay
     if session.status != observed_status:
@@ -290,13 +326,23 @@ async def submit_answer(
     if session.status == STATUS_COMPLETE:
         raise HTTPException(status_code=409, detail="session already complete")
 
-    answering_follow_up = session.status == STATUS_AWAITING_FOLLOW_UP
-    answer_text = session.answer_text
-    follow_up_answer = session.follow_up_answer
-    if answering_follow_up:
-        follow_up_answer = body.text
+    pending = _pending_probe(session, probes)
+    if session.status == STATUS_AWAITING_FOLLOW_UP and pending is None:  # pragma: no cover
+        # The status is only ever written beside an unanswered probe row, in the
+        # same transaction. Refuse rather than score this answer as the initial one.
+        raise HTTPException(status_code=409, detail="session has no pending probe")
+
+    # The scored transcript so far, plus the answer being submitted now. Built
+    # without touching the ORM objects: nothing is written until the score lands.
+    # `len(pairs)` is the scorer's `probes_used`, which is what both the parser
+    # policy and the cap below are keyed on.
+    if pending is not None:
+        answer_text = session.answer_text
+        pairs = [(p.question, p.answer) for p in probes[:-1]]
+        pairs.append((pending.question, body.text))
     else:
         answer_text = body.text
+        pairs = []
 
     # Score before writing anything, so an LLM failure leaves the session and card
     # untouched rather than half-written. The answer is re-sent on retry.
@@ -309,9 +355,7 @@ async def submit_answer(
         mastery_summary=card.mastery_summary,
         question_asked=session.question_asked,
         answer_text=answer_text,
-        follow_up_question=session.follow_up_question,
-        follow_up_answer=follow_up_answer,
-        follow_up_used=session.follow_up_used,
+        probes=pairs,
         answer_anchor=card.answer_anchor,
         source_excerpt=card.source_excerpt,
         answer_basis=card.answer_basis,
@@ -322,18 +366,32 @@ async def submit_answer(
 
     if result.scoring_contract_version != session.scoring_contract_version:
         raise llm.LLMError("scorer returned the wrong contract version")
+    if result.status == "follow_up" and len(pairs) >= llm.MAX_SCORED_FOLLOW_UPS:
+        # Defense in depth, at the write site. Both parsers already refuse to
+        # return a probe here, so reaching this line means a parser bug — and the
+        # cap has to hold anyway: a prompt alone can never extend a session.
+        raise llm.LLMError("scorer asked for a follow-up past the structural cap")
 
-    # Only now does the transcript move onto the ORM object. If the provider or
+    # Only now does the transcript move onto the ORM objects. If the provider or
     # contract validation failed above, the request leaves no dirty session state
     # for a later transaction to commit accidentally.
-    if answering_follow_up:
-        session.follow_up_answer = follow_up_answer
+    if pending is not None:
+        pending.answer = body.text
+        db.add(pending)
     else:
-        session.answer_text = answer_text
+        session.answer_text = body.text
     session.draft_text = ""
 
     if result.status == "follow_up":
-        session.follow_up_question = result.follow_up_question
+        db.add(
+            SessionProbe(
+                session_id=session.id,
+                idx=len(probes) + 1,
+                question=result.follow_up_question or "",
+            )
+        )
+        # Still written, and still truthful: "a scored probe was issued in this
+        # session". The count lives in `session_probes`; this stays the cheap flag.
         session.follow_up_used = True
         session.status = STATUS_AWAITING_FOLLOW_UP
         db.add(session)

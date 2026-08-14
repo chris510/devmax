@@ -134,7 +134,8 @@ def prepare_cases(
 def _scoring_result(
     prepared: PreparedCall, data: dict[str, Any], usage: Usage
 ) -> effort_sweep.Result:
-    parsed = llm.parse_score_result(data, follow_up_used=True)
+    # Parsed at the cap so the bakeoff always gets a scored result to compare.
+    parsed = llm.parse_score_result(data, probes_used=llm.MAX_SCORED_FOLLOW_UPS)
     assert parsed.accuracy is not None
     assert parsed.depth is not None
     assert parsed.boundaries is not None

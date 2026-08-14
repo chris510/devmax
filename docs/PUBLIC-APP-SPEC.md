@@ -17,7 +17,7 @@ deployed, the compatibility path is removed in a separate migration.
 
 Devmax is a conversational study coach for durable understanding. A user brings
 material, reviews the topics Devmax extracts, then answers short questions by
-voice or text. Devmax scores the answer, asks at most one clarifying follow-up,
+voice or text. Devmax scores the answer, asks at most two clarifying follow-ups,
 and schedules the topic for later retrieval.
 
 The launch product is subject-agnostic for knowledge a learner can explain in

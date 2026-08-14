@@ -3,11 +3,25 @@
 import uuid
 from datetime import UTC, datetime
 
+from sqlmodel import select
+
 from app.config import get_settings
-from app.models import Card, PendingCapture, Session
+from app.models import Card, PendingCapture, Session, SessionProbe
 from app.services import llm
 from app.services.llm import CoachingResult, ScoreResult
 from tests.conftest import API_HEADERS, local_today, make_card
+
+
+async def probes_of(db, session_id) -> list[SessionProbe]:
+    return list(
+        (
+            await db.exec(
+                select(SessionProbe)
+                .where(SessionProbe.session_id == session_id)
+                .order_by(SessionProbe.idx)
+            )
+        ).all()
+    )
 
 
 def v2_result(recall: int, *, status: str = "complete", probe: str | None = None):
@@ -22,13 +36,19 @@ def v2_result(recall: int, *, status: str = "complete", probe: str | None = None
     )
 
 
-async def install_v2(monkeypatch, result: ScoreResult):
+async def install_v2(monkeypatch, result: ScoreResult, *then: ScoreResult):
+    """Route scoring to a stub and record its kwargs.
+
+    Extra results supply later scored turns in order; the last one repeats, so a
+    single-result call still answers every turn the way it always did.
+    """
     monkeypatch.setattr(get_settings(), "scoring_contract_version", 2)
     calls = []
+    results = [result, *then]
 
     async def score_answer(**kwargs):
         calls.append(kwargs)
-        return result
+        return results[min(len(calls) - 1, len(results) - 1)]
 
     monkeypatch.setattr(llm, "score_answer", score_answer)
     return calls
@@ -126,12 +146,76 @@ async def test_v2_exact_initial_answer_replay_is_not_scored_as_the_follow_up(
         "question": "One more — name the missing link?",
     }
     assert len(calls) == 1
+    assert calls[0]["probes"] == []
     session = await db.get(Session, uuid.UUID(started["session_id"]))
     await db.refresh(session)
     assert session.status == "awaiting_follow_up"
     assert session.scoring_contract_version == 2
-    assert session.follow_up_answer == ""
     assert session.score is None
+    assert [(p.idx, p.answer) for p in await probes_of(db, session.id)] == [(1, "")]
+
+
+async def test_v2_second_probe_is_committed_and_only_the_final_turn_scores(
+    client, db, monkeypatch
+):
+    """V2's insufficiency probe, end to end: two probe rows, one SM-2 application."""
+    calls = await install_v2(
+        monkeypatch,
+        v2_result(2, status="follow_up", probe="One more — name the missing link?"),
+        v2_result(2, status="follow_up", probe="Last one — what does that imply?"),
+        v2_result(4),
+    )
+    card = make_card(
+        canonical_question="What is the essential account?",
+        repetitions=1,
+        interval_days=1,
+    )
+    db.add(card)
+    await db.commit()
+    schedule_before = (card.ease_factor, card.interval_days, card.repetitions)
+
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{started['session_id']}/answers"
+    session_id = uuid.UUID(started["session_id"])
+
+    await client.post(endpoint, headers=API_HEADERS, json={"text": "a partial account"})
+    second = await client.post(endpoint, headers=API_HEADERS, json={"text": "still ambiguous"})
+    assert second.json() == {
+        "status": "follow_up",
+        "question": "Last one — what does that imply?",
+    }
+
+    session = await db.get(Session, session_id)
+    await db.refresh(session)
+    await db.refresh(card)
+    assert session.status == "awaiting_follow_up"
+    assert session.score is None
+    assert [(p.idx, p.question, p.answer) for p in await probes_of(db, session_id)] == [
+        (1, "One more — name the missing link?", "still ambiguous"),
+        (2, "Last one — what does that imply?", ""),
+    ]
+    assert (card.ease_factor, card.interval_days, card.repetitions) == schedule_before
+
+    final = (
+        await client.post(endpoint, headers=API_HEADERS, json={"text": "the missing link"})
+    ).json()
+    assert final["status"] == "complete"
+    assert final["recall_score"] == 4
+    # Second successful review: one `good` application, not two.
+    assert final["interval_days"] == 6
+
+    assert [call["probes"] for call in calls] == [
+        [],
+        [("One more — name the missing link?", "still ambiguous")],
+        [
+            ("One more — name the missing link?", "still ambiguous"),
+            ("Last one — what does that imply?", "the missing link"),
+        ],
+    ]
+    await db.refresh(card)
+    await db.refresh(session)
+    assert (card.repetitions, card.interval_days) == (2, 6)
+    assert session.accuracy == 4
 
 
 async def test_qualitative_coaching_changes_only_its_four_session_fields(

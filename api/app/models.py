@@ -285,6 +285,9 @@ class Session(SQLModel, table=True):
     card_id: uuid.UUID = Field(foreign_key="cards.id", ondelete="CASCADE")
 
     question_asked: str
+    # Frozen legacy, both of them: the single probe a session could once carry.
+    # Migration 0015 moved probes to `session_probes` and left these holding the
+    # history they already had. Nothing reads or writes them — see DEVIATIONS §30.
     follow_up_question: str | None = None
     answer_text: str = ""
     follow_up_answer: str = ""
@@ -299,6 +302,8 @@ class Session(SQLModel, table=True):
     depth: int | None = None
     boundaries: int | None = None
     feedback: str = ""
+    # Still written, still truthful: "a scored probe was issued in this session".
+    # How many, and which, is `session_probes`.
     follow_up_used: bool = False
     # V1 remains active until the staged V2 release gate is complete. Every row
     # carries its meaning so historical composites are never relabeled as Recall.
@@ -328,6 +333,29 @@ class Session(SQLModel, table=True):
 
     started_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     ended_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+
+
+class SessionProbe(SQLModel, table=True):
+    """One scored follow-up probe, in the order it was asked.
+
+    Rows here are scored and pre-correction by definition, which is what keeps the
+    coached re-attempt and the coaching turn on `Session` as scalars — those happen
+    after the correction has been stated and never reach SM-2. See migration 0015
+    and docs/multi-turn-coaching-design.md §5.1.
+    """
+
+    __tablename__ = "session_probes"
+    __table_args__ = (Index("uq_session_probes_session_idx", "session_id", "idx", unique=True),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(foreign_key="sessions.id", ondelete="CASCADE")
+    # 1-based. The ceiling is `llm.MAX_SCORED_FOLLOW_UPS`, enforced in code so the
+    # cap stays one decision; the schema only knows that order starts at 1.
+    idx: int
+    question: str
+    # "" until this probe is answered — a row is written when the question is issued.
+    answer: str = ""
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 class DeviceToken(SQLModel, table=True):

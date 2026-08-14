@@ -78,6 +78,35 @@ final class WireFormatTests: XCTestCase {
         XCTAssertEqual(open.turns.map(\.role), [.question])
     }
 
+    /// A session can now carry two follow-up pairs, because the model may ask a
+    /// second time when one probe left it unable to score honestly. The wire
+    /// format is unchanged — the turns array is flat and ordered, and Card
+    /// History renders it in order — but the shape is new, and the transcript
+    /// keys its rows by `Turn.id`, which is role plus text. Two probes in one
+    /// session that collapsed into a single row would be a silent loss.
+    func testASessionWithTwoFollowUpsDecodesAsSevenDistinctTurns() throws {
+        let json = Data(#"""
+        {"id":"00000000-0000-0000-0000-0000000000f1",
+         "date":"2026-07-16T21:32:00.000000Z","score":3,
+         "feedback":"Clear on lookups; didn't mention replication.",
+         "turns":[{"role":"question","text":"How does a client find the owner?"},
+                  {"role":"answer","text":"Hash it, walk clockwise."},
+                  {"role":"follow_up","text":"One more — what about during a join?"},
+                  {"role":"answer","text":"Some keys point at the new node."},
+                  {"role":"follow_up","text":"Last one — who serves them meanwhile?"},
+                  {"role":"answer","text":"Whichever one has the data."},
+                  {"role":"score","text":"3 — Correct lookup path."}]}
+        """#.utf8)
+
+        let session = try LiveAPI.decoder.decode(SessionHistory.self, from: json)
+
+        XCTAssertEqual(
+            session.turns.map(\.role),
+            [.question, .answer, .followUp, .answer, .followUp, .answer, .score]
+        )
+        XCTAssertEqual(Set(session.turns.map(\.id)).count, session.turns.count)
+    }
+
     func testSnakeCaseKeysMapOntoTheSwiftProperties() throws {
         let card = try decodeCardDetail()
 

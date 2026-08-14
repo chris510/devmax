@@ -19,7 +19,7 @@ project. No existing design file was modified.
 ## Decision summary
 
 Devmax already has the right learning loop: short closed-book retrieval,
-corrective feedback, one scored follow-up, a bounded coached re-attempt, and
+corrective feedback, up to two scored follow-ups, a bounded coached re-attempt, and
 spaced scheduling based only on unaided mechanism recall. The next release
 should make the inputs to that loop trustworthy before adding more review
 volume.

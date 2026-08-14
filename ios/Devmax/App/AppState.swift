@@ -796,6 +796,12 @@ final class AppState: ObservableObject {
         // Optimistic: the answer appears in the thread immediately.
         thread.append(ThreadEntry(role: .answer, text: text))
         stage = .processing
+        // Cleared with the commit, not with the response: the answer is in the
+        // thread now, and a draft outliving it renders the same words a second
+        // time with a live caret under the scoring indicator. Only the in-memory
+        // copy goes — disk still holds the answer until the request lands, so an
+        // app killed in flight can rehydrate it, and the catch below restores it.
+        draft = ""
 
         do {
             let value = try await send(sessionID, text)
@@ -804,7 +810,6 @@ final class AppState: ObservableObject {
             // flight. Applying a stale result would score the wrong card.
             guard self.sessionID == sessionID else { return nil }
             if let card = currentCard { DraftStore.clear(for: card.id) }
-            draft = ""
             return value
         } catch {
             guard self.sessionID == sessionID else { return nil }
@@ -1224,9 +1229,10 @@ final class AppState: ObservableObject {
             await waitForLibrary()
             startSprint()
             await waitForQuestion()
-            // Walk the whole set so the recap has a full run behind it. Each card
-            // may take a follow-up turn before it completes, so answer until the
-            // score lands rather than a fixed number of times.
+            // Walk the whole set so the recap has a full run behind it. A sprint
+            // card is never probed, so one answer scores it — but answering until
+            // the score lands, rather than a fixed number of times, is what keeps
+            // a change to that budget from stranding the walk mid-card.
             while true {
                 for _ in 0..<3 where stage != .result {
                     await submit("A fixture answer, scored by the mock.")
@@ -1273,8 +1279,8 @@ final class AppState: ObservableObject {
         case "processing":
             thread.append(ThreadEntry(role: .answer, text: answer))
             stage = .processing
-        case "followup", "score", "submit-failure", "reattempt", "reattempt-answered",
-             "coaching", "coaching-answered", "coaching-boundary",
+        case "followup", "followup-second", "score", "submit-failure", "reattempt",
+             "reattempt-answered", "coaching", "coaching-answered", "coaching-boundary",
              "coaching-boundary-answered":
             await submit(answer)
             if route == "followup" { return }
@@ -1282,8 +1288,11 @@ final class AppState: ObservableObject {
                 // The first submit already failed under WC_FAIL_SUBMIT.
                 return
             }
+            // A daily review is probed once, so this second answer is the one the
+            // score lands on — except under `followup-second`, where the route has
+            // armed the session's second probe and this answer draws that instead.
             await submit("Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes.")
-            await submit("Right — and replication follows the successor list.")
+            if route == "followup-second" { return }
             if route.hasPrefix("coaching") {
                 beginCoaching()
                 if route == "coaching" || route == "coaching-boundary" { return }

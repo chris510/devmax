@@ -255,8 +255,9 @@ struct AppSettings: Codable, Equatable {
 
 /// One turn in the Conversation thread. Render order is the source of truth.
 struct ThreadEntry: Identifiable, Equatable {
-    /// `reattemptQuestion` is turn 3 — a coached re-attempt after the correction,
-    /// prefaced `In your words — ` the way the probe is prefaced `One more — `.
+    /// `reattemptQuestion` is the coached re-attempt after the correction,
+    /// prefaced `In your words — ` the way the probes are prefaced
+    /// `One more — ` and `Last one — `.
     enum Role: Equatable {
         case question, answer, followUpQuestion, reattemptQuestion
         case coachingQuestion, coachingFeedback
@@ -346,6 +347,10 @@ enum Stage: Equatable {
     var footer: Footer {
         switch self {
         case .questionFailed: return .hidden
+        // The turn is closed: the answer is sent and the scoring indicator owns
+        // the screen. A mic still on screen reading `TAP TO KEEP GOING` offers to
+        // continue an answer that is already being scored.
+        case .processing: return .hidden
         case .result: return .result
         default: return .answer
         }

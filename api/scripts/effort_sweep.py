@@ -77,6 +77,18 @@ def _expected_axes(case: dict) -> tuple[int | None, int | None, int | None]:
     )
 
 
+def _case_probes(case: dict[str, Any]) -> list[tuple[str, str]]:
+    """The case's follow-up pair, if it has one.
+
+    Sweep cases carry at most one, and the case files keep the flat
+    `follow_up_question`/`follow_up_answer` keys they were authored with.
+    """
+    question = case.get("follow_up_question")
+    if not question:
+        return []
+    return [(str(question), str(case.get("follow_up_answer", "")))]
+
+
 def build_completion(
     case: dict[str, Any],
     *,
@@ -91,9 +103,7 @@ def build_completion(
         mastery_summary=case.get("mastery_summary", ""),
         question_asked=case["question"],
         answer_text=case["answer"],
-        follow_up_question=case.get("follow_up_question"),
-        follow_up_answer=case.get("follow_up_answer", ""),
-        follow_up_used=True,
+        probes=_case_probes(case),
         answer_basis=case.get("answer_basis", ""),
         answer_rubric=case.get("answer_rubric"),
     )
@@ -167,7 +177,9 @@ async def run_case(
     token = case_key.set(key)
     try:
         data = await llm._complete(**prepared.completion)
-        result = llm.parse_score_result(data, follow_up_used=True)
+        # The sweep grades scoring quality, not session flow: parsing at the cap
+        # forces a complete result so every case yields axes to compare.
+        result = llm.parse_score_result(data, probes_used=llm.MAX_SCORED_FOLLOW_UPS)
     finally:
         case_key.reset(token)
 
