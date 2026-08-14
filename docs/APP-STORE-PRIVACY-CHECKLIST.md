@@ -82,6 +82,9 @@ public and in-app retention copy must state this distinction.
 ## Required release gates
 
 - [ ] Migration 0014 applied successfully.
+- [ ] `/health` reports the intended required consent policy, latest supported
+      policy, and cataloged minimum iOS build; a code deploy did not implicitly
+      advance the required policy.
 - [ ] The consent-capable build names both providers before any AI request and
   discloses the dual-provider shadow and pseudonymous safety identifier, then
   sends the exact policy version rendered with grant or decline.

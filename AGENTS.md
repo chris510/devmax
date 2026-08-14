@@ -46,6 +46,18 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   the approved target and the activation sequence; do not partially introduce
   V2 semantics, relabel a V1 composite as Recall, or mix composite-only history
   into a Recall average.
+- **Shipping consent code never activates a new disclosure.** The server keeps a
+  catalog of understood policies, while `AI_CONSENT_REQUIRED_POLICY_VERSION`
+  separately names the policy production requires. A newer disclosure may be
+  recorded during the compatibility window, and a newer grant satisfies an
+  older required policy; the shipped pre-versioned client is recognized only as
+  the exact Anthropic-only v1 disclosure it rendered. Advance the required
+  policy only after the catalog's minimum iOS build is distributed and the
+  choice is recorded. `/health` reports required/latest/minimum-build, source
+  tests keep the iOS constant and build number aligned, and OpenAI cannot boot
+  unless the combined policy is required. A stale grant cannot authorize a
+  broader provider set, but a stale decline remains a safe global refusal so an
+  old client can always continue without AI.
 - **`missed_count` never touches `ease_factor`.** Missing a review is a *compliance* signal,
   not a *retention* signal. Conflating them means a busy week at work trashes the ease factor
   on topics the user knows cold, and the scheduler then over-drills the wrong things.

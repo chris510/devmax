@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app import config as app_config
 from app.config import QUALIFICATION_MAX_AGE_DAYS, Settings
+from app.consent_policy import LATEST_POLICY_VERSION
 
 GOOD = {
     "database_url": "postgresql+asyncpg://u:p@host/db",
@@ -52,6 +53,7 @@ def enabled(**overrides: object) -> Settings:
         "openai_v2_scoring_shadow_stage_id": SHADOW_STAGE_ID,
         "openai_safety_identifier_secret": SAFETY_SECRET,
         "ai_consent_enforcement_enabled": True,
+        "ai_consent_required_policy_version": LATEST_POLICY_VERSION,
         "scoring_contract_version": 2,
     }
     values.update(overrides)
@@ -272,6 +274,13 @@ def test_enabled_mode_requires_a_long_independent_safety_secret() -> None:
 def test_enabled_mode_requires_consent_enforcement() -> None:
     with pytest.raises(ValidationError, match="AI_CONSENT_ENFORCEMENT_ENABLED"):
         enabled(ai_consent_enforcement_enabled=False)
+
+
+def test_enabled_mode_requires_the_combined_consent_policy() -> None:
+    with pytest.raises(
+        ValidationError, match="AI_CONSENT_REQUIRED_POLICY_VERSION"
+    ):
+        enabled(ai_consent_required_policy_version="anthropic-2026-08-12-v1")
 
 
 def test_enabled_mode_requires_v2_to_be_active_first() -> None:

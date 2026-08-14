@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.auth import AuthMiddleware, require_user
 from app.config import get_settings
+from app.consent_policy import LATEST_POLICY_VERSION, policy_for
 from app.db import session_factory
 from app.routers import (
     authentication,
@@ -104,7 +105,13 @@ async def llm_unavailable(_request: Request, exc: LLMError) -> JSONResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, str | int]:
     async with session_factory() as session:
         await session.exec(text("SELECT 1"))
-    return {"status": "ok"}
+    required_policy = policy_for(get_settings().ai_consent_required_policy_version)
+    return {
+        "status": "ok",
+        "ai_consent_required_policy_version": required_policy.version,
+        "ai_consent_latest_supported_policy_version": LATEST_POLICY_VERSION,
+        "ai_consent_minimum_ios_build": required_policy.minimum_ios_build,
+    }

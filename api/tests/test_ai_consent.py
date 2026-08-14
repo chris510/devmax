@@ -11,6 +11,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_settings
+from app.consent_policy import LEGACY_POLICY_VERSION, policy_for
 from app.models import (
     AI_CONSENT_GRANTED,
     FOUNDER_USER_ID,
@@ -20,6 +21,7 @@ from app.models import (
     LLMUsage,
     User,
 )
+from app.routers import authentication as authentication_router
 from app.services import ai_consent, authentication, llm, usage
 from tests.conftest import API_HEADERS, TEST_DATABASE_URL
 
@@ -62,11 +64,13 @@ async def test_profile_prompts_until_the_current_provider_disclosure_is_recorded
     )
 
 
-async def test_an_old_anthropic_grant_requires_the_combined_disclosure(client, db):
+async def test_an_old_anthropic_grant_remains_valid_during_the_compatibility_stage(
+    client, db
+):
     user = await db.get(User, FOUNDER_USER_ID)
     assert user is not None
     user.ai_consent_status = AI_CONSENT_GRANTED
-    user.ai_consent_version = "anthropic-2026-08-12-v1"
+    user.ai_consent_version = LEGACY_POLICY_VERSION
     user.ai_consent_granted_at = datetime.now(UTC)
     db.add(user)
     await db.commit()
@@ -74,8 +78,22 @@ async def test_an_old_anthropic_grant_requires_the_combined_disclosure(client, d
     profile = await client.get("/auth/me", headers=API_HEADERS)
 
     assert profile.status_code == 200
-    assert profile.json()["ai_processing_allowed"] is False
-    assert profile.json()["ai_consent_prompt_required"] is True
+    assert profile.json()["ai_processing_allowed"] is True
+    assert profile.json()["ai_consent_prompt_required"] is False
+
+
+async def test_legacy_client_can_record_a_choice_while_v1_is_required(client, db):
+    response = await client.put(
+        "/auth/ai-consent", headers=API_HEADERS, json={"action": "grant"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == policy_for(LEGACY_POLICY_VERSION).provider
+    assert response.json()["policy_version"] == LEGACY_POLICY_VERSION
+    assert response.json()["processing_allowed"] is True
+    user = await db.get(User, FOUNDER_USER_ID)
+    assert user is not None
+    assert user.ai_consent_version == LEGACY_POLICY_VERSION
 
 
 async def test_decline_is_recorded_and_blocks_processing(client, db):
@@ -131,12 +149,15 @@ async def test_withdraw_remains_available_without_the_current_disclosure(
     assert events[-1].action == "withdraw"
 
 
-@pytest.mark.parametrize("action", ["grant", "decline"])
-@pytest.mark.parametrize("policy_version", [None, "anthropic-2026-08-12-v1"])
-async def test_grant_and_decline_reject_missing_or_stale_disclosures_before_recording(
-    client, db, action, policy_version
+@pytest.mark.parametrize("policy_version", [None, LEGACY_POLICY_VERSION])
+async def test_activated_v2_rejects_legacy_grant_before_recording(
+    client, db, monkeypatch, policy_version
 ):
-    body = {"action": action}
+    activated = get_settings().model_copy(
+        update={"ai_consent_required_policy_version": ai_consent.POLICY_VERSION}
+    )
+    monkeypatch.setattr(authentication_router, "get_settings", lambda: activated)
+    body = {"action": "grant"}
     if policy_version is not None:
         body["policy_version"] = policy_version
     response = await client.put("/auth/ai-consent", headers=API_HEADERS, json=body)
@@ -151,6 +172,43 @@ async def test_grant_and_decline_reject_missing_or_stale_disclosures_before_reco
     assert user is not None
     assert user.ai_consent_status == "pending"
     assert (await db.exec(select(AIConsentEvent))).all() == []
+
+
+@pytest.mark.parametrize("policy_version", [None, LEGACY_POLICY_VERSION])
+async def test_activated_v2_still_allows_a_legacy_client_to_decline(
+    client, db, monkeypatch, policy_version
+):
+    activated = get_settings().model_copy(
+        update={"ai_consent_required_policy_version": ai_consent.POLICY_VERSION}
+    )
+    monkeypatch.setattr(authentication_router, "get_settings", lambda: activated)
+    body = {"action": "decline"}
+    if policy_version is not None:
+        body["policy_version"] = policy_version
+
+    response = await client.put("/auth/ai-consent", headers=API_HEADERS, json=body)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "declined"
+    assert response.json()["processing_allowed"] is False
+    assert response.json()["prompt_required"] is False
+    user = await db.get(User, FOUNDER_USER_ID)
+    assert user is not None
+    assert user.ai_consent_version == LEGACY_POLICY_VERSION
+
+
+async def test_unknown_disclosure_version_is_always_rejected(client, db):
+    response = await client.put(
+        "/auth/ai-consent",
+        headers=API_HEADERS,
+        json={"action": "grant", "policy_version": "unknown-policy"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["policy_version"] == LEGACY_POLICY_VERSION
+    user = await db.get(User, FOUNDER_USER_ID)
+    assert user is not None
+    assert user.ai_consent_status == "pending"
 
 
 async def test_model_budget_gate_refuses_without_current_permission(db):

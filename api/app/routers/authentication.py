@@ -104,6 +104,7 @@ async def refresh(body: RefreshTokenIn, db: AsyncSession = Depends(get_session))
 
 @router.get("/me", response_model=CurrentUserOut, dependencies=[Depends(require_user)])
 async def me(db: AsyncSession = Depends(get_session)) -> CurrentUserOut:
+    config = get_settings()
     user = await db.get(User, current_user_id())
     identity = (
         await db.exec(select(AppleIdentity).where(AppleIdentity.user_id == current_user_id()))
@@ -120,8 +121,12 @@ async def me(db: AsyncSession = Depends(get_session)) -> CurrentUserOut:
         ai_consent_status=user.ai_consent_status,
         ai_consent_version=user.ai_consent_version,
         ai_consent_updated_at=user.ai_consent_updated_at,
-        ai_processing_allowed=ai_consent.processing_allowed(user),
-        ai_consent_prompt_required=ai_consent.prompt_required(user),
+        ai_processing_allowed=ai_consent.processing_allowed(
+            user, config.ai_consent_required_policy_version
+        ),
+        ai_consent_prompt_required=ai_consent.prompt_required(
+            user, config.ai_consent_required_policy_version
+        ),
     )
 
 
@@ -131,16 +136,26 @@ async def me(db: AsyncSession = Depends(get_session)) -> CurrentUserOut:
 async def update_ai_consent(
     body: AIConsentIn, db: AsyncSession = Depends(get_session)
 ) -> AIConsentOut:
+    config = get_settings()
     user, changed_at = await ai_consent.record(
-        db, current_user_id(), body.action, body.policy_version
+        db,
+        current_user_id(),
+        body.action,
+        body.policy_version,
+        config.ai_consent_required_policy_version,
     )
+    recorded_policy = ai_consent.policy_for(user.ai_consent_version)
     return AIConsentOut(
-        provider=ai_consent.PROVIDER,
-        policy_version=ai_consent.POLICY_VERSION,
+        provider=recorded_policy.provider,
+        policy_version=recorded_policy.version,
         status=user.ai_consent_status,
         updated_at=changed_at,
-        processing_allowed=ai_consent.processing_allowed(user),
-        prompt_required=ai_consent.prompt_required(user),
+        processing_allowed=ai_consent.processing_allowed(
+            user, config.ai_consent_required_policy_version
+        ),
+        prompt_required=ai_consent.prompt_required(
+            user, config.ai_consent_required_policy_version
+        ),
     )
 
 
