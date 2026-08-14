@@ -64,6 +64,18 @@ targets:
     dependencies:
       - target: Devmax
 
+  DevmaxUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: DevmaxUITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.christrinh.devmax.uitests
+    dependencies:
+      - target: Devmax
+
 # XcodeGen writes no shared scheme unless one is declared, which makes
 # `xcodebuild -scheme Devmax` after a clean `xcodegen generate` fragile.
 schemes:
@@ -78,6 +90,7 @@ schemes:
       config: Debug
       targets:
         - DevmaxTests
+        - DevmaxUITests
     profile:
       config: Release
     analyze:
