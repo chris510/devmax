@@ -46,7 +46,11 @@ test("server-renders the public privacy policy", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Privacy — Unprompted/);
-  assert.match(html, /Anthropic AI processing/);
+  assert.match(html, /Third-party AI processing/);
+  assert.match(html, /Anthropic or OpenAI/);
+  assert.match(html, /store: false/);
+  assert.match(html, /does not disable that default abuse-monitoring retention/);
   assert.match(html, /You may decline AI processing/);
+  assert.match(html, /Study Plan you explicitly create keeps its guide provenance/);
   assert.match(html, /permanently delete the account/);
 });

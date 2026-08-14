@@ -1,7 +1,7 @@
 import argparse
 import json
 from collections import Counter
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -301,6 +301,36 @@ def test_jsonl_results_are_durable_and_resume_by_exact_fingerprint(tmp_path) -> 
     path = tmp_path / "results.jsonl"
 
     with support.JsonlRecorder(path) as recorder:
+        recorder.append(
+            support.make_run_manifest(
+                kind="scoring",
+                evaluation_run_id="00000000-0000-0000-0000-000000000001",
+                provider="anthropic",
+                model="claude-sonnet-5",
+                stage2_pack_fingerprint="a" * 64,
+                calls=[prepared],
+                qualification_fingerprints={prepared.fingerprint: "b" * 64},
+                approved_max_cost_usd=Decimal("1"),
+                rates_per_million_usd={
+                    "input": Decimal("2"),
+                    "output": Decimal("10"),
+                    "cached_input": Decimal("0.2"),
+                    "cache_write": Decimal("2.5"),
+                },
+                input_count_method=support.INPUT_COUNT_ANTHROPIC_EXACT,
+                input_counts={prepared.fingerprint: 100},
+                estimate=support.CostEstimate(
+                    calls=1,
+                    input_tokens=100,
+                    output_tokens=20,
+                    usd=Decimal("0.00045"),
+                    output_tokens_per_call=20,
+                ),
+                qualification_expires_at=(
+                    datetime.now(UTC) + timedelta(days=1)
+                ),
+            )
+        )
         recorder.append(record)
         assert path.read_text().endswith("\n")
 
@@ -385,6 +415,25 @@ async def test_preflight_uses_free_token_count_shape_without_max_tokens() -> Non
     assert messages.calls[0]["output_config"]["effort"] == "low"
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid_count", [True, -1, "7", 1.0, None])
+async def test_anthropic_preflight_rejects_coercible_or_negative_counts(
+    invalid_count,
+) -> None:
+    prepared = prepared_call()
+
+    class Messages:
+        async def count_tokens(self, **_kwargs):
+            return SimpleNamespace(input_tokens=invalid_count)
+
+    with pytest.raises(ValueError, match="non-negative exact integer"):
+        await support.count_prepared_calls(
+            [prepared],
+            concurrency=1,
+            client=SimpleNamespace(messages=Messages()),
+        )
+
+
 def test_paid_run_requires_an_explicit_sufficient_budget() -> None:
     estimate = support.CostEstimate(
         calls=1,
@@ -404,6 +453,27 @@ def test_paid_run_requires_an_explicit_sufficient_budget() -> None:
         )
     support.enforce_budget(
         estimate, budget=Decimal("0.01"), dry_run=False, parser=parser
+    )
+
+    rounded = support.CostEstimate(
+        calls=1,
+        input_tokens=1,
+        output_tokens=1,
+        usd=Decimal("0.00001"),
+        output_tokens_per_call=1,
+    )
+    with pytest.raises(SystemExit, match="2"):
+        support.enforce_budget(
+            rounded,
+            budget=Decimal("0.00001"),
+            dry_run=False,
+            parser=parser,
+        )
+    support.enforce_budget(
+        rounded,
+        budget=Decimal("0.0001"),
+        dry_run=False,
+        parser=parser,
     )
 
 

@@ -9,20 +9,36 @@ import hashlib
 import json
 import logging
 import math
+import os
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, TextIO
 
+from app.config import QUALIFICATION_MAX_AGE_DAYS, parse_strict_utc_timestamp
 from app.services import llm
 from app.services.card_lifecycle import Grounding, GroundingError
 
 RESULT_FORMAT_VERSION = 1
+RUN_MANIFEST_RECORD_TYPE = "run_manifest"
+INPUT_COUNT_ANTHROPIC_EXACT = "anthropic_messages_count_tokens"
+INPUT_COUNT_OPENAI_EXACT = "openai_responses_input_tokens"
+INPUT_COUNT_OPENAI_REUSED_TOTAL = "openai_reused_exact_total"
+INPUT_COUNT_LOCAL_BOUND = "local_utf8_byte_upper_bound"
+VALID_INPUT_COUNT_METHODS = frozenset(
+    (
+        INPUT_COUNT_ANTHROPIC_EXACT,
+        INPUT_COUNT_OPENAI_EXACT,
+        INPUT_COUNT_LOCAL_BOUND,
+    )
+)
 USD_DISPLAY_QUANTUM = Decimal("0.0001")
+MAX_QUALIFICATION_WINDOW = timedelta(days=QUALIFICATION_MAX_AGE_DAYS)
+MIN_OPENAI_V2_COST_REDUCTION = Decimal("0.85")
 
 # Versioned from the providers' public pricing tables. Sonnet 5's introductory
 # rate ends after 2026-08-31; keeping the boundary in code prevents a stale
@@ -117,6 +133,15 @@ class UsageTap(logging.Handler):
         usage.output_tokens += int(args[4])
         usage.cache_read_tokens += int(args[5])
         usage.cache_write_tokens += int(args[6])
+
+
+class RecordedEvaluationFailure(RuntimeError):
+    """A provider/contract failure whose evidence row is already durable."""
+
+    def __init__(self, original: BaseException, record: dict[str, Any]) -> None:
+        super().__init__(str(original))
+        self.original = original
+        self.record = record
 
 
 @contextmanager
@@ -248,6 +273,8 @@ def load_result_records(path: Path | None, *, kind: str) -> dict[str, dict[str, 
                 raise ValueError(f"{path}:{line_number}: invalid JSON") from exc
             if not isinstance(record, dict):
                 raise ValueError(f"{path}:{line_number}: record must be an object")
+            if record.get("record_type") == RUN_MANIFEST_RECORD_TYPE:
+                continue
             if record.get("format_version") != RESULT_FORMAT_VERSION:
                 raise ValueError(f"{path}:{line_number}: unsupported result format")
             if record.get("kind") != kind:
@@ -267,6 +294,22 @@ def default_output_path(kind: str, *, now: datetime | None = None) -> Path:
     return Path(".eval-results") / f"{kind}-{stamp}.jsonl"
 
 
+def utc_timestamp(instant: datetime) -> str:
+    """Render one timezone-aware instant in the strict deployment format."""
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("qualification timestamps must be timezone-aware")
+    return instant.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def qualification_expiry_arg(value: str) -> datetime:
+    try:
+        return parse_strict_utc_timestamp(
+            value, field="--qualification-expires-at"
+        )
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 class JsonlRecorder:
     """Flush each paid result immediately so a later failure cannot erase spend."""
 
@@ -284,11 +327,149 @@ class JsonlRecorder:
             raise RuntimeError("result recorder is not open")
         self._file.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         self._file.flush()
+        os.fsync(self._file.fileno())
 
     def __exit__(self, *_args) -> None:
         if self._file is not None:
             self._file.close()
             self._file = None
+
+
+def make_run_manifest(
+    *,
+    kind: str,
+    evaluation_run_id: str,
+    provider: str,
+    model: str,
+    stage2_pack_fingerprint: str,
+    calls: list[PreparedCall],
+    qualification_fingerprints: dict[str, str],
+    approved_max_cost_usd: Decimal,
+    rates_per_million_usd: dict[str, Decimal],
+    input_count_method: str,
+    input_counts: dict[str, int],
+    estimate: CostEstimate,
+    qualification_expires_at: datetime,
+    safety_identifier_format_version: int | None = None,
+    safety_identifier: str | None = None,
+    created_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Describe every paid invocation before the first one can start.
+
+    The manifest is the first flushed JSONL row in a qualification artifact.
+    Its exact invocation list lets the evidence reader prove that a failed or
+    inconvenient call was not discarded after spend occurred.
+    """
+    manifest_created_at = created_at or datetime.now(UTC)
+    if (
+        manifest_created_at.tzinfo is None
+        or manifest_created_at.utcoffset() is None
+    ):
+        raise ValueError("run manifest creation time must be timezone-aware")
+    manifest_created_at = manifest_created_at.astimezone(UTC)
+    if qualification_expires_at.tzinfo is None or qualification_expires_at.utcoffset() is None:
+        raise ValueError("qualification expiry must be timezone-aware")
+    qualification_expires_at = qualification_expires_at.astimezone(UTC)
+    if qualification_expires_at <= manifest_created_at:
+        raise ValueError("qualification expiry must be after the fresh run starts")
+    if qualification_expires_at > manifest_created_at + MAX_QUALIFICATION_WINDOW:
+        raise ValueError("qualification expiry cannot exceed the 30-day evidence window")
+
+    fingerprints = {call.fingerprint for call in calls}
+    if set(qualification_fingerprints) != fingerprints:
+        raise ValueError("qualification fingerprints do not match run invocations")
+    if set(input_counts) != fingerprints:
+        raise ValueError("input counts do not match run invocations")
+    if any(type(value) is not int or value < 0 for value in input_counts.values()):
+        raise ValueError("input counts must be non-negative exact integers")
+    if input_count_method not in VALID_INPUT_COUNT_METHODS:
+        raise ValueError(f"unsupported input-count method: {input_count_method}")
+    expected_rate_keys = {"input", "output", "cached_input", "cache_write"}
+    if set(rates_per_million_usd) != expected_rate_keys or any(
+        not value.is_finite() or value <= 0
+        for value in rates_per_million_usd.values()
+    ):
+        raise ValueError("run manifest requires all four positive explicit rates")
+    if not approved_max_cost_usd.is_finite() or approved_max_cost_usd <= 0:
+        raise ValueError("run manifest requires a positive approved max cost")
+    if estimate.calls != len(calls):
+        raise ValueError("cost estimate call count does not match run invocations")
+    if estimate.input_tokens != sum(input_counts.values()):
+        raise ValueError("cost estimate input total does not match invocation counts")
+    estimated_ceiling = cost_ceiling_for_display(estimate.usd)
+    if estimated_ceiling > approved_max_cost_usd:
+        raise ValueError("approved max cost is below the estimated ceiling")
+    if provider == "openai":
+        if (
+            type(safety_identifier_format_version) is not int
+            or safety_identifier_format_version <= 0
+        ):
+            raise ValueError(
+                "OpenAI run manifest requires a safety-identifier format version"
+            )
+        if (
+            type(safety_identifier) is not str
+            or len(safety_identifier) != 64
+            or any(character not in "0123456789abcdef" for character in safety_identifier)
+        ):
+            raise ValueError(
+                "OpenAI run manifest requires a synthetic 64-hex safety identifier"
+            )
+        safety_identifier_attestation: dict[str, Any] | None = {
+            "kind": "synthetic_non_user",
+            "format_version": safety_identifier_format_version,
+            "value": safety_identifier,
+        }
+    elif provider == "anthropic":
+        if (
+            safety_identifier_format_version is not None
+            or safety_identifier is not None
+        ):
+            raise ValueError(
+                "Anthropic run manifest cannot attest an OpenAI safety identifier"
+            )
+        safety_identifier_attestation = None
+    else:
+        raise ValueError(f"unsupported run-manifest provider: {provider}")
+
+    return {
+        "format_version": RESULT_FORMAT_VERSION,
+        "record_type": RUN_MANIFEST_RECORD_TYPE,
+        "kind": kind,
+        "created_at": utc_timestamp(manifest_created_at),
+        "qualification_expires_at": utc_timestamp(qualification_expires_at),
+        "evaluation_run_id": evaluation_run_id,
+        "provider": provider,
+        "model": model,
+        "stage2_pack_fingerprint": stage2_pack_fingerprint,
+        "fresh": True,
+        "safety_identifier": safety_identifier_attestation,
+        "preflight": {
+            "approved_max_cost_usd": str(approved_max_cost_usd),
+            "estimated_ceiling_usd": str(estimated_ceiling),
+            "rates_per_million_usd": {
+                key: str(value) for key, value in rates_per_million_usd.items()
+            },
+            "input_count_method": input_count_method,
+            "input_counts": {
+                call.fingerprint: input_counts[call.fingerprint] for call in calls
+            },
+            "input_tokens_total": estimate.input_tokens,
+            "estimated_output_tokens": estimate.output_tokens,
+            "estimated_output_tokens_per_call": estimate.output_tokens_per_call,
+        },
+        "invocations": [
+            {
+                "fingerprint": call.fingerprint,
+                "case": call.case_name,
+                "effort": call.effort,
+                "qualification_fingerprint": qualification_fingerprints[
+                    call.fingerprint
+                ],
+            }
+            for call in calls
+        ],
+    }
 
 
 def make_result_record(
@@ -308,6 +489,28 @@ def make_result_record(
         "effort": prepared.effort,
         "scoring_prompt_variant": prepared.scoring_prompt_variant,
         "result": result,
+        "usage": asdict(usage),
+    }
+
+
+def make_failure_record(
+    prepared: PreparedCall,
+    *,
+    model: str,
+    failure: dict[str, Any],
+    usage: Usage,
+) -> dict[str, Any]:
+    """Build the typed counterpart to one successful evidence row."""
+    return {
+        "format_version": RESULT_FORMAT_VERSION,
+        "kind": prepared.kind,
+        "fingerprint": prepared.fingerprint,
+        "created_at": datetime.now(UTC).isoformat(),
+        "case": prepared.case_name,
+        "model": model,
+        "effort": prepared.effort,
+        "scoring_prompt_variant": prepared.scoring_prompt_variant,
+        "failure": failure,
         "usage": asdict(usage),
     }
 
@@ -345,6 +548,14 @@ def add_paid_evaluation_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--resume", type=Path, help="reuse exact fingerprint matches from JSONL")
     parser.add_argument("--fresh", action="store_true", help="ignore --resume matches")
+    parser.add_argument(
+        "--qualification-expires-at",
+        type=qualification_expiry_arg,
+        help=(
+            "explicit UTC deadline for V2 qualification evidence; paid V2 Recall "
+            "runs require it and cap it at 30 days from each fresh manifest"
+        ),
+    )
     parser.add_argument("--output", type=Path, help="new JSONL result path")
     parser.add_argument(
         "--dry-run",
@@ -418,7 +629,7 @@ def enforce_budget(
         parser.error(
             "paid run not started: review the estimate, then pass --max-cost-usd"
         )
-    if estimate.usd > budget:
+    if cost_ceiling_for_display(estimate.usd) > budget:
         parser.error(
             f"estimated ceiling ${cost_ceiling_for_display(estimate.usd):.4f} "
             f"exceeds --max-cost-usd ${budget}"
@@ -513,7 +724,12 @@ async def count_prepared_calls(
             result = await token_client.messages.count_tokens(
                 **llm.count_params_for_completion(call.completion)
             )
-        return call.fingerprint, int(result.input_tokens)
+        input_tokens = result.input_tokens
+        if type(input_tokens) is not int or input_tokens < 0:
+            raise ValueError(
+                "Anthropic input token count must be a non-negative exact integer"
+            )
+        return call.fingerprint, input_tokens
 
     pairs = await asyncio.gather(*(count(call) for call in prepared))
     return dict(pairs)
@@ -614,6 +830,12 @@ def hydrate_grounding(cases: list[dict], manifest_path: Path, parser) -> list[di
                 "question": authority.canonical_question,
                 "answer_basis": authority.answer_basis,
                 "answer_rubric": authority.answer_rubric,
+                "grounding_status": status,
+                "source_url": grounding.source_url,
+                "source_section": grounding.source_section,
+                "source_label": grounding.source_label,
+                "target_week": entry.get("target_week"),
+                "evidence": entry.get("evidence", ""),
             }
         )
     return hydrated
@@ -630,3 +852,24 @@ async def run_bounded[T, U](
 
     # gather preserves source order even when calls complete out of order.
     return await asyncio.gather(*(bounded(index, item) for index, item in enumerate(items)))
+
+
+async def run_bounded_collect[T, U](
+    items: list[U], concurrency: int, call: Callable[[int, U], Awaitable[T]]
+) -> list[T | BaseException]:
+    """Await every scheduled call and return failures in source order.
+
+    Qualification runners use this after writing their run manifest.  Unlike a
+    raising gather, one provider or contract failure cannot abandon evidence
+    from sibling calls that have already started (or were budgeted to start).
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def bounded(index: int, item: U) -> T:
+        async with semaphore:
+            return await call(index, item)
+
+    return await asyncio.gather(
+        *(bounded(index, item) for index, item in enumerate(items)),
+        return_exceptions=True,
+    )

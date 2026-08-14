@@ -279,8 +279,9 @@ def stub_import(monkeypatch):
         error: Exception | None = None
         calls = 0
 
-    async def fake(**_kwargs):
+    async def fake(**kwargs):
         Stub.calls += 1
+        await kwargs["before_provider_call"](1)
         if Stub.error is not None:
             raise Stub.error
         return Stub.response

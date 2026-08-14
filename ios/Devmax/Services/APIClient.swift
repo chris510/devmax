@@ -496,7 +496,10 @@ struct LiveAPI: DevmaxAPI {
     }
 
     func updateAIConsent(action: String) async throws -> AIConsentReceipt {
-        let body = try Self.encoder.encode(["action": action])
+        let body = try Self.encoder.encode([
+            "action": action,
+            "policy_version": AIProcessingDisclosure.policyVersion
+        ])
         let data = try await request("PUT", "auth/ai-consent", body: body)
         return try Self.decoder.decode(AIConsentReceipt.self, from: data)
     }

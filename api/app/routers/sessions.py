@@ -30,7 +30,7 @@ from app.schemas import (
     ReattemptOut,
     SessionStart,
 )
-from app.services import llm, usage
+from app.services import ai_consent, llm, usage
 from app.services.cards import recall_is_available
 from app.services.scheduler import apply_sm2, quality_for
 from app.services.scoring_contract import (
@@ -38,6 +38,16 @@ from app.services.scoring_contract import (
     active_scoring_contract_version,
     coaching_question,
     next_coaching_focus,
+)
+from app.services.scoring_provider import (
+    ROUTE_ANTHROPIC,
+    ROUTE_PRIMARY,
+    ROUTE_SHADOW,
+    ScoringRoute,
+    ScoringTrace,
+    openai_route_eligibility,
+    qualification_fingerprint,
+    route_for_session,
 )
 
 router = APIRouter(tags=["sessions"])
@@ -54,6 +64,145 @@ REATTEMPT_MAX_ACCURACY = 2
 # re-attempt is the same retrieval, now informed. Composed server-side and sent to
 # the client, so what is displayed is what the answer is graded against.
 REATTEMPT_PREFACE = "In your words — "
+
+
+def _scoring_event_details(
+    *,
+    session: Session,
+    probes_used: int,
+    event_id: uuid.UUID,
+    event_started_at: datetime,
+    consent_verified: bool,
+    allowlist_verified: bool,
+    qualification_expires_at: str,
+) -> dict[str, object]:
+    """Build metadata shared by a scoring intent and its terminal call rows."""
+    return {
+        "scoring_event_id": str(event_id),
+        "event_started_at": event_started_at.isoformat(),
+        "session_id": str(session.id),
+        "scoring_contract_version": session.scoring_contract_version,
+        "probes_used": probes_used,
+        "ai_consent_policy_version": ai_consent.POLICY_VERSION,
+        "ai_consent_verified": consent_verified,
+        "openai_allowlist_verified": allowlist_verified,
+        "qualification_expires_at": qualification_expires_at,
+    }
+
+
+def _scoring_call_details(
+    trace: ScoringTrace | None,
+    *,
+    session: Session,
+    probes_used: int,
+    event_id: uuid.UUID,
+    event_started_at: datetime,
+    consent_verified: bool,
+    allowlist_verified: bool,
+    qualification_expires_at: str,
+) -> list[dict[str, object]] | None:
+    """Add correlation metadata without copying learner content into telemetry."""
+    if trace is None:
+        return None
+    event_details = _scoring_event_details(
+        session=session,
+        probes_used=probes_used,
+        event_id=event_id,
+        event_started_at=event_started_at,
+        consent_verified=consent_verified,
+        allowlist_verified=allowlist_verified,
+        qualification_expires_at=qualification_expires_at,
+    )
+    return [
+        {
+            **details,
+            **event_details,
+        }
+        for details in trace.usage_details()
+    ]
+
+
+def _scoring_intent_details(
+    *,
+    session: Session,
+    probes_used: int,
+    event_id: uuid.UUID,
+    event_started_at: datetime,
+    consent_verified: bool,
+    allowlist_verified: bool,
+    reserved_calls: int,
+    openai_expected: bool,
+    shadow_stage_id: str,
+    qualification_expires_at: str,
+) -> dict[str, object]:
+    """Describe expected calls without copying any scoring input or output."""
+    route = session.scoring_route
+    mode = str(route.get("mode", ROUTE_ANTHROPIC))
+    expected_calls: list[dict[str, str]]
+    if not openai_expected or mode == ROUTE_ANTHROPIC:
+        expected_calls = [
+            {
+                "provider": "anthropic",
+                "model": str(route.get("anthropic_model", "")),
+                "requirement": "required",
+            }
+        ]
+        authoritative_provider = "anthropic"
+    elif mode == ROUTE_SHADOW:
+        expected_calls = [
+            {
+                "provider": "anthropic",
+                "model": str(route.get("anthropic_model", "")),
+                "requirement": "required",
+            },
+            {
+                "provider": "openai",
+                "model": str(route.get("openai_model", "")),
+                "requirement": "required",
+            },
+        ]
+        authoritative_provider = "anthropic"
+    elif mode == ROUTE_PRIMARY:
+        expected_calls = [
+            {
+                "provider": "openai",
+                "model": str(route.get("openai_model", "")),
+                "requirement": "required",
+            },
+            {
+                "provider": "anthropic",
+                "model": str(route.get("anthropic_model", "")),
+                "requirement": "conditional_fallback",
+            },
+        ]
+        authoritative_provider = "openai"
+    else:  # pragma: no cover - callers emit intents only for OpenAI routes
+        raise ValueError("scoring intent requires an OpenAI route")
+    return {
+        "audit_type": "scoring_event_intent",
+        "manifest_version": 1,
+        "status": "pending",
+        "reserved_calls": reserved_calls,
+        "finalized_at": None,
+        "terminal_call_count": 0,
+        "shadow_stage_id": shadow_stage_id,
+        "shadow_stage_ordinal": None,
+        "route": mode,
+        "authoritative_provider": authoritative_provider,
+        "qualification_fingerprint": str(
+            route.get("qualification_fingerprint", "")
+        ),
+        **_scoring_event_details(
+            session=session,
+            probes_used=probes_used,
+            event_id=event_id,
+            event_started_at=event_started_at,
+            consent_verified=consent_verified,
+            allowlist_verified=allowlist_verified,
+            qualification_expires_at=qualification_expires_at,
+        ),
+        "expected_calls": expected_calls,
+    }
 
 
 def _reattempt_eligible(session: Session) -> bool:
@@ -221,20 +370,35 @@ async def start_session(
         ).all()
 
         await usage.ensure_available(db, current_user_id(), "question", get_settings())
-        generated_question = await llm.generate_question(
-            topic=card.topic,
-            category=card.category,
-            pattern=card.pattern,
-            source_company=card.source_company,
-            mastery_summary=card.mastery_summary,
-            last_score=card.last_score,
-            recent_questions=list(recent),
-            answer_anchor=card.answer_anchor,
-            source_excerpt=card.source_excerpt,
-            answer_basis=card.answer_basis,
-            answer_rubric=card.answer_rubric,
-        )
-        usage.record(db, current_user_id(), "question")
+        # Concurrent first-opens serialize at the account/provider boundary
+        # above. Refresh after that possible wait: the winner may already have
+        # committed both the canonical question and its live session.
+        await db.refresh(card)
+        if card.lifecycle_status != CARD_ACTIVE:
+            raise HTTPException(status_code=409, detail="card is archived")
+        _require_recall_available(card)
+        existing = await _live_session(db, card_id)
+        if existing is not None:
+            resumed = await _resumed(db, existing)
+            await db.rollback()
+            return resumed
+
+        question = card.canonical_question
+        if not question:
+            generated_question = await llm.generate_question(
+                topic=card.topic,
+                category=card.category,
+                pattern=card.pattern,
+                source_company=card.source_company,
+                mastery_summary=card.mastery_summary,
+                last_score=card.last_score,
+                recent_questions=list(recent),
+                answer_anchor=card.answer_anchor,
+                source_excerpt=card.source_excerpt,
+                answer_basis=card.answer_basis,
+                answer_rubric=card.answer_rubric,
+            )
+            usage.record(db, current_user_id(), "question")
 
     # Serialize the final eligibility check with Learn. Question generation above
     # intentionally happens outside the lock; after any wait this populate-existing
@@ -261,12 +425,19 @@ async def start_session(
         card.canonical_question = question
         db.add(card)
 
+    scoring_contract_version = active_scoring_contract_version()
+    frozen_scoring_route = route_for_session(
+        get_settings(),
+        user_id=current_user_id(),
+        scoring_contract_version=scoring_contract_version,
+    )
     session = Session(
         card_id=card_id,
         question_asked=question,
         practice=practice,
         status=STATUS_OPEN,
-        scoring_contract_version=active_scoring_contract_version(),
+        scoring_contract_version=scoring_contract_version,
+        scoring_route=frozen_scoring_route.as_json(),
     )
     db.add(session)
     await db.commit()
@@ -307,6 +478,19 @@ async def submit_answer(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    # A completed idempotent replay makes no provider call and therefore must
+    # remain available after consent is withdrawn. Re-check under the card lock
+    # below for the concurrent case where another submit has not committed yet.
+    prelock_probes = await _session_probes(db, session.id)
+    prelock_replay = _replayed_answer(session, prelock_probes, body.text)
+    if prelock_replay is not None:
+        return prelock_replay
+    user_id = current_user_id()
+    settings = get_settings()
+    # Provider work and account deletion share an account -> card lock order.
+    # Reversing it here can deadlock Postgres when DELETE /account cascades to
+    # the same card while this request waits on the user's consent row.
+    await ai_consent.require_ai_processing(db, user_id, settings)
     observed_status = session.status
 
     card = await _owned_card(db, session.card_id, for_update=True)
@@ -349,20 +533,155 @@ async def submit_answer(
     score_operation = (
         "score_v2" if session.scoring_contract_version == SCORING_CONTRACT_V2 else "score"
     )
-    await usage.ensure_available(db, current_user_id(), score_operation, get_settings())
-    result = await llm.score_answer(
-        topic=card.topic,
-        mastery_summary=card.mastery_summary,
-        question_asked=session.question_asked,
-        answer_text=answer_text,
-        probes=pairs,
-        answer_anchor=card.answer_anchor,
-        source_excerpt=card.source_excerpt,
-        answer_basis=card.answer_basis,
-        answer_rubric=card.answer_rubric,
-        scoring_contract_version=session.scoring_contract_version,
+    scoring_event_id = uuid.uuid4()
+    scoring_event_started_at = datetime.now(UTC)
+    route_mode = str(session.scoring_route.get("mode", ROUTE_ANTHROPIC))
+    # Shadow always makes two calls; primary may need its one permitted technical
+    # fallback. Check the worst case against the existing best-effort daily guard.
+    # The provider account spend cap remains the hard concurrent-spend boundary.
+    allowlist_verified_now = user_id in settings.openai_v2_scoring_user_id_set
+    qualification_expires_at = (
+        settings.openai_v2_scoring_qualification_expires_at.strip()
     )
-    usage.record(db, current_user_id(), score_operation)
+    openai_eligible_now = False
+    if session.scoring_contract_version == SCORING_CONTRACT_V2:
+        try:
+            frozen_route = ScoringRoute.from_json(session.scoring_route, settings)
+        except ValueError as exc:
+            await db.rollback()
+            raise llm.LLMError(str(exc)) from exc
+        if frozen_route.mode in {ROUTE_SHADOW, ROUTE_PRIMARY}:
+            openai_completion = llm.build_score_v2_completion(
+                model=frozen_route.openai_model,
+                effort=frozen_route.openai_effort,
+                topic=card.topic,
+                mastery_summary=card.mastery_summary,
+                question_asked=session.question_asked,
+                answer_text=answer_text,
+                probes=pairs,
+                answer_anchor=card.answer_anchor,
+                source_excerpt=card.source_excerpt,
+                answer_basis=card.answer_basis,
+                answer_rubric=card.answer_rubric,
+            )
+            eligibility = openai_route_eligibility(
+                settings,
+                route=frozen_route,
+                user_id=user_id,
+                actual_fingerprint=qualification_fingerprint(openai_completion),
+            )
+            openai_eligible_now = eligibility.allowed
+    requested_calls = (
+        1 if route_mode == ROUTE_ANTHROPIC or not openai_eligible_now else 2
+    )
+    await usage.ensure_available(
+        db,
+        user_id,
+        score_operation,
+        settings,
+        requested_calls=requested_calls,
+        consent_boundary_locked=True,
+    )
+    scoring_intent_id: uuid.UUID | None = None
+    if session.scoring_contract_version == SCORING_CONTRACT_V2:
+        # This independent, content-free manifest is the last durable action
+        # before provider orchestration. A process death can leave a manifest
+        # without terminal rows, but can no longer make a paid first-N canary
+        # event disappear and be replaced by a later success.
+        try:
+            scoring_intent_id = await usage.record_scoring_intent(
+                db,
+                user_id,
+                details=_scoring_intent_details(
+                    session=session,
+                    probes_used=len(pairs),
+                    event_id=scoring_event_id,
+                    event_started_at=scoring_event_started_at,
+                    consent_verified=settings.ai_consent_enforcement_enabled,
+                    allowlist_verified=allowlist_verified_now,
+                    reserved_calls=requested_calls,
+                    openai_expected=(
+                        route_mode in {ROUTE_SHADOW, ROUTE_PRIMARY}
+                        and openai_eligible_now
+                    ),
+                    shadow_stage_id=(
+                        settings.openai_v2_scoring_shadow_stage_id
+                        if route_mode == ROUTE_SHADOW and openai_eligible_now
+                        else ""
+                    ),
+                    qualification_expires_at=qualification_expires_at,
+                ),
+            )
+        except Exception as exc:
+            await db.rollback()
+            raise llm.LLMError("scoring audit unavailable") from exc
+    try:
+        result = await llm.score_answer(
+            topic=card.topic,
+            mastery_summary=card.mastery_summary,
+            question_asked=session.question_asked,
+            answer_text=answer_text,
+            probes=pairs,
+            answer_anchor=card.answer_anchor,
+            source_excerpt=card.source_excerpt,
+            answer_basis=card.answer_basis,
+            answer_rubric=card.answer_rubric,
+            scoring_contract_version=session.scoring_contract_version,
+            scoring_route=session.scoring_route,
+            user_id=user_id,
+        )
+    except llm.LLMError as exc:
+        details = _scoring_call_details(
+            exc.trace,
+            session=session,
+            probes_used=len(pairs),
+            event_id=scoring_event_id,
+            event_started_at=scoring_event_started_at,
+            consent_verified=settings.ai_consent_enforcement_enabled,
+            allowlist_verified=allowlist_verified_now,
+            qualification_expires_at=qualification_expires_at,
+        )
+        if details:
+            # No session/card mutation has happened yet. Persist only physical
+            # call evidence so paid failures still count and remain diagnosable.
+            try:
+                independently_committed = await usage.record_physical_calls(
+                    db,
+                    user_id,
+                    score_operation,
+                    call_details=details,
+                    intent_id=scoring_intent_id,
+                )
+            except Exception as audit_exc:
+                await db.rollback()
+                raise llm.LLMError("scoring audit unavailable") from audit_exc
+            if not independently_committed:
+                await db.commit()
+        raise
+    call_details = _scoring_call_details(
+        result.trace,
+        session=session,
+        probes_used=len(pairs),
+        event_id=scoring_event_id,
+        event_started_at=scoring_event_started_at,
+        consent_verified=settings.ai_consent_enforcement_enabled,
+        allowlist_verified=allowlist_verified_now,
+        qualification_expires_at=qualification_expires_at,
+    )
+    if scoring_intent_id is not None and not call_details:
+        await db.rollback()
+        raise llm.LLMError("scoring audit unavailable")
+    try:
+        await usage.record_physical_calls(
+            db,
+            user_id,
+            score_operation,
+            call_details=call_details,
+            intent_id=scoring_intent_id,
+        )
+    except Exception as exc:
+        await db.rollback()
+        raise llm.LLMError("scoring audit unavailable") from exc
 
     if result.scoring_contract_version != session.scoring_contract_version:
         raise llm.LLMError("scorer returned the wrong contract version")
@@ -496,6 +815,9 @@ async def submit_reattempt(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    user_id = current_user_id()
+    settings = get_settings()
+    await ai_consent.require_ai_processing(db, user_id, settings)
     card = await _owned_card(db, session.card_id, for_update=True)
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
@@ -527,7 +849,13 @@ async def submit_reattempt(
     # leaves the row untouched and the client can retry. Unlike `submit_answer`,
     # nothing is at risk either way: the score is already banked and the schedule
     # already applied.
-    await usage.ensure_available(db, current_user_id(), "reattempt", get_settings())
+    await usage.ensure_available(
+        db,
+        user_id,
+        "reattempt",
+        settings,
+        consent_boundary_locked=True,
+    )
     result = await llm.score_reattempt(
         topic=card.topic,
         question_asked=session.question_asked,
@@ -538,7 +866,7 @@ async def submit_reattempt(
         answer_basis=card.answer_basis or card.answer_anchor,
         answer_rubric=card.answer_rubric,
     )
-    usage.record(db, current_user_id(), "reattempt")
+    usage.record(db, user_id, "reattempt")
 
     session.reattempt_answer = body.text
     session.reattempt_accuracy = result.accuracy
@@ -566,6 +894,9 @@ async def submit_coaching(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    user_id = current_user_id()
+    settings = get_settings()
+    await ai_consent.require_ai_processing(db, user_id, settings)
     # Card lock serializes completed coaching turns across separate sessions for
     # the same card, so two simultaneous submissions cannot select the same
     # alternation focus. It deliberately does not lock the session row: draft
@@ -600,7 +931,13 @@ async def submit_coaching(
     focus = next_coaching_focus(completed)
     question = coaching_question(focus)
 
-    await usage.ensure_available(db, current_user_id(), "coaching", get_settings())
+    await usage.ensure_available(
+        db,
+        user_id,
+        "coaching",
+        settings,
+        consent_boundary_locked=True,
+    )
     result = await llm.coach_answer(
         topic=card.topic,
         focus=focus,
@@ -609,7 +946,7 @@ async def submit_coaching(
         answer_basis=card.answer_basis or card.answer_anchor,
         answer_rubric=card.answer_rubric,
     )
-    usage.record(db, current_user_id(), "coaching")
+    usage.record(db, user_id, "coaching")
 
     session.coaching_focus = focus
     session.coaching_question = question

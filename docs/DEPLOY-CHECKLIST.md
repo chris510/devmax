@@ -218,5 +218,26 @@ not measured. `scripts/effort_sweep.py` is hardwired to `settings.scoring_effort
 `SCORING_CONTRACT_VERSION=1` until the compatible iOS build has been deployed and
 the activation checks in RUNBOOK §Scoring Contract V2 activation and rollback
 have been completed. Activation changes only that setting; do not combine it
-with a model or provider change. Rollback returns the setting to `1` and leaves
-all versioned history intact.
+with a model or provider change. Rollback first sets
+`OPENAI_V2_SCORING_MODE=off`, then returns the contract setting to `1` in the
+same deploy; enabled OpenAI routing deliberately cannot boot against V1. All
+versioned history remains intact.
+
+**OpenAI V2 scoring is also implemented but deliberately inactive.** Keep
+`OPENAI_V2_SCORING_MODE=off`; do not provision an allowlist or enable live
+shadow/primary routing during V2 activation. The separate human-pack, three-run,
+100-event shadow, cost, consent, and owner-canary gates are binding in
+`docs/OPENAI-V2-SCORING-ROLLOUT.md`. Migrations 0016–0017 may land safely while
+dark; they add provider/audit plus nullable material-import and Study Plan
+preview claim metadata only. They rewrite no score, guide, preview, status, or
+scheduling state; the disposable Postgres test proves the 0016→0017→0016→0017
+round trip before deployment.
+
+Before a separately approved shadow stage, predeclare a fresh
+`OPENAI_V2_SCORING_SHADOW_STAGE_ID` UUID. Qualification is the immutable,
+inclusive ordinal 1–100 export for that exact stage; pending/incomplete intents
+or missing terminal rows are not replaceable, and `--event-count` values other
+than 100 are diagnostic only. Pass the exact deployed
+`OPENAI_V2_SCORING_QUALIFICATION_EXPIRES_AT` to the reporter with
+`--expected-qualification-expires-at`; a mismatch or any selected event at or
+after that deadline blocks qualification.

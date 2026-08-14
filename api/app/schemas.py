@@ -315,10 +315,14 @@ class CurrentUserOut(BaseModel):
 
 class AIConsentIn(BaseModel):
     action: Literal["grant", "decline", "withdraw"]
+    # The client sends the version embedded beside the disclosure it rendered.
+    # Optional at the schema boundary so even an older client can always withdraw;
+    # the service requires an exact current match for grant and decline.
+    policy_version: str | None = Field(default=None, max_length=128)
 
 
 class AIConsentOut(BaseModel):
-    provider: Literal["Anthropic"] = "Anthropic"
+    provider: str
     policy_version: str
     status: Literal["granted", "declined", "withdrawn"]
     updated_at: datetime
@@ -1007,3 +1011,4 @@ class AccountExport(BaseModel):
     sessions: list[dict[str, object]]
     study_plans: list[dict[str, object]]
     ai_consent_events: list[dict[str, object]]
+    llm_usage: list[dict[str, object]]

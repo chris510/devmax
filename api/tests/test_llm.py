@@ -250,6 +250,7 @@ def test_both_builders_state_the_turn_and_the_cap(builder, probes, used, final) 
 @pytest.mark.parametrize(
     "payload",
     [
+        [],
         {},
         {**scored(4), "accuracy": None},
         {**scored(4), "depth": "not a number"},
@@ -400,12 +401,15 @@ async def test_v2_complete_result_is_recall_and_has_no_secondary_axes(
     [
         {},
         {**recalled(3), "recall_score": None},
+        {**recalled(3), "recall_score": True},
+        {**recalled(3), "recall_score": 3.0},
+        {**recalled(3), "recall_score": "3"},
         {**recalled(3), "recall_score": "not a number"},
         {**recalled(3), "recall_score": 6},
     ],
 )
 async def test_v2_unusable_recall_raises_llm_error(
-    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+    monkeypatch: pytest.MonkeyPatch, payload: Any
 ) -> None:
     stub_completion(monkeypatch, payload)
     with pytest.raises(llm.LLMError):
@@ -586,6 +590,68 @@ async def test_v2_parse_failure_makes_exactly_one_transmission(monkeypatch):
     assert len(client.calls) == 1
 
 
+async def test_guarded_long_call_reauthorizes_each_explicit_parse_retry(monkeypatch):
+    client = FakeClient(
+        [
+            make_response(text="not json"),
+            make_response({"result": "usable"}),
+        ]
+    )
+    monkeypatch.setattr(llm, "_no_retry_client", lambda: client)
+    monkeypatch.setattr(
+        llm,
+        "_client",
+        lambda: pytest.fail("a guarded call must disable hidden SDK retries"),
+    )
+    authorized: list[int] = []
+
+    async def authorize(attempt: int) -> None:
+        authorized.append(attempt)
+
+    result = await llm._complete(
+        model="test",
+        effort=None,
+        rubric="test",
+        user_content="test",
+        schema={"type": "object"},
+        max_tokens=256,
+        before_provider_call=authorize,
+    )
+
+    assert result == {"result": "usable"}
+    assert authorized == [1, 2]
+    assert len(client.calls) == 2
+
+
+async def test_guard_failure_before_parse_retry_prevents_a_second_transmission(
+    monkeypatch,
+):
+    client = FakeClient(
+        [
+            make_response(text="not json"),
+            make_response({"result": "must not be sent"}),
+        ]
+    )
+    monkeypatch.setattr(llm, "_no_retry_client", lambda: client)
+
+    async def authorize(attempt: int) -> None:
+        if attempt == 2:
+            raise RuntimeError("permission withdrawn")
+
+    with pytest.raises(RuntimeError, match="permission withdrawn"):
+        await llm._complete(
+            model="test",
+            effort=None,
+            rubric="test",
+            user_content="test",
+            schema={"type": "object"},
+            max_tokens=256,
+            before_provider_call=authorize,
+        )
+
+    assert len(client.calls) == 1
+
+
 async def test_v2_usage_and_outcome_logs_are_attributed_to_the_contract(
     monkeypatch, caplog
 ):
@@ -619,6 +685,25 @@ async def test_v2_contract_failure_is_attributed_for_invalid_rate(monkeypatch, c
         record.getMessage() for record in caplog.records
     ]
 
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {**recalled(4), "unexpected": "field"},
+        {key: value for key, value in recalled(4).items() if key != "feedback"},
+        {**recalled(4), "feedback": {"text": "not a string"}},
+        {**recalled(2, PROBE), "follow_up_question": [PROBE]},
+        {**recalled(4), "mastery_summary": 123},
+    ],
+)
+async def test_v2_strict_schema_keys_and_text_types_are_enforced(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+) -> None:
+    stub_completion(monkeypatch, payload)
+    with pytest.raises(llm.LLMError):
+        await llm.score_answer(
+            **SCORE_ARGS, probes=NO_PROBES, scoring_contract_version=2
+        )
 
 async def test_effort_is_omitted_when_unset(fake_client, monkeypatch):
     """Haiku 4.5 rejects `effort` outright, so it must be absent, not null."""

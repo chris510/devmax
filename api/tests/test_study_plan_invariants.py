@@ -84,6 +84,7 @@ SESSION_COLUMNS = (
     "feedback",
     "follow_up_used",
     "scoring_contract_version",
+    "scoring_route",
     "coaching_focus",
     "coaching_question",
     "coaching_answer",

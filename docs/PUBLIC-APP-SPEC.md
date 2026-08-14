@@ -64,6 +64,16 @@ Guide import is durable, asynchronous, and review-first:
 - Sign in is required before the first paid extraction call.
 - Import runs as a persistent background job. Closing the app or leaving the
   screen does not cancel it.
+- Exactly one worker may own an import run. It atomically claims a pending row,
+  renews a short heartbeat during the provider wait, and may store a result only
+  while its run token still matches. Startup recovery takes over only an expired
+  claim; a late old-worker result is discarded. Retry is available only from the
+  failed state, so duplicate taps cannot schedule duplicate paid transmissions.
+- The direct Study Plan preview path applies the same ownership rule even though
+  its HTTP request waits for completion: the new draft is claimed once, Retry
+  atomically accepts only `failed`, a heartbeat preserves an active long call,
+  and only the matching run token may store the preview. A concurrent Retry is
+  rejected before consent authorization or provider transmission.
 - The UI reports saved, processing, ready, needs-attention, and failed states.
   It never promises a duration, shows a fake percentage, or uses indefinite
   skeleton motion.
@@ -241,18 +251,39 @@ before confirmation.
 
 ## Privacy copy that is part of the design
 
-Before either paid path is available, the app names Anthropic, describes the
-guide/title/plan settings or question/transcript/answer authority/context sent,
-states the purpose, and records a versioned Allow or Decline decision on the
-server. A current grant is required at the provider-call boundary. Withdrawal
-from Settings blocks future Anthropic work without deleting study state; a
+Before either paid path is available, the app names Anthropic and OpenAI,
+describes the guide/title/plan settings or question/transcript/answer
+authority/context sent, states which provider may perform each purpose, and
+records a versioned Allow or Decline decision on the server. Grant and decline
+must identify the exact disclosure version rendered by the client; withdrawal
+must remain available without it. A current grant is required at every physical
+provider-call boundary. Direct calls keep that decision serialized through the
+provider call. A multi-minute guide import instead rechecks consent and records
+a durable authorization while the consent lock is held immediately before each
+provider transmission, then releases the lock while the response runs. Hidden
+SDK retries are disabled; an explicit parse retry must cross the boundary again.
+Withdrawal or deletion that wins before authorization blocks that transmission.
+Once a request has been authorized and handed to the provider client, neither
+action can recall it; account deletion discards any result that returns later. A
 material disclosure change requires consent again.
+
+If an owner-only provider shadow is enabled, the disclosure also states that the
+same answer context is sent to Anthropic and OpenAI simultaneously, Anthropic
+alone controls the shown and saved result, and OpenAI receives a stable
+pseudonymous safety identifier derived from the account UUID—not the Apple
+credential, name, or email.
 
 Before the first guide is processed:
 
 > Devmax sends the guide text needed to propose your review topics to its AI
 > provider. Your source stays attached to your account so you can review or
 > delete it later.
+
+Deleting an imported source removes that source and its source-owned transient
+guide draft/raw import response. If the user explicitly created a Study Plan
+from it, the plan retains its own guide provenance until account deletion. The
+Data & privacy screen and public policy must state that distinction rather than
+implying that source removal also erases an already-created plan.
 
 Before the first answer is scored:
 

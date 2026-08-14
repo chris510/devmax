@@ -1,0 +1,455 @@
+[
+  {
+    "name": "draft delivery — initial no recall",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "I am blank on the sequence after requirements.",
+    "expected_recall": 0,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 0 initial-flow label only; learner text and label require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-0-1",
+      "recall-0"
+    ]
+  },
+  {
+    "name": "draft delivery — initial adjacent architecture jargon",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "I establish polyglot persistence, put Kafka at the event backbone, add Redis for hot paths, and define sharding and multi-region failover before fitting the API and entities around that stack.",
+    "expected_recall": 1,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 1 initial-flow label for fluent but reversed sequencing; learner text and label require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-0-1",
+      "adjacent-jargon",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft delivery — terminal partial sequence at cap",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "I would sketch the architecture and discuss scaling.",
+    "probes": [
+      {
+        "question": "Before scaling, what should you derive from the agreed requirements?",
+        "answer": "I would list a few entities."
+      },
+      {
+        "question": "What completes the design before a deep dive?",
+        "answer": "Then I would choose the database and scale it."
+      }
+    ],
+    "expected_recall": 2,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 2 at the two-probe cap; the transcript still omits the external interface and requirement-driven end-to-end sequence, but text and label require owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "terminal-boundary-2-3",
+      "recall-2"
+    ]
+  },
+  {
+    "name": "draft delivery — self-corrected complete sequence",
+    "topic": "System design delivery: requirements to entities, APIs, high-level design, and deep dives",
+    "answer": "I usually pick the database first—actually, no, that is backwards once the requirements are agreed. I should identify the core entities, define the external API, draw the simplest end-to-end design that serves those calls, and only then spend the remaining time on the constraints and bottlenecks worth a deep dive.",
+    "expected_recall": 5,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 5 self-correction case; whether the correction is precise and complete enough for 5 requires owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "partial-self-correction",
+      "recall-5"
+    ]
+  },
+  {
+    "name": "draft nfr — terminal generic checklist at cap",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "The system should maximize scalability, availability, consistency, durability, security, and performance.",
+    "probes": [
+      {
+        "question": "Which of those qualities constrains this feed operation?",
+        "answer": "All of them are important for every large system."
+      },
+      {
+        "question": "Give one bound that would change the architecture.",
+        "answer": "It should be very fast and extremely reliable."
+      }
+    ],
+    "expected_recall": 1,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 1 for a still-generic checklist after two probes; learner text and label require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "adjacent-jargon",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft nfr — terminal one contextual bound at cap",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "I would measure performance rather than just saying the feed is fast.",
+    "probes": [
+      {
+        "question": "Make that constraint specific to feed reads.",
+        "answer": "Set a feed-read latency target under expected traffic."
+      },
+      {
+        "question": "What other reliability choice should constrain the design?",
+        "answer": "We can decide that later once the architecture is built."
+      }
+    ],
+    "expected_recall": 2,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 2 because one useful latency constraint is supplied but the essential prioritization and reliability/consistency account remains materially incomplete; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-1-2",
+      "terminal-boundary-2-3",
+      "recall-2"
+    ]
+  },
+  {
+    "name": "draft nfr — operation-specific SLO alternative",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "I would express the few important qualities as operation-specific SLOs: a feed-read latency percentile under stated load, an availability objective, and an acceptable freshness or consistency allowance during failure. Those bounds should be the ones that can select an architecture.",
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 4 for a source-compatible SLO framing; precision and completeness require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "source-compatible-alternative",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft nfr — noisy bounded constraints",
+    "topic": "Non-functional requirements: turning scale, latency, availability, and durability into design constraints",
+    "answer": "fast means like p ninety five feed reads under three hundred millis at expected read qps and reliable means an availability target um plus say how stale the feed may be keep only the few numbers that drive the design",
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 3 initial-flow label for a noisy but substantially correct account with a possible bounded omission; owner human review must decide the exact Recall before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "speech-noise",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft identity — initial resource check with bounded omission",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "Verify the bearer token to identify the caller, load the booking, and check that the caller is allowed to cancel it.",
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 3 because authentication and resource authorization are present while the client-controlled body identity boundary is only implicit; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft identity — initial complete principal boundary",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "Derive the caller from the verified bearer token, load the booking, and authorize that principal as its owner or an allowed administrator. The user ID in the body is client input and cannot override the authenticated principal.",
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 4 initial-flow label for a substantially complete account; owner human review must decide whether any omission changes the exact numeral before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft identity — terminal essential account with omission",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "Verify the token before cancelling.",
+    "probes": [
+      {
+        "question": "What does the service authorize after verifying it?",
+        "answer": "Load the booking and check that the verified caller owns it."
+      },
+      {
+        "question": "What role does the body user ID play?",
+        "answer": "It identifies request data but is not proof of the caller."
+      }
+    ],
+    "expected_recall": 3,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 3 at the cap with the essential authentication/authorization boundary recovered but one bounded omission; exact scoring requires owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-2-3",
+      "terminal-boundary-3-4",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft identity — terminal complete account at cap",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "answer": "First verify the credential.",
+    "probes": [
+      {
+        "question": "What principal should the service use?",
+        "answer": "Use the principal derived from the verified token, not the body user ID."
+      },
+      {
+        "question": "How is the cancellation authorized?",
+        "answer": "Load the booking and require that verified principal to be its owner or an allowed administrator."
+      }
+    ],
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 4 at the two-probe cap for a recovered, substantially complete account; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "terminal-turn",
+      "two-probe-cap",
+      "terminal-boundary-3-4",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft identity — stale mastery contradicted",
+    "topic": "API identity boundary: deriving the principal from trusted authentication context before authorizing a resource or action",
+    "mastery_summary": "Previously separated authentication from resource-level authorization and rejected client-controlled identity.",
+    "answer": "Because the token is valid, the body user ID is safe to treat as the caller and the service may cancel that user's booking directly.",
+    "expected_recall": 1,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 1 current-turn label despite a correct stale summary; learner text and label require owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "prior-summary-contradiction",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft timeout — one-probe evidence still insufficient",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "answer": "Retry the payment with the same idempotency key.",
+    "probes": [
+      {
+        "question": "What does the timeout prove, and what should the server do with that key?",
+        "answer": "It does not reveal the outcome, and the server should recognize that it has seen the key."
+      }
+    ],
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed one-probe insufficiency at Recall 3 because recognizing the key may not yet distinguish returning or awaiting one recorded result; owner human review must approve both text and flow before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "one-probe-insufficiency",
+      "follow-up-anchored",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft timeout — follow-up supplies replay safety",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "answer": "Retry the timed-out payment with bounded backoff.",
+    "probes": [
+      {
+        "question": "What outcome should the client assume, and how do both sides prevent a second charge?",
+        "answer": "Assume the outcome is unknown, reuse the same operation-scoped idempotency key, and have the server return or await the one recorded result."
+      }
+    ],
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed terminal Recall 4 after one probe supplies the essential replay-safe account; exact label and learner evidence require owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "one-probe-terminal",
+      "follow-up-anchored",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft timeout — self-corrected unknown outcome",
+    "topic": "Timeouts, retries, and idempotency across a partial network failure",
+    "answer": "A timeout means the charge failed, so send a new request—wait, the server may already have completed it. Treat the outcome as unknown, retry transiently with the same operation-scoped idempotency key and bounded backoff, and have the server return or await the one recorded result so a new key cannot create a second charge.",
+    "expected_recall": 5,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 5 self-correction case; precision and completeness require owner human review against approved grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "partial-self-correction",
+      "recall-5"
+    ]
+  },
+  {
+    "name": "draft cursor — stale mastery cannot rescue encoded offset",
+    "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
+    "mastery_summary": "Previously used the last ordered record as the continuation boundary and rejected encoded offsets.",
+    "answer": "The cursor should be the next page number encoded in base64; decoding it to an offset keeps pages stable when new rows arrive.",
+    "expected_recall": 1,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 1 current-turn label for an encoded-offset misconception despite the stale correct summary; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "prior-summary-contradiction",
+      "adjacent-jargon",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft cursor — keyset alternative",
+    "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
+    "answer": "Use keyset pagination over a defined ordering. Return the final row's ordered key and ask for rows after it next time, so insertions before that key do not move the continuation boundary. Direct jumps to arbitrary numbered pages become harder.",
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 4 for an approved-equivalent keyset framing; the exact numeral requires owner human review against grounding before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "source-compatible-alternative",
+      "recall-4"
+    ]
+  },
+  {
+    "name": "draft cursor — initial stable boundary with omission",
+    "topic": "Cursor pagination: preserving stable traversal while new rows are inserted",
+    "answer": "Put the final record ID in the cursor and resume after it instead of using a page offset.",
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 3 for the essential stable-boundary mechanism with ordering and insertion consequences abbreviated; owner human review is required before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft estimation — initial ritual math",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "answer": "I would calculate DAU, peak QPS, bandwidth, replication-adjusted storage, and five-year growth. At internet scale those figures prove aggregation must be distributed, so topic cardinality is unnecessary.",
+    "expected_recall": 1,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 1 because fluent ritual arithmetic does not identify the decision-changing bound; learner text and label require owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "adjacent-jargon",
+      "recall-1"
+    ]
+  },
+  {
+    "name": "draft estimation — noisy decision bound",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "answer": "the choice is one min heap versus shard it so estimate number of topics um topic cardinality and use that number to decide not all the dau qps storage math",
+    "expected_recall": 3,
+    "expected_flow": "follow_up",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 3 initial-flow label for a noisy essential account with abbreviated application; exact scoring requires owner human review before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "speech-noise",
+      "recall-3"
+    ]
+  },
+  {
+    "name": "draft estimation — complete decision-linked estimate",
+    "topic": "Decision-driven estimation: calculating only the bound that can change an architectural choice",
+    "answer": "State the branch first: one in-memory Top-K worker or sharded aggregation. Estimate topic cardinality and the resulting heap footprint, compare that with one worker's capacity, and keep one instance if it fits or shard only if it does not.",
+    "expected_recall": 4,
+    "expected_flow": "complete",
+    "review_status": "pending",
+    "review_note": "Proposed Recall 4 for a substantially complete decision-linked estimate; owner human review must decide whether it is precise enough for this numeral before any live call.",
+    "tags": [
+      "v2-recall-draft",
+      "week1-canary-only",
+      "pending-owner-review",
+      "initial-turn",
+      "initial-boundary-3-4",
+      "source-compatible-alternative",
+      "recall-4"
+    ]
+  }
+]
