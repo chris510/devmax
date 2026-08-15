@@ -60,7 +60,7 @@ from scripts.effort_sweep_support import (  # noqa: E402
 
 KIND = v2_recall_eval.KIND
 LOCAL_INPUT_FRAMING_ALLOWANCE = 2048
-FALLBACK_OUTPUT_TOKENS = 2048
+FALLBACK_OUTPUT_TOKENS = llm.SCORING_OUTPUT_TOKEN_LIMIT
 
 
 class EvalSettings(BaseSettings):

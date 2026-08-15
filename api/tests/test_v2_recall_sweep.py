@@ -71,6 +71,14 @@ def test_claude_actual_cost_accounts_for_both_cache_buckets() -> None:
     assert cost == Decimal("0.0002465")
 
 
+def test_preflight_output_ceiling_tracks_the_production_scoring_limit() -> None:
+    assert (
+        v2_recall_sweep.FALLBACK_OUTPUT_TOKENS
+        == llm.SCORING_OUTPUT_TOKEN_LIMIT
+        == 8_000
+    )
+
+
 @pytest.mark.anyio
 async def test_keyless_dry_run_uses_local_bound_and_no_network(
     monkeypatch, tmp_path, capsys

@@ -620,6 +620,18 @@ async def test_v2_complete_result_is_recall_and_has_no_secondary_axes(
     assert llm.SCORE_V2_SCHEMA["additionalProperties"] is False
 
 
+def test_v2_builder_uses_the_proven_scoring_output_allowance() -> None:
+    completion = llm.build_score_v2_completion(
+        model="claude-sonnet-5",
+        effort="low",
+        **SCORE_ARGS,
+        probes=NO_PROBES,
+    )
+
+    assert completion["max_tokens"] == llm.SCORING_OUTPUT_TOKEN_LIMIT == 8_000
+    assert completion["retry"] is False
+
+
 @pytest.mark.parametrize(
     "payload",
     [
