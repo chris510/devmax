@@ -264,6 +264,32 @@ async def test_invalid_lesson_extraction_writes_no_proposals_or_cards(
     assert not (await db.exec(select(Card))).all()
 
 
+def test_lesson_post_validation_owns_provider_unsupported_array_bounds():
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request path notes",
+        source_text=GUIDE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+
+    with pytest.raises(llm.LLMError, match="between 1 and 7 concepts"):
+        materials._validated_lesson_concepts(source, [])
+
+    too_many = [
+        lesson_concept(GUIDE, topic=f"Request routing path {index}")
+        for index in range(8)
+    ]
+    with pytest.raises(llm.LLMError, match="between 1 and 7 concepts"):
+        materials._validated_lesson_concepts(source, too_many)
+
+    missing_prompt = lesson_concept(GUIDE)
+    missing_prompt["recall_questions"] = missing_prompt["recall_questions"][:-1]
+    with pytest.raises(llm.LLMError, match="exactly five recall prompts"):
+        materials._validated_lesson_concepts(source, [missing_prompt])
+
+
 @pytest.mark.parametrize("status", [SOURCE_PENDING, SOURCE_PROCESSING, SOURCE_READY])
 async def test_retry_rejects_every_import_that_is_not_failed(
     client, db, monkeypatch, status
