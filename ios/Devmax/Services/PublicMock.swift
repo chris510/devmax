@@ -68,30 +68,69 @@ extension MockAPI {
     func materialImports() async throws -> [MaterialImport] { [try await materialImport(Self.sourceID)] }
 
     func materialImport(_ id: UUID) async throws -> MaterialImport {
-        MaterialImport(
-            id: id, title: "Contracts — formation", kind: "guide", version: 1,
-            status: "ready", importPath: "topics", intent: "already_studied",
-            originalFilename: "contracts.md", characterCount: 1284, cleanCount: 3,
+        if materialImportDelay != .zero {
+            try await Task.sleep(for: materialImportDelay)
+        }
+        if let materialImportFixture { return materialImportFixture }
+        let route = await MainActor.run { DebugFlags.shared.route }
+        let status = ["extracting", "import-background"].contains(route)
+            ? "processing"
+            : "ready"
+        let isLesson = ["lesson-concepts", "lesson-concept-expanded"].contains(route)
+        return MaterialImport(
+            id: id,
+            title: isLesson ? "Networking 101" : "Contracts — formation",
+            kind: isLesson ? "article" : "guide", version: 1,
+            status: status, importPath: isLesson ? "lesson" : "topics",
+            intent: "already_studied",
+            originalFilename: isLesson ? "" : "contracts.md",
+            characterCount: isLesson ? 876 : 1284, cleanCount: isLesson ? 2 : 3,
             attentionCount: 0, error: "", planDraftId: nil,
             comparison: ["added": 2, "changed": 1, "removed": 0, "unchanged": 3],
             topics: [
                 MaterialTopic(
-                    id: Self.topicID, position: 1, sectionTitle: "Formation", topic: "Offer",
-                    answerAnchor: "An offer is an objective manifestation of willingness to bargain, with definite terms and an invitation to accept.",
-                    sourceExcerpt: "An offer requires definite terms and intent to be bound.",
-                    canonicalQuestion: "How does consistent hashing limit key movement when membership changes?",
+                    id: Self.topicID, position: 1,
+                    sectionTitle: isLesson ? "Networking 101" : "Formation",
+                    topic: isLesson ? "Network layer best-effort delivery" : "Offer",
+                    answerAnchor: isLesson
+                        ? "IP routes packets between networks with best-effort delivery; "
+                            + "packets may be lost, reordered, or duplicated."
+                        : "An offer is an objective manifestation of willingness to bargain, "
+                            + "with definite terms and an invitation to accept.",
+                    sourceExcerpt: isLesson
+                        ? "IP addresses and routes packets between networks using best-effort "
+                            + "delivery, so packets may be lost, reordered, or duplicated."
+                        : "An offer requires definite terms and intent to be bound.",
+                    canonicalQuestion: isLesson
+                        ? "How does best-effort IP delivery shape the transport layer above it?"
+                        : "How does consistent hashing limit key movement when membership changes?",
                     answerRubric: Self.lessonRubric,
-                    recallQuestions: Self.lessonPrompts(for: "consistent hashing"),
+                    recallQuestions: Self.lessonPrompts(
+                        for: isLesson ? "network layer best-effort delivery" : "consistent hashing"
+                    ),
                     status: "clean", issue: ""
                 ),
                 MaterialTopic(
                     id: UUID(uuidString: "00000000-0000-0000-0000-000000000903")!,
-                    position: 2, sectionTitle: "Formation", topic: "Acceptance",
-                    answerAnchor: "Acceptance is assent to the offer's terms in the manner invited by the offer.",
-                    sourceExcerpt: "Acceptance must mirror the terms and be communicated.",
-                    canonicalQuestion: "How does Raft elect a leader without losing log safety?",
+                    position: 2,
+                    sectionTitle: isLesson ? "Networking 101" : "Formation",
+                    topic: isLesson ? "Persistent TCP connection trade-offs" : "Acceptance",
+                    answerAnchor: isLesson
+                        ? "Connection reuse avoids repeated TCP setup latency, while each open "
+                            + "connection consumes sockets, memory, buffers, and server state."
+                        : "Acceptance is assent to the offer's terms in the manner invited by "
+                            + "the offer.",
+                    sourceExcerpt: isLesson
+                        ? "Reusing persistent connections avoids repeated setup, but each open "
+                            + "connection consumes sockets, memory, buffers, and server state."
+                        : "Acceptance must mirror the terms and be communicated.",
+                    canonicalQuestion: isLesson
+                        ? "Why does TCP connection reuse reduce latency, and what does it cost?"
+                        : "How does Raft elect a leader without losing log safety?",
                     answerRubric: Self.lessonRubric,
-                    recallQuestions: Self.lessonPrompts(for: "Raft leader election"),
+                    recallQuestions: Self.lessonPrompts(
+                        for: isLesson ? "persistent TCP connections" : "Raft leader election"
+                    ),
                     status: "clean", issue: ""
                 )
             ], createdAt: Date(), updatedAt: Date()
@@ -102,7 +141,10 @@ extension MockAPI {
         try await materialImport(Self.sourceID)
     }
 
-    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport { try await materialImport(id) }
+    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport {
+        if let retryMaterialImportFixture { return retryMaterialImportFixture }
+        return try await materialImport(id)
+    }
     func deleteMaterialImport(_ id: UUID) async throws {}
 
     func editMaterialTopic(
@@ -117,7 +159,12 @@ extension MockAPI {
         return value
     }
 
-    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
+    func confirmMaterial(
+        _ id: UUID, topics: [UUID], contentProvenance: String?
+    ) async throws -> MaterialConfirmation {
+        if confirmMaterialDelay != .zero {
+            try await Task.sleep(for: confirmMaterialDelay)
+        }
         let cards = topics.map { topic in
             topic == Self.topicID ? Self.publicCardID : Self.secondPublicCardID
         }
@@ -157,9 +204,13 @@ extension MockAPI {
     }
 
     func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
-        MaterialArtifacts(
+        if lessonArtifactDelay != .zero {
+            try await Task.sleep(for: lessonArtifactDelay)
+        }
+        return MaterialArtifacts(
             sourceId: id, title: "Contracts — formation",
-            sourceUrl: "https://example.com/lesson", distilledAt: Date(),
+            sourceUrl: "https://example.com/lesson",
+            contentProvenance: "exact_source_excerpt", distilledAt: Date(),
             canonicalNoteMarkdown: "# Contracts — formation\n\nA concise canonical note.",
             recallExportMarkdown: "# Recall questions\n\n- Explain the mechanism.",
             concepts: [],

@@ -20,10 +20,12 @@ private enum LessonSourceKind: String, CaseIterable, Identifiable {
 }
 
 struct PublicOnboardingView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var flow: PublicOnboardingState
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var plan: StudyPlanState
     @EnvironmentObject private var auth: AuthState
+    @State private var expandedTopics: Set<UUID> = []
 
     var body: some View {
         Group {
@@ -68,6 +70,13 @@ struct PublicOnboardingView: View {
                 flow.resumeAfterSignIn(app: app)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard DebugFlags.shared.route.isEmpty,
+                  phase == .active,
+                  [.importing, .importFailed].contains(flow.step)
+            else { return }
+            Task { await flow.refreshActiveImport() }
+        }
         .sheet(item: $flow.editingTopic) { topic in
             TopicEditSheet(
                 topic: topic,
@@ -98,11 +107,21 @@ struct PublicOnboardingView: View {
             .presentationBackground(Theme.surface)
         }
         .task(id: flow.step.rawValue) {
+            if flow.step == .importing, flow.job == nil,
+               DebugFlags.shared.useMockAPI,
+               let item = try? await flow.api.materialImports().first {
+                flow.job = item
+                flow.routeImportResult()
+            }
             if [.importReady, .topics].contains(flow.step), flow.job == nil,
                let item = try? await flow.api.materialImports().first
             {
                 flow.job = item
-                flow.selectedTopics = item.cleanTopicIDs
+                flow.selectedTopics = item.importPath == "lesson" ? [] : item.cleanTopicIDs
+                if DebugFlags.shared.route == "lesson-concept-expanded",
+                   let first = item.topics.first {
+                    expandedTopics.insert(first.id)
+                }
                 if DebugFlags.shared.route == "topic-edit" {
                     flow.editingTopic = item.topics.first
                 }
@@ -137,7 +156,7 @@ struct PublicOnboardingView: View {
             PublicChoice(
                 title: "Bring a guide", detail: "Paste text or choose a text-based PDF, TXT, or Markdown file.",
                 badge: "RECOMMENDED"
-            ) { flow.step = .guide }
+            ) { flow.beginGuide() }
             PublicChoice(title: "Add a few topics", detail: "Fast setup. Each topic needs a trusted answer anchor.") {
                 flow.step = .manual
             }
@@ -243,21 +262,93 @@ struct PublicOnboardingView: View {
     }
 
     private var importing: some View {
-        PublicPage(kicker: "SAVED · PROCESSING", title: "Your guide is safe.") {
-            Text("Devmax is reading the source structure and preparing proposals. A long guide may take a while.").publicBody()
-            PublicMaterialCard(title: flow.preparedTitle, meta: "\(flow.draft.guideText.count) CHARACTERS · SAVED TO YOUR ACCOUNT")
-            PublicNote("You can leave this screen or close the app. Processing continues, and the result will remain in Study material.")
+        PublicPage(
+            kicker: flow.job == nil ? "SAVING" : "SAVED · PROCESSING",
+            title: flow.job == nil
+                ? (flow.isLessonDraft ? "Saving your lesson…" : "Saving your guide…")
+                : (flow.isLessonDraft ? "Your lesson is safe." : "Your guide is safe.")
+        ) {
+            Text(
+                flow.job == nil
+                    ? "Your draft is safe on this device while Devmax saves it to your account."
+                    : "Devmax is reading the source structure and preparing proposals "
+                        + "for your review. A long source may take a while."
+            )
+            .publicBody()
+            PublicMaterialCard(
+                title: flow.job?.title ?? flow.preparedTitle,
+                meta: "\(flow.job?.characterCount ?? flow.draft.guideText.count) CHARACTERS · "
+                    + (flow.job == nil ? "SAVED ON THIS DEVICE" : "SAVED TO YOUR ACCOUNT")
+            )
+            ImportProgressStatus(
+                status: flow.job?.status,
+                startedAt: flow.importStartedAt ?? flow.job?.updatedAt ?? Date(),
+                checkedAt: flow.lastImportCheckedAt
+            )
+            PublicNote(
+                flow.job == nil
+                    ? "Keep this screen open until the account save finishes. If it fails, "
+                        + "your draft remains on this device."
+                    : "You can leave this screen or close the app. Processing continues, "
+                        + "and the result will remain in Study material."
+            )
         } footer: {
-            SecondaryButton(title: "Go to Today") { leaveToToday() }
+            if flow.job != nil {
+                SecondaryButton(title: "Go to Today") { leaveToToday() }
+            }
         }
     }
 
     private var importFailed: some View {
-        PublicPage(kicker: "IMPORT PAUSED", title: "The guide is still here.") {
-            Text(flow.error.isEmpty ? "Processing didn't finish. No topics or cards were created." : flow.error).publicBody()
-            PublicMaterialCard(title: flow.preparedTitle, meta: "FULL SOURCE RETAINED · NOTHING CREATED")
+        PublicPage(
+            kicker: flow.lessonGroundingRecheckFailed
+                ? "GROUNDING CHECK STOPPED"
+                : (flow.lessonGroundingRecoveryRequired
+                    ? "SOURCE CHECK REQUIRED" : "PROCESSING STOPPED"),
+            title: flow.lessonGroundingRecoveryRequired
+                ? "Your lesson is safe."
+                : (flow.isLessonDraft ? "Your lesson is still here." : "The guide is still here.")
+        ) {
+            Text(
+                flow.lessonGroundingRecheckFailed
+                    ? "The source-grounding check failed. Your full source and prior "
+                        + "concept preview remain safe, and no cards were created."
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "This lesson was processed before Devmax's current source-grounding "
+                            + "check. Recheck it before reviewing concepts. Your source is safe "
+                            + "and no cards were created."
+                        : (flow.error.isEmpty
+                            ? "Processing didn't finish. No topics or cards were created."
+                            : flow.error))
+            ).publicBody()
+            PublicMaterialCard(
+                title: flow.job?.title ?? flow.preparedTitle,
+                meta: flow.lessonGroundingRecheckFailed
+                    ? "SOURCE + PRIOR PREVIEW RETAINED · NO CARDS CREATED"
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "FULL SOURCE RETAINED · NO CARDS CREATED"
+                        : "FULL SOURCE RETAINED · NOTHING CREATED")
+            )
+            PublicNote(
+                flow.lessonGroundingRecheckFailed
+                    ? "Retry runs the current grounding check again. The prior preview "
+                        + "cannot be confirmed unless that check finishes."
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "The old concept preview stays available until a replacement passes "
+                            + "the current grounding check."
+                        : "Retry checks the saved job first. If processing already finished "
+                            + "in the background, Devmax will take you straight to the result.")
+            )
         } footer: {
-            PrimaryButton(title: "Try processing again") { Task { await flow.retryImport() } }
+            PrimaryButton(
+                title: flow.busy
+                    ? "Checking status…"
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "Recheck source grounding" : "Try processing again"),
+                enabled: !flow.busy
+            ) {
+                Task { await flow.retryImport() }
+            }
             Button(flow.isLessonDraft ? "Back to my lesson" : "Back to my guide") {
                 flow.step = flow.isLessonDraft ? .lesson : .guide
             }.publicSecondary()
@@ -270,6 +361,16 @@ struct PublicOnboardingView: View {
                 title: flow.job?.title ?? flow.preparedTitle,
                 meta: "\(flow.job?.cleanCount ?? 3) READY · \(flow.job?.attentionCount ?? 0) NEED ATTENTION"
             )
+            if flow.isLessonDraft,
+               let classification = LessonContentProvenance(
+                   rawValue: flow.draft.contentProvenance
+               )
+            {
+                PublicMaterialCard(
+                    title: "Content origin",
+                    meta: classification.label.uppercased()
+                )
+            }
             if let comparison = flow.job?.comparison, !comparison.isEmpty {
                 PublicMaterialCard(
                     title: "Source version changes",
@@ -288,18 +389,45 @@ struct PublicOnboardingView: View {
 
     private var topics: some View {
         PublicPage(
-            back: { flow.step = .importReady },
+            back: {
+                if !flow.busy { flow.step = .importReady }
+            },
             kicker: flow.isLessonDraft ? "REVIEW CONCEPTS" : "REVIEW TOPICS",
             title: "Confirm what you'll practice"
         ) {
             if let job = flow.job {
+                if flow.isLessonDraft {
+                    lessonProvenancePicker
+                    PublicNote(
+                        "This labels the pasted knowledge itself. Source type and URL "
+                            + "remain separate attribution."
+                    )
+                    Hairline()
+                    PublicNote(
+                        "Review every clean concept. Select each one you want, or remove it. "
+                            + "Nothing is created until every remaining concept has a decision."
+                    )
+                }
                 ForEach(job.topics) { topic in
                     Button {
-                        if flow.selectedTopics.contains(topic.id) { flow.selectedTopics.remove(topic.id) }
-                        else if topic.isClean { flow.selectedTopics.insert(topic.id) }
+                        if flow.isLessonDraft {
+                            if expandedTopics.contains(topic.id) {
+                                expandedTopics.remove(topic.id)
+                            } else {
+                                expandedTopics.insert(topic.id)
+                            }
+                        } else if flow.selectedTopics.contains(topic.id) {
+                            flow.selectedTopics.remove(topic.id)
+                        } else if topic.isClean {
+                            flow.selectedTopics.insert(topic.id)
+                        }
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            Text(flow.selectedTopics.contains(topic.id) ? "✓" : "○")
+                            Text(
+                                flow.isLessonDraft
+                                    ? (expandedTopics.contains(topic.id) ? "⌄" : "›")
+                                    : (flow.selectedTopics.contains(topic.id) ? "✓" : "○")
+                            )
                                 .foregroundStyle(topic.isClean ? Theme.accent : Theme.metaFaint)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(topic.topic).font(WCFont.sans(15, weight: 500)).foregroundStyle(Theme.text)
@@ -311,7 +439,9 @@ struct PublicOnboardingView: View {
                                    let prompts = topic.recallQuestions, !prompts.isEmpty
                                 {
                                     MetaText(
-                                        text: prompts.map(\.levelLabel).joined(separator: " · "),
+                                        text: topic.isClean
+                                            ? "STRUCTURE CHECKED · REVIEW MEANING"
+                                            : "NEEDS ATTENTION",
                                         font: WCFont.mono(9), tracking: 0.3,
                                         color: Theme.metaFaint, uppercased: true
                                     )
@@ -325,8 +455,34 @@ struct PublicOnboardingView: View {
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
+                    .disabled(flow.busy)
+                    if flow.isLessonDraft, expandedTopics.contains(topic.id) {
+                        LessonConceptEvidence(topic: topic)
+                        Button(
+                            flow.selectedTopics.contains(topic.id)
+                                ? "Remove from practice"
+                                : "Select this concept for practice"
+                        ) {
+                            if flow.selectedTopics.contains(topic.id) {
+                                flow.selectedTopics.remove(topic.id)
+                            } else if topic.isClean {
+                                flow.selectedTopics.insert(topic.id)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(WCFont.sans(13.5, weight: 500))
+                        .foregroundStyle(topic.isClean ? Theme.accent : Theme.metaFaint)
+                        .frame(maxWidth: .infinity, minHeight: Metrics.minTapTarget)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Metrics.secondaryRadius)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                        .disabled(flow.busy || !topic.isClean)
+                    }
                     HStack(spacing: 18) {
-                        Button("Edit source anchor") { flow.editingTopic = topic }
+                        if !flow.isLessonDraft {
+                            Button("Edit source anchor") { flow.editingTopic = topic }
+                        }
                         Button("Remove") {
                             Task {
                                 await flow.updateTopic(
@@ -338,6 +494,7 @@ struct PublicOnboardingView: View {
                     }
                     .font(WCFont.sans(12.5)).foregroundStyle(Theme.meta)
                     .buttonStyle(.plain).frame(minHeight: Metrics.minTapTarget)
+                    .disabled(flow.busy)
                     Hairline()
                 }
             } else {
@@ -354,15 +511,18 @@ struct PublicOnboardingView: View {
                             ? "Study 1 concept"
                             : "Study \(flow.selectedTopics.count) concepts")
                         : "Create selected topics"),
-                enabled: !flow.selectedTopics.isEmpty && !flow.busy
+                enabled: flow.canConfirmSelectedTopics
             ) {
                 Task { await flow.confirmTopics(app: app) }
             }
         }
+        .disabled(flow.busy)
     }
 
     private var lessonSourceFields: some View {
         VStack(alignment: .leading, spacing: 10) {
+            lessonProvenancePicker
+
             MetaText(
                 text: "SOURCE TYPE", font: WCFont.mono(9.5),
                 tracking: 0.8, color: Theme.meta
@@ -405,6 +565,59 @@ struct PublicOnboardingView: View {
             if !flow.lessonSourceURLIsValid {
                 MetaText(
                     text: "USE A FULL HTTP OR HTTPS URL",
+                    font: WCFont.mono(9.5), tracking: 0.7, color: Theme.scoreLow
+                )
+            }
+        }
+    }
+
+    private var lessonProvenancePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MetaText(
+                text: "WHAT IS THE PASTED TEXT?", font: WCFont.mono(9.5),
+                tracking: 0.8, color: Theme.meta
+            )
+            Menu {
+                ForEach(LessonContentProvenance.allCases) { classification in
+                    Button(classification.label) {
+                        flow.draft.contentProvenance = classification.rawValue
+                        flow.schedulePersist()
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(
+                        LessonContentProvenance(
+                            rawValue: flow.draft.contentProvenance
+                        )?.label ?? "Choose content origin"
+                    )
+                    .font(WCFont.sans(14.5))
+                    .foregroundStyle(Theme.text)
+                    Spacer()
+                    Text("Change")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.meta)
+                }
+                .padding(.horizontal, 13)
+                .frame(minHeight: Metrics.minTapTarget)
+                .background(
+                    Theme.inputFill,
+                    in: RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            }
+            if let classification = LessonContentProvenance(
+                rawValue: flow.draft.contentProvenance
+            ) {
+                Text(classification.detail)
+                    .font(WCFont.sans(12.5))
+                    .foregroundStyle(Theme.textMuted)
+            } else {
+                MetaText(
+                    text: "CHOOSE ONE BEFORE CREATING CARDS",
                     font: WCFont.mono(9.5), tracking: 0.7, color: Theme.scoreLow
                 )
             }
@@ -584,6 +797,22 @@ struct PublicOnboardingView: View {
                             title: source.title,
                             meta: "VERSION \(source.version) · \(source.status.uppercased()) · \(source.characterCount) CHARACTERS"
                         )
+                        if source.importPath == "lesson" {
+                            MetaText(
+                                text: LessonContentProvenance(
+                                    rawValue: source.contentProvenance ?? ""
+                                )?.label ?? "Content origin not set",
+                                font: WCFont.mono(9.5), tracking: 0.5,
+                                color: Theme.metaFaint, uppercased: true
+                            )
+                        }
+                        if let action = savedImportAction(source) {
+                            Button(action) { flow.openSavedImport(source) }
+                                .buttonStyle(.plain)
+                                .font(TypeRole.secondaryAction)
+                                .foregroundStyle(Theme.accent)
+                                .frame(minHeight: Metrics.minTapTarget)
+                        }
                         HStack(spacing: 18) {
                             Button("Import updated version") { flow.beginGuideUpdate(source) }
                             Button("Remove") { Task { await flow.deleteMaterial(source.id) } }
@@ -595,7 +824,9 @@ struct PublicOnboardingView: View {
                 }
             }
             Hairline()
-            PublicChoice(title: "Add another guide", detail: "Paste text or choose a supported text-based file.") { flow.step = .guide }
+            PublicChoice(title: "Add another guide", detail: "Paste text or choose a supported text-based file.") {
+                flow.beginGuide(forceNew: true)
+            }
             PublicChoice(title: "Add manual topics", detail: "Create grounded review topics without a guide.") { flow.step = .manual }
             PublicChoice(title: "Browse collections", detail: "See reviewed, versioned starter material.") {
                 flow.step = .collections; Task { await flow.loadCollections() }
@@ -615,6 +846,19 @@ struct PublicOnboardingView: View {
                 decrement: { binding.wrappedValue = Swift.max(min, binding.wrappedValue - 1) },
                 increment: { binding.wrappedValue = Swift.min(max, binding.wrappedValue + 1) }
             )
+        }
+    }
+
+    private func savedImportAction(_ source: MaterialImport) -> String? {
+        if source.requiresLessonGroundingRecovery {
+            return "Recheck source grounding"
+        }
+        return switch source.status {
+        case "pending", "processing": "View progress"
+        case "ready", "needs_attention":
+            source.importPath == "lesson" ? "Review concepts" : "Review proposals"
+        case "failed": "Review and retry"
+        default: nil
         }
     }
 
@@ -688,6 +932,176 @@ struct PublicOnboardingView: View {
         PublicSetupStore.clear()
         await auth.markOnboardingComplete()
         await app.loadToday()
+    }
+}
+
+private struct LessonConceptEvidence: View {
+    let topic: MaterialTopic
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PublicNote(
+                "Structure checked means required fields and pasted-source spans "
+                    + "were validated. Review the meaning before selecting this concept."
+            )
+            evidence("PASTED SOURCE EXCERPT", topic.sourceExcerpt)
+            evidence("ANSWER BASIS", topic.answerAnchor)
+            if let question = topic.canonicalQuestion, !question.isEmpty {
+                evidence("CANONICAL QUESTION", question)
+            }
+            if !rubricRows.isEmpty {
+                MetaText(
+                    text: "ANSWER RUBRIC", font: WCFont.mono(10),
+                    tracking: 0.8, color: Theme.meta
+                )
+                ForEach(Array(rubricRows.enumerated()), id: \.offset) { _, row in
+                    evidence(row.label.uppercased(), row.value)
+                }
+            }
+            if let prompts = topic.recallQuestions, !prompts.isEmpty {
+                MetaText(
+                    text: "RECALL QUESTIONS", font: WCFont.mono(10),
+                    tracking: 0.8, color: Theme.meta
+                )
+                ForEach(prompts) { prompt in
+                    evidence(prompt.levelLabel.uppercased(), prompt.question)
+                }
+            }
+        }
+        .padding(14)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+        .overlay(RoundedRectangle(cornerRadius: Metrics.inlineRadius).stroke(Theme.border))
+    }
+
+    private var rubricRows: [(label: String, value: String)] {
+        let values = topic.answerRubric ?? [:]
+        let fields = [
+            ("Mechanism", ["mechanism", "essential_account"]),
+            ("Acceptable alternative", ["acceptable_alternative"]),
+            ("Trade-off / depth", ["trade_off", "depth_extension"]),
+            ("Failure boundary", ["failure_mode", "boundary_extension"]),
+            ("Misconception", ["misconception"])
+        ]
+        return fields.compactMap { label, keys in
+            guard let value = keys.compactMap({ values[$0] }).first(where: { !$0.isEmpty })
+            else { return nil }
+            return (label, value)
+        }
+    }
+
+    private func evidence(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            MetaText(
+                text: label, font: WCFont.mono(9),
+                tracking: 0.55, color: Theme.metaFaint
+            )
+            Text(value.isEmpty ? "Not supplied." : value)
+                .font(WCFont.sans(13))
+                .foregroundStyle(Theme.textMuted)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+struct ImportProgressPresentation: Equatable {
+    let status: String
+    let elapsedSeconds: Int
+    let checkedSecondsAgo: Int?
+
+    init(status: String?, startedAt: Date, checkedAt: Date?, now: Date) {
+        self.status = status ?? "starting"
+        elapsedSeconds = max(0, Int(now.timeIntervalSince(startedAt)))
+        checkedSecondsAgo = checkedAt.map { max(0, Int(now.timeIntervalSince($0))) }
+    }
+
+    var title: String {
+        switch status {
+        case "pending": "Saved and waiting to start"
+        case "processing": "Reading and checking the source"
+        default: "Saving to your account"
+        }
+    }
+
+    var detail: String {
+        switch status {
+        case "pending": "Your lesson is queued; no cards exist yet."
+        case "processing": "Devmax is preparing proposals for your review."
+        default: "Your draft remains on this device until the account save finishes."
+        }
+    }
+
+    var elapsedLabel: String { "WORKING · \(Self.shortDuration(elapsedSeconds))" }
+
+    var checkedLabel: String {
+        guard let checkedSecondsAgo else { return "CONNECTING" }
+        if checkedSecondsAgo < 2 { return "STATUS UPDATED NOW" }
+        return "CHECKED \(Self.shortDuration(checkedSecondsAgo)) AGO"
+    }
+
+    private static func shortDuration(_ seconds: Int) -> String {
+        guard seconds >= 60 else { return "\(seconds)S" }
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "\(minutes)M" : "\(minutes)M \(remainder)S"
+    }
+}
+
+private struct ImportProgressStatus: View {
+    let status: String?
+    let startedAt: Date
+    let checkedAt: Date?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let presentation = ImportProgressPresentation(
+                status: status, startedAt: startedAt, checkedAt: checkedAt,
+                now: context.date
+            )
+            HStack(alignment: .top, spacing: 12) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Theme.accent)
+                    .padding(.top, 2)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(presentation.title)
+                        .font(WCFont.sans(14, weight: 500))
+                        .foregroundStyle(Theme.text)
+                    Text(presentation.detail)
+                        .font(WCFont.sans(12.5))
+                        .foregroundStyle(Theme.textMuted)
+                        .lineSpacing(3)
+                    HStack(spacing: 10) {
+                        MetaText(
+                            text: presentation.elapsedLabel,
+                            font: WCFont.mono(9), tracking: 0.45,
+                            color: Theme.metaFaint
+                        )
+                        MetaText(
+                            text: presentation.checkedLabel,
+                            font: WCFont.mono(9), tracking: 0.45,
+                            color: Theme.metaFaint
+                        )
+                    }
+                    MetaText(
+                        text: "NO CONCEPTS OR CARDS CREATED YET",
+                        font: WCFont.mono(9), tracking: 0.45,
+                        color: Theme.metaFaint
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+            .overlay(RoundedRectangle(cornerRadius: Metrics.inlineRadius).stroke(Theme.border))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "\(presentation.title). In progress. No concepts or cards have been created yet."
+            )
+            .accessibilityIdentifier("material-import-progress")
+        }
     }
 }
 

@@ -134,6 +134,25 @@ final class DebugFlags: ObservableObject {
 /// Fixture data matching the design handoff's screenshots exactly.
 actor MockAPI: DevmaxAPI {
     static let shared = MockAPI()
+    let materialImportDelay: Duration
+    let confirmMaterialDelay: Duration
+    let lessonArtifactDelay: Duration
+    let materialImportFixture: MaterialImport?
+    let retryMaterialImportFixture: MaterialImport?
+
+    init(
+        materialImportDelay: Duration = .zero,
+        confirmMaterialDelay: Duration = .zero,
+        lessonArtifactDelay: Duration = .zero,
+        materialImportFixture: MaterialImport? = nil,
+        retryMaterialImportFixture: MaterialImport? = nil
+    ) {
+        self.materialImportDelay = materialImportDelay
+        self.confirmMaterialDelay = confirmMaterialDelay
+        self.lessonArtifactDelay = lessonArtifactDelay
+        self.materialImportFixture = materialImportFixture
+        self.retryMaterialImportFixture = retryMaterialImportFixture
+    }
 
     /// Only the forced-failure alternation reads this. It counts submits across
     /// the whole app run — and across both answer endpoints, so a re-attempt

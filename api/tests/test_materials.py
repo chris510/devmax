@@ -18,6 +18,7 @@ from app.models import (
     SOURCE_PENDING,
     SOURCE_PROCESSING,
     SOURCE_READY,
+    SOURCE_SUPERSEDED,
     Card,
     MaterialSource,
     MaterialTopicProposal,
@@ -40,6 +41,21 @@ LESSON_RUBRIC = {
     "failure_mode": "A failed routing stage can stop the request before storage.",
     "misconception": "The request does not jump directly from DNS to the database.",
 }
+
+NETWORKING_101_SOURCE = (
+    "Networking 101 focuses on three layers relevant to system design. At the "
+    "network layer, IP addresses and routes packets between networks using "
+    "best-effort delivery, so packets may be lost, reordered, or duplicated. At "
+    "the transport layer, TCP provides a reliable ordered byte stream using "
+    "sequence numbers, acknowledgements, retransmission, flow control, and "
+    "congestion control. At the application layer, protocols such as DNS and HTTP "
+    "define message meaning. To load a webpage, DNS resolves the hostname, the "
+    "client establishes a TCP connection over IP, and HTTP sends the request and "
+    "response. Creating a new TCP connection for every HTTP request repeats "
+    "handshake round trips and adds latency. Reusing persistent connections avoids "
+    "repeated setup, but each open connection consumes sockets, memory, buffers, "
+    "and server state, so services need timeouts and capacity limits."
+)
 
 
 def lesson_concept(source_text: str, **overrides) -> dict:
@@ -82,6 +98,165 @@ def lesson_concept(source_text: str, **overrides) -> dict:
         "recall_questions": prompts,
     }
     return {**base, **overrides}
+
+
+def lesson_findings(
+    concepts: list[dict],
+    *,
+    verdicts: dict[tuple[int, str], str] | None = None,
+    repairs: dict[tuple[int, str], str] | None = None,
+) -> list[dict]:
+    verdicts = verdicts or {}
+    repairs = repairs or {}
+    findings = []
+    for concept_index, concept in enumerate(concepts, 1):
+        evidence = concept["source_excerpt"][:300]
+        for field in llm.LESSON_GROUNDING_FIELDS:
+            key = (concept_index, field)
+            verdict = verdicts.get(key, "supported")
+            findings.append(
+                {
+                    "concept_index": concept_index,
+                    "field": field,
+                    "verdict": verdict,
+                    "evidence_spans": [evidence],
+                    "reason": (
+                        "The expected answer is stated in the excerpt."
+                        if verdict != "unsupported"
+                        else "The field adds a detail the excerpt does not state."
+                    ),
+                    "repair": repairs.get(key, ""),
+                }
+            )
+    return findings
+
+
+def stub_lesson_verifier(monkeypatch, responses=None) -> list[dict]:
+    calls: list[dict] = []
+    queued = list(responses or [])
+
+    async def verify(**kwargs):
+        calls.append(kwargs)
+        if queued:
+            response = queued.pop(0)
+            return response(kwargs["concepts"]) if callable(response) else response
+        return lesson_findings(kwargs["concepts"])
+
+    monkeypatch.setattr(llm, "verify_lesson_grounding", verify)
+    return calls
+
+
+def grounded_summary() -> dict[str, int]:
+    return {
+        "grounding_gate_version": materials.LESSON_GROUNDING_GATE_VERSION,
+    }
+
+
+def networking_concept(**overrides) -> dict:
+    base = {
+        "topic": "TCP reliability and web requests",
+        "section_title": "Networking 101",
+        "source_excerpt": NETWORKING_101_SOURCE,
+        "answer_basis": (
+            "TCP provides a reliable ordered byte stream above IP, while DNS and "
+            "HTTP define the application-level steps used to load a webpage."
+        ),
+        "canonical_question": (
+            "How does a webpage request move through DNS, TCP, IP, and HTTP?"
+        ),
+        "answer_rubric": {
+            "mechanism": (
+                "TCP uses sequence numbers, acknowledgements, retransmission, flow "
+                "control, and congestion control for a reliable ordered byte stream."
+            ),
+            "acceptable_alternative": (
+                "The source supports describing DNS and HTTP as application-layer "
+                "protocols around the TCP connection."
+            ),
+            "trade_off": (
+                "Persistent connections avoid repeated setup but consume sockets, "
+                "memory, buffers, and server state."
+            ),
+            "failure_mode": "Best-effort IP packets may be lost, reordered, or duplicated.",
+            "misconception": (
+                "TCP is the transport layer; DNS and HTTP define application message "
+                "meaning."
+            ),
+        },
+        "recall_questions": [
+            {
+                "level": "definition_recognition",
+                "question": (
+                    "What distinguishes IP, TCP, and DNS or HTTP in the webpage flow?"
+                ),
+            },
+            {
+                "level": "mechanism",
+                "question": "How does TCP provide a reliable ordered byte stream?",
+            },
+            {
+                "level": "derivation",
+                "question": (
+                    "Why does creating a new TCP connection for each request add latency?"
+                ),
+            },
+            {
+                "level": "application",
+                "question": (
+                    "How does the stated protocol sequence load a webpage from a hostname?"
+                ),
+            },
+            {
+                "level": "failure_tradeoff",
+                "question": (
+                    "What does a persistent connection save, and what server resources "
+                    "does it consume?"
+                ),
+            },
+        ],
+    }
+    return {**base, **overrides}
+
+
+def adversarial_networking_concept() -> dict:
+    base = networking_concept()
+    return networking_concept(
+        answer_rubric={
+            **base["answer_rubric"],
+            "failure_mode": (
+                "TCP waits for a retransmission timeout when an acknowledgement is "
+                "lost, then resends corrupted data."
+            ),
+        },
+        recall_questions=[
+            *base["recall_questions"][:3],
+            {
+                "level": "application",
+                "question": (
+                    "How would TCP recover corrupted data during a live video call?"
+                ),
+            },
+            base["recall_questions"][4],
+        ],
+    )
+
+
+def lesson_proposal(
+    source: MaterialSource, *, position: int, topic: str, status: str = "clean"
+) -> MaterialTopicProposal:
+    concept = lesson_concept(GUIDE, topic=topic)
+    return MaterialTopicProposal(
+        source_id=source.id,
+        position=position,
+        section_title=concept["section_title"],
+        topic=concept["topic"],
+        answer_anchor=concept["answer_basis"],
+        source_excerpt=concept["source_excerpt"],
+        canonical_question=concept["canonical_question"],
+        answer_rubric=concept["answer_rubric"],
+        recall_questions=concept["recall_questions"],
+        status=status,
+    )
 
 
 async def _claim(db, source: MaterialSource) -> uuid.UUID:
@@ -140,6 +315,7 @@ async def test_lesson_import_persists_safe_url_provenance_and_source_type(
             "source_text": GUIDE,
             "source_url": "https://example.com/engineering/request-path?view=full",
             "kind": "article",
+            "content_provenance": "learner_notes",
             "import_path": "lesson",
             "intent": "learn",
         },
@@ -150,9 +326,11 @@ async def test_lesson_import_persists_safe_url_provenance_and_source_type(
         "https://example.com/engineering/request-path?view=full"
     )
     assert response.json()["kind"] == "article"
+    assert response.json()["content_provenance"] == "learner_notes"
     source = (await db.exec(select(MaterialSource))).one()
     assert source.import_path == "lesson"
     assert source.kind == "article"
+    assert source.content_provenance == "learner_notes"
     assert source.source_text == GUIDE
     assert calls == [source.id]
 
@@ -208,6 +386,7 @@ async def test_lesson_extraction_stores_one_complete_concept_pack(
         title="Request path notes",
         source_text=GUIDE,
         source_url="https://example.com/request-path",
+        content_provenance="exact_source_excerpt",
         kind="article",
         import_path="lesson",
         status=SOURCE_PENDING,
@@ -219,12 +398,17 @@ async def test_lesson_extraction_stores_one_complete_concept_pack(
         return [lesson_concept(GUIDE)]
 
     monkeypatch.setattr(llm, "extract_lesson", extract)
+    verifier_calls = stub_lesson_verifier(monkeypatch)
     processed = await materials._process_lesson(db, source, await _claim(db, source))
     await db.flush()
 
     proposal = (await db.exec(select(MaterialTopicProposal))).one()
     assert processed.status == SOURCE_READY
     assert processed.result_summary["concept_count"] == 1
+    assert processed.result_summary["grounding_gate_version"] == (
+        materials.LESSON_GROUNDING_GATE_VERSION
+    )
+    assert len(verifier_calls) == 1
     assert proposal.canonical_question.startswith("How would you trace")
     assert proposal.answer_rubric == LESSON_RUBRIC
     assert [prompt["level"] for prompt in proposal.recall_questions] == list(
@@ -289,8 +473,431 @@ def test_lesson_post_validation_owns_provider_unsupported_array_bounds():
     with pytest.raises(llm.LLMError, match="exactly five recall prompts"):
         materials._validated_lesson_concepts(source, [missing_prompt])
 
+    empty_section = lesson_concept(GUIDE, section_title="")
+    with pytest.raises(llm.LLMError, match="empty section title"):
+        materials._validated_lesson_concepts(source, [empty_section])
 
-@pytest.mark.parametrize("status", [SOURCE_PENDING, SOURCE_PROCESSING, SOURCE_READY])
+
+def test_networking_grounding_requires_a_complete_literal_evidence_matrix():
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source, [networking_concept()]
+    )
+    findings = lesson_findings(concepts)
+    review = materials._validated_lesson_grounding(
+        source, concepts, findings
+    )
+    assert len(review) == len(llm.LESSON_GROUNDING_FIELDS)
+
+    with pytest.raises(llm.LLMError, match="missing 1 required field verdict"):
+        materials._validated_lesson_grounding(source, concepts, findings[:-1])
+
+    duplicate = [*findings, findings[0]]
+    with pytest.raises(llm.LLMError, match="unexpected or duplicated"):
+        materials._validated_lesson_grounding(source, concepts, duplicate)
+
+    non_literal = lesson_findings(concepts)
+    non_literal[0]["evidence_spans"] = [
+        "Each packet can take a different path through the network."
+    ]
+    with pytest.raises(llm.LLMError, match="non-literal span"):
+        materials._validated_lesson_grounding(source, concepts, non_literal)
+
+    passing_repair = lesson_findings(concepts)
+    passing_repair[0]["repair"] = "A replacement that must not be trusted."
+    with pytest.raises(llm.LLMError, match="repairs a passing field"):
+        materials._validated_lesson_grounding(source, concepts, passing_repair)
+
+    allowed_absence = lesson_findings(concepts)
+    next(
+        finding
+        for finding in allowed_absence
+        if finding["field"] == "answer_rubric.trade_off"
+    )["verdict"] = "bounded_absence"
+    materials._validated_lesson_grounding(source, concepts, allowed_absence)
+
+    missing_mechanism = lesson_findings(concepts)
+    next(
+        finding
+        for finding in missing_mechanism
+        if finding["field"] == "answer_rubric.mechanism"
+    )["verdict"] = "bounded_absence"
+    with pytest.raises(llm.LLMError, match="required positive field"):
+        materials._validated_lesson_grounding(
+            source, concepts, missing_mechanism
+        )
+
+
+def test_networking_grounding_rejects_source_text_outside_the_concept_excerpt():
+    excerpt = NETWORKING_101_SOURCE[:400]
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source, [networking_concept(source_excerpt=excerpt)]
+    )
+    findings = lesson_findings(concepts)
+    findings[0]["evidence_spans"] = [
+        "Reusing persistent connections avoids repeated setup"
+    ]
+
+    with pytest.raises(llm.LLMError, match="non-literal span"):
+        materials._validated_lesson_grounding(source, concepts, findings)
+
+
+async def test_networking_unsupported_additions_are_review_only(
+    client, db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        content_provenance="exact_source_excerpt",
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+    concept = adversarial_networking_concept()
+
+    async def extract(**_kwargs):
+        return [concept]
+
+    def unsupported(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={
+                (1, "answer_rubric.failure_mode"): "unsupported",
+                (1, "recall_questions.application"): "unsupported",
+            },
+        )
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    verifier_calls = stub_lesson_verifier(monkeypatch, [unsupported])
+    processed = await materials._process_lesson(
+        db, source, await _claim(db, source)
+    )
+    db.add(processed)
+    await db.commit()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    assert len(verifier_calls) == 1
+    assert processed.status == SOURCE_NEEDS_ATTENTION
+    assert proposal.status == "needs_attention"
+    assert "answer_rubric.failure_mode" in proposal.issue
+    assert "recall_questions.application" in proposal.issue
+    assert processed.result_summary["grounding_gate_version"] == (
+        materials.LESSON_GROUNDING_GATE_VERSION
+    )
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 409
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_malformed_lesson_verification_writes_nothing(db, monkeypatch):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [networking_concept()]
+
+    def incomplete(concepts):
+        return lesson_findings(concepts)[:-1]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    stub_lesson_verifier(monkeypatch, [incomplete])
+    with pytest.raises(llm.LLMError, match="missing 1 required field verdict"):
+        await materials._process_lesson(db, source, await _claim(db, source))
+
+    assert not (await db.exec(select(MaterialTopicProposal))).all()
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_networking_repair_gets_one_independent_recheck(db, monkeypatch):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [adversarial_networking_concept()]
+
+    def repairable(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={
+                (1, "answer_rubric.failure_mode"): "unsupported",
+                (1, "recall_questions.application"): "unsupported",
+            },
+            repairs={
+                (1, "answer_rubric.failure_mode"): (
+                    "Best-effort IP packets may be lost, reordered, or duplicated."
+                ),
+                (1, "recall_questions.application"): (
+                    "How does the stated protocol sequence load a webpage from a hostname?"
+                ),
+            },
+        )
+
+    authorizer_operations = []
+
+    def authorizer(*_args, operation="guide_import", **_kwargs):
+        authorizer_operations.append(operation)
+
+        async def authorize(_attempt):
+            return None
+
+        return authorize
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    monkeypatch.setattr(materials, "_guide_authorizer", authorizer)
+    verifier_calls = stub_lesson_verifier(monkeypatch, [repairable])
+    processed = await materials._process_lesson(
+        db, source, await _claim(db, source)
+    )
+    await db.flush()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    assert len(verifier_calls) == 2
+    assert authorizer_operations == [
+        "guide_import",
+        "lesson_grounding",
+        "lesson_grounding_recheck",
+    ]
+    assert processed.status == SOURCE_READY
+    assert proposal.status == "clean"
+    assert proposal.answer_rubric["failure_mode"].startswith("Best-effort IP")
+    assert "video call" not in proposal.recall_questions[3]["question"]
+
+
+async def test_second_grounding_failure_never_gets_a_third_repair(db, monkeypatch):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [adversarial_networking_concept()]
+
+    def first(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={(1, "recall_questions.application"): "unsupported"},
+            repairs={
+                (1, "recall_questions.application"): (
+                    "How does the stated protocol sequence load a webpage from a hostname?"
+                )
+            },
+        )
+
+    def second(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={(1, "recall_questions.application"): "unsupported"},
+            repairs={
+                (1, "recall_questions.application"): (
+                    "How does DNS resolve the hostname before the TCP connection?"
+                )
+            },
+        )
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    verifier_calls = stub_lesson_verifier(monkeypatch, [first, second])
+    processed = await materials._process_lesson(
+        db, source, await _claim(db, source)
+    )
+    await db.flush()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    assert len(verifier_calls) == 2
+    assert processed.status == SOURCE_NEEDS_ATTENTION
+    assert proposal.status == "needs_attention"
+    assert "recall_questions.application" in proposal.issue
+    assert "live video call" in proposal.recall_questions[3]["question"]
+    assert "stated protocol sequence" not in proposal.recall_questions[3]["question"]
+
+
+async def test_second_grounding_failure_restores_and_reports_every_original_rejection(
+    db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [adversarial_networking_concept()]
+
+    def first(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={(1, "answer_rubric.failure_mode"): "unsupported"},
+            repairs={
+                (1, "answer_rubric.failure_mode"): (
+                    "Best-effort IP packets may be lost, reordered, or duplicated."
+                )
+            },
+        )
+
+    def second(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={(1, "recall_questions.application"): "unsupported"},
+        )
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    verifier_calls = stub_lesson_verifier(monkeypatch, [first, second])
+    processed = await materials._process_lesson(
+        db, source, await _claim(db, source)
+    )
+    await db.flush()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    assert len(verifier_calls) == 2
+    assert processed.status == SOURCE_NEEDS_ATTENTION
+    assert "answer_rubric.failure_mode" in proposal.issue
+    assert "recall_questions.application" in proposal.issue
+    assert "retransmission timeout" in proposal.answer_rubric["failure_mode"]
+    assert "live video call" in proposal.recall_questions[3]["question"]
+
+
+async def test_incomplete_grounding_repair_stays_attention_without_recheck(
+    db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [adversarial_networking_concept()]
+
+    def incomplete_repair(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={
+                (1, "answer_rubric.failure_mode"): "unsupported",
+                (1, "recall_questions.application"): "unsupported",
+            },
+            repairs={
+                (1, "answer_rubric.failure_mode"): (
+                    "Best-effort IP packets may be lost, reordered, or duplicated."
+                )
+            },
+        )
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    verifier_calls = stub_lesson_verifier(monkeypatch, [incomplete_repair])
+    processed = await materials._process_lesson(
+        db, source, await _claim(db, source)
+    )
+    await db.flush()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    assert len(verifier_calls) == 1
+    assert processed.status == SOURCE_NEEDS_ATTENTION
+    assert "retransmission timeout" in proposal.answer_rubric["failure_mode"]
+
+
+async def test_malformed_grounding_recheck_writes_nothing(db, monkeypatch):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=NETWORKING_101_SOURCE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [adversarial_networking_concept()]
+
+    def repairable(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={(1, "recall_questions.application"): "unsupported"},
+            repairs={
+                (1, "recall_questions.application"): (
+                    "How does the stated protocol sequence load a webpage from a hostname?"
+                )
+            },
+        )
+
+    def malformed(concepts):
+        return lesson_findings(concepts)[:-1]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    verifier_calls = stub_lesson_verifier(
+        monkeypatch, [repairable, malformed]
+    )
+    with pytest.raises(llm.LLMError, match="missing 1 required field verdict"):
+        await materials._process_lesson(db, source, await _claim(db, source))
+
+    assert len(verifier_calls) == 2
+    assert not (await db.exec(select(MaterialTopicProposal))).all()
+    assert not (await db.exec(select(Card))).all()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        SOURCE_PENDING,
+        SOURCE_PROCESSING,
+        SOURCE_READY,
+        SOURCE_NEEDS_ATTENTION,
+        SOURCE_CONFIRMED,
+        SOURCE_SUPERSEDED,
+    ],
+)
 async def test_retry_rejects_every_import_that_is_not_failed(
     client, db, monkeypatch, status
 ):
@@ -309,10 +916,168 @@ async def test_retry_rejects_every_import_that_is_not_failed(
     db.add(source)
     await db.commit()
 
+    before = await client.get(
+        f"/materials/imports/{source.id}", headers=API_HEADERS
+    )
     response = await client.post(
         f"/materials/imports/{source.id}/retry", headers=API_HEADERS
     )
 
+    assert before.status_code == 200
+    assert before.json()["lesson_grounding_required"] is False
+    assert response.status_code == 409
+    await db.refresh(source)
+    assert source.status == status
+    assert calls == []
+
+
+@pytest.mark.parametrize("status", [SOURCE_READY, SOURCE_NEEDS_ATTENTION])
+async def test_retry_requeues_a_pre_gate_lesson_without_discarding_its_source_or_preview(
+    client, db, monkeypatch, status
+):
+    calls: list[uuid.UUID] = []
+
+    async def no_work(source_id):
+        calls.append(source_id)
+
+    monkeypatch.setattr(materials, "process_import", no_work)
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Pre-gate Networking lesson",
+        source_text=NETWORKING_101_SOURCE,
+        import_path="lesson",
+        status=status,
+        result_summary={"workflow": "lesson", "concept_count": 1},
+        error="old preview needs a current grounding check",
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Legacy unverified Networking concept"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    before = await client.get(
+        f"/materials/imports/{source.id}", headers=API_HEADERS
+    )
+    response = await client.post(
+        f"/materials/imports/{source.id}/retry", headers=API_HEADERS
+    )
+
+    assert before.status_code == 200
+    assert before.json()["lesson_grounding_required"] is True
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == SOURCE_PENDING
+    assert response.json()["lesson_grounding_required"] is False
+    await db.refresh(source)
+    retained = await db.get(MaterialTopicProposal, proposal.id)
+    assert source.status == SOURCE_PENDING
+    assert source.source_text == NETWORKING_101_SOURCE
+    assert source.result_summary == {
+        "workflow": "lesson",
+        "concept_count": 1,
+        "lesson_grounding_recovery_required": True,
+    }
+    assert source.error == ""
+    assert retained is not None
+    assert retained.topic == "Legacy unverified Networking concept"
+    assert calls == [source.id]
+
+
+async def test_pre_gate_grounding_recovery_survives_a_failed_worker_and_retries(
+    client, db, monkeypatch
+):
+    background_calls: list[uuid.UUID] = []
+    real_process_import = materials.process_import
+
+    async def no_work(source_id):
+        background_calls.append(source_id)
+
+    monkeypatch.setattr(materials, "process_import", no_work)
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Pre-gate recovery survives restart",
+        source_text=NETWORKING_101_SOURCE,
+        import_path="lesson",
+        status=SOURCE_READY,
+        result_summary={"workflow": "lesson", "concept_count": 1},
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Prior concept preview"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    started = await client.post(
+        f"/materials/imports/{source.id}/retry", headers=API_HEADERS
+    )
+    assert started.status_code == 202, started.text
+    assert background_calls == [source.id]
+
+    async def fail_extraction(**_kwargs):
+        raise llm.LLMError("grounding provider unavailable")
+
+    monkeypatch.setattr(llm, "extract_lesson", fail_extraction)
+    factory = async_sessionmaker(
+        db.bind, class_=AsyncSession, expire_on_commit=False
+    )
+    monkeypatch.setattr(materials, "session_factory", factory)
+    assert await real_process_import(source.id) is True
+    await db.refresh(source)
+    assert source.status == SOURCE_FAILED
+
+    failed = await client.get(
+        f"/materials/imports/{source.id}", headers=API_HEADERS
+    )
+    assert failed.status_code == 200
+    assert failed.json()["status"] == SOURCE_FAILED
+    assert failed.json()["lesson_grounding_required"] is True
+    assert failed.json()["error"] == "grounding provider unavailable"
+    assert [topic["id"] for topic in failed.json()["topics"]] == [str(proposal.id)]
+
+    retried = await client.post(
+        f"/materials/imports/{source.id}/retry", headers=API_HEADERS
+    )
+    assert retried.status_code == 202, retried.text
+    assert retried.json()["status"] == SOURCE_PENDING
+    assert retried.json()["lesson_grounding_required"] is False
+    await db.refresh(source)
+    assert source.result_summary["lesson_grounding_recovery_required"] is True
+    assert await db.get(MaterialTopicProposal, proposal.id) is not None
+    assert background_calls == [source.id, source.id]
+
+
+@pytest.mark.parametrize("status", [SOURCE_READY, SOURCE_NEEDS_ATTENTION])
+async def test_retry_rejects_a_lesson_that_already_passed_the_current_grounding_gate(
+    client, db, monkeypatch, status
+):
+    calls: list[uuid.UUID] = []
+
+    async def no_work(source_id):
+        calls.append(source_id)
+
+    monkeypatch.setattr(materials, "process_import", no_work)
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Current grounded lesson",
+        source_text=NETWORKING_101_SOURCE,
+        import_path="lesson",
+        status=status,
+        result_summary=grounded_summary(),
+    )
+    db.add(source)
+    await db.commit()
+
+    before = await client.get(
+        f"/materials/imports/{source.id}", headers=API_HEADERS
+    )
+    response = await client.post(
+        f"/materials/imports/{source.id}/retry", headers=API_HEADERS
+    )
+
+    assert before.status_code == 200
+    assert before.json()["lesson_grounding_required"] is False
     assert response.status_code == 409
     await db.refresh(source)
     assert source.status == status
@@ -762,6 +1527,83 @@ async def test_topics_are_proposals_until_the_user_confirms(client, db, stub_imp
     assert all(card.last_score is None for card in cards)
 
 
+async def test_pre_gate_lesson_cannot_confirm_clean_legacy_proposals(client, db):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Pre-gate Networking lesson",
+        source_text=NETWORKING_101_SOURCE,
+        content_provenance="exact_source_excerpt",
+        import_path="lesson",
+        status=SOURCE_READY,
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Legacy unverified Networking concept"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    response = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "lesson_grounding_required"
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_legacy_lesson_requires_explicit_content_provenance_before_confirmation(
+    client, db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Coached request-path correction",
+        source_text=GUIDE,
+        source_url="https://example.com/request-path",
+        kind="notes",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [lesson_concept(GUIDE)]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    stub_lesson_verifier(monkeypatch)
+    await materials._process_lesson(db, source, await _claim(db, source))
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+
+    blocked = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "content_provenance_required"
+    assert not (await db.exec(select(Card))).all()
+    await db.refresh(source)
+    assert source.content_provenance == "legacy_unspecified"
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={
+            "selected_topic_ids": [str(proposal.id)],
+            "content_provenance": "coached_correction",
+        },
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    await db.refresh(source)
+    assert source.content_provenance == "coached_correction"
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
 async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     client, db, monkeypatch
 ):
@@ -770,6 +1612,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
         title="Request path notes",
         source_text=GUIDE,
         source_url="https://example.com/request-path",
+        content_provenance="exact_source_excerpt",
         kind="article",
         import_path="lesson",
         status=SOURCE_PENDING,
@@ -781,6 +1624,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
         return [lesson_concept(GUIDE)]
 
     monkeypatch.setattr(llm, "extract_lesson", extract)
+    stub_lesson_verifier(monkeypatch)
     processed = await materials._process_lesson(db, source, await _claim(db, source))
     db.add(processed)
     await db.commit()
@@ -795,6 +1639,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert preview.json()["topics"][0]["answer_rubric"] == LESSON_RUBRIC
     assert len(preview.json()["topics"][0]["recall_questions"]) == 5
     assert preview.json()["topics"][0]["card_id"] is None
+    assert preview.json()["content_provenance"] == "exact_source_excerpt"
 
     confirmed = await client.post(
         f"/materials/imports/{source.id}/confirm",
@@ -872,6 +1717,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert distilled.status_code == 200, distilled.text
     artifact = distilled.json()
     assert artifact["source_url"] == source.source_url
+    assert artifact["content_provenance"] == "exact_source_excerpt"
     assert GUIDE not in artifact["canonical_note_markdown"]
     assert "private spoken answer" not in distilled.text
     assert artifact["concepts"][0]["concept"] == proposal.topic
@@ -898,6 +1744,8 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert writeback_concept["card_id"] == f"devmax:card:{card.id}"
     assert len(writeback_concept["answer_rubric"]) == 5
     assert len(writeback_concept["recall_candidates"]) == 5
+
+
     assert writeback_concept["quiz_evidence"] == [
         {
             "id": f"devmax:session:{session.id}",
@@ -938,6 +1786,210 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert source.status == SOURCE_CONFIRMED
     assert source.canonical_note_markdown == artifact["canonical_note_markdown"]
     assert source.recall_export_markdown == artifact["recall_export_markdown"]
+
+
+async def test_lesson_confirmation_requires_an_explicit_decision_for_every_concept(
+    client, db
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Two request-path concepts",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_READY,
+        result_summary=grounded_summary(),
+    )
+    first = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    second = lesson_proposal(
+        source, position=2, topic="Request routing failure points"
+    )
+    db.add(source)
+    db.add(first)
+    db.add(second)
+    await db.commit()
+
+    partial = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(first.id)]},
+    )
+
+    assert partial.status_code == 409, partial.text
+    assert partial.json()["detail"] == {
+        "code": "lesson_decisions_incomplete",
+        "unselected_clean_topic_ids": [str(second.id)],
+        "needs_attention_topic_ids": [],
+    }
+    assert not (await db.exec(select(Card))).all()
+    await db.refresh(first)
+    await db.refresh(second)
+    assert first.status == "clean"
+    assert second.status == "clean"
+
+    second.status = "excluded"
+    db.add(second)
+    await db.commit()
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(first.id)]},
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
+async def test_lesson_confirmation_rejects_any_concept_that_still_needs_attention(
+    client, db
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request-path concepts needing review",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_NEEDS_ATTENTION,
+        result_summary=grounded_summary(),
+    )
+    clean = lesson_proposal(source, position=1, topic="Request routing boundaries")
+    attention = lesson_proposal(
+        source,
+        position=2,
+        topic="Request routing failure points",
+        status="needs_attention",
+    )
+    db.add(source)
+    db.add(clean)
+    db.add(attention)
+    await db.commit()
+
+    response = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(clean.id)]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "code": "lesson_decisions_incomplete",
+        "unselected_clean_topic_ids": [],
+        "needs_attention_topic_ids": [str(attention.id)],
+    }
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_lesson_partial_edit_requires_new_grounding_before_confirmation(
+    client, db
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Editable request-path concept",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_READY,
+        result_summary=grounded_summary(),
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    original_question = proposal.canonical_question
+    original_rubric = proposal.answer_rubric
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    edited = await client.patch(
+        f"/materials/topics/{proposal.id}",
+        headers=API_HEADERS,
+        json={
+            "topic": proposal.topic,
+            "answer_anchor": "A changed answer basis that has not been re-grounded.",
+            "action": "keep",
+        },
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["status"] == "needs_attention"
+    assert "source-grounding check" in edited.json()["issue"]
+    assert edited.json()["canonical_question"] == original_question
+    assert edited.json()["answer_rubric"] == original_rubric
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert confirmed.status_code == 409, confirmed.text
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_confirmed_lesson_proposal_cannot_be_edited_or_removed(client, db):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Confirmed request-path concept",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_READY,
+        result_summary=grounded_summary(),
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
+    edited = await client.patch(
+        f"/materials/topics/{proposal.id}",
+        headers=API_HEADERS,
+        json={"action": "exclude"},
+    )
+
+    assert edited.status_code == 409, edited.text
+    assert edited.json()["detail"] == {"code": "material_not_editable"}
+    await db.refresh(proposal)
+    assert proposal.status == "confirmed"
+    assert proposal.card_id is not None
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
+async def test_processing_source_cannot_confirm_stale_proposals(client, db):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Reprocessing request-path concept",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_PROCESSING,
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    response = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {"code": "material_not_confirmable"}
+    assert not (await db.exec(select(Card))).all()
 
 
 async def test_plan_import_reuses_its_preview_for_review_topics(db, stub_import):
@@ -1169,12 +2221,14 @@ async def test_merge_target_must_belong_to_the_same_source(client, db):
         title="First",
         source_text=GUIDE,
         import_path="topics",
+        status=SOURCE_READY,
     )
     second = MaterialSource(
         user_id=FOUNDER_USER_ID,
         title="Second",
         source_text=GUIDE,
         import_path="topics",
+        status=SOURCE_READY,
     )
     db.add(first)
     db.add(second)

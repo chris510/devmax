@@ -665,6 +665,41 @@ async def _exercise_round_trips() -> None:
         }
         assert await _numeric_snapshot(database_url, card_id, session_id) == original
 
+        # 0019 never guesses the origin of existing content. The learner can
+        # classify it after upgrade, while downgrade removes only that metadata.
+        _run_alembic(database_url, "upgrade", "0019")
+        await _assert_revision(database_url, "0019")
+        provenance = await _fetch_one(
+            database_url,
+            "SELECT content_provenance FROM material_sources WHERE id = :source_id",
+            {"source_id": source_id},
+        )
+        assert provenance == {"content_provenance": "legacy_unspecified"}
+        await _execute(
+            database_url,
+            """
+            UPDATE material_sources
+            SET content_provenance = 'coached_correction'
+            WHERE id = :source_id
+            """,
+            {"source_id": source_id},
+        )
+        _run_alembic(database_url, "downgrade", "0018")
+        await _assert_revision(database_url, "0018")
+        assert not await _column_exists(
+            database_url, "material_sources", "content_provenance"
+        )
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
+
+        _run_alembic(database_url, "upgrade", "0019")
+        await _assert_revision(database_url, "0019")
+        provenance = await _fetch_one(
+            database_url,
+            "SELECT content_provenance FROM material_sources WHERE id = :source_id",
+            {"source_id": source_id},
+        )
+        assert provenance == {"content_provenance": "legacy_unspecified"}
+
 
 def test_scoring_migrations_preserve_numeric_and_scheduler_state() -> None:
     asyncio.run(_exercise_round_trips())

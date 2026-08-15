@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from sqlalchemy import func, update
+from sqlalchemy import func
 from sqlalchemy.orm import defer
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -11,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.auth import current_user_id
 from app.db import get_session
 from app.models import (
+    CONTENT_PROVENANCE_LEGACY_UNSPECIFIED,
     DELIVERY_CONVERSATIONAL,
     PROPOSAL_CLEAN,
     PROPOSAL_CONFIRMED,
@@ -18,7 +19,9 @@ from app.models import (
     PROPOSAL_NEEDS_ATTENTION,
     SOURCE_CONFIRMED,
     SOURCE_FAILED,
+    SOURCE_NEEDS_ATTENTION,
     SOURCE_PENDING,
+    SOURCE_READY,
     SOURCE_SUPERSEDED,
     STATUS_COMPLETE,
     Card,
@@ -53,6 +56,8 @@ from app.services.card_lifecycle import (
 from app.services.scoring_contract import project_card_score
 
 router = APIRouter(prefix="/materials", tags=["study material"])
+
+LESSON_GROUNDING_RECOVERY_MARKER = "lesson_grounding_recovery_required"
 
 COLLECTION = CollectionDetail(
     id="system-design-foundations",
@@ -113,15 +118,16 @@ COLLECTION = CollectionDetail(
 )
 
 
-async def _owned_source(db: AsyncSession, source_id: uuid.UUID) -> MaterialSource:
-    source = (
-        await db.exec(
-            select(MaterialSource).where(
-                MaterialSource.id == source_id,
-                MaterialSource.user_id == current_user_id(),
-            )
-        )
-    ).first()
+async def _owned_source(
+    db: AsyncSession, source_id: uuid.UUID, *, for_update: bool = False
+) -> MaterialSource:
+    statement = select(MaterialSource).where(
+        MaterialSource.id == source_id,
+        MaterialSource.user_id == current_user_id(),
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    source = (await db.exec(statement)).first()
     if source is None:
         raise HTTPException(status_code=404, detail="material not found")
     return source
@@ -132,6 +138,28 @@ def _artifacts_ready(source: MaterialSource) -> bool:
         source.distilled_at
         and source.canonical_note_markdown
         and source.recall_export_markdown
+    )
+
+
+def _legacy_lesson_preview_requires_grounding(source: MaterialSource) -> bool:
+    return bool(
+        source.import_path == "lesson"
+        and source.status in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}
+        and source.result_summary.get("grounding_gate_version")
+        != materials.LESSON_GROUNDING_GATE_VERSION
+    )
+
+
+def _lesson_grounding_required(source: MaterialSource) -> bool:
+    """Whether a legacy preview needs its first successful current-gate pass."""
+    if _legacy_lesson_preview_requires_grounding(source):
+        return True
+    return bool(
+        source.import_path == "lesson"
+        and source.status == SOURCE_FAILED
+        and source.result_summary.get(LESSON_GROUNDING_RECOVERY_MARKER) is True
+        and source.result_summary.get("grounding_gate_version")
+        != materials.LESSON_GROUNDING_GATE_VERSION
     )
 
 
@@ -148,6 +176,7 @@ def _response_from_topics(
         title=source.title,
         kind=source.kind,
         source_url=source.source_url,
+        content_provenance=source.content_provenance,
         version=source.version,
         status=source.status,
         import_path=source.import_path,
@@ -160,6 +189,7 @@ def _response_from_topics(
         plan_draft_id=source.plan_draft_id,
         comparison={key: int(value) for key, value in (summary.get("comparison") or {}).items()},
         topics=[MaterialTopicOut.model_validate(row) for row in topics],
+        lesson_grounding_required=_lesson_grounding_required(source),
         artifacts_ready=(
             _artifacts_ready(source) if artifacts_ready is None else artifacts_ready
         ),
@@ -198,6 +228,7 @@ async def start_import(
         title=body.title.strip(),
         source_text=body.source_text,
         source_url=body.source_url,
+        content_provenance=body.content_provenance,
         original_filename=body.original_filename,
         mime_type=body.mime_type,
         import_path=body.import_path,
@@ -265,31 +296,27 @@ async def retry_import(
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
 ) -> MaterialImportOut:
-    source = await _owned_source(db, source_id)
-    retried_id = (
-        await db.exec(
-            update(MaterialSource)
-            .where(
-                MaterialSource.id == source.id,
-                MaterialSource.user_id == current_user_id(),
-                MaterialSource.status == SOURCE_FAILED,
-            )
-            .values(
-                status=SOURCE_PENDING,
-                processing_run_id=None,
-                processing_heartbeat_at=None,
-                error="",
-                updated_at=datetime.now(UTC),
-            )
-            .returning(MaterialSource.id)
-        )
-    ).one_or_none()
-    if retried_id is None:
+    source = await _owned_source(db, source_id, for_update=True)
+    legacy_recovery = _legacy_lesson_preview_requires_grounding(source)
+    if source.status != SOURCE_FAILED and not legacy_recovery:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="only a failed import can be retried")
+        raise HTTPException(
+            status_code=409,
+            detail="only a failed import or a pre-gate lesson can be retried",
+        )
+    if legacy_recovery:
+        source.result_summary = {
+            **source.result_summary,
+            LESSON_GROUNDING_RECOVERY_MARKER: True,
+        }
+    source.status = SOURCE_PENDING
+    source.processing_run_id = None
+    source.processing_heartbeat_at = None
+    source.error = ""
+    source.updated_at = datetime.now(UTC)
+    db.add(source)
     await db.commit()
-    source = await db.get(MaterialSource, retried_id, populate_existing=True)
-    assert source is not None
+    await db.refresh(source)
     background.add_task(materials.process_import, source.id)
     return await _response(db, source)
 
@@ -300,24 +327,38 @@ async def edit_topic(
     body: MaterialTopicEdit,
     db: AsyncSession = Depends(get_session),
 ) -> MaterialTopicOut:
-    row = (
-        await db.exec(
-            select(MaterialTopicProposal)
-            .join(MaterialSource, MaterialSource.id == MaterialTopicProposal.source_id)
-            .where(
-                MaterialTopicProposal.id == proposal_id,
-                MaterialSource.user_id == current_user_id(),
-            )
+    row_ref = await db.get(MaterialTopicProposal, proposal_id)
+    if row_ref is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    source = await _owned_source(db, row_ref.source_id, for_update=True)
+    if source.status not in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "material_not_editable"},
         )
-    ).first()
+    row = await db.get(
+        MaterialTopicProposal,
+        proposal_id,
+        with_for_update=True,
+        populate_existing=True,
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="topic not found")
-    if body.topic is not None:
-        row.topic = body.topic.strip()
-    if body.answer_anchor is not None:
-        row.answer_anchor = body.answer_anchor.strip()
+
+    topic = body.topic.strip() if body.topic is not None else row.topic
+    answer_anchor = (
+        body.answer_anchor.strip()
+        if body.answer_anchor is not None
+        else row.answer_anchor
+    )
+    if not topic:
+        raise HTTPException(status_code=422, detail="topic must not be blank")
+    content_changed = topic != row.topic or answer_anchor != row.answer_anchor
+    row.topic = topic
+    row.answer_anchor = answer_anchor
     if body.action == "exclude":
         row.status = PROPOSAL_EXCLUDED
+        row.merged_into_id = None
     elif body.action == "merge":
         if body.merge_into_id is None:
             raise HTTPException(status_code=422, detail="merge target required")
@@ -327,6 +368,7 @@ async def edit_topic(
                     MaterialTopicProposal.id == body.merge_into_id,
                     MaterialTopicProposal.source_id == row.source_id,
                     MaterialTopicProposal.id != row.id,
+                    MaterialTopicProposal.status == PROPOSAL_CLEAN,
                 )
             )
         ).first()
@@ -334,7 +376,15 @@ async def edit_topic(
             raise HTTPException(status_code=404, detail="merge target not found")
         row.status = PROPOSAL_EXCLUDED
         row.merged_into_id = body.merge_into_id
+    elif source.import_path == "lesson":
+        row.merged_into_id = None
+        if content_changed:
+            row.status = PROPOSAL_NEEDS_ATTENTION
+            row.issue = (
+                "Edited lesson content requires a new source-grounding check."
+            )
     else:
+        row.merged_into_id = None
         row.status = PROPOSAL_CLEAN if row.answer_anchor else PROPOSAL_NEEDS_ATTENTION
         row.issue = "" if row.answer_anchor else "A good answer anchor is required."
     row.updated_at = datetime.now(UTC)
@@ -349,7 +399,34 @@ async def confirm_topics(
     body: MaterialConfirmIn,
     db: AsyncSession = Depends(get_session),
 ) -> MaterialConfirmOut:
-    source = await _owned_source(db, source_id)
+    source = await _owned_source(db, source_id, for_update=True)
+    if source.status not in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "material_not_confirmable"},
+        )
+    if source.import_path == "lesson":
+        if source.result_summary.get("grounding_gate_version") != (
+            materials.LESSON_GROUNDING_GATE_VERSION
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "lesson_grounding_required",
+                    "message": "Process this lesson again before confirming concepts.",
+                },
+            )
+        classification = body.content_provenance or source.content_provenance
+        if classification == CONTENT_PROVENANCE_LEGACY_UNSPECIFIED:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "content_provenance_required",
+                    "message": "Choose what the lesson text represents before confirming.",
+                },
+            )
+        source.content_provenance = classification
+        db.add(source)
     rows = (
         await db.exec(
             select(MaterialTopicProposal).where(
@@ -362,6 +439,41 @@ async def confirm_topics(
         raise HTTPException(status_code=404, detail="topic not found")
     if any(row.status != PROPOSAL_CLEAN or not row.answer_anchor.strip() for row in rows):
         raise HTTPException(status_code=409, detail="topics still need attention")
+    if source.import_path == "lesson":
+        unselected_clean = (
+            await db.exec(
+                select(MaterialTopicProposal)
+                .where(
+                    MaterialTopicProposal.source_id == source.id,
+                    MaterialTopicProposal.status == PROPOSAL_CLEAN,
+                    col(MaterialTopicProposal.id).not_in(body.selected_topic_ids),
+                )
+                .order_by(MaterialTopicProposal.position)
+            )
+        ).all()
+        needs_attention = (
+            await db.exec(
+                select(MaterialTopicProposal)
+                .where(
+                    MaterialTopicProposal.source_id == source.id,
+                    MaterialTopicProposal.status == PROPOSAL_NEEDS_ATTENTION,
+                )
+                .order_by(MaterialTopicProposal.position)
+            )
+        ).all()
+        if unselected_clean or needs_attention:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "lesson_decisions_incomplete",
+                    "unselected_clean_topic_ids": [
+                        str(row.id) for row in unselected_clean
+                    ],
+                    "needs_attention_topic_ids": [
+                        str(row.id) for row in needs_attention
+                    ],
+                },
+            )
     existing = await study_plan.normalized_card_index(db, current_user_id())
     normalized = [study_plan.normalize_topic(row.topic) for row in rows]
     if len(set(normalized)) != len(normalized) or any(key in existing for key in normalized):
@@ -565,6 +677,7 @@ def _artifacts_response(
         source_id=source.id,
         title=source.title,
         source_url=source.source_url,
+        content_provenance=source.content_provenance,
         distilled_at=source.distilled_at,
         canonical_note_markdown=source.canonical_note_markdown,
         recall_export_markdown=source.recall_export_markdown,
