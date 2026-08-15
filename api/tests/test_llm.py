@@ -8,6 +8,7 @@ without this file the invariant has no coverage at all.
 """
 
 import json
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -63,6 +64,22 @@ def test_lesson_schema_uses_only_anthropic_supported_constraints():
     rubric = concepts["items"]["properties"]["answer_rubric"]
     assert tuple(rubric["properties"]) == RUBRIC_FIELDS
     assert tuple(rubric["required"]) == RUBRIC_FIELDS
+    assert (
+        concepts["items"]["properties"]["canonical_question"]["pattern"]
+        == llm.LESSON_OPEN_QUESTION_PATTERN
+    )
+    assert (
+        prompt_list["items"]["properties"]["question"]["pattern"]
+        == llm.LESSON_OPEN_QUESTION_PATTERN
+    )
+    assert re.fullmatch(
+        llm.LESSON_OPEN_QUESTION_PATTERN,
+        "How would you trace a request across the network?",
+    )
+    assert not re.fullmatch(
+        llm.LESSON_OPEN_QUESTION_PATTERN,
+        "Could you trace a request across the network?",
+    )
 
     def schema_keys(value):
         if isinstance(value, dict):

@@ -40,23 +40,8 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-_CLOSED_QUESTION_PREFIXES = (
-    "am ",
-    "are ",
-    "can ",
-    "could ",
-    "did ",
-    "do ",
-    "does ",
-    "had ",
-    "has ",
-    "have ",
-    "is ",
-    "should ",
-    "was ",
-    "were ",
-    "will ",
-    "would ",
+_OPEN_QUESTION_PREFIXES = tuple(
+    f"{starter} " for starter in llm.LESSON_OPEN_QUESTION_STARTERS
 )
 
 
@@ -65,7 +50,7 @@ def _is_open_question(value: str) -> bool:
     return (
         question.endswith("?")
         and len(question.split()) >= 4
-        and not question.casefold().startswith(_CLOSED_QUESTION_PREFIXES)
+        and question.startswith(_OPEN_QUESTION_PREFIXES)
     )
 
 

@@ -70,6 +70,18 @@ LESSON_RECALL_LEVELS = (
     "failure_tradeoff",
 )
 
+LESSON_OPEN_QUESTION_STARTERS = (
+    "How",
+    "What",
+    "Why",
+    "When",
+    "Where",
+    "Which",
+)
+LESSON_OPEN_QUESTION_PATTERN = (
+    "^(" + "|".join(LESSON_OPEN_QUESTION_STARTERS) + r") [^?]+\?$"
+)
+
 # Retries match the SDK's own default, pinned so a future SDK change can't
 # quietly alter how long a session can stall. The timeout is the real
 # departure: 600s is the default and is absurd for a session the user is
@@ -688,7 +700,8 @@ Do not normalize punctuation or whitespace.
 excerpt and the pasted source.
   - `canonical_question`: one open-ended engineering question that forces \
 reconstruction of the mechanism or application. Prefer a concrete scenario. It \
-must not be a definition-only prompt or a yes/no question.
+must not be a definition-only prompt or a yes/no question. It must begin with \
+exactly one of: {", ".join(LESSON_OPEN_QUESTION_STARTERS)}.
   - `answer_rubric`: exactly these five fields: {", ".join(RUBRIC_FIELDS)}. The \
 mechanism is required; the other fields must state the best source-supported \
 alternative framing, trade-off, failure mode, and misconception. If the source \
@@ -700,7 +713,8 @@ order: {", ".join(LESSON_RECALL_LEVELS)}. Definition/recognition must still ask 
 the learner to distinguish or recognize the concept in context, not recite a \
 glossary line. Mechanism asks how it works. Derivation asks the learner to reason \
 from constraints. Application uses a concrete scenario. Failure/trade-off asks \
-where it breaks or what it costs.
+where it breaks or what it costs. Every recall question must begin with exactly \
+one of: {", ".join(LESSON_OPEN_QUESTION_STARTERS)}.
 
 Every question is one self-contained question with no answer embedded in it. Do \
 not write multi-part checklists. Return only the structured fields. No preamble, \
@@ -711,7 +725,10 @@ _LESSON_RECALL_PROMPT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "level": {"type": "string", "enum": list(LESSON_RECALL_LEVELS)},
-        "question": {"type": "string"},
+        "question": {
+            "type": "string",
+            "pattern": LESSON_OPEN_QUESTION_PATTERN,
+        },
     },
     "required": ["level", "question"],
     "additionalProperties": False,
@@ -733,7 +750,10 @@ LESSON_EXTRACTION_SCHEMA: dict[str, Any] = {
                     "section_title": {"type": "string"},
                     "source_excerpt": {"type": "string"},
                     "answer_basis": {"type": "string"},
-                    "canonical_question": {"type": "string"},
+                    "canonical_question": {
+                        "type": "string",
+                        "pattern": LESSON_OPEN_QUESTION_PATTERN,
+                    },
                     "answer_rubric": {
                         "type": "object",
                         "properties": {
