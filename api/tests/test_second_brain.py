@@ -11,16 +11,26 @@ import pytest
 
 from app.services import second_brain
 from app.services.second_brain import (
+    LEARNING_WRITEBACK_SCHEMA,
     LearningNoteError,
     RenderedLearningNote,
     VaultConflictError,
     VaultWriteError,
+    build_learning_writeback_bundle,
+    canonical_json_bytes,
     confidence_for_score,
     render_learning_note,
     render_learning_notes,
+    validate_learning_writeback_bundle,
     write_learning_note,
     write_learning_notes,
 )
+
+SOURCE_ID = "00000000-0000-0000-0000-000000000901"
+LINEAGE_ID = "00000000-0000-0000-0000-000000000902"
+PROPOSAL_ID = "00000000-0000-0000-0000-000000000903"
+CARD_ID = "00000000-0000-0000-0000-000000000904"
+SESSION_ID = "00000000-0000-0000-0000-000000000905"
 
 
 def artifact() -> dict[str, object]:
@@ -60,6 +70,45 @@ def artifact() -> dict[str, object]:
         "score": 4,
         "reviewed_on": "2026-08-14",
     }
+
+
+def writeback_bundle(*, recall_score: object = 4) -> dict[str, object]:
+    concept = artifact()
+    concept.update(
+        {
+            "proposal_id": PROPOSAL_ID,
+            "card_id": CARD_ID,
+            "canonical_question": "How does a key find its owner?",
+            "answer_rubric": {
+                "mechanism": "Walk clockwise to the first owning virtual node.",
+                "acceptable_alternative": "Equivalent ring traversal terminology.",
+                "trade_off": "More virtual nodes require more metadata.",
+                "failure_mode": "Too few virtual nodes produce imbalance.",
+                "misconception": "Membership changes move some keys, not none.",
+            },
+            "confidence": "established",
+        }
+    )
+    rows = concept["quiz_results"]
+    assert isinstance(rows, list)
+    rows[0].update(
+        {
+            "session_id": SESSION_ID,
+            "scoring_contract_version": 2,
+            "scored_follow_up_used": True,
+            "reviewed_at": "2026-08-14T22:42:00Z",
+            "recall_score": recall_score,
+        }
+    )
+    return build_learning_writeback_bundle(
+        source_id=SOURCE_ID,
+        source_lineage_id=LINEAGE_ID,
+        source_version=3,
+        source_title=concept["source_title"],
+        source_url=concept["source_url"],
+        source_distilled_at="2026-08-14T22:45:00Z",
+        concepts=[concept],
+    )
 
 
 def git(path: Path, *args: str) -> str:
@@ -149,7 +198,7 @@ def test_renderer_rejects_free_form_answer_transcripts() -> None:
     assert isinstance(rows, list)
     rows[0]["answer_text"] = "the full free-form answer"
 
-    with pytest.raises(LearningNoteError, match="unknown quiz"):
+    with pytest.raises(LearningNoteError, match="raw source fields"):
         render_learning_note(payload)
 
 
@@ -186,6 +235,76 @@ def test_renderer_requires_an_unaided_quiz_result() -> None:
 
     with pytest.raises(LearningNoteError, match="unaided"):
         render_learning_note(payload)
+
+
+def test_writeback_bundle_has_exact_namespaced_contract_and_stable_ids() -> None:
+    bundle = writeback_bundle()
+
+    assert bundle["schema"] == LEARNING_WRITEBACK_SCHEMA
+    assert bundle["schema_version"] == 1
+    assert bundle["producer"] == "devmax"
+    assert bundle["source"] == {
+        "id": f"devmax:source:{SOURCE_ID}",
+        "lineage_id": f"devmax:source-lineage:{LINEAGE_ID}",
+        "version": 3,
+        "title": 'Hello Interview: "Consistent Hashing"',
+        "url": "https://example.com/lessons/hash?week=1&mode=read",
+        "distilled_at": "2026-08-14T22:45:00Z",
+    }
+    concept = bundle["concepts"][0]
+    assert concept["id"] == f"devmax:proposal:{PROPOSAL_ID}"
+    assert concept["card_id"] == f"devmax:card:{CARD_ID}"
+    assert concept["producer_assessment"] == "established"
+    assert len(concept["answer_rubric"]) == 5
+    assert [row["type"] for row in concept["recall_candidates"]] == [
+        "definition_recognition",
+        "mechanism",
+        "derivation",
+        "application",
+        "failure_tradeoff",
+    ]
+    assert concept["recall_candidates"][1]["id"] == (
+        f"devmax:probe:{PROPOSAL_ID}:mechanism"
+    )
+    evidence = concept["quiz_evidence"][0]
+    assert evidence["id"] == f"devmax:session:{SESSION_ID}"
+    assert evidence["scoring_contract_version"] == 2
+    assert evidence["scored_follow_up_used"] is True
+    assert bundle == validate_learning_writeback_bundle(bundle)
+    assert bundle["export_id"].startswith("sha256:")
+    assert bundle == writeback_bundle()
+
+
+def test_candidate_id_does_not_depend_on_prompt_wording() -> None:
+    original = writeback_bundle()
+    candidate = original["concepts"][0]["recall_candidates"][0]
+    changed = json.loads(json.dumps(original))
+    changed_candidate = changed["concepts"][0]["recall_candidates"][0]
+    changed_candidate["prompt"] = "A revised recognition prompt?"
+
+    assert changed_candidate["id"] == candidate["id"]
+    with pytest.raises(LearningNoteError, match="canonical JSON"):
+        validate_learning_writeback_bundle(changed)
+
+
+def test_writeback_bundle_excludes_private_and_live_scheduler_fields() -> None:
+    encoded = canonical_json_bytes(writeback_bundle()).decode("utf-8")
+
+    for forbidden in (
+        "source_text",
+        "answer_text",
+        "transcript",
+        "next_review_at",
+        "interval_days",
+        "mastery_summary",
+        "canonical_question",
+    ):
+        assert forbidden not in encoded
+
+
+def test_writeback_bundle_fails_closed_without_a_completed_session_score() -> None:
+    with pytest.raises(LearningNoteError, match="recall_score must be an integer"):
+        writeback_bundle(recall_score=None)
 
 
 def test_preview_cli_prints_markdown_without_touching_vault(
@@ -230,12 +349,49 @@ def test_preview_cli_defaults_to_all_concepts(tmp_path: Path) -> None:
     assert "<!-- raft-leader-election.md -->" in result.stdout
 
 
-def test_cli_writes_all_concepts_in_one_batch(tmp_path: Path, vault: Path) -> None:
+def test_cli_saves_validated_bundle_without_touching_vault(
+    tmp_path: Path, vault: Path
+) -> None:
     second = artifact()
     second["concept"] = "Raft Leader Election"
     payload_path = tmp_path / "lesson-artifacts.json"
+    output_path = tmp_path / "writeback.json"
     payload_path.write_text(
-        json.dumps({"concepts": [artifact(), second]}), encoding="utf-8"
+        json.dumps(
+            {
+                "concepts": [artifact(), second],
+                "writeback_bundle": writeback_bundle(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    script = Path(__file__).parents[1] / "scripts" / "export_second_brain.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            str(payload_path),
+            "--output",
+            str(output_path),
+        ],
+        cwd=Path(__file__).parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Saved validated writeback bundle" in result.stdout
+    assert json.loads(output_path.read_text(encoding="utf-8")) == writeback_bundle()
+    assert git(vault, "status", "--porcelain=v1") == ""
+
+
+def test_cli_rejects_deprecated_direct_vault_write(tmp_path: Path, vault: Path) -> None:
+    payload_path = tmp_path / "lesson-artifacts.json"
+    payload_path.write_text(
+        json.dumps({"concepts": [artifact()], "writeback_bundle": writeback_bundle()}),
+        encoding="utf-8",
     )
     script = Path(__file__).parents[1] / "scripts" / "export_second_brain.py"
 
@@ -254,11 +410,9 @@ def test_cli_writes_all_concepts_in_one_batch(tmp_path: Path, vault: Path) -> No
         text=True,
     )
 
-    assert result.returncode == 0
-    assert "Wrote 2 learning note(s)" in result.stdout
-    assert (vault / "wiki" / "consistent-hashing-virtual-nodes.md").is_file()
-    assert (vault / "wiki" / "raft-leader-election.md").is_file()
-    assert (vault / "log.md").read_text(encoding="utf-8").count("ingest | wiki/") == 1
+    assert result.returncode == 2
+    assert "direct vault writes are deprecated" in result.stderr
+    assert git(vault, "status", "--porcelain=v1") == ""
 
 
 def test_write_creates_note_and_updates_index_and_log(vault: Path) -> None:

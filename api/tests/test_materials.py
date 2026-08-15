@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from datetime import UTC, date, datetime
 
@@ -812,6 +813,8 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
         depth=3,
         boundaries=3,
         feedback="Reconstructed the routing stages and their boundary cost.",
+        follow_up_used=True,
+        scoring_contract_version=2,
         status="complete",
         ended_at=reviewed_at,
     )
@@ -855,6 +858,44 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert artifact["concepts"][0]["quiz_results"][0]["question"] == (
         card.canonical_question
     )
+    bundle = artifact["writeback_bundle"]
+    assert bundle["schema"] == "second-brain.learning-writeback"
+    assert bundle["schema_version"] == 1
+    assert bundle["producer"] == "devmax"
+    assert bundle["source"]["id"] == f"devmax:source:{source.id}"
+    assert bundle["source"]["lineage_id"] == (
+        f"devmax:source-lineage:{source.lineage_id}"
+    )
+    assert bundle["source"]["version"] == source.version
+    writeback_concept = bundle["concepts"][0]
+    assert writeback_concept["id"] == f"devmax:proposal:{proposal.id}"
+    assert writeback_concept["card_id"] == f"devmax:card:{card.id}"
+    assert len(writeback_concept["answer_rubric"]) == 5
+    assert len(writeback_concept["recall_candidates"]) == 5
+    assert writeback_concept["quiz_evidence"] == [
+        {
+            "id": f"devmax:session:{session.id}",
+            "reviewed_at": reviewed_at.isoformat().replace("+00:00", "Z"),
+            "prompt": card.canonical_question,
+            "score": 4,
+            "graded_summary": session.feedback,
+            "scoring_contract_version": 2,
+            "scored_follow_up_used": True,
+        }
+    ]
+    assert writeback_concept["producer_assessment"] == "established"
+    serialized_bundle = json.dumps(bundle, sort_keys=True)
+    for forbidden in (
+        GUIDE,
+        "private spoken answer",
+        "answer_text",
+        "source_text",
+        "interval_days",
+        "next_review_at",
+        "mastery_summary",
+        "canonical_question",
+    ):
+        assert forbidden not in serialized_bundle
 
     replayed = await client.post(
         f"/materials/imports/{source.id}/distill", headers=API_HEADERS

@@ -1,10 +1,12 @@
-"""Render and locally write distilled learning notes for the second-brain vault.
+"""Render and exchange distilled learning notes with the second-brain vault.
 
 The hosted API must never know where a user's local Obsidian vault lives.  This
 module therefore has two deliberately separate halves:
 
 * ``render_learning_note`` is pure and is safe for routers or completion services.
-* ``write_learning_note`` is a local-only adapter used by the companion CLI.
+* ``build_learning_writeback_bundle`` produces the provider-neutral handoff.
+* ``write_learning_note`` remains as a legacy local adapter for library callers;
+  the companion CLI no longer writes directly into a vault.
 
 The input schema contains distilled fields only.  Raw page text, HTML, pasted
 source content, and answer-basis dumps are rejected at the dictionary boundary.
@@ -20,6 +22,7 @@ import re
 import subprocess
 import tempfile
 import unicodedata
+import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -34,6 +37,17 @@ RECALL_LEVELS = (
     "derivation",
     "application",
     "failure_tradeoff",
+)
+
+LEARNING_WRITEBACK_SCHEMA = "second-brain.learning-writeback"
+LEARNING_WRITEBACK_SCHEMA_VERSION = 1
+
+ANSWER_RUBRIC_FIELDS = (
+    "mechanism",
+    "acceptable_alternative",
+    "trade_off",
+    "failure_mode",
+    "misconception",
 )
 
 RECALL_LABELS = {
@@ -62,7 +76,9 @@ _RECALL_LEVEL_ALIASES = {
 }
 
 _ARTIFACT_FIELDS = {
+    "answer_rubric",
     "card_id",
+    "canonical_question",
     "concept",
     "confidence",
     "source_url",
@@ -88,6 +104,9 @@ _QUIZ_FIELDS = {
     "reviewed_at",
     "reviewed_on",
     "score",
+    "scored_follow_up_used",
+    "scoring_contract_version",
+    "session_id",
 }
 _RAW_SOURCE_FIELDS = {
     "answer",
@@ -116,6 +135,43 @@ class VaultWriteError(RuntimeError):
 
 class VaultConflictError(VaultWriteError):
     """The vault has state that requires a human merge or cleanup."""
+
+
+def canonical_json_bytes(value: object) -> bytes:
+    """Encode one JSON value with the exact byte contract used for stable IDs."""
+
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise LearningNoteError(f"writeback bundle is not canonical JSON: {exc}") from exc
+
+
+def _content_id(value: object) -> str:
+    return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def reject_raw_export_fields(value: object, *, path: str = "artifact") -> None:
+    """Reject raw source and learner-answer fields at every untrusted boundary."""
+
+    if isinstance(value, Mapping):
+        forbidden = sorted(
+            str(key) for key in value if isinstance(key, str) and key in _RAW_SOURCE_FIELDS
+        )
+        if forbidden:
+            raise LearningNoteError(
+                f"raw source fields are not exportable at {path}: " + ", ".join(forbidden)
+            )
+        for key, child in value.items():
+            reject_raw_export_fields(child, path=f"{path}.{key}")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for index, child in enumerate(value):
+            reject_raw_export_fields(child, path=f"{path}[{index}]")
 
 
 @dataclass(frozen=True)
@@ -278,6 +334,394 @@ def _parse_recall_prompts(value: object) -> dict[str, str]:
     return {level: parsed[level] for level in RECALL_LEVELS}
 
 
+def _uuid_text(value: object, *, field: str) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise LearningNoteError(f"{field} must be a UUID") from exc
+
+
+def _positive_version(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise LearningNoteError(f"{field} must be a positive integer")
+    return value
+
+
+def _reviewed_at(value: object, *, field: str) -> str:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise LearningNoteError(f"{field} must be an ISO datetime") from exc
+    else:
+        raise LearningNoteError(f"{field} must be an ISO datetime")
+    if parsed.tzinfo is None:
+        raise LearningNoteError(f"{field} must include a timezone")
+    normalized = parsed.isoformat()
+    return normalized[:-6] + "Z" if normalized.endswith("+00:00") else normalized
+
+
+def _answer_rubric(value: object, *, field: str) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise LearningNoteError(f"{field} must be an object")
+    unknown = sorted(set(value) - set(ANSWER_RUBRIC_FIELDS))
+    missing = [name for name in ANSWER_RUBRIC_FIELDS if name not in value]
+    if unknown or missing:
+        details: list[str] = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if unknown:
+            details.append("unknown " + ", ".join(unknown))
+        raise LearningNoteError(
+            f"{field} must contain the five rubric fields: " + "; ".join(details)
+        )
+    return {
+        name: _nonempty_text(value[name], field=f"{field}.{name}", max_length=4000)
+        for name in ANSWER_RUBRIC_FIELDS
+    }
+
+
+def _bundle_candidate(
+    *,
+    proposal_id: str,
+    level: str,
+    question: str,
+    answer_rubric: str,
+) -> dict[str, Any]:
+    return {
+        "id": f"devmax:probe:{proposal_id}:{level}",
+        "type": level,
+        "prompt": question,
+        "answer_rubric": answer_rubric,
+    }
+
+
+def _candidate_rubrics(rubric: Mapping[str, str]) -> dict[str, str]:
+    """Project the five-field authority into one concise criterion per probe."""
+
+    return {
+        "definition_recognition": (
+            f"Recognize the concept without this misconception: {rubric['misconception']}"
+        ),
+        "mechanism": rubric["mechanism"],
+        "derivation": (
+            f"Derive the mechanism and its cost: {rubric['mechanism']} "
+            f"Trade-off: {rubric['trade_off']}"
+        ),
+        "application": (
+            f"Apply an accurate account; this alternative is acceptable: "
+            f"{rubric['acceptable_alternative']}"
+        ),
+        "failure_tradeoff": (
+            f"Failure mode: {rubric['failure_mode']} Trade-off: {rubric['trade_off']}"
+        ),
+    }
+
+
+def build_learning_writeback_bundle(
+    *,
+    source_id: object,
+    source_lineage_id: object,
+    source_version: object,
+    source_title: object,
+    source_url: object,
+    source_distilled_at: object,
+    concepts: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build the privacy-bounded, content-addressed lesson handoff.
+
+    This is an event and knowledge bundle, not a synchronization of the live
+    scheduler. Raw source text, learner answers, intervals, due dates, and live
+    mastery summaries are deliberately absent.
+    """
+
+    if isinstance(concepts, (str, bytes)) or not concepts:
+        raise LearningNoteError("writeback concepts must contain at least one concept")
+    source = {
+        "id": f"devmax:source:{_uuid_text(source_id, field='source.id')}",
+        "lineage_id": (
+            "devmax:source-lineage:"
+            + _uuid_text(source_lineage_id, field="source.lineage_id")
+        ),
+        "version": _positive_version(source_version, field="source.version"),
+        "title": _nonempty_text(source_title, field="source.title", max_length=500),
+        "url": _validate_url(
+            _optional_text(source_url, field="source.url", max_length=4000)
+        ),
+        "distilled_at": _reviewed_at(
+            source_distilled_at, field="source.distilled_at"
+        ),
+    }
+
+    rows: list[dict[str, Any]] = []
+    for concept_index, concept in enumerate(concepts):
+        if not isinstance(concept, Mapping):
+            raise LearningNoteError(f"concepts[{concept_index}] must be an object")
+        reject_raw_export_fields(concept, path=f"concepts[{concept_index}]")
+        proposal_id = _uuid_text(
+            concept.get("proposal_id"), field=f"concepts[{concept_index}].proposal_id"
+        )
+        card_id = _uuid_text(
+            concept.get("card_id"), field=f"concepts[{concept_index}].card_id"
+        )
+        prompts = _parse_recall_prompts(concept.get("recall_prompts"))
+        rubric = _answer_rubric(
+            concept.get("answer_rubric"),
+            field=f"concepts[{concept_index}].answer_rubric",
+        )
+        candidate_rubrics = _candidate_rubrics(rubric)
+        candidates = [
+            _bundle_candidate(
+                proposal_id=proposal_id,
+                level=level,
+                question=prompts[level],
+                answer_rubric=candidate_rubrics[level],
+            )
+            for level in RECALL_LEVELS
+        ]
+
+        quiz_value = concept.get("quiz_results")
+        if (
+            not isinstance(quiz_value, Sequence)
+            or isinstance(quiz_value, (str, bytes))
+            or not 1 <= len(quiz_value) <= 20
+        ):
+            raise LearningNoteError(
+                f"concepts[{concept_index}].quiz_results must contain 1 to 20 rows"
+            )
+        evidence: list[dict[str, Any]] = []
+        for quiz_index, quiz in enumerate(quiz_value):
+            if not isinstance(quiz, Mapping):
+                raise LearningNoteError(
+                    f"concepts[{concept_index}].quiz_results[{quiz_index}] must be an object"
+                )
+            prefix = f"concepts[{concept_index}].quiz_results[{quiz_index}]"
+            contract = quiz.get("scoring_contract_version")
+            if isinstance(contract, bool) or contract not in {1, 2}:
+                raise LearningNoteError(f"{prefix}.scoring_contract_version must be 1 or 2")
+            follow_up = quiz.get("scored_follow_up_used")
+            if not isinstance(follow_up, bool):
+                raise LearningNoteError(f"{prefix}.scored_follow_up_used must be boolean")
+            recall_score = _score(
+                quiz.get("recall_score"), field=f"{prefix}.recall_score"
+            )
+            evidence.append(
+                {
+                    "id": "devmax:session:"
+                    + _uuid_text(quiz.get("session_id"), field=f"{prefix}.session_id"),
+                    "scoring_contract_version": contract,
+                    "score": recall_score,
+                    "scored_follow_up_used": follow_up,
+                    "reviewed_at": _reviewed_at(
+                        quiz.get("reviewed_at"), field=f"{prefix}.reviewed_at"
+                    ),
+                    "prompt": _nonempty_text(
+                        quiz.get("question"), field=f"{prefix}.question", max_length=2000
+                    ),
+                    "graded_summary": _nonempty_text(
+                        quiz.get("graded_summary"),
+                        field=f"{prefix}.graded_summary",
+                        max_length=4000,
+                    ),
+                }
+            )
+
+        assessment = _nonempty_text(
+            concept.get("confidence"),
+            field=f"concepts[{concept_index}].producer_assessment",
+            max_length=32,
+        )
+        if assessment not in {"unrated", "needs_review", "developing", "established"}:
+            raise LearningNoteError(
+                f"concepts[{concept_index}].producer_assessment is invalid"
+            )
+        gotchas_value = concept.get("gotchas")
+        if (
+            not isinstance(gotchas_value, Sequence)
+            or isinstance(gotchas_value, (str, bytes))
+            or not 1 <= len(gotchas_value) <= 8
+        ):
+            raise LearningNoteError(
+                f"concepts[{concept_index}].gotchas must contain 1 to 8 strings"
+            )
+        rows.append(
+            {
+                "id": f"devmax:proposal:{proposal_id}",
+                "card_id": f"devmax:card:{card_id}",
+                "title": _nonempty_text(
+                    concept.get("concept"),
+                    field=f"concepts[{concept_index}].concept",
+                    max_length=200,
+                ),
+                "answer_rubric": rubric,
+                "mental_model": _nonempty_text(
+                    concept.get("mental_model"),
+                    field=f"concepts[{concept_index}].mental_model",
+                    max_length=2000,
+                ),
+                "how_it_works": _nonempty_text(
+                    concept.get("how_it_works"),
+                    field=f"concepts[{concept_index}].how_it_works",
+                    max_length=4000,
+                ),
+                "gotchas": [
+                    _nonempty_text(
+                        value,
+                        field=f"concepts[{concept_index}].gotchas[{gotcha_index}]",
+                        max_length=1000,
+                    )
+                    for gotcha_index, value in enumerate(gotchas_value)
+                ],
+                "recall_candidates": candidates,
+                "quiz_evidence": evidence,
+                "producer_assessment": assessment,
+            }
+        )
+
+    core: dict[str, Any] = {
+        "schema": LEARNING_WRITEBACK_SCHEMA,
+        "schema_version": LEARNING_WRITEBACK_SCHEMA_VERSION,
+        "producer": "devmax",
+        "source": source,
+        "concepts": rows,
+    }
+    return {**core, "export_id": _content_id(core)}
+
+
+def validate_learning_writeback_bundle(bundle: object) -> dict[str, Any]:
+    """Strictly validate and normalize a bundle received by the local CLI."""
+
+    if not isinstance(bundle, Mapping):
+        raise LearningNoteError("writeback_bundle must be an object")
+    reject_raw_export_fields(bundle, path="writeback_bundle")
+    expected_top = {
+        "schema",
+        "schema_version",
+        "producer",
+        "export_id",
+        "source",
+        "concepts",
+    }
+    if set(bundle) != expected_top:
+        raise LearningNoteError("writeback_bundle has missing or unknown fields")
+    if bundle.get("schema") != LEARNING_WRITEBACK_SCHEMA:
+        raise LearningNoteError(
+            f"writeback_bundle.schema must be {LEARNING_WRITEBACK_SCHEMA}"
+        )
+    if bundle.get("schema_version") != LEARNING_WRITEBACK_SCHEMA_VERSION:
+        raise LearningNoteError(
+            f"writeback_bundle.schema_version must be {LEARNING_WRITEBACK_SCHEMA_VERSION}"
+        )
+    if bundle.get("producer") != "devmax":
+        raise LearningNoteError("writeback_bundle.producer must be devmax")
+    source = bundle.get("source")
+    if not isinstance(source, Mapping) or set(source) != {
+        "id",
+        "lineage_id",
+        "version",
+        "title",
+        "url",
+        "distilled_at",
+    }:
+        raise LearningNoteError("writeback_bundle.source has missing or unknown fields")
+    concepts = bundle.get("concepts")
+    if not isinstance(concepts, Sequence) or isinstance(concepts, (str, bytes)):
+        raise LearningNoteError("writeback_bundle.concepts must be a list")
+
+    builder_concepts: list[dict[str, Any]] = []
+    expected_concept = {
+        "id",
+        "card_id",
+        "title",
+        "answer_rubric",
+        "mental_model",
+        "how_it_works",
+        "gotchas",
+        "recall_candidates",
+        "quiz_evidence",
+        "producer_assessment",
+    }
+    for index, concept in enumerate(concepts):
+        if not isinstance(concept, Mapping) or set(concept) != expected_concept:
+            raise LearningNoteError(
+                f"writeback_bundle.concepts[{index}] has missing or unknown fields"
+            )
+        candidates = concept.get("recall_candidates")
+        evidence = concept.get("quiz_evidence")
+        if not isinstance(candidates, list) or any(
+            not isinstance(row, Mapping)
+            or set(row) != {"id", "type", "prompt", "answer_rubric"}
+            for row in candidates
+        ):
+            raise LearningNoteError(
+                f"writeback_bundle.concepts[{index}].recall_candidates is invalid"
+            )
+        if not isinstance(evidence, list) or any(
+            not isinstance(row, Mapping)
+            or set(row)
+            != {
+                "id",
+                "scoring_contract_version",
+                "score",
+                "scored_follow_up_used",
+                "reviewed_at",
+                "prompt",
+                "graded_summary",
+            }
+            for row in evidence
+        ):
+            raise LearningNoteError(
+                f"writeback_bundle.concepts[{index}].quiz_evidence is invalid"
+            )
+        builder_concepts.append(
+            {
+                "proposal_id": str(concept["id"]).removeprefix("devmax:proposal:"),
+                "card_id": str(concept["card_id"]).removeprefix("devmax:card:"),
+                "concept": concept["title"],
+                "answer_rubric": concept["answer_rubric"],
+                "mental_model": concept["mental_model"],
+                "how_it_works": concept["how_it_works"],
+                "gotchas": concept["gotchas"],
+                "confidence": concept["producer_assessment"],
+                "recall_prompts": [
+                    {"level": row["type"], "question": row["prompt"]}
+                    for row in candidates
+                ],
+                "quiz_results": [
+                    {
+                        "session_id": str(row["id"]).removeprefix("devmax:session:"),
+                        "scoring_contract_version": row["scoring_contract_version"],
+                        "recall_score": row["score"],
+                        "scored_follow_up_used": row["scored_follow_up_used"],
+                        "reviewed_at": row["reviewed_at"],
+                        "question": row["prompt"],
+                        "graded_summary": row["graded_summary"],
+                    }
+                    for row in evidence
+                ],
+            }
+        )
+
+    rebuilt = build_learning_writeback_bundle(
+        source_id=str(source.get("id")).removeprefix("devmax:source:"),
+        source_lineage_id=str(source.get("lineage_id")).removeprefix(
+            "devmax:source-lineage:"
+        ),
+        source_version=source.get("version"),
+        source_title=source.get("title"),
+        source_url=source.get("url"),
+        source_distilled_at=source.get("distilled_at"),
+        concepts=builder_concepts,
+    )
+    if dict(bundle) != rebuilt:
+        raise LearningNoteError(
+            "writeback_bundle identifiers or export_id do not match canonical JSON"
+        )
+    return rebuilt
+
+
 def _first_present(row: Mapping[str, Any], *names: str, default: object = None) -> object:
     for name in names:
         if name in row:
@@ -290,6 +734,8 @@ def artifact_from_dict(payload: Mapping[str, Any]) -> LearningNoteArtifact:
 
     if not isinstance(payload, Mapping):
         raise LearningNoteError("artifact must be a JSON object")
+
+    reject_raw_export_fields(payload)
 
     raw_fields = sorted(set(payload) & _RAW_SOURCE_FIELDS)
     if raw_fields:

@@ -17,12 +17,14 @@ not introduce a second lesson scheduler or a second grading path.
 5. **Lesson results** shows the concept scores, feedback, and next-review timing. The existing
    SM-2 scheduler remains the only scheduling authority.
 6. After every confirmed concept has one completed, non-practice review, distill the lesson
-   and preview or write its learning notes to the local second-brain vault.
+   and preview or save its learning writeback bundle. Import that bundle through the local
+   second-brain workflow; Devmax does not write into the vault directly.
 
 The pasted source remains attached to the Devmax material so grading can stay grounded. Raw
-source text and answer transcripts are never written to the second brain. Each vault export is
-one concise, graded concept note containing a mental model, mechanism, gotchas, five recall
-prompts, and quiz evidence.
+source text and answer transcripts are never included in the bundle. Each export contains one
+concise, graded concept record with a mental model, mechanism, gotchas, exactly five recall
+prompts, and quiz evidence. It intentionally excludes scheduling, intervals, and live mastery;
+Devmax remains the authority for those fields.
 
 ## Run locally
 
@@ -90,7 +92,7 @@ curl -sS -X POST \
 The distillation endpoint is deterministic and idempotent. It uses confirmed concept
 grounding plus unaided grade evidence, not raw conversations.
 
-## Export to the second brain
+## Prepare a second-brain writeback
 
 Preview every concept note without touching the vault:
 
@@ -99,19 +101,25 @@ cd api
 uv run python scripts/export_second_brain.py /tmp/devmax-lesson-artifacts.json
 ```
 
-After reviewing the preview, write all concept notes as one all-or-none local operation:
+After reviewing the preview, save the validated JSON bundle:
 
 ```sh
 uv run python scripts/export_second_brain.py \
   /tmp/devmax-lesson-artifacts.json \
-  --write \
-  --vault /absolute/path/to/second-brain
+  --output /tmp/devmax-learning-writeback.json
 ```
 
-The writer requires the vault's `CLAUDE.md`, `wiki/_index.md`, and `log.md`; requires the
-vault to be on a clean `main` branch; refuses existing concept notes and unsafe paths; and
-updates the notes, index, and log together. It never commits or pushes. Use `--concept` with a
-concept title or slug to preview or export only one concept.
+The saved envelope uses `schema: "second-brain.learning-writeback"` and `schema_version: 1`.
+Its `export_id` is derived from canonical JSON, so consumers can detect an identical export.
+Concept, card, probe, and session IDs are stable Devmax identifiers, while the source lineage
+and version let an importer distinguish a newer distillation from a duplicate. The bundle
+contains no raw source, learner answer, transcript, scheduling state, interval, or live mastery.
+
+Direct `--write` and `--vault` use is deprecated and rejected. The second-brain importer owns
+vault path validation, conflict handling, indexing, and Git safety. `--concept` remains
+available only for Markdown preview; a saved bundle always preserves the complete contract.
+On iOS, **Prepare export** creates the same privacy-bounded `.json` bundle for the existing
+share flow.
 
 ## Verification
 

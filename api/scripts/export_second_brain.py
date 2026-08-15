@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview or locally write a distilled Devmax learning-note export."""
+"""Preview distilled notes or save their provider-neutral writeback bundle."""
 
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.services.second_brain import (
     LearningNoteError,  # noqa: E402
     RenderedLearningNote,  # noqa: E402
-    VaultWriteError,  # noqa: E402
+    canonical_json_bytes,  # noqa: E402
+    reject_raw_export_fields,  # noqa: E402
     render_learning_notes,  # noqa: E402
     slugify_concept,  # noqa: E402
-    write_learning_notes,  # noqa: E402
+    validate_learning_writeback_bundle,  # noqa: E402
 )
 
 
@@ -39,8 +40,8 @@ def _read_payload(location: str) -> object:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Preview a distilled second-brain learning note. Writing is local-only, "
-            "requires --write and an explicit --vault, and never commits or pushes."
+            "Preview distilled second-brain learning notes or save the validated "
+            "provider-neutral JSON writeback bundle. This command never writes to a vault."
         )
     )
     parser.add_argument("artifact", help="export JSON file, URL, or - for stdin")
@@ -50,8 +51,17 @@ def _parser() -> argparse.ArgumentParser:
             "concept title or kebab-case slug when the API JSON contains multiple concepts"
         ),
     )
-    parser.add_argument("--write", action="store_true", help="write note, index, and log")
-    parser.add_argument("--vault", type=Path, help="explicit second-brain vault path")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="save the complete validated writeback bundle to a new JSON file",
+    )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--vault", type=Path, help=argparse.SUPPRESS)
     return parser
 
 
@@ -99,28 +109,52 @@ def _preview(notes: tuple[RenderedLearningNote, ...]) -> str:
     )
 
 
+def _bundle(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise LearningNoteError("artifact must be a JSON object")
+    if "writeback_bundle" not in payload:
+        raise LearningNoteError(
+            "artifact does not contain writeback_bundle; fetch lesson artifacts again"
+        )
+    return validate_learning_writeback_bundle(payload["writeback_bundle"])
+
+
+def _save_bundle(bundle: dict[str, object], destination: Path) -> None:
+    path = destination.expanduser().resolve()
+    if path.exists():
+        raise LearningNoteError(f"output already exists: {path}")
+    if not path.parent.is_dir():
+        raise LearningNoteError(f"output directory does not exist: {path.parent}")
+    path.write_bytes(canonical_json_bytes(bundle) + b"\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.write and args.vault is None:
-        parser.error("--write requires an explicit --vault")
+    if args.write or args.vault is not None:
+        parser.error(
+            "direct vault writes are deprecated; save the bundle with --output, "
+            "then let the vault importer apply it"
+        )
+    if args.output is not None and args.concept is not None:
+        parser.error("--concept is preview-only; --output saves the complete bundle")
 
     try:
-        payloads = _select_concepts(_read_payload(args.artifact), args.concept)
+        payload = _read_payload(args.artifact)
+        reject_raw_export_fields(payload)
+        payloads = _select_concepts(payload, args.concept)
         rendered = render_learning_notes(payloads)
-        if not args.write:
+        if args.output is None:
             sys.stdout.write(_preview(rendered))
             return 0
-
-        result = write_learning_notes(rendered, args.vault)
-    except (OSError, ValueError, VaultWriteError) as exc:
+        bundle = _bundle(payload)
+        _save_bundle(bundle, args.output)
+    except (OSError, ValueError) as exc:
         print(f"second-brain export: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Wrote {len(result.note_paths)} learning note(s):")
-    for path in result.note_paths:
-        print(f"- {path}")
-    print("Review the vault changes before publishing; no commit or push was performed.")
+    print(f"Saved validated writeback bundle: {args.output.expanduser().resolve()}")
+    print("No vault files, commits, or pushes were performed.")
     return 0
 
 

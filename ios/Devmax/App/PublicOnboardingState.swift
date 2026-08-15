@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class PublicOnboardingState: ObservableObject {
     private enum PendingAfterSignIn { case guide, manual, collection }
+    private enum LessonExportError: Error { case missingWritebackBundle }
     enum Step: String {
         case welcome, material, guide, lesson, fileError, planPath, planIntent, planSetup
         case handoff, importing, importFailed, importReady, topics, manual
@@ -292,8 +293,8 @@ final class PublicOnboardingState: ObservableObject {
 
     /// Distillation is explicit and operates on confirmed source-backed concepts,
     /// never on the conversation transcript. iOS cannot write into a Mac vault,
-    /// so it prepares one shareable Markdown export after the server produces the
-    /// canonical note and recall artifact.
+    /// so it shares the server's provider-neutral JSON writeback bundle for the
+    /// vault importer to validate and apply.
     func prepareLessonArtifacts() async {
         guard isLessonDraft, let id = job?.id ?? draft.sourceID else {
             error = "This lesson no longer has a source to export."
@@ -330,12 +331,16 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     private static func writeLessonExport(_ artifacts: MaterialArtifacts) throws -> URL {
-        let body = artifacts.canonicalNoteMarkdown
-            + "\n\n---\n\n"
-            + artifacts.recallExportMarkdown
+        guard let bundle = artifacts.writebackBundle else {
+            throw LessonExportError.missingWritebackBundle
+        }
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let body = try encoder.encode(bundle)
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("devmax-learning-notes-\(artifacts.sourceId).md")
-        try Data(body.utf8).write(to: url, options: .atomic)
+            .appendingPathComponent("devmax-learning-writeback-\(artifacts.sourceId).json")
+        try body.write(to: url, options: .atomic)
         return url
     }
 
