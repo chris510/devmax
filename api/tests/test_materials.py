@@ -60,7 +60,7 @@ def lesson_concept(source_text: str, **overrides) -> dict:
         },
         {
             "level": "application",
-            "question": "Given a stalled request, how would you locate the failing routing stage?",
+            "question": "How would you locate the failing routing stage in a stalled request?",
         },
         {
             "level": "failure_tradeoff",
