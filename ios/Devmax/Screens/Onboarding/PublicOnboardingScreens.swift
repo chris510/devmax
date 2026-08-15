@@ -156,7 +156,7 @@ struct PublicOnboardingView: View {
             PublicChoice(
                 title: "Bring a guide", detail: "Paste text or choose a text-based PDF, TXT, or Markdown file.",
                 badge: "RECOMMENDED"
-            ) { flow.step = .guide }
+            ) { flow.beginGuide() }
             PublicChoice(title: "Add a few topics", detail: "Fast setup. Each topic needs a trusted answer anchor.") {
                 flow.step = .manual
             }
@@ -293,7 +293,9 @@ struct PublicOnboardingView: View {
                         + "and the result will remain in Study material."
             )
         } footer: {
-            SecondaryButton(title: "Go to Today") { leaveToToday() }
+            if flow.job != nil {
+                SecondaryButton(title: "Go to Today") { leaveToToday() }
+            }
         }
     }
 
@@ -358,7 +360,9 @@ struct PublicOnboardingView: View {
 
     private var topics: some View {
         PublicPage(
-            back: { flow.step = .importReady },
+            back: {
+                if !flow.busy { flow.step = .importReady }
+            },
             kicker: flow.isLessonDraft ? "REVIEW CONCEPTS" : "REVIEW TOPICS",
             title: "Confirm what you'll practice"
         ) {
@@ -422,6 +426,7 @@ struct PublicOnboardingView: View {
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
+                    .disabled(flow.busy)
                     if flow.isLessonDraft, expandedTopics.contains(topic.id) {
                         LessonConceptEvidence(topic: topic)
                         Button(
@@ -443,10 +448,12 @@ struct PublicOnboardingView: View {
                             RoundedRectangle(cornerRadius: Metrics.secondaryRadius)
                                 .strokeBorder(Theme.border, lineWidth: 1)
                         )
-                        .disabled(!topic.isClean)
+                        .disabled(flow.busy || !topic.isClean)
                     }
                     HStack(spacing: 18) {
-                        Button("Edit source anchor") { flow.editingTopic = topic }
+                        if !flow.isLessonDraft {
+                            Button("Edit source anchor") { flow.editingTopic = topic }
+                        }
                         Button("Remove") {
                             Task {
                                 await flow.updateTopic(
@@ -458,6 +465,7 @@ struct PublicOnboardingView: View {
                     }
                     .font(WCFont.sans(12.5)).foregroundStyle(Theme.meta)
                     .buttonStyle(.plain).frame(minHeight: Metrics.minTapTarget)
+                    .disabled(flow.busy)
                     Hairline()
                 }
             } else {
@@ -479,6 +487,7 @@ struct PublicOnboardingView: View {
                 Task { await flow.confirmTopics(app: app) }
             }
         }
+        .disabled(flow.busy)
     }
 
     private var lessonSourceFields: some View {
@@ -786,7 +795,9 @@ struct PublicOnboardingView: View {
                 }
             }
             Hairline()
-            PublicChoice(title: "Add another guide", detail: "Paste text or choose a supported text-based file.") { flow.step = .guide }
+            PublicChoice(title: "Add another guide", detail: "Paste text or choose a supported text-based file.") {
+                flow.beginGuide(forceNew: true)
+            }
             PublicChoice(title: "Add manual topics", detail: "Create grounded review topics without a guide.") { flow.step = .manual }
             PublicChoice(title: "Browse collections", detail: "See reviewed, versioned starter material.") {
                 flow.step = .collections; Task { await flow.loadCollections() }

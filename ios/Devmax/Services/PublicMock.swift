@@ -68,6 +68,9 @@ extension MockAPI {
     func materialImports() async throws -> [MaterialImport] { [try await materialImport(Self.sourceID)] }
 
     func materialImport(_ id: UUID) async throws -> MaterialImport {
+        if materialImportDelay != .zero {
+            try await Task.sleep(for: materialImportDelay)
+        }
         let route = await MainActor.run { DebugFlags.shared.route }
         let status = ["extracting", "import-background"].contains(route)
             ? "processing"
@@ -155,6 +158,9 @@ extension MockAPI {
     func confirmMaterial(
         _ id: UUID, topics: [UUID], contentProvenance: String?
     ) async throws -> MaterialConfirmation {
+        if confirmMaterialDelay != .zero {
+            try await Task.sleep(for: confirmMaterialDelay)
+        }
         let cards = topics.map { topic in
             topic == Self.topicID ? Self.publicCardID : Self.secondPublicCardID
         }
@@ -194,7 +200,10 @@ extension MockAPI {
     }
 
     func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
-        MaterialArtifacts(
+        if lessonArtifactDelay != .zero {
+            try await Task.sleep(for: lessonArtifactDelay)
+        }
+        return MaterialArtifacts(
             sourceId: id, title: "Contracts — formation",
             sourceUrl: "https://example.com/lesson",
             contentProvenance: "exact_source_excerpt", distilledAt: Date(),

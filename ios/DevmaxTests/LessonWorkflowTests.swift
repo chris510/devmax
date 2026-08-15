@@ -24,10 +24,12 @@ final class LessonWorkflowTests: XCTestCase {
         )
     }
 
-    private static func lessonImport(topics: [MaterialTopic]) -> MaterialImport {
+    private static func lessonImport(
+        topics: [MaterialTopic], status: String = "ready"
+    ) -> MaterialImport {
         MaterialImport(
             id: UUID(), title: "Networking 101", kind: "article", version: 1,
-            status: "ready", importPath: "lesson", intent: "already_studied",
+            status: status, importPath: "lesson", intent: "already_studied",
             originalFilename: "", sourceUrl: "https://example.com/networking",
             contentProvenance: LessonContentProvenance.learnerNotes.rawValue,
             characterCount: 876, cleanCount: topics.filter(\.isClean).count,
@@ -241,6 +243,134 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertEqual(flow.step, .importReady)
         XCTAssertEqual(flow.job?.id, source.id)
         XCTAssertEqual(flow.selectedTopics, source.cleanTopicIDs)
+    }
+
+    @MainActor
+    func testStartingAnotherGuideClearsThePriorImportIdentity() async throws {
+        let api = MockAPI()
+        let source = try await api.materialImport(UUID())
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        flow.openSavedImport(source)
+        flow.draft.sourceID = source.id
+
+        flow.beginGuide(forceNew: true)
+
+        XCTAssertNil(flow.job)
+        XCTAssertNil(flow.draft.sourceID)
+        XCTAssertNil(flow.draft.previousVersionID)
+        XCTAssertTrue(flow.selectedTopics.isEmpty)
+        XCTAssertEqual(flow.step, .guide)
+    }
+
+    @MainActor
+    func testBeginningAnUpdatedVersionKeepsOnlyItsLineageIdentity() async throws {
+        let api = MockAPI()
+        let source = try await api.materialImport(UUID())
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        flow.openSavedImport(source)
+
+        flow.beginGuideUpdate(source)
+
+        XCTAssertNil(flow.job)
+        XCTAssertNil(flow.draft.sourceID)
+        XCTAssertEqual(flow.draft.previousVersionID, source.id)
+        XCTAssertTrue(flow.selectedTopics.isEmpty)
+        XCTAssertEqual(flow.step, source.importPath == "lesson" ? .lesson : .guide)
+    }
+
+    @MainActor
+    func testLateRefreshCannotRestoreAnImportAfterStartingANewGuide() async throws {
+        let api = MockAPI(materialImportDelay: .milliseconds(100))
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        let processing = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)],
+            status: "processing"
+        )
+        flow.openSavedImport(processing)
+        let refresh = Task { await flow.refreshActiveImport() }
+        try await Task.sleep(for: .milliseconds(20))
+
+        flow.beginGuide(forceNew: true)
+        await refresh.value
+
+        XCTAssertNil(flow.job)
+        XCTAssertNil(flow.draft.sourceID)
+        XCTAssertEqual(flow.step, .guide)
+    }
+
+    @MainActor
+    func testLateConfirmationCannotStartAnOldLessonAfterOpeningANewGuide() async throws {
+        let api = MockAPI(confirmMaterialDelay: .milliseconds(100))
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        let app = AppState(api: api)
+        let lesson = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        flow.openSavedImport(lesson)
+        flow.selectedTopics.insert(lesson.topics[0].id)
+        let confirmation = Task { await flow.confirmTopics(app: app) }
+        try await Task.sleep(for: .milliseconds(20))
+
+        flow.beginGuide(forceNew: true)
+        await confirmation.value
+
+        XCTAssertNil(flow.job)
+        XCTAssertEqual(flow.step, .guide)
+        XCTAssertTrue(app.path.isEmpty)
+    }
+
+    @MainActor
+    func testLateArtifactResponseCannotAttachAnOldExportToANewGuide() async throws {
+        let api = MockAPI(lessonArtifactDelay: .milliseconds(100))
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        let lesson = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        flow.openSavedImport(lesson)
+        let preparation = Task { await flow.prepareLessonArtifacts() }
+        try await Task.sleep(for: .milliseconds(20))
+
+        flow.beginGuide(forceNew: true)
+        await preparation.value
+
+        XCTAssertNil(flow.lessonExportURL)
+        XCTAssertEqual(flow.lessonArtifactState, .idle)
+        XCTAssertEqual(flow.step, .guide)
+    }
+
+    @MainActor
+    func testSavedLessonClassificationReplacesAnUnrelatedDraftChoice() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        flow.draft.contentProvenance = LessonContentProvenance.aiDerivedSummary.rawValue
+        let source = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+
+        flow.openSavedImport(source)
+
+        XCTAssertEqual(
+            flow.draft.contentProvenance,
+            LessonContentProvenance.learnerNotes.rawValue
+        )
+    }
+
+    @MainActor
+    func testLegacySavedLessonClearsAStaleClassificationAndCannotConfirm() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        flow.draft.contentProvenance = LessonContentProvenance.aiDerivedSummary.rawValue
+        var source = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        source.contentProvenance = LessonContentProvenance.legacyUnspecified
+
+        flow.openSavedImport(source)
+        flow.selectedTopics.insert(source.topics[0].id)
+
+        XCTAssertEqual(
+            flow.draft.contentProvenance,
+            LessonContentProvenance.legacyUnspecified
+        )
+        XCTAssertFalse(flow.canConfirmSelectedTopics)
     }
 
     @MainActor

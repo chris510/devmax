@@ -39,6 +39,7 @@ final class PublicOnboardingState: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var pendingAfterSignIn: PendingAfterSignIn = .guide
+    private var importGeneration = 0
 
     init(
         api: DevmaxAPI = APIConfig.client,
@@ -134,21 +135,40 @@ final class PublicOnboardingState: ObservableObject {
     /// state machine. An unsent lesson draft is resumed; a submitted or unrelated
     /// draft starts clean while the durable server import remains in Study material.
     func beginLesson() {
-        pollTask?.cancel()
-        if !isLessonDraft || draft.sourceID != nil {
+        if job != nil || !isLessonDraft || draft.sourceID != nil {
             draft = PublicSetupDraft()
             draft.importPath = "lesson"
             draft.intent = "already_studied"
             draft.sourceType = "article"
         }
+        clearActiveImport()
+        persist()
+        step = .lesson
+    }
+
+    /// Opens the guide path while preserving only an unsent guide draft. A user
+    /// who explicitly asks for another guide always gets a new import identity.
+    func beginGuide(forceNew: Bool = false) {
+        if forceNew || job != nil || isLessonDraft || draft.sourceID != nil {
+            draft = PublicSetupDraft()
+        }
+        clearActiveImport()
+        persist()
+        step = .guide
+    }
+
+    private func clearActiveImport() {
+        importGeneration &+= 1
+        pollTask?.cancel()
         job = nil
         selectedTopics = []
         lessonProgress = nil
         lessonArtifactState = .idle
         lessonExportURL = nil
+        importStartedAt = nil
+        lastImportCheckedAt = nil
         error = ""
-        persist()
-        step = .lesson
+        busy = false
     }
 
     func persist() {
@@ -182,6 +202,7 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func startImport() async {
+        guard !busy else { return }
         guard guideIsValid, !isLessonDraft || lessonIsValid else {
             if !guideIsValid {
                 error = "Add at least 200 readable characters. Your draft is still saved."
@@ -193,7 +214,16 @@ final class PublicOnboardingState: ObservableObject {
             step = .fileError
             return
         }
+        // `startImport` always creates a new durable source. Clear any prior
+        // identity before the POST so saving/retry UI can never route an old job.
+        clearActiveImport()
+        draft.sourceID = nil
+        persist()
+        let generation = importGeneration
         busy = true
+        defer {
+            if generation == importGeneration { busy = false }
+        }
         error = ""
         importStartedAt = Date()
         lastImportCheckedAt = nil
@@ -213,6 +243,7 @@ final class PublicOnboardingState: ObservableObject {
                     previousVersionId: draft.previousVersionID
                 )
             )
+            guard generation == importGeneration else { return }
             job = value
             lastImportCheckedAt = Date()
             if ["pending", "processing"].contains(value.status) {
@@ -222,19 +253,22 @@ final class PublicOnboardingState: ObservableObject {
             persist()
             routeImportResult()
         } catch {
+            guard generation == importGeneration else { return }
             self.error = isLessonDraft
                 ? "Your lesson is still saved, but processing couldn't start."
                 : "The guide is safe, but processing couldn't start."
             step = .importFailed
         }
-        busy = false
     }
 
     func retryImport() async {
         guard !busy else { return }
         guard let id = job?.id ?? draft.sourceID else { return await startImport() }
+        let generation = importGeneration
         busy = true
-        defer { busy = false }
+        defer {
+            if generation == importGeneration { busy = false }
+        }
         error = ""
         importStartedAt = Date()
         lastImportCheckedAt = nil
@@ -242,7 +276,9 @@ final class PublicOnboardingState: ObservableObject {
         do {
             // The server may have finished after this screen last refreshed.
             // Reconcile first so a stale failure screen never retries a ready job.
-            if let latest = try? await api.materialImport(id), latest.status != "failed" {
+            let latest = try? await api.materialImport(id)
+            guard generation == importGeneration else { return }
+            if let latest, latest.status != "failed" {
                 job = latest
                 lastImportCheckedAt = Date()
                 if ["pending", "processing"].contains(latest.status) {
@@ -251,13 +287,16 @@ final class PublicOnboardingState: ObservableObject {
                 routeImportResult()
                 return
             }
-            job = try await api.retryMaterialImport(id)
+            let retried = try await api.retryMaterialImport(id)
+            guard generation == importGeneration else { return }
+            job = retried
             lastImportCheckedAt = Date()
             if let job, ["pending", "processing"].contains(job.status) {
                 importStartedAt = job.updatedAt
             }
             routeImportResult()
         } catch {
+            guard generation == importGeneration else { return }
             self.error = isLessonDraft
                 ? "The lesson is still saved. Try again when the service is reachable."
                 : "The guide is still saved. Try again when the service is reachable."
@@ -266,9 +305,12 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func restoreImportIfNeeded() async {
+        let generation = importGeneration
         guard draft.sourceID == nil else {
             if let id = draft.sourceID {
-                job = try? await api.materialImport(id)
+                let restored = try? await api.materialImport(id)
+                guard generation == importGeneration else { return }
+                job = restored
                 if let job {
                     lastImportCheckedAt = Date()
                     if ["pending", "processing"].contains(job.status) {
@@ -280,6 +322,7 @@ final class PublicOnboardingState: ObservableObject {
             return
         }
         guard let latest = try? await api.materialImports().first else { return }
+        guard generation == importGeneration else { return }
         job = latest
         lastImportCheckedAt = Date()
         if ["pending", "processing"].contains(latest.status) {
@@ -292,13 +335,16 @@ final class PublicOnboardingState: ObservableObject {
 
     func routeImportResult() {
         guard let job else { return }
-        if job.importPath == "lesson",
-           !lessonContentProvenanceIsSelected,
-           let classification = job.contentProvenance,
-           LessonContentProvenance(rawValue: classification) != nil
-        {
-            draft.contentProvenance = classification
-            persist()
+        if job.importPath == "lesson" {
+            // A saved lesson owns its classification. Never carry a valid choice
+            // from a different draft into this source and overwrite its meaning.
+            let classification = job.contentProvenance.flatMap {
+                LessonContentProvenance(rawValue: $0)?.rawValue
+            } ?? LessonContentProvenance.legacyUnspecified
+            if draft.contentProvenance != classification {
+                draft.contentProvenance = classification
+                persist()
+            }
         }
         switch job.status {
         case "ready", "needs_attention":
@@ -318,8 +364,12 @@ final class PublicOnboardingState: ObservableObject {
 
     func refreshActiveImport() async {
         guard [.importing, .importFailed].contains(step),
-              let id = job?.id ?? draft.sourceID,
-              let latest = try? await api.materialImport(id)
+              let id = job?.id ?? draft.sourceID
+        else { return }
+        let generation = importGeneration
+        guard let latest = try? await api.materialImport(id) else { return }
+        guard generation == importGeneration,
+              (job?.id ?? draft.sourceID) == id
         else { return }
         let previousStatus = job?.status
         job = latest
@@ -333,6 +383,7 @@ final class PublicOnboardingState: ObservableObject {
 
     private func beginPolling(_ id: UUID) {
         pollTask?.cancel()
+        let generation = importGeneration
         pollTask = Task { [weak self] in
             let intervals = [2.0, 4.0, 8.0, 15.0]
             var intervalIndex = 0
@@ -343,6 +394,10 @@ final class PublicOnboardingState: ObservableObject {
                 do {
                     let previousStatus = self.job?.status
                     let latest = try await self.api.materialImport(id)
+                    guard !Task.isCancelled,
+                          generation == self.importGeneration,
+                          (self.job?.id ?? self.draft.sourceID) == id
+                    else { return }
                     self.job = latest
                     self.lastImportCheckedAt = Date()
                     if latest.status != previousStatus,
@@ -364,7 +419,13 @@ final class PublicOnboardingState: ObservableObject {
     func openImportedResult(plan: StudyPlanState) async {
         guard let job else { return }
         if job.importPath == "plan", let draftID = job.planDraftId {
-            plan.preview = try? await api.savedPlanPreview(draftID)
+            let generation = importGeneration
+            let sourceID = job.id
+            let preview = try? await api.savedPlanPreview(draftID)
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            plan.preview = preview
             plan.previewLoad = plan.preview == nil ? .error : .ready
             step = .planPreview
         } else {
@@ -373,33 +434,59 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func confirmTopics(app: AppState) async {
-        guard let job else { return }
+        guard !busy, canConfirmSelectedTopics, let job else { return }
+        let generation = importGeneration
+        let sourceID = job.id
+        let lesson = job.importPath == "lesson"
+        let selected = job.topics
+            .filter { selectedTopics.contains($0.id) }
+            .sorted { $0.position < $1.position }
         busy = true
-        defer { busy = false }
+        defer {
+            if importContextIsCurrent(generation: generation, sourceID: sourceID) {
+                busy = false
+            }
+        }
         do {
-            let selected = job.topics
-                .filter { selectedTopics.contains($0.id) }
-                .sorted { $0.position < $1.position }
             let result = try await api.confirmMaterial(
-                job.id,
+                sourceID,
                 topics: selected.map(\.id),
-                contentProvenance: isLessonDraft ? draft.contentProvenance : nil
+                contentProvenance: lesson ? draft.contentProvenance : nil
             )
-            if isLessonDraft {
+            guard importContextIsCurrent(generation: generation, sourceID: sourceID) else {
+                return
+            }
+            if lesson {
                 await beginLessonStudy(
-                    cardIDs: result.createdCardIds, topics: selected, app: app
+                    cardIDs: result.createdCardIds, topics: selected, app: app,
+                    generation: generation, sourceID: sourceID
                 )
             } else {
-                await beginFirstReview(cardIDs: result.createdCardIds, app: app)
+                await beginFirstReview(
+                    cardIDs: result.createdCardIds, app: app,
+                    expectedImport: (generation: generation, sourceID: sourceID)
+                )
             }
         } catch {
+            guard importContextIsCurrent(generation: generation, sourceID: sourceID) else {
+                return
+            }
             self.error = "Resolve the highlighted topics before creating review cards."
         }
     }
 
+    private func importContextIsCurrent(generation: Int, sourceID: UUID) -> Bool {
+        generation == importGeneration && (job?.id ?? draft.sourceID) == sourceID
+    }
+
     func loadLessonProgress() async {
         guard isLessonDraft, let id = job?.id ?? draft.sourceID else { return }
-        if let value = try? await api.lessonProgress(id) { lessonProgress = value }
+        let generation = importGeneration
+        guard let value = try? await api.lessonProgress(id) else { return }
+        guard importContextIsCurrent(generation: generation, sourceID: id) else {
+            return
+        }
+        lessonProgress = value
     }
 
     /// Distillation is explicit and operates on confirmed source-backed concepts,
@@ -412,6 +499,8 @@ final class PublicOnboardingState: ObservableObject {
             lessonArtifactState = .failed
             return
         }
+        let generation = importGeneration
+        let artifactsReady = job?.artifactsReady == true
         lessonArtifactState = .preparing
         error = ""
         do {
@@ -420,6 +509,9 @@ final class PublicOnboardingState: ObservableObject {
                 progress = current
             } else {
                 progress = try await api.lessonProgress(id)
+                guard importContextIsCurrent(
+                    generation: generation, sourceID: id
+                ) else { return }
                 lessonProgress = progress
             }
             guard progress.complete else {
@@ -428,14 +520,20 @@ final class PublicOnboardingState: ObservableObject {
                 return
             }
             let artifacts: MaterialArtifacts
-            if job?.artifactsReady == true {
+            if artifactsReady {
                 artifacts = try await api.materialArtifacts(id)
             } else {
                 artifacts = try await api.distillLesson(id)
             }
+            guard importContextIsCurrent(
+                generation: generation, sourceID: id
+            ) else { return }
             lessonExportURL = try Self.writeLessonExport(artifacts)
             lessonArtifactState = .ready
         } catch {
+            guard importContextIsCurrent(
+                generation: generation, sourceID: id
+            ) else { return }
             self.error = "The lesson is safe, but its distilled export couldn't be prepared."
             lessonArtifactState = .failed
         }
@@ -459,11 +557,22 @@ final class PublicOnboardingState: ObservableObject {
         _ topic: MaterialTopic, name: String, answerAnchor: String,
         action: String = "keep", mergeInto: UUID? = nil
     ) async {
+        guard !busy, let sourceID = job?.id else { return }
+        let generation = importGeneration
+        busy = true
+        defer {
+            if importContextIsCurrent(generation: generation, sourceID: sourceID) {
+                busy = false
+            }
+        }
         do {
             let updated = try await api.editMaterialTopic(
                 topic.id, topic: name, answerAnchor: answerAnchor,
                 action: action, mergeInto: mergeInto
             )
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
             if var current = job,
                let index = current.topics.firstIndex(where: { $0.id == topic.id }) {
                 current.topics[index] = updated
@@ -479,7 +588,12 @@ final class PublicOnboardingState: ObservableObject {
                 }
             }
             editingTopic = nil
-        } catch { self.error = "That topic edit couldn't be saved." }
+        } catch {
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            self.error = "That topic edit couldn't be saved."
+        }
     }
 
     func saveManual(authenticated: Bool, app: AppState) {
@@ -515,7 +629,7 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func openSavedImport(_ source: MaterialImport) {
-        pollTask?.cancel()
+        clearActiveImport()
         job = source
         error = ""
         lastImportCheckedAt = Date()
@@ -538,6 +652,7 @@ final class PublicOnboardingState: ObservableObject {
         update.requestedWeeks = draft.requestedWeeks
         update.weeklyCapacityHours = draft.weeklyCapacityHours
         update.previousVersionID = source.id
+        clearActiveImport()
         draft = update
         persist()
         step = source.importPath == "lesson" ? .lesson : .guide
@@ -570,8 +685,17 @@ final class PublicOnboardingState: ObservableObject {
         } catch { self.error = "That collection is already in this account or unavailable." }
     }
 
-    private func beginFirstReview(cardIDs: [UUID], app: AppState) async {
+    private func beginFirstReview(
+        cardIDs: [UUID], app: AppState,
+        expectedImport: (generation: Int, sourceID: UUID)? = nil
+    ) async {
         let library = (try? await api.cards(sort: "next_review", mode: "conversational")) ?? []
+        if let expectedImport {
+            guard importContextIsCurrent(
+                generation: expectedImport.generation,
+                sourceID: expectedImport.sourceID
+            ) else { return }
+        }
         let wanted = Set(cardIDs)
         guard let card = library.first(where: { wanted.contains($0.id) })?.asQueueCard() else {
             error = "The topic was saved, but its first review couldn't open."
@@ -584,9 +708,13 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     private func beginLessonStudy(
-        cardIDs: [UUID], topics: [MaterialTopic], app: AppState
+        cardIDs: [UUID], topics: [MaterialTopic], app: AppState,
+        generation: Int, sourceID: UUID
     ) async {
         let library = (try? await api.cards(sort: "next_review", mode: "conversational")) ?? []
+        guard importContextIsCurrent(generation: generation, sourceID: sourceID) else {
+            return
+        }
         let cards = Self.orderedLessonCards(
             cardIDs: cardIDs, topics: topics, library: library
         )

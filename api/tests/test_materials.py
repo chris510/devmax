@@ -1107,6 +1107,115 @@ async def test_lesson_confirmation_rejects_any_concept_that_still_needs_attentio
     assert not (await db.exec(select(Card))).all()
 
 
+async def test_lesson_partial_edit_requires_new_grounding_before_confirmation(
+    client, db
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Editable request-path concept",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_READY,
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    original_question = proposal.canonical_question
+    original_rubric = proposal.answer_rubric
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    edited = await client.patch(
+        f"/materials/topics/{proposal.id}",
+        headers=API_HEADERS,
+        json={
+            "topic": proposal.topic,
+            "answer_anchor": "A changed answer basis that has not been re-grounded.",
+            "action": "keep",
+        },
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["status"] == "needs_attention"
+    assert "source-grounding check" in edited.json()["issue"]
+    assert edited.json()["canonical_question"] == original_question
+    assert edited.json()["answer_rubric"] == original_rubric
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert confirmed.status_code == 409, confirmed.text
+    assert not (await db.exec(select(Card))).all()
+
+
+async def test_confirmed_lesson_proposal_cannot_be_edited_or_removed(client, db):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Confirmed request-path concept",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_READY,
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
+    edited = await client.patch(
+        f"/materials/topics/{proposal.id}",
+        headers=API_HEADERS,
+        json={"action": "exclude"},
+    )
+
+    assert edited.status_code == 409, edited.text
+    assert edited.json()["detail"] == {"code": "material_not_editable"}
+    await db.refresh(proposal)
+    assert proposal.status == "confirmed"
+    assert proposal.card_id is not None
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
+async def test_processing_source_cannot_confirm_stale_proposals(client, db):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Reprocessing request-path concept",
+        source_text=GUIDE,
+        content_provenance="learner_notes",
+        import_path="lesson",
+        status=SOURCE_PROCESSING,
+    )
+    proposal = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    db.add(source)
+    db.add(proposal)
+    await db.commit()
+
+    response = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {"code": "material_not_confirmable"}
+    assert not (await db.exec(select(Card))).all()
+
+
 async def test_plan_import_reuses_its_preview_for_review_topics(db, stub_import):
     source = MaterialSource(
         user_id=FOUNDER_USER_ID,
@@ -1336,12 +1445,14 @@ async def test_merge_target_must_belong_to_the_same_source(client, db):
         title="First",
         source_text=GUIDE,
         import_path="topics",
+        status=SOURCE_READY,
     )
     second = MaterialSource(
         user_id=FOUNDER_USER_ID,
         title="Second",
         source_text=GUIDE,
         import_path="topics",
+        status=SOURCE_READY,
     )
     db.add(first)
     db.add(second)

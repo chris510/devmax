@@ -19,7 +19,9 @@ from app.models import (
     PROPOSAL_NEEDS_ATTENTION,
     SOURCE_CONFIRMED,
     SOURCE_FAILED,
+    SOURCE_NEEDS_ATTENTION,
     SOURCE_PENDING,
+    SOURCE_READY,
     SOURCE_SUPERSEDED,
     STATUS_COMPLETE,
     Card,
@@ -114,15 +116,16 @@ COLLECTION = CollectionDetail(
 )
 
 
-async def _owned_source(db: AsyncSession, source_id: uuid.UUID) -> MaterialSource:
-    source = (
-        await db.exec(
-            select(MaterialSource).where(
-                MaterialSource.id == source_id,
-                MaterialSource.user_id == current_user_id(),
-            )
-        )
-    ).first()
+async def _owned_source(
+    db: AsyncSession, source_id: uuid.UUID, *, for_update: bool = False
+) -> MaterialSource:
+    statement = select(MaterialSource).where(
+        MaterialSource.id == source_id,
+        MaterialSource.user_id == current_user_id(),
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    source = (await db.exec(statement)).first()
     if source is None:
         raise HTTPException(status_code=404, detail="material not found")
     return source
@@ -303,24 +306,38 @@ async def edit_topic(
     body: MaterialTopicEdit,
     db: AsyncSession = Depends(get_session),
 ) -> MaterialTopicOut:
-    row = (
-        await db.exec(
-            select(MaterialTopicProposal)
-            .join(MaterialSource, MaterialSource.id == MaterialTopicProposal.source_id)
-            .where(
-                MaterialTopicProposal.id == proposal_id,
-                MaterialSource.user_id == current_user_id(),
-            )
+    row_ref = await db.get(MaterialTopicProposal, proposal_id)
+    if row_ref is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    source = await _owned_source(db, row_ref.source_id, for_update=True)
+    if source.status not in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "material_not_editable"},
         )
-    ).first()
+    row = await db.get(
+        MaterialTopicProposal,
+        proposal_id,
+        with_for_update=True,
+        populate_existing=True,
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="topic not found")
-    if body.topic is not None:
-        row.topic = body.topic.strip()
-    if body.answer_anchor is not None:
-        row.answer_anchor = body.answer_anchor.strip()
+
+    topic = body.topic.strip() if body.topic is not None else row.topic
+    answer_anchor = (
+        body.answer_anchor.strip()
+        if body.answer_anchor is not None
+        else row.answer_anchor
+    )
+    if not topic:
+        raise HTTPException(status_code=422, detail="topic must not be blank")
+    content_changed = topic != row.topic or answer_anchor != row.answer_anchor
+    row.topic = topic
+    row.answer_anchor = answer_anchor
     if body.action == "exclude":
         row.status = PROPOSAL_EXCLUDED
+        row.merged_into_id = None
     elif body.action == "merge":
         if body.merge_into_id is None:
             raise HTTPException(status_code=422, detail="merge target required")
@@ -330,6 +347,7 @@ async def edit_topic(
                     MaterialTopicProposal.id == body.merge_into_id,
                     MaterialTopicProposal.source_id == row.source_id,
                     MaterialTopicProposal.id != row.id,
+                    MaterialTopicProposal.status == PROPOSAL_CLEAN,
                 )
             )
         ).first()
@@ -337,7 +355,15 @@ async def edit_topic(
             raise HTTPException(status_code=404, detail="merge target not found")
         row.status = PROPOSAL_EXCLUDED
         row.merged_into_id = body.merge_into_id
+    elif source.import_path == "lesson":
+        row.merged_into_id = None
+        if content_changed:
+            row.status = PROPOSAL_NEEDS_ATTENTION
+            row.issue = (
+                "Edited lesson content requires a new source-grounding check."
+            )
     else:
+        row.merged_into_id = None
         row.status = PROPOSAL_CLEAN if row.answer_anchor else PROPOSAL_NEEDS_ATTENTION
         row.issue = "" if row.answer_anchor else "A good answer anchor is required."
     row.updated_at = datetime.now(UTC)
@@ -352,7 +378,12 @@ async def confirm_topics(
     body: MaterialConfirmIn,
     db: AsyncSession = Depends(get_session),
 ) -> MaterialConfirmOut:
-    source = await _owned_source(db, source_id)
+    source = await _owned_source(db, source_id, for_update=True)
+    if source.status not in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "material_not_confirmable"},
+        )
     if source.import_path == "lesson":
         classification = body.content_provenance or source.content_provenance
         if classification == CONTENT_PROVENANCE_LEGACY_UNSPECIFIED:
