@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from datetime import UTC, date, datetime
 
@@ -261,6 +262,32 @@ async def test_invalid_lesson_extraction_writes_no_proposals_or_cards(
 
     assert not (await db.exec(select(MaterialTopicProposal))).all()
     assert not (await db.exec(select(Card))).all()
+
+
+def test_lesson_post_validation_owns_provider_unsupported_array_bounds():
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request path notes",
+        source_text=GUIDE,
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+
+    with pytest.raises(llm.LLMError, match="between 1 and 7 concepts"):
+        materials._validated_lesson_concepts(source, [])
+
+    too_many = [
+        lesson_concept(GUIDE, topic=f"Request routing path {index}")
+        for index in range(8)
+    ]
+    with pytest.raises(llm.LLMError, match="between 1 and 7 concepts"):
+        materials._validated_lesson_concepts(source, too_many)
+
+    missing_prompt = lesson_concept(GUIDE)
+    missing_prompt["recall_questions"] = missing_prompt["recall_questions"][:-1]
+    with pytest.raises(llm.LLMError, match="exactly five recall prompts"):
+        materials._validated_lesson_concepts(source, [missing_prompt])
 
 
 @pytest.mark.parametrize("status", [SOURCE_PENDING, SOURCE_PROCESSING, SOURCE_READY])
@@ -812,6 +839,8 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
         depth=3,
         boundaries=3,
         feedback="Reconstructed the routing stages and their boundary cost.",
+        follow_up_used=True,
+        scoring_contract_version=2,
         status="complete",
         ended_at=reviewed_at,
     )
@@ -855,6 +884,44 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert artifact["concepts"][0]["quiz_results"][0]["question"] == (
         card.canonical_question
     )
+    bundle = artifact["writeback_bundle"]
+    assert bundle["schema"] == "second-brain.learning-writeback"
+    assert bundle["schema_version"] == 1
+    assert bundle["producer"] == "devmax"
+    assert bundle["source"]["id"] == f"devmax:source:{source.id}"
+    assert bundle["source"]["lineage_id"] == (
+        f"devmax:source-lineage:{source.lineage_id}"
+    )
+    assert bundle["source"]["version"] == source.version
+    writeback_concept = bundle["concepts"][0]
+    assert writeback_concept["id"] == f"devmax:proposal:{proposal.id}"
+    assert writeback_concept["card_id"] == f"devmax:card:{card.id}"
+    assert len(writeback_concept["answer_rubric"]) == 5
+    assert len(writeback_concept["recall_candidates"]) == 5
+    assert writeback_concept["quiz_evidence"] == [
+        {
+            "id": f"devmax:session:{session.id}",
+            "reviewed_at": reviewed_at.isoformat().replace("+00:00", "Z"),
+            "prompt": card.canonical_question,
+            "score": 4,
+            "graded_summary": session.feedback,
+            "scoring_contract_version": 2,
+            "scored_follow_up_used": True,
+        }
+    ]
+    assert writeback_concept["producer_assessment"] == "established"
+    serialized_bundle = json.dumps(bundle, sort_keys=True)
+    for forbidden in (
+        GUIDE,
+        "private spoken answer",
+        "answer_text",
+        "source_text",
+        "interval_days",
+        "next_review_at",
+        "mastery_summary",
+        "canonical_question",
+    ):
+        assert forbidden not in serialized_bundle
 
     replayed = await client.post(
         f"/materials/imports/{source.id}/distill", headers=API_HEADERS

@@ -711,31 +711,33 @@ _LESSON_RECALL_PROMPT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "level": {"type": "string", "enum": list(LESSON_RECALL_LEVELS)},
-        "question": {"type": "string", "maxLength": 1000},
+        "question": {"type": "string"},
     },
     "required": ["level", "question"],
     "additionalProperties": False,
 }
 
+# Anthropic's raw ``output_config.format`` JSON-schema subset rejects collection
+# and string length constraints (``minItems``, ``maxItems``, ``maxLength``).
+# Keep the provider schema structural and enforce every bound in
+# ``materials._validated_lesson_concepts`` before anything reaches the database.
 LESSON_EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "concepts": {
             "type": "array",
-            "minItems": 1,
-            "maxItems": 7,
             "items": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "maxLength": 200},
-                    "section_title": {"type": "string", "maxLength": 1000},
-                    "source_excerpt": {"type": "string", "maxLength": 20000},
-                    "answer_basis": {"type": "string", "maxLength": 2000},
-                    "canonical_question": {"type": "string", "maxLength": 2000},
+                    "topic": {"type": "string"},
+                    "section_title": {"type": "string"},
+                    "source_excerpt": {"type": "string"},
+                    "answer_basis": {"type": "string"},
+                    "canonical_question": {"type": "string"},
                     "answer_rubric": {
                         "type": "object",
                         "properties": {
-                            field: {"type": "string", "maxLength": 900}
+                            field: {"type": "string"}
                             for field in RUBRIC_FIELDS
                         },
                         "required": list(RUBRIC_FIELDS),
@@ -743,8 +745,6 @@ LESSON_EXTRACTION_SCHEMA: dict[str, Any] = {
                     },
                     "recall_questions": {
                         "type": "array",
-                        "minItems": len(LESSON_RECALL_LEVELS),
-                        "maxItems": len(LESSON_RECALL_LEVELS),
                         "items": _LESSON_RECALL_PROMPT_SCHEMA,
                     },
                 },

@@ -192,6 +192,54 @@ struct LearningNoteConcept: Codable, Identifiable, Equatable {
     let confidence: String
 }
 
+struct LearningWritebackSource: Codable, Equatable {
+    let id: String
+    let lineageId: String
+    let version: Int
+    let title: String
+    let url: String
+    let distilledAt: String
+}
+
+struct LearningWritebackCandidate: Codable, Equatable {
+    let id: String
+    let type: String
+    let prompt: String
+    let answerRubric: String
+}
+
+struct LearningWritebackEvidence: Codable, Equatable {
+    let id: String
+    let reviewedAt: String
+    let prompt: String
+    let score: Int
+    let gradedSummary: String
+    let scoringContractVersion: Int
+    let scoredFollowUpUsed: Bool
+}
+
+struct LearningWritebackConcept: Codable, Equatable {
+    let id: String
+    let cardId: String
+    let title: String
+    let answerRubric: [String: String]
+    let mentalModel: String
+    let howItWorks: String
+    let gotchas: [String]
+    let recallCandidates: [LearningWritebackCandidate]
+    let quizEvidence: [LearningWritebackEvidence]
+    let producerAssessment: String
+}
+
+struct LearningWritebackBundle: Codable, Equatable {
+    let schema: String
+    let schemaVersion: Int
+    let producer: String
+    let exportId: String
+    let source: LearningWritebackSource
+    let concepts: [LearningWritebackConcept]
+}
+
 struct MaterialArtifacts: Codable, Equatable {
     let sourceId: UUID
     let title: String
@@ -200,6 +248,7 @@ struct MaterialArtifacts: Codable, Equatable {
     let canonicalNoteMarkdown: String
     let recallExportMarkdown: String
     let concepts: [LearningNoteConcept]
+    let writebackBundle: LearningWritebackBundle?
 }
 
 struct ManualTopic: Codable, Equatable {

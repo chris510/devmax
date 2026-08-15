@@ -162,7 +162,50 @@ extension MockAPI {
             sourceUrl: "https://example.com/lesson", distilledAt: Date(),
             canonicalNoteMarkdown: "# Contracts — formation\n\nA concise canonical note.",
             recallExportMarkdown: "# Recall questions\n\n- Explain the mechanism.",
-            concepts: []
+            concepts: [],
+            writebackBundle: Self.lessonWritebackBundle(sourceID: id)
+        )
+    }
+
+    private static func lessonWritebackBundle(sourceID: UUID) -> LearningWritebackBundle {
+        let proposalID = "00000000-0000-0000-0000-000000000902"
+        let rubric = lessonRubric
+        return LearningWritebackBundle(
+            schema: "second-brain.learning-writeback", schemaVersion: 1,
+            producer: "devmax", exportId: "sha256:mock-writeback-export",
+            source: LearningWritebackSource(
+                id: "devmax:source:\(sourceID)",
+                lineageId: "devmax:source-lineage:00000000-0000-0000-0000-000000000901",
+                version: 1, title: "Contracts — formation",
+                url: "https://example.com/lesson", distilledAt: "2026-08-14T22:45:00Z"
+            ),
+            concepts: [
+                LearningWritebackConcept(
+                    id: "devmax:proposal:\(proposalID)",
+                    cardId: "devmax:card:\(publicCardID)", title: "Contract formation",
+                    answerRubric: rubric,
+                    mentalModel: "Offer and acceptance create mutual assent.",
+                    howItWorks: rubric["mechanism"]!,
+                    gotchas: ["Do not treat every negotiation as acceptance."],
+                    recallCandidates: lessonPrompts(for: "contract formation").map { prompt in
+                        LearningWritebackCandidate(
+                            id: "devmax:probe:\(proposalID):\(prompt.level)",
+                            type: prompt.level, prompt: prompt.question,
+                            answerRubric: rubric["mechanism"]!
+                        )
+                    },
+                    quizEvidence: [
+                        LearningWritebackEvidence(
+                            id: "devmax:session:00000000-0000-0000-0000-000000000905",
+                            reviewedAt: "2026-08-14T22:42:00Z",
+                            prompt: "How is a contract formed?", score: 4,
+                            gradedSummary: "Recalled mutual assent and consideration.",
+                            scoringContractVersion: 2, scoredFollowUpUsed: true
+                        )
+                    ],
+                    producerAssessment: "established"
+                )
+            ]
         )
     }
 

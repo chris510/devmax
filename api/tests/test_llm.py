@@ -54,18 +54,28 @@ def test_proposal_schema_and_activation_share_the_rubric_fields():
     assert tuple(rubric["required"]) == RUBRIC_FIELDS
 
 
-def test_lesson_schema_has_one_open_prompt_slot_for_each_depth():
+def test_lesson_schema_uses_only_anthropic_supported_constraints():
     concepts = llm.LESSON_EXTRACTION_SCHEMA["properties"]["concepts"]
-    assert concepts["minItems"] == 1
-    assert concepts["maxItems"] == 7
     prompt_list = concepts["items"]["properties"]["recall_questions"]
-    assert prompt_list["minItems"] == prompt_list["maxItems"] == 5
     assert tuple(prompt_list["items"]["properties"]["level"]["enum"]) == (
         llm.LESSON_RECALL_LEVELS
     )
     rubric = concepts["items"]["properties"]["answer_rubric"]
     assert tuple(rubric["properties"]) == RUBRIC_FIELDS
     assert tuple(rubric["required"]) == RUBRIC_FIELDS
+
+    def schema_keys(value):
+        if isinstance(value, dict):
+            yield from value
+            for child in value.values():
+                yield from schema_keys(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from schema_keys(child)
+
+    assert {"minItems", "maxItems", "minLength", "maxLength"}.isdisjoint(
+        schema_keys(llm.LESSON_EXTRACTION_SCHEMA)
+    )
 
 
 async def test_lesson_extraction_uses_the_bounded_card_proposal_route(monkeypatch):

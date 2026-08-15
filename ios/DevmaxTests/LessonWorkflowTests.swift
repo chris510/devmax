@@ -101,7 +101,7 @@ final class LessonWorkflowTests: XCTestCase {
     }
 
     @MainActor
-    func testPreparedExportContainsOnlyDistilledArtifacts() async throws {
+    func testPreparedExportSharesExactPrivacyBoundedJSONBundle() async throws {
         let flow = PublicOnboardingState(api: MockAPI(), route: "lesson-add")
         flow.draft.sourceID = UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
 
@@ -110,9 +110,40 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertEqual(flow.lessonArtifactState, .ready)
         let url = try XCTUnwrap(flow.lessonExportURL)
         defer { try? FileManager.default.removeItem(at: url) }
-        let exported = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(exported.contains("A concise canonical note."))
-        XCTAssertTrue(exported.contains("Explain the mechanism."))
-        XCTAssertFalse(exported.contains("FULL RAW SOURCE"))
+        XCTAssertEqual(url.pathExtension, "json")
+        let data = try Data(contentsOf: url)
+        let exported = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(exported["schema"] as? String, "second-brain.learning-writeback")
+        XCTAssertEqual(exported["schema_version"] as? Int, 1)
+        XCTAssertEqual(exported["producer"] as? String, "devmax")
+        XCTAssertEqual(exported["export_id"] as? String, "sha256:mock-writeback-export")
+        let source = try XCTUnwrap(exported["source"] as? [String: Any])
+        XCTAssertTrue((source["id"] as? String)?.hasPrefix("devmax:source:") == true)
+        let concepts = try XCTUnwrap(exported["concepts"] as? [[String: Any]])
+        XCTAssertEqual(concepts.count, 1)
+        let candidates = try XCTUnwrap(
+            concepts[0]["recall_candidates"] as? [[String: Any]]
+        )
+        XCTAssertEqual(candidates.count, 5)
+        XCTAssertTrue(candidates.allSatisfy { $0["answer_rubric"] is String })
+        let serialized = try XCTUnwrap(String(data: data, encoding: .utf8))
+        for forbidden in [
+            "FULL RAW SOURCE", "source_text", "answer_text", "transcript",
+            "next_review_at", "interval_days", "mastery_summary", "canonical_question"
+        ] {
+            XCTAssertFalse(serialized.contains(forbidden))
+        }
+    }
+
+    func testMaterialArtifactsStillDecodesWhenOlderServerOmitsBundle() throws {
+        let data = Data(
+            ##"{"source_id":"00000000-0000-0000-0000-000000000901","title":"Old artifacts","source_url":"","distilled_at":"2026-08-14T22:45:00Z","canonical_note_markdown":"# Note","recall_export_markdown":"# Recall","concepts":[]}"##.utf8
+        )
+
+        let artifacts = try LiveAPI.decoder.decode(MaterialArtifacts.self, from: data)
+
+        XCTAssertNil(artifacts.writebackBundle)
     }
 }

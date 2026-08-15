@@ -1071,9 +1071,12 @@ class LessonProgressOut(BaseModel):
 
 
 class LessonQuizResult(BaseModel):
+    session_id: uuid.UUID
     reviewed_at: datetime
     question: str
     recall_score: int | None
+    scoring_contract_version: ScoringContractVersion
+    scored_follow_up_used: bool
     graded_summary: str
     feedback: str
 
@@ -1082,6 +1085,8 @@ class LearningNoteConcept(BaseModel):
     proposal_id: uuid.UUID
     card_id: uuid.UUID
     concept: str
+    canonical_question: str
+    answer_rubric: dict[str, str]
     source_title: str
     source_url: str
     mental_model: str
@@ -1092,6 +1097,76 @@ class LearningNoteConcept(BaseModel):
     confidence: Literal["unrated", "needs_review", "developing", "established"]
 
 
+class LearningWritebackSource(BaseModel):
+    id: str
+    lineage_id: str
+    version: int = Field(ge=1)
+    title: str
+    url: str
+    distilled_at: datetime
+
+
+class LearningWritebackAnswerRubric(BaseModel):
+    mechanism: str
+    acceptable_alternative: str
+    trade_off: str
+    failure_mode: str
+    misconception: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LearningWritebackCandidate(BaseModel):
+    id: str
+    type: Literal[
+        "definition_recognition",
+        "mechanism",
+        "derivation",
+        "application",
+        "failure_tradeoff",
+    ]
+    prompt: str
+    answer_rubric: str
+
+
+class LearningWritebackEvidence(BaseModel):
+    id: str
+    reviewed_at: datetime
+    prompt: str
+    score: int = Field(ge=0, le=5)
+    graded_summary: str
+    scoring_contract_version: ScoringContractVersion
+    scored_follow_up_used: bool
+
+
+class LearningWritebackConcept(BaseModel):
+    id: str
+    card_id: str
+    title: str
+    answer_rubric: LearningWritebackAnswerRubric
+    mental_model: str
+    how_it_works: str
+    gotchas: list[str] = Field(min_length=1, max_length=8)
+    recall_candidates: list[LearningWritebackCandidate] = Field(
+        min_length=5, max_length=5
+    )
+    quiz_evidence: list[LearningWritebackEvidence] = Field(min_length=1, max_length=20)
+    producer_assessment: Literal[
+        "unrated", "needs_review", "developing", "established"
+    ]
+
+
+class LearningWritebackBundle(BaseModel):
+    schema_: Literal["second-brain.learning-writeback"] = Field(alias="schema")
+    schema_version: Literal[1]
+    producer: Literal["devmax"]
+    source: LearningWritebackSource
+    concepts: list[LearningWritebackConcept] = Field(min_length=1)
+    export_id: str
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class MaterialArtifactsOut(BaseModel):
     source_id: uuid.UUID
     title: str
@@ -1100,6 +1175,7 @@ class MaterialArtifactsOut(BaseModel):
     canonical_note_markdown: str
     recall_export_markdown: str
     concepts: list[LearningNoteConcept]
+    writeback_bundle: LearningWritebackBundle
 
 
 class ManualTopicIn(BaseModel):

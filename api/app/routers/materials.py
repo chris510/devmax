@@ -44,7 +44,7 @@ from app.schemas import (
     MaterialTopicEdit,
     MaterialTopicOut,
 )
-from app.services import materials, study_plan
+from app.services import materials, second_brain, study_plan
 from app.services.card_lifecycle import (
     Grounding,
     GroundingError,
@@ -507,9 +507,12 @@ def _learning_note_concepts(
         gotchas = [value for value in gotchas if value.rsplit(":", 1)[-1].strip()]
         quiz_results = [
             LessonQuizResult(
+                session_id=session.id,
                 reviewed_at=session.ended_at or session.started_at,
                 question=session.question_asked[:2000],
                 recall_score=session.accuracy,
+                scoring_contract_version=session.scoring_contract_version,
+                scored_follow_up_used=session.follow_up_used,
                 graded_summary=(session.feedback or card.mastery_summary)[:4000],
                 feedback=session.feedback[:4000],
             )
@@ -523,6 +526,8 @@ def _learning_note_concepts(
                 proposal_id=proposal.id,
                 card_id=card.id,
                 concept=proposal.topic,
+                canonical_question=proposal.canonical_question,
+                answer_rubric=proposal.answer_rubric,
                 source_title=source.title,
                 source_url=source.source_url,
                 mental_model=proposal.answer_anchor,
@@ -546,6 +551,16 @@ def _artifacts_response(
             status_code=409,
             detail={"code": "artifacts_not_ready"},
         )
+    assert source.distilled_at is not None
+    writeback_bundle = second_brain.build_learning_writeback_bundle(
+        source_id=source.id,
+        source_lineage_id=source.lineage_id,
+        source_version=source.version,
+        source_title=source.title,
+        source_url=source.source_url,
+        source_distilled_at=source.distilled_at,
+        concepts=[concept.model_dump(mode="json") for concept in concepts],
+    )
     return MaterialArtifactsOut(
         source_id=source.id,
         title=source.title,
@@ -554,6 +569,7 @@ def _artifacts_response(
         canonical_note_markdown=source.canonical_note_markdown,
         recall_export_markdown=source.recall_export_markdown,
         concepts=concepts,
+        writeback_bundle=writeback_bundle,
     )
 
 
