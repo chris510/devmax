@@ -158,6 +158,7 @@ async def test_lesson_import_persists_safe_url_provenance_and_source_type(
             "source_text": GUIDE,
             "source_url": "https://example.com/engineering/request-path?view=full",
             "kind": "article",
+            "content_provenance": "learner_notes",
             "import_path": "lesson",
             "intent": "learn",
         },
@@ -168,9 +169,11 @@ async def test_lesson_import_persists_safe_url_provenance_and_source_type(
         "https://example.com/engineering/request-path?view=full"
     )
     assert response.json()["kind"] == "article"
+    assert response.json()["content_provenance"] == "learner_notes"
     source = (await db.exec(select(MaterialSource))).one()
     assert source.import_path == "lesson"
     assert source.kind == "article"
+    assert source.content_provenance == "learner_notes"
     assert source.source_text == GUIDE
     assert calls == [source.id]
 
@@ -226,6 +229,7 @@ async def test_lesson_extraction_stores_one_complete_concept_pack(
         title="Request path notes",
         source_text=GUIDE,
         source_url="https://example.com/request-path",
+        content_provenance="exact_source_excerpt",
         kind="article",
         import_path="lesson",
         status=SOURCE_PENDING,
@@ -780,6 +784,55 @@ async def test_topics_are_proposals_until_the_user_confirms(client, db, stub_imp
     assert all(card.last_score is None for card in cards)
 
 
+async def test_legacy_lesson_requires_explicit_content_provenance_before_confirmation(
+    client, db, monkeypatch
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Coached request-path correction",
+        source_text=GUIDE,
+        source_url="https://example.com/request-path",
+        kind="notes",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+    )
+    db.add(source)
+    await db.commit()
+
+    async def extract(**_kwargs):
+        return [lesson_concept(GUIDE)]
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    await materials._process_lesson(db, source, await _claim(db, source))
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+
+    blocked = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "content_provenance_required"
+    assert not (await db.exec(select(Card))).all()
+    await db.refresh(source)
+    assert source.content_provenance == "legacy_unspecified"
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={
+            "selected_topic_ids": [str(proposal.id)],
+            "content_provenance": "coached_correction",
+        },
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    await db.refresh(source)
+    assert source.content_provenance == "coached_correction"
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
 async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     client, db, monkeypatch
 ):
@@ -788,6 +841,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
         title="Request path notes",
         source_text=GUIDE,
         source_url="https://example.com/request-path",
+        content_provenance="exact_source_excerpt",
         kind="article",
         import_path="lesson",
         status=SOURCE_PENDING,
@@ -813,6 +867,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert preview.json()["topics"][0]["answer_rubric"] == LESSON_RUBRIC
     assert len(preview.json()["topics"][0]["recall_questions"]) == 5
     assert preview.json()["topics"][0]["card_id"] is None
+    assert preview.json()["content_provenance"] == "exact_source_excerpt"
 
     confirmed = await client.post(
         f"/materials/imports/{source.id}/confirm",
@@ -890,6 +945,7 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert distilled.status_code == 200, distilled.text
     artifact = distilled.json()
     assert artifact["source_url"] == source.source_url
+    assert artifact["content_provenance"] == "exact_source_excerpt"
     assert GUIDE not in artifact["canonical_note_markdown"]
     assert "private spoken answer" not in distilled.text
     assert artifact["concepts"][0]["concept"] == proposal.topic
@@ -967,6 +1023,7 @@ async def test_lesson_confirmation_requires_an_explicit_decision_for_every_conce
         user_id=FOUNDER_USER_ID,
         title="Two request-path concepts",
         source_text=GUIDE,
+        content_provenance="learner_notes",
         import_path="lesson",
         status=SOURCE_READY,
     )
@@ -1019,6 +1076,7 @@ async def test_lesson_confirmation_rejects_any_concept_that_still_needs_attentio
         user_id=FOUNDER_USER_ID,
         title="Request-path concepts needing review",
         source_text=GUIDE,
+        content_provenance="learner_notes",
         import_path="lesson",
         status=SOURCE_NEEDS_ATTENTION,
     )

@@ -11,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.auth import current_user_id
 from app.db import get_session
 from app.models import (
+    CONTENT_PROVENANCE_LEGACY_UNSPECIFIED,
     DELIVERY_CONVERSATIONAL,
     PROPOSAL_CLEAN,
     PROPOSAL_CONFIRMED,
@@ -148,6 +149,7 @@ def _response_from_topics(
         title=source.title,
         kind=source.kind,
         source_url=source.source_url,
+        content_provenance=source.content_provenance,
         version=source.version,
         status=source.status,
         import_path=source.import_path,
@@ -198,6 +200,7 @@ async def start_import(
         title=body.title.strip(),
         source_text=body.source_text,
         source_url=body.source_url,
+        content_provenance=body.content_provenance,
         original_filename=body.original_filename,
         mime_type=body.mime_type,
         import_path=body.import_path,
@@ -350,6 +353,18 @@ async def confirm_topics(
     db: AsyncSession = Depends(get_session),
 ) -> MaterialConfirmOut:
     source = await _owned_source(db, source_id)
+    if source.import_path == "lesson":
+        classification = body.content_provenance or source.content_provenance
+        if classification == CONTENT_PROVENANCE_LEGACY_UNSPECIFIED:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "content_provenance_required",
+                    "message": "Choose what the lesson text represents before confirming.",
+                },
+            )
+        source.content_provenance = classification
+        db.add(source)
     rows = (
         await db.exec(
             select(MaterialTopicProposal).where(
@@ -600,6 +615,7 @@ def _artifacts_response(
         source_id=source.id,
         title=source.title,
         source_url=source.source_url,
+        content_provenance=source.content_provenance,
         distilled_at=source.distilled_at,
         canonical_note_markdown=source.canonical_note_markdown,
         recall_export_markdown=source.recall_export_markdown,

@@ -924,6 +924,13 @@ LessonRecallLevel = Literal[
     "application",
     "failure_tradeoff",
 ]
+ContentProvenance = Literal[
+    "legacy_unspecified",
+    "exact_source_excerpt",
+    "learner_notes",
+    "coached_correction",
+    "ai_derived_summary",
+]
 
 
 class LessonRecallPrompt(BaseModel):
@@ -937,6 +944,9 @@ class MaterialImportIn(BaseModel):
     # Provenance only. The server never fetches this URL; extraction always uses
     # the required pasted source_text above.
     source_url: str = Field(default="", max_length=4000)
+    # Classification of the pasted content, separate from kind and source_url.
+    # The legacy value keeps older clients readable but cannot confirm a lesson.
+    content_provenance: ContentProvenance = "legacy_unspecified"
     kind: MaterialSourceKind = "guide"
     original_filename: str = Field(default="", max_length=255)
     mime_type: Literal["text/plain", "text/markdown", "application/pdf"] = "text/plain"
@@ -1002,6 +1012,7 @@ class MaterialImportOut(BaseModel):
     title: str
     kind: str
     source_url: str
+    content_provenance: ContentProvenance
     version: int
     status: Literal[
         "draft",
@@ -1038,6 +1049,9 @@ class MaterialTopicEdit(BaseModel):
 
 class MaterialConfirmIn(BaseModel):
     selected_topic_ids: list[uuid.UUID] = Field(min_length=1)
+    # Lets an upgraded client classify an already-imported legacy lesson at the
+    # final review boundary without re-uploading or reprocessing its source.
+    content_provenance: ContentProvenance | None = None
 
 
 class MaterialConfirmOut(BaseModel):
@@ -1171,6 +1185,9 @@ class MaterialArtifactsOut(BaseModel):
     source_id: uuid.UUID
     title: str
     source_url: str
+    # Kept outside the strict v1 writeback bundle until producer and importer can
+    # move to v2 together. This field is available to API/export clients now.
+    content_provenance: ContentProvenance
     distilled_at: datetime
     canonical_note_markdown: str
     recall_export_markdown: str

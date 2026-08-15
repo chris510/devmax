@@ -152,7 +152,9 @@ extension MockAPI {
         return value
     }
 
-    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
+    func confirmMaterial(
+        _ id: UUID, topics: [UUID], contentProvenance: String?
+    ) async throws -> MaterialConfirmation {
         let cards = topics.map { topic in
             topic == Self.topicID ? Self.publicCardID : Self.secondPublicCardID
         }
@@ -194,7 +196,8 @@ extension MockAPI {
     func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
         MaterialArtifacts(
             sourceId: id, title: "Contracts — formation",
-            sourceUrl: "https://example.com/lesson", distilledAt: Date(),
+            sourceUrl: "https://example.com/lesson",
+            contentProvenance: "exact_source_excerpt", distilledAt: Date(),
             canonicalNoteMarkdown: "# Contracts — formation\n\nA concise canonical note.",
             recallExportMarkdown: "# Recall questions\n\n- Explain the mechanism.",
             concepts: [],

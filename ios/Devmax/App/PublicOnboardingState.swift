@@ -86,11 +86,18 @@ final class PublicOnboardingState: ObservableObject {
         return value.isEmpty || SafeExternalURL.parse(value) != nil
     }
 
-    var lessonIsValid: Bool { guideIsValid && lessonSourceURLIsValid }
+    var lessonContentProvenanceIsSelected: Bool {
+        LessonContentProvenance(rawValue: draft.contentProvenance) != nil
+    }
+
+    var lessonIsValid: Bool {
+        guideIsValid && lessonSourceURLIsValid && lessonContentProvenanceIsSelected
+    }
 
     var canConfirmSelectedTopics: Bool {
         guard !busy, !selectedTopics.isEmpty else { return false }
         guard isLessonDraft else { return true }
+        guard lessonContentProvenanceIsSelected else { return false }
         guard let job else { return false }
         let selectedAreClean = job.topics
             .filter { selectedTopics.contains($0.id) }
@@ -175,10 +182,14 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func startImport() async {
-        guard guideIsValid, !isLessonDraft || lessonSourceURLIsValid else {
-            error = lessonSourceURLIsValid
-                ? "Add at least 200 readable characters. Your draft is still saved."
-                : "Use a full http or https source URL, or leave it blank."
+        guard guideIsValid, !isLessonDraft || lessonIsValid else {
+            if !guideIsValid {
+                error = "Add at least 200 readable characters. Your draft is still saved."
+            } else if !lessonSourceURLIsValid {
+                error = "Use a full http or https source URL, or leave it blank."
+            } else {
+                error = "Choose what the pasted lesson text represents."
+            }
             step = .fileError
             return
         }
@@ -194,6 +205,7 @@ final class PublicOnboardingState: ObservableObject {
                     originalFilename: draft.originalFilename, mimeType: draft.mimeType,
                     kind: draft.sourceType,
                     sourceUrl: draft.sourceURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                    contentProvenance: draft.contentProvenance,
                     importPath: draft.importPath, intent: draft.intent,
                     requestedWeeks: draft.requestedWeeks,
                     weeklyCapacityMinutes: draft.weeklyCapacityHours * 60,
@@ -280,6 +292,14 @@ final class PublicOnboardingState: ObservableObject {
 
     func routeImportResult() {
         guard let job else { return }
+        if job.importPath == "lesson",
+           !lessonContentProvenanceIsSelected,
+           let classification = job.contentProvenance,
+           LessonContentProvenance(rawValue: classification) != nil
+        {
+            draft.contentProvenance = classification
+            persist()
+        }
         switch job.status {
         case "ready", "needs_attention":
             error = ""
@@ -360,7 +380,11 @@ final class PublicOnboardingState: ObservableObject {
             let selected = job.topics
                 .filter { selectedTopics.contains($0.id) }
                 .sorted { $0.position < $1.position }
-            let result = try await api.confirmMaterial(job.id, topics: selected.map(\.id))
+            let result = try await api.confirmMaterial(
+                job.id,
+                topics: selected.map(\.id),
+                contentProvenance: isLessonDraft ? draft.contentProvenance : nil
+            )
             if isLessonDraft {
                 await beginLessonStudy(
                     cardIDs: result.createdCardIds, topics: selected, app: app
@@ -508,6 +532,9 @@ final class PublicOnboardingState: ObservableObject {
         update.intent = source.intent
         update.sourceType = source.kind
         update.sourceURL = source.sourceUrl ?? ""
+        // Classification belongs to the new pasted content, not its lineage.
+        // Require an explicit choice for every updated lesson version.
+        update.contentProvenance = LessonContentProvenance.legacyUnspecified
         update.requestedWeeks = draft.requestedWeeks
         update.weeklyCapacityHours = draft.weeklyCapacityHours
         update.previousVersionID = source.id

@@ -330,6 +330,16 @@ struct PublicOnboardingView: View {
                 title: flow.job?.title ?? flow.preparedTitle,
                 meta: "\(flow.job?.cleanCount ?? 3) READY · \(flow.job?.attentionCount ?? 0) NEED ATTENTION"
             )
+            if flow.isLessonDraft,
+               let classification = LessonContentProvenance(
+                   rawValue: flow.draft.contentProvenance
+               )
+            {
+                PublicMaterialCard(
+                    title: "Content origin",
+                    meta: classification.label.uppercased()
+                )
+            }
             if let comparison = flow.job?.comparison, !comparison.isEmpty {
                 PublicMaterialCard(
                     title: "Source version changes",
@@ -354,6 +364,12 @@ struct PublicOnboardingView: View {
         ) {
             if let job = flow.job {
                 if flow.isLessonDraft {
+                    lessonProvenancePicker
+                    PublicNote(
+                        "This labels the pasted knowledge itself. Source type and URL "
+                            + "remain separate attribution."
+                    )
+                    Hairline()
                     PublicNote(
                         "Review every clean concept. Select each one you want, or remove it. "
                             + "Nothing is created until every remaining concept has a decision."
@@ -467,6 +483,8 @@ struct PublicOnboardingView: View {
 
     private var lessonSourceFields: some View {
         VStack(alignment: .leading, spacing: 10) {
+            lessonProvenancePicker
+
             MetaText(
                 text: "SOURCE TYPE", font: WCFont.mono(9.5),
                 tracking: 0.8, color: Theme.meta
@@ -509,6 +527,59 @@ struct PublicOnboardingView: View {
             if !flow.lessonSourceURLIsValid {
                 MetaText(
                     text: "USE A FULL HTTP OR HTTPS URL",
+                    font: WCFont.mono(9.5), tracking: 0.7, color: Theme.scoreLow
+                )
+            }
+        }
+    }
+
+    private var lessonProvenancePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MetaText(
+                text: "WHAT IS THE PASTED TEXT?", font: WCFont.mono(9.5),
+                tracking: 0.8, color: Theme.meta
+            )
+            Menu {
+                ForEach(LessonContentProvenance.allCases) { classification in
+                    Button(classification.label) {
+                        flow.draft.contentProvenance = classification.rawValue
+                        flow.schedulePersist()
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(
+                        LessonContentProvenance(
+                            rawValue: flow.draft.contentProvenance
+                        )?.label ?? "Choose content origin"
+                    )
+                    .font(WCFont.sans(14.5))
+                    .foregroundStyle(Theme.text)
+                    Spacer()
+                    Text("Change")
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.meta)
+                }
+                .padding(.horizontal, 13)
+                .frame(minHeight: Metrics.minTapTarget)
+                .background(
+                    Theme.inputFill,
+                    in: RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            }
+            if let classification = LessonContentProvenance(
+                rawValue: flow.draft.contentProvenance
+            ) {
+                Text(classification.detail)
+                    .font(WCFont.sans(12.5))
+                    .foregroundStyle(Theme.textMuted)
+            } else {
+                MetaText(
+                    text: "CHOOSE ONE BEFORE CREATING CARDS",
                     font: WCFont.mono(9.5), tracking: 0.7, color: Theme.scoreLow
                 )
             }
@@ -688,6 +759,15 @@ struct PublicOnboardingView: View {
                             title: source.title,
                             meta: "VERSION \(source.version) · \(source.status.uppercased()) · \(source.characterCount) CHARACTERS"
                         )
+                        if source.importPath == "lesson" {
+                            MetaText(
+                                text: LessonContentProvenance(
+                                    rawValue: source.contentProvenance ?? ""
+                                )?.label ?? "Content origin not set",
+                                font: WCFont.mono(9.5), tracking: 0.5,
+                                color: Theme.metaFaint, uppercased: true
+                            )
+                        }
                         if let action = savedImportAction(source) {
                             Button(action) { flow.openSavedImport(source) }
                                 .buttonStyle(.plain)

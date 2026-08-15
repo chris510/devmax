@@ -406,6 +406,12 @@ PROPOSAL_NEEDS_ATTENTION = "needs_attention"
 PROPOSAL_EXCLUDED = "excluded"
 PROPOSAL_CONFIRMED = "confirmed"
 
+CONTENT_PROVENANCE_LEGACY_UNSPECIFIED = "legacy_unspecified"
+CONTENT_PROVENANCE_EXACT_SOURCE_EXCERPT = "exact_source_excerpt"
+CONTENT_PROVENANCE_LEARNER_NOTES = "learner_notes"
+CONTENT_PROVENANCE_COACHED_CORRECTION = "coached_correction"
+CONTENT_PROVENANCE_AI_DERIVED_SUMMARY = "ai_derived_summary"
+
 
 class MaterialSource(SQLModel, table=True):
     __tablename__ = "material_sources"
@@ -434,6 +440,9 @@ class MaterialSource(SQLModel, table=True):
     # Provenance only. The import worker never fetches this URL; source_text is
     # still the exact authority transmitted for extraction and scoring.
     source_url: str = ""
+    # What the pasted content is, independently from its genre and attribution.
+    # Existing rows remain explicitly unclassified until the learner chooses.
+    content_provenance: str = CONTENT_PROVENANCE_LEGACY_UNSPECIFIED
     original_filename: str = ""
     mime_type: str = "text/plain"
     import_path: str = "topics"

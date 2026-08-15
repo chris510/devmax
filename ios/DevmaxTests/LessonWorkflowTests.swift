@@ -29,6 +29,7 @@ final class LessonWorkflowTests: XCTestCase {
             id: UUID(), title: "Networking 101", kind: "article", version: 1,
             status: "ready", importPath: "lesson", intent: "already_studied",
             originalFilename: "", sourceUrl: "https://example.com/networking",
+            contentProvenance: LessonContentProvenance.learnerNotes.rawValue,
             characterCount: 876, cleanCount: topics.filter(\.isClean).count,
             attentionCount: topics.filter { !$0.isClean }.count, error: "",
             planDraftId: nil, comparison: [:], topics: topics,
@@ -79,7 +80,8 @@ final class LessonWorkflowTests: XCTestCase {
         let request = MaterialImportRequest(
             title: "Consistent hashing", sourceText: String(repeating: "source ", count: 40),
             originalFilename: "", mimeType: "text/plain", kind: "documentation",
-            sourceUrl: "https://example.com/lesson", importPath: "lesson",
+            sourceUrl: "https://example.com/lesson",
+            contentProvenance: "exact_source_excerpt", importPath: "lesson",
             intent: "already_studied", requestedWeeks: 12,
             weeklyCapacityMinutes: 480, mode: "flexible", deadline: nil,
             previousVersionId: nil
@@ -90,6 +92,7 @@ final class LessonWorkflowTests: XCTestCase {
         )
         XCTAssertEqual(object["kind"] as? String, "documentation")
         XCTAssertEqual(object["source_url"] as? String, "https://example.com/lesson")
+        XCTAssertEqual(object["content_provenance"] as? String, "exact_source_excerpt")
         XCTAssertEqual(object["import_path"] as? String, "lesson")
         XCTAssertNotNil(object["source_text"])
     }
@@ -109,7 +112,23 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertEqual(draft.guideText, "kept")
         XCTAssertEqual(draft.sourceURL, "")
         XCTAssertEqual(draft.sourceType, "guide")
+        XCTAssertEqual(
+            draft.contentProvenance, LessonContentProvenance.legacyUnspecified
+        )
         XCTAssertEqual(draft.importPath, "topics")
+    }
+
+    @MainActor
+    func testLessonCannotStartUntilContentOriginIsExplicit() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "lesson-add")
+        flow.draft.guideText = String(repeating: "source ", count: 40)
+        flow.draft.contentProvenance = LessonContentProvenance.legacyUnspecified
+
+        XCTAssertFalse(flow.lessonIsValid)
+
+        flow.draft.contentProvenance = LessonContentProvenance.learnerNotes.rawValue
+
+        XCTAssertTrue(flow.lessonIsValid)
     }
 
     @MainActor
@@ -133,6 +152,7 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertEqual(exported["export_id"] as? String, "sha256:mock-writeback-export")
         let source = try XCTUnwrap(exported["source"] as? [String: Any])
         XCTAssertTrue((source["id"] as? String)?.hasPrefix("devmax:source:") == true)
+        XCTAssertNil(source["content_provenance"])
         let concepts = try XCTUnwrap(exported["concepts"] as? [[String: Any]])
         XCTAssertEqual(concepts.count, 1)
         let candidates = try XCTUnwrap(

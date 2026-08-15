@@ -127,7 +127,9 @@ protocol DevmaxAPI {
         _ id: UUID, topic: String?, answerAnchor: String?, action: String,
         mergeInto: UUID?
     ) async throws -> MaterialTopic
-    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation
+    func confirmMaterial(
+        _ id: UUID, topics: [UUID], contentProvenance: String?
+    ) async throws -> MaterialConfirmation
     func lessonProgress(_ id: UUID) async throws -> LessonProgress
     func distillLesson(_ id: UUID) async throws -> MaterialArtifacts
     func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts
@@ -213,7 +215,9 @@ extension DevmaxAPI {
         _ id: UUID, topic: String?, answerAnchor: String?, action: String,
         mergeInto: UUID?
     ) async throws -> MaterialTopic { throw APIError.status(501) }
-    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
+    func confirmMaterial(
+        _ id: UUID, topics: [UUID], contentProvenance: String?
+    ) async throws -> MaterialConfirmation {
         throw APIError.status(501)
     }
     func lessonProgress(_ id: UUID) async throws -> LessonProgress { throw APIError.status(501) }
@@ -558,11 +562,19 @@ struct LiveAPI: DevmaxAPI {
         return try Self.decoder.decode(MaterialTopic.self, from: data)
     }
 
-    func confirmMaterial(_ id: UUID, topics: [UUID]) async throws -> MaterialConfirmation {
-        struct Body: Encodable { let selectedTopicIds: [UUID] }
+    func confirmMaterial(
+        _ id: UUID, topics: [UUID], contentProvenance: String?
+    ) async throws -> MaterialConfirmation {
+        struct Body: Encodable {
+            let selectedTopicIds: [UUID]
+            let contentProvenance: String?
+        }
         return try await post(
             "materials/imports/\(id)/confirm", MaterialConfirmation.self,
-            body: Body(selectedTopicIds: topics)
+            body: Body(
+                selectedTopicIds: topics,
+                contentProvenance: contentProvenance
+            )
         )
     }
 

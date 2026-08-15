@@ -9,6 +9,7 @@ struct PublicSetupDraft: Codable, Equatable {
     /// the lesson text the learner intentionally pasted.
     var sourceURL = ""
     var sourceType = "guide"
+    var contentProvenance = LessonContentProvenance.legacyUnspecified
     var importPath = "topics"
     var intent = "already_studied"
     var requestedWeeks = 12
@@ -28,6 +29,9 @@ struct PublicSetupDraft: Codable, Equatable {
         mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType) ?? "text/plain"
         sourceURL = try values.decodeIfPresent(String.self, forKey: .sourceURL) ?? ""
         sourceType = try values.decodeIfPresent(String.self, forKey: .sourceType) ?? "guide"
+        contentProvenance = try values.decodeIfPresent(
+            String.self, forKey: .contentProvenance
+        ) ?? LessonContentProvenance.legacyUnspecified
         importPath = try values.decodeIfPresent(String.self, forKey: .importPath) ?? "topics"
         intent = try values.decodeIfPresent(String.self, forKey: .intent) ?? "already_studied"
         requestedWeeks = try values.decodeIfPresent(Int.self, forKey: .requestedWeeks) ?? 12

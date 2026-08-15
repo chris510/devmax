@@ -92,6 +92,19 @@ curl -sS -X POST \
 The distillation endpoint is deterministic and idempotent. It uses confirmed concept
 grounding plus unaided grade evidence, not raw conversations.
 
+### Content provenance
+
+Lesson imports classify the pasted content independently from attribution URL and source
+genre. New lessons must choose exactly one of `exact_source_excerpt`, `learner_notes`,
+`coached_correction`, or `ai_derived_summary` before confirmation can create cards. Rows
+created before this field existed use `legacy_unspecified`; that value is never inferred and
+cannot cross the lesson confirmation boundary until the learner chooses a classification.
+
+The material and artifact APIs expose `content_provenance`. The strict, content-addressed
+writeback bundle remains byte/key-compatible schema v1 and therefore does not include the new
+field. Moving it into the portable bundle requires one coordinated schema-v2 release of both
+the Devmax producer and second-brain importer; neither side should ship that contract alone.
+
 ## Prepare a second-brain writeback
 
 Preview every concept note without touching the vault:
