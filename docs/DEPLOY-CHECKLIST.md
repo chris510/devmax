@@ -221,9 +221,14 @@ not measured. `scripts/effort_sweep.py` is hardwired to `settings.scoring_effort
 
 **Scoring Contract V2 is implemented and currently rolled back to V1.** The
 first Claude stabilization window produced two surplus-probe contract failures
-in one session, with every write correctly left untouched. Keep
-`SCORING_CONTRACT_VERSION=1` until parser-policy version 2 passes the offline
-matrix and a separately approved Claude-only reactivation window. Activation
+in one session. Parser-policy version 2 fixed that defect, but the 2026-08-15
+reactivation then produced one `max_tokens`/invalid-JSON response at the old
+2,048-token ceiling out of five scoring calls. Every failed call left product
+state untouched and its physical-call audit was retained. V2 now shares V1's
+established 8,000-token scoring ceiling, which invalidates prior OpenAI
+qualification fingerprints and raises their explicit worst-case spend
+preflight. Keep `SCORING_CONTRACT_VERSION=1` until the updated offline matrix
+passes and a separately approved Claude-only reactivation window. Activation
 changes only that setting; do not combine it with a model or provider change.
 Rollback first sets
 `OPENAI_V2_SCORING_MODE=off`, then returns the contract setting to `1` in the

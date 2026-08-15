@@ -361,7 +361,7 @@ def test_v2_recall_kind_uses_the_production_prompt_schema_and_cap(tmp_path) -> N
     assert prepared.completion["rubric"] == llm.SCORING_V2_RUBRIC
     assert prepared.completion["schema"] == llm.SCORE_V2_SCHEMA
     assert prepared.completion["retry"] is False
-    assert request["max_output_tokens"] == 2048
+    assert request["max_output_tokens"] == llm.SCORING_OUTPUT_TOKEN_LIMIT
     assert request["text"]["format"]["name"] == "devmax_recall_score_v2"
     assert request["text"]["format"]["schema"] == llm.SCORE_V2_SCHEMA
     assert request["safety_identifier"] == V2_EVAL_SAFETY_IDENTIFIER

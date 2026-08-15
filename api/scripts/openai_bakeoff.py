@@ -92,7 +92,7 @@ DEFAULT_MODEL = OPENAI_V2_LUNA_MODEL
 DEFAULT_EFFORT = "low"
 DEFAULT_OUTPUT_CAPS = {
     "scoring": 2048,
-    "v2-recall": 2048,
+    "v2-recall": llm.SCORING_OUTPUT_TOKEN_LIMIT,
     "reattempt": 512,
     "evidence": 512,
 }

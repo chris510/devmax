@@ -639,6 +639,10 @@ device:
 7. Inspect logs for the `score` and `coaching` model calls, including model,
    latency, cache/input/output tokens, and invalid structured responses. No live
    canary beyond the answers you intentionally submit is part of deployment.
+   A scoring response ending with `stop_reason=max_tokens` is an activation
+   failure even when a manual resubmission succeeds: roll back, preserve the
+   failed-call audit, and verify the fingerprinted 8,000-token scoring ceiling
+   before another window.
 
 Immediate rollback is configuration-only: first set
 `OPENAI_V2_SCORING_MODE=off`, then set `SCORING_CONTRACT_VERSION=1` in the same

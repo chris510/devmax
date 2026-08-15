@@ -1,7 +1,9 @@
 # Scoring Contract V2 — recall plus qualitative coaching
 
-**Status:** implemented; production returned to V1 during Claude stabilization
-after the first V2 activation exposed a surplus-probe parser failure.
+**Status:** implemented; production returned to V1 during Claude stabilization.
+The first activation exposed a surplus-probe parser failure; the second proved
+that the original 2,048-token V2 output allowance could truncate low-effort
+reasoning before the strict JSON response completed.
 
 **Decision date:** 2026-08-10.
 
@@ -23,6 +25,17 @@ surplus candidate or insufficiency claim when the server completes. Strict
 schema, Recall, completion-text, missing-required-candidate, transaction, and
 cap checks remain fail-closed. This amendment increments the separately
 fingerprinted V2 parser-policy version and does not authorize reactivation.
+
+**Amended 2026-08-15** for scoring output headroom. In the second Claude-only
+stabilization window, one initial scoring call ended at exactly 2,048 output
+tokens with `stop_reason=max_tokens`; the fail-closed transaction returned 503
+and a separately submitted retry completed normally. V2 now uses the same
+8,000-token ceiling already established by V1 scoring. This changes no prompt,
+schema, model, effort, call count, retry policy, product decision, or scheduler
+rule. It does change the fingerprinted request and the paid-evaluation
+worst-case ceiling, so every previous provider qualification remains invalid.
+Production returned to V1 pending offline verification and another separately
+approved Claude-only stabilization window.
 
 This document owns the target scoring contract, its historical-data boundary,
 the migration of every score consumer, and the release gates for activating it.
@@ -246,6 +259,9 @@ best-of-N selection, and semantic retries. The request budget is structural:
 
 Scoring and qualitative calls have separate purpose tags and token/cost meters.
 Their structured schemas use bounded feedback fields and explicit output caps.
+The scoring cap is 8,000 tokens for both V1 and V2; it is a truncation ceiling,
+not expected output usage. V2 still makes exactly one physical scoring call per
+submitted turn and performs no parse or semantic retry.
 No implementation may hide a new provider call inside Coverage, Today, push,
 history, focus selection, or migration. Exact price claims require separately
 approved live token counts; this contract promises call bounds, not a price

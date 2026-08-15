@@ -60,6 +60,13 @@ FOLLOW_UP_HIGH = 3
 # would have to be migrated in lockstep with this line.
 MAX_SCORED_FOLLOW_UPS = 2
 
+# Both scoring contracts need enough room for low-effort reasoning plus the
+# bounded structured response. V2 initially shipped with 2,048, but a live
+# Sonnet response consumed that entire allowance and was truncated before valid
+# JSON could be returned. V1's established 8,000-token ceiling has the required
+# headroom without changing the one-call/no-semantic-retry contract.
+SCORING_OUTPUT_TOKEN_LIMIT = 8_000
+
 # Durable lesson prompts have one stable label per learning depth. They are
 # preview/export artifacts; scheduled recall still uses Card.canonical_question.
 LESSON_RECALL_LEVELS = (
@@ -1453,7 +1460,7 @@ def build_score_answer_completion(
         "rubric": SCORING_RUBRIC,
         "user_content": "\n".join(t for t in transcript if t is not None),
         "schema": SCORE_SCHEMA,
-        "max_tokens": 8000,
+        "max_tokens": SCORING_OUTPUT_TOKEN_LIMIT,
     }
 
 
@@ -1494,7 +1501,7 @@ def build_score_v2_completion(
         "rubric": SCORING_V2_RUBRIC,
         "user_content": "\n".join(t for t in transcript if t is not None),
         "schema": SCORE_V2_SCHEMA,
-        "max_tokens": 2048,
+        "max_tokens": SCORING_OUTPUT_TOKEN_LIMIT,
         "retry": False,
     }
 

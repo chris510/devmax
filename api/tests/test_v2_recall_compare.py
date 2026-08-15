@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app.services import llm
 from scripts import (
     openai_bakeoff,
     v2_recall_compare,
@@ -83,7 +84,7 @@ def prepared_call(
     *,
     model: str,
     effort: str = "low",
-    output_cap: int = 2048,
+    output_cap: int = llm.SCORING_OUTPUT_TOKEN_LIMIT,
 ):
     if model.startswith("claude-"):
         return v2_recall_sweep.prepare_cases(
@@ -460,7 +461,7 @@ def four_runs(
             )
         ],
         rates=claude_manifest_rates,
-        output_allowance=2048,
+        output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
     )
     luna_paths = []
     for index, recall in enumerate(luna_recalls, 1):
@@ -481,7 +482,7 @@ def four_runs(
                     )
                 ],
                 rates=luna_manifest_rates,
-                output_allowance=2048,
+                output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
             )
         )
     return (
@@ -872,7 +873,7 @@ def test_text_review_covers_all_successful_cases_and_exactly_one_per_run(
         write_jsonl(
             tmp_path / "two-cases.jsonl",
             [first, second],
-            output_allowance=2048,
+            output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
         ),
         label="luna",
         provider="luna",
@@ -1428,7 +1429,7 @@ def test_frozen_binding_reparses_hand_edited_follow_up_policy_fields(
         write_jsonl(
             tmp_path / "hand-edited-follow-up.jsonl",
             [record],
-            output_allowance=2048,
+            output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
         ),
         label="luna",
         provider="luna",
@@ -1454,7 +1455,7 @@ def test_artifact_reader_does_not_coerce_non_string_follow_up_text(
             write_jsonl(
                 tmp_path / "non-string-follow-up.jsonl",
                 [record],
-                output_allowance=2048,
+                output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
             ),
             label="luna",
             provider="luna",
@@ -1473,7 +1474,9 @@ def test_frozen_binding_rejects_a_manifest_and_row_relabel(
     record["case"] = "relabelled case"
     run = v2_recall_compare.load_evidence(
         write_jsonl(
-            tmp_path / "relabelled.jsonl", [record], output_allowance=2048
+            tmp_path / "relabelled.jsonl",
+            [record],
+            output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
         ),
         label="luna",
         provider="luna",
@@ -1510,7 +1513,7 @@ def test_frozen_binding_rejects_swapped_case_results(
         write_jsonl(
             tmp_path / "swapped.jsonl",
             [first, second],
-            output_allowance=2048,
+            output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
         ),
         label="luna",
         provider="luna",
@@ -1535,7 +1538,9 @@ def test_frozen_binding_rejects_a_tampered_expected_label_mapping(
     )
     run = v2_recall_compare.load_evidence(
         write_jsonl(
-            tmp_path / "label-tamper.jsonl", [record], output_allowance=2048
+            tmp_path / "label-tamper.jsonl",
+            [record],
+            output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
         ),
         label="luna",
         provider="luna",
@@ -1637,7 +1642,7 @@ def test_encoded_invalid_responses_are_counted_and_fail_the_gate(tmp_path: Path)
     invalid_path = write_jsonl(
         tmp_path / "luna-invalid.jsonl",
         [bound_failure_record(case, model="gpt-5.6-luna", replica="4")],
-        output_allowance=2048,
+        output_allowance=llm.SCORING_OUTPUT_TOKEN_LIMIT,
     )
     invalid = v2_recall_compare.load_evidence(
         invalid_path, label="luna-invalid", provider="luna"

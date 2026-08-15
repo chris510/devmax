@@ -249,6 +249,13 @@ request count, valid-response rate, latency, follow-up distribution, Recall
 distribution, and scheduler-bucket distribution without adding learner-content
 analytics. There is no OpenAI shadow during this stage.
 
+The 2026-08-15 reactivation was rolled back after one of five scoring calls hit
+the original 2,048-token ceiling and returned truncated JSON. The two completed
+sessions remained transactionally correct and the earlier surplus-candidate
+failure did not recur. Parser-policy version 2 now pairs with the established
+8,000-token scoring ceiling. Because the output cap is part of the qualification
+fingerprint and spend preflight, all prior Luna evidence remains ineligible.
+
 A written stabilization sign-off is required before Stage 2. A provider canary
 must not become a way to debug the V2 product contract.
 
