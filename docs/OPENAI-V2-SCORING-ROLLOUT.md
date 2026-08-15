@@ -32,6 +32,13 @@ or acceptance window. If V2 is not active and stable on Claude, this rollout
 stops. Provider rollback returns scoring to **Claude V2**, not to V1; a V2
 contract rollback remains the separate procedure owned by the V2 specification.
 
+The first Claude V2 stabilization window was rolled back on 2026-08-14 after
+two otherwise valid responses in one session supplied surplus probe candidates
+outside the server's legal band. Parser-policy version 2 preserves the same
+turn decisions while ignoring those candidates. The version bump invalidates
+all earlier provider qualification fingerprints; Stage 1 must pass again on
+Claude before a new Stage 2/3 evidence set can authorize anything.
+
 ## Decision
 
 The only candidate OpenAI production path is Recall-only V2 scoring through
@@ -83,7 +90,9 @@ Claude fallback in primary mode:
 - strict-schema violation;
 - missing required usage/response metadata when the adapter cannot safely
   normalize the response; or
-- rejection by the production V2 parser, including illegal follow-up behavior.
+- rejection by the production V2 parser, including a missing candidate for a
+  server-required follow-up. A surplus candidate ignored by parser-policy
+  version 2 is a successful response, not a fallback-eligible failure.
 
 A schema-valid, parser-valid Recall result is never a technical failure,
 regardless of its numeral, feedback, disagreement with history, disagreement
@@ -663,7 +672,7 @@ reviewed and a new explicit decision is recorded.
 - a non-consented or non-allowlisted shadow;
 - retrying Luna, calling multiple Claude fallbacks, or choosing a favorable
   valid score;
-- changing SM-2, follow-up policy, trusted grounding, transaction boundaries,
+- changing SM-2, follow-up decisions, trusted grounding, transaction boundaries,
   or historical scores;
 - expanding beyond the owner UUID allowlist; or
 - claiming production or whole-account savings before the 30-day report.

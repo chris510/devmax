@@ -1,6 +1,7 @@
 # Scoring Contract V2 — recall plus qualitative coaching
 
-**Status:** approved product and architecture target; not active in production.
+**Status:** implemented; production returned to V1 during Claude stabilization
+after the first V2 activation exposed a surplus-probe parser failure.
 
 **Decision date:** 2026-08-10.
 
@@ -11,6 +12,17 @@ changes invariant 4, the follow-up truth table, the call budget, and the
 acceptance matrix below. **It does not begin activation.**
 `scoring_contract_version` stays 1 and V1 remains the runtime contract; the V2
 parser's tightened rules stay dark until the activation stage is complete.
+
+**Amended 2026-08-14** for server-owned probe-candidate tolerance. A live Claude
+V2 session returned an otherwise valid Recall result with an extra probe outside
+the 1–3 band twice. The fail-closed parser protected every write, but discarded
+the learner's answer and required another paid submission. The product decision
+is unchanged: Recall and `probes_used` still decide every turn. The parser now
+requires a candidate only when the server grants another turn and ignores a
+surplus candidate or insufficiency claim when the server completes. Strict
+schema, Recall, completion-text, missing-required-candidate, transaction, and
+cap checks remain fail-closed. This amendment increments the separately
+fingerprinted V2 parser-policy version and does not authorize reactivation.
 
 This document owns the target scoring contract, its historical-data boundary,
 the migration of every score consumer, and the release gates for activating it.
@@ -134,19 +146,19 @@ have already been answered (`probes_used`, which is `len(probes)`):
 
 | `probes_used` | Server action | Reason |
 | --- | --- | --- |
-| 0 | Recall decides: 0 complete with correction; 1–3 ask a scored follow-up prefaced "One more — "; 4–5 complete. `needs_more_evidence` must be false wherever a probe is forbidden. | The band rule, unchanged from V1: one clarification can distinguish partial retrieval from a missing essential link, and a wrong essential account is corrected rather than probed. |
-| 1 | `needs_more_evidence` decides: true asks the second scored follow-up, prefaced "Last one — "; false completes. | Past the band, only the model's own insufficiency claim earns another turn, and it must carry the probe that would settle it. |
-| 2 (`MAX_SCORED_FOLLOW_UPS`) | Complete only. `needs_more_evidence` must be false and the probe must be empty. | The cap. There is no turn left for a probe to be answered in. |
+| 0 | Recall decides: 0 complete with correction; 1–3 ask a scored follow-up prefaced "One more — "; 4–5 complete. A candidate is required for 1–3; any candidate or insufficiency claim outside the band is ignored. | The band rule, unchanged from V1: one clarification can distinguish partial retrieval from a missing essential link, and a wrong essential account is corrected rather than probed. |
+| 1 | `needs_more_evidence` decides: true asks the second scored follow-up, prefaced "Last one — "; false completes. A true claim requires the candidate that would settle it; a surplus candidate when false is ignored. | Past the band, only the model's own insufficiency claim earns another turn. |
+| 2 (`MAX_SCORED_FOLLOW_UPS`) | Complete only. Any surplus candidate or insufficiency claim is ignored. | The cap. There is no turn left for a probe to be answered in. |
 
 This preserves the implemented V1 lower-bound decision documented in
 `docs/DEVIATIONS.md`: a score of 0 is corrected rather than probed.
 
-The V2 parser is fail-closed on every cell: a missing or non-boolean
-`needs_more_evidence`, an insufficiency claim without a probe, a probe where the
-table forbids one, or an absent probe where the table requires one is an
-`LLMError`, not a coercion. Each scored turn's call sees every prior probe pair,
-so at most three scoring calls exist in a session and no retry selects between
-valid results.
+The V2 parser remains fail-closed on exact keys and types, Recall range, required
+completion text, and a missing candidate where the table grants another turn.
+A surplus candidate is not a turn and is not a reason to discard a valid score:
+the server ignores it and emits content-free telemetry. Each scored turn's call
+sees every prior probe pair, so at most three scoring calls exist in a session
+and no retry selects between valid results.
 
 ### Feedback and mastery summary
 
@@ -534,9 +546,10 @@ into one release.
 - The V2 response schema rejects `depth`, `boundaries`, `composite`, and
   model-supplied scheduler quality.
 - Follow-up truth table is exactly the table above: at `probes_used` 0, Recall
-  decides (0 no; 1–3 yes; 4–5 no) and `needs_more_evidence` must be false
-  wherever a probe is forbidden; at 1, `needs_more_evidence` decides; at 2,
-  complete only, with `needs_more_evidence` false and no probe.
+  decides (0 no; 1–3 yes; 4–5 no); at 1, `needs_more_evidence` decides; at 2,
+  completion is structural. A missing candidate for a granted turn fails
+  closed. A surplus candidate or insufficiency claim on a completing turn is
+  ignored, never shown, and cannot alter Recall or create another call.
 - A session cannot accept more than `MAX_SCORED_FOLLOW_UPS` scored follow-ups,
   including replay and concurrent-submission cases. Replay of the last answered
   turn returns the pending probe at every probe, not only the first.

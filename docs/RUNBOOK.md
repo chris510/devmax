@@ -623,10 +623,12 @@ device:
    final Recall band needed to prove both branches: `0–2` offers the existing
    re-attempt; `3–5` offers **Go one level deeper**. Follow-ups must match the
    amended truth table in `docs/SCORING-CONTRACT-V2-SPEC.md`: on the initial
-   answer a provisional `1–3` probes and `0`/`4–5` must not; after one answered
+   answer a provisional `1–3` probes and `0`/`4–5` completes; after one answered
    probe only `needs_more_evidence: true` probes again; at two answered probes
-   the turn always completes with `needs_more_evidence` false and no probe.
-   V2 is fail-closed, so any departure is a 503, not a quietly dropped probe.
+   the turn always completes. A missing candidate for a server-granted turn is
+   a 503. A surplus candidate or insufficiency claim on a completing turn is
+   ignored and logged without its text; confirm it cannot create a probe, alter
+   Recall, or add a provider call.
 5. Verify the new session row: `score = accuracy`, `depth IS NULL`,
    `boundaries IS NULL`, and `scoring_contract_version = 2`. Verify the card's
    `last_score = last_accuracy`, secondary axes are null, and

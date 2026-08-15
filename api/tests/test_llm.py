@@ -379,6 +379,7 @@ PROBE = "One more — missing link?"
 
 # The V2 contract in full. Turn 1 is decided by the band and `needs_more_evidence`
 # may say either thing; past it the flag decides alone; at the cap nothing probes.
+# Surplus candidate text is ignored wherever the server decides to complete.
 @pytest.mark.parametrize(
     ("probes", "score", "needs", "probe", "expected"),
     [
@@ -390,10 +391,16 @@ PROBE = "One more — missing link?"
         (NO_PROBES, 2, True, PROBE, "follow_up"),
         (NO_PROBES, 4, False, "", "complete"),
         (NO_PROBES, 5, False, "", "complete"),
+        (NO_PROBES, 0, False, PROBE, "complete"),
+        (NO_PROBES, 0, True, "", "complete"),
+        (NO_PROBES, 4, True, PROBE, "complete"),
         (ONE_PROBE, 2, True, PROBE, "follow_up"),
         (ONE_PROBE, 5, True, PROBE, "follow_up"),
         (ONE_PROBE, 2, False, "", "complete"),
+        (ONE_PROBE, 2, False, PROBE, "complete"),
         (AT_CAP, 2, False, "", "complete"),
+        (AT_CAP, 2, True, "", "complete"),
+        (AT_CAP, 2, True, PROBE, "complete"),
     ],
 )
 async def test_v2_follow_up_truth_table(
@@ -412,6 +419,7 @@ async def test_v2_follow_up_truth_table(
 
     assert result.status == expected
     assert result.scoring_contract_version == 2
+    assert len(calls) == 1
     assert calls[0]["schema"] == llm.SCORE_V2_SCHEMA
     assert calls[0]["retry"] is False
 
@@ -493,26 +501,17 @@ async def test_v2_at_the_cap_cannot_create_another_scored_turn(
     assert result.score == 2
 
 
-# Every departure from the table above, in both directions. V2 is still dark, so a
-# violation must be loud rather than silently coerced the way V1 coerces it.
+# Missing evidence for a server-required turn is still a hard contract failure.
+# Surplus candidates are covered by the truth table above and cannot create a turn.
 @pytest.mark.parametrize(
     ("probes", "score", "needs", "probe"),
     [
         # Turn 1: the band demanded a probe and none came.
         (NO_PROBES, 2, False, ""),
         (NO_PROBES, 2, True, ""),
-        # Turn 1: outside the band, a probe is forbidden — and so is the claim.
-        (NO_PROBES, 0, False, "One more — forbidden"),
-        (NO_PROBES, 4, False, "One more — forbidden"),
-        (NO_PROBES, 0, True, ""),
-        (NO_PROBES, 4, True, "One more — forbidden"),
-        # Mid-session: the flag alone decides, and must agree with the probe.
-        (ONE_PROBE, 2, False, "Last one — forbidden"),
+        # Mid-session: an insufficiency claim must carry the candidate that
+        # would settle it.
         (ONE_PROBE, 2, True, ""),
-        # At the cap: no probe, and no claim that one is needed.
-        (AT_CAP, 2, False, "Last one — forbidden"),
-        (AT_CAP, 2, True, "Last one — forbidden"),
-        (AT_CAP, 2, True, ""),
     ],
 )
 async def test_v2_invalid_follow_up_policy_fails_closed(
@@ -527,6 +526,30 @@ async def test_v2_invalid_follow_up_policy_fails_closed(
         await llm.score_answer(
             **SCORE_ARGS, probes=probes, scoring_contract_version=2
         )
+
+
+async def test_v2_surplus_candidate_is_ignored_with_content_free_telemetry(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    candidate = "One more — learner-specific text must not enter logs"
+    stub_completion(monkeypatch, recalled(4, candidate, needs=True))
+
+    with caplog.at_level("WARNING", logger="app.services.llm"):
+        result = await llm.score_answer(
+            **SCORE_ARGS, probes=NO_PROBES, scoring_contract_version=2
+        )
+
+    assert result.status == "complete"
+    message = next(
+        record.getMessage()
+        for record in caplog.records
+        if "event=surplus_probe_candidate_ignored" in record.getMessage()
+    )
+    assert "reason=outside_initial_band" in message
+    assert "recall=4" in message
+    assert "probes_used=0" in message
+    assert "candidate_present=True" in message
+    assert candidate not in message
 
 
 async def test_qualitative_coaching_is_unscored_and_no_retry(

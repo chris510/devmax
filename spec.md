@@ -355,6 +355,12 @@ Rules to encode in the prompt:
   - `0 < probes_used < MAX_SCORED_FOLLOW_UPS`: probe again only if
     `needs_more_evidence` is true.
   - `probes_used == MAX_SCORED_FOLLOW_UPS`: always `complete`.
+- `follow_up_question` is a candidate, not permission to extend the session.
+  A candidate is required when the server's rule grants another scored turn.
+  A surplus candidate or insufficiency claim is ignored when Recall or the cap
+  requires completion, and is recorded only as content-free contract telemetry.
+  This preserves the otherwise valid score and answer without letting model text
+  widen the band or exceed the cap.
 - **Maximum `MAX_SCORED_FOLLOW_UPS` (2) scored follow-ups per session.** The cap
   is structural: both parsers enforce it and `submit_answer` re-checks it at the
   write site, so a prompt alone can never extend a session. A session may carry

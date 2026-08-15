@@ -303,6 +303,10 @@ def test_qualification_fingerprint_changes_with_response_policy_versions(
     assert scoring_provider.qualification_fingerprint(COMPLETION) != original
 
 
+def test_current_v2_parser_policy_version_records_candidate_tolerance() -> None:
+    assert scoring_provider.V2_PARSER_POLICY_VERSION == 2
+
+
 def test_qualification_fingerprint_is_a_stable_sha256_digest() -> None:
     first = scoring_provider.qualification_fingerprint(COMPLETION)
     reordered_schema = {
@@ -316,7 +320,7 @@ def test_qualification_fingerprint_is_a_stable_sha256_digest() -> None:
     }
 
     assert len(first) == 64
-    assert first == "32db5c24e36ebb387bf3e9cb9853a7490974d1b8b3b4acb2ebbd77c5d58ac3e8"
+    assert first == "9c49b518396dba543bdcf346f620313065c384184b0df1dd83ad1d2c7e193bf3"
     assert first == scoring_provider.qualification_fingerprint(reordered_schema)
     assert first == scoring_provider.qualification_fingerprint(COMPLETION)
 
