@@ -146,4 +146,68 @@ final class LessonWorkflowTests: XCTestCase {
 
         XCTAssertNil(artifacts.writebackBundle)
     }
+
+    func testImportProgressUsesRealServerStateAndElapsedTime() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let value = ImportProgressPresentation(
+            status: "processing", startedAt: now.addingTimeInterval(-72),
+            checkedAt: now.addingTimeInterval(-4), now: now
+        )
+
+        XCTAssertEqual(value.title, "Reading and checking the source")
+        XCTAssertEqual(value.elapsedLabel, "WORKING · 1M 12S")
+        XCTAssertEqual(value.checkedLabel, "CHECKED 4S AGO")
+    }
+
+    func testImportProgressNeverInventsCompletionPercentage() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let value = ImportProgressPresentation(
+            status: "pending", startedAt: now.addingTimeInterval(-8),
+            checkedAt: nil, now: now
+        )
+
+        XCTAssertEqual(value.title, "Saved and waiting to start")
+        XCTAssertEqual(value.elapsedLabel, "WORKING · 8S")
+        XCTAssertEqual(value.checkedLabel, "CONNECTING")
+        XCTAssertFalse(value.elapsedLabel.contains("percent"))
+    }
+
+    @MainActor
+    func testRetryReconcilesAJobThatAlreadyFinished() async {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "extract-error")
+        flow.draft.sourceID = UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
+
+        await flow.retryImport()
+
+        XCTAssertEqual(flow.step, .importReady)
+        XCTAssertEqual(flow.job?.status, "ready")
+        XCTAssertNotNil(flow.lastImportCheckedAt)
+    }
+
+    @MainActor
+    func testForegroundRefreshRoutesFinishedImportWithoutRetrying() async {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "extract-error")
+        flow.draft.sourceID = UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
+
+        await flow.refreshActiveImport()
+
+        XCTAssertEqual(flow.step, .importReady)
+        XCTAssertEqual(flow.job?.status, "ready")
+        XCTAssertNotNil(flow.lastImportCheckedAt)
+    }
+
+    @MainActor
+    func testSavedReadyImportCanReopenConceptReview() async throws {
+        let api = MockAPI()
+        let source = try await api.materialImport(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
+        )
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+
+        flow.openSavedImport(source)
+
+        XCTAssertEqual(flow.step, .importReady)
+        XCTAssertEqual(flow.job?.id, source.id)
+        XCTAssertEqual(flow.selectedTopics, source.cleanTopicIDs)
+    }
 }

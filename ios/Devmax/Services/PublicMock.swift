@@ -68,9 +68,13 @@ extension MockAPI {
     func materialImports() async throws -> [MaterialImport] { [try await materialImport(Self.sourceID)] }
 
     func materialImport(_ id: UUID) async throws -> MaterialImport {
-        MaterialImport(
+        let route = await MainActor.run { DebugFlags.shared.route }
+        let status = ["extracting", "import-background"].contains(route)
+            ? "processing"
+            : "ready"
+        return MaterialImport(
             id: id, title: "Contracts — formation", kind: "guide", version: 1,
-            status: "ready", importPath: "topics", intent: "already_studied",
+            status: status, importPath: "topics", intent: "already_studied",
             originalFilename: "contracts.md", characterCount: 1284, cleanCount: 3,
             attentionCount: 0, error: "", planDraftId: nil,
             comparison: ["added": 2, "changed": 1, "removed": 0, "unchanged": 3],

@@ -20,6 +20,7 @@ private enum LessonSourceKind: String, CaseIterable, Identifiable {
 }
 
 struct PublicOnboardingView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var flow: PublicOnboardingState
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var plan: StudyPlanState
@@ -68,6 +69,13 @@ struct PublicOnboardingView: View {
                 flow.resumeAfterSignIn(app: app)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard DebugFlags.shared.route.isEmpty,
+                  phase == .active,
+                  [.importing, .importFailed].contains(flow.step)
+            else { return }
+            Task { await flow.refreshActiveImport() }
+        }
         .sheet(item: $flow.editingTopic) { topic in
             TopicEditSheet(
                 topic: topic,
@@ -98,6 +106,12 @@ struct PublicOnboardingView: View {
             .presentationBackground(Theme.surface)
         }
         .task(id: flow.step.rawValue) {
+            if flow.step == .importing, flow.job == nil,
+               DebugFlags.shared.useMockAPI,
+               let item = try? await flow.api.materialImports().first {
+                flow.job = item
+                flow.routeImportResult()
+            }
             if [.importReady, .topics].contains(flow.step), flow.job == nil,
                let item = try? await flow.api.materialImports().first
             {
@@ -243,9 +257,25 @@ struct PublicOnboardingView: View {
     }
 
     private var importing: some View {
-        PublicPage(kicker: "SAVED · PROCESSING", title: "Your guide is safe.") {
-            Text("Devmax is reading the source structure and preparing proposals. A long guide may take a while.").publicBody()
-            PublicMaterialCard(title: flow.preparedTitle, meta: "\(flow.draft.guideText.count) CHARACTERS · SAVED TO YOUR ACCOUNT")
+        PublicPage(
+            kicker: "SAVED · PROCESSING",
+            title: flow.isLessonDraft ? "Your lesson is safe." : "Your guide is safe."
+        ) {
+            Text(
+                "Devmax is reading the source structure and preparing proposals "
+                    + "for your review. A long source may take a while."
+            )
+            .publicBody()
+            PublicMaterialCard(
+                title: flow.job?.title ?? flow.preparedTitle,
+                meta: "\(flow.job?.characterCount ?? flow.draft.guideText.count) "
+                    + "CHARACTERS · SAVED TO YOUR ACCOUNT"
+            )
+            ImportProgressStatus(
+                status: flow.job?.status,
+                startedAt: flow.importStartedAt ?? flow.job?.updatedAt ?? Date(),
+                checkedAt: flow.lastImportCheckedAt
+            )
             PublicNote("You can leave this screen or close the app. Processing continues, and the result will remain in Study material.")
         } footer: {
             SecondaryButton(title: "Go to Today") { leaveToToday() }
@@ -253,11 +283,26 @@ struct PublicOnboardingView: View {
     }
 
     private var importFailed: some View {
-        PublicPage(kicker: "IMPORT PAUSED", title: "The guide is still here.") {
+        PublicPage(
+            kicker: "PROCESSING STOPPED",
+            title: flow.isLessonDraft ? "Your lesson is still here." : "The guide is still here."
+        ) {
             Text(flow.error.isEmpty ? "Processing didn't finish. No topics or cards were created." : flow.error).publicBody()
-            PublicMaterialCard(title: flow.preparedTitle, meta: "FULL SOURCE RETAINED · NOTHING CREATED")
+            PublicMaterialCard(
+                title: flow.job?.title ?? flow.preparedTitle,
+                meta: "FULL SOURCE RETAINED · NOTHING CREATED"
+            )
+            PublicNote(
+                "Retry checks the saved job first. If processing already finished "
+                    + "in the background, Devmax will take you straight to the result."
+            )
         } footer: {
-            PrimaryButton(title: "Try processing again") { Task { await flow.retryImport() } }
+            PrimaryButton(
+                title: flow.busy ? "Checking status…" : "Try processing again",
+                enabled: !flow.busy
+            ) {
+                Task { await flow.retryImport() }
+            }
             Button(flow.isLessonDraft ? "Back to my lesson" : "Back to my guide") {
                 flow.step = flow.isLessonDraft ? .lesson : .guide
             }.publicSecondary()
@@ -584,6 +629,13 @@ struct PublicOnboardingView: View {
                             title: source.title,
                             meta: "VERSION \(source.version) · \(source.status.uppercased()) · \(source.characterCount) CHARACTERS"
                         )
+                        if let action = savedImportAction(source) {
+                            Button(action) { flow.openSavedImport(source) }
+                                .buttonStyle(.plain)
+                                .font(TypeRole.secondaryAction)
+                                .foregroundStyle(Theme.accent)
+                                .frame(minHeight: Metrics.minTapTarget)
+                        }
                         HStack(spacing: 18) {
                             Button("Import updated version") { flow.beginGuideUpdate(source) }
                             Button("Remove") { Task { await flow.deleteMaterial(source.id) } }
@@ -615,6 +667,16 @@ struct PublicOnboardingView: View {
                 decrement: { binding.wrappedValue = Swift.max(min, binding.wrappedValue - 1) },
                 increment: { binding.wrappedValue = Swift.min(max, binding.wrappedValue + 1) }
             )
+        }
+    }
+
+    private func savedImportAction(_ source: MaterialImport) -> String? {
+        switch source.status {
+        case "pending", "processing": "View progress"
+        case "ready", "needs_attention":
+            source.importPath == "lesson" ? "Review concepts" : "Review proposals"
+        case "failed": "Review and retry"
+        default: nil
         }
     }
 
@@ -688,6 +750,107 @@ struct PublicOnboardingView: View {
         PublicSetupStore.clear()
         await auth.markOnboardingComplete()
         await app.loadToday()
+    }
+}
+
+struct ImportProgressPresentation: Equatable {
+    let status: String
+    let elapsedSeconds: Int
+    let checkedSecondsAgo: Int?
+
+    init(status: String?, startedAt: Date, checkedAt: Date?, now: Date) {
+        self.status = status ?? "starting"
+        elapsedSeconds = max(0, Int(now.timeIntervalSince(startedAt)))
+        checkedSecondsAgo = checkedAt.map { max(0, Int(now.timeIntervalSince($0))) }
+    }
+
+    var title: String {
+        switch status {
+        case "pending": "Saved and waiting to start"
+        case "processing": "Reading and checking the source"
+        default: "Starting safely"
+        }
+    }
+
+    var detail: String {
+        switch status {
+        case "pending": "Your lesson is queued; no cards exist yet."
+        case "processing": "Devmax is preparing proposals for your review."
+        default: "Saving the lesson before source analysis begins."
+        }
+    }
+
+    var elapsedLabel: String { "WORKING · \(Self.shortDuration(elapsedSeconds))" }
+
+    var checkedLabel: String {
+        guard let checkedSecondsAgo else { return "CONNECTING" }
+        if checkedSecondsAgo < 2 { return "STATUS UPDATED NOW" }
+        return "CHECKED \(Self.shortDuration(checkedSecondsAgo)) AGO"
+    }
+
+    private static func shortDuration(_ seconds: Int) -> String {
+        guard seconds >= 60 else { return "\(seconds)S" }
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "\(minutes)M" : "\(minutes)M \(remainder)S"
+    }
+}
+
+private struct ImportProgressStatus: View {
+    let status: String?
+    let startedAt: Date
+    let checkedAt: Date?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let presentation = ImportProgressPresentation(
+                status: status, startedAt: startedAt, checkedAt: checkedAt,
+                now: context.date
+            )
+            HStack(alignment: .top, spacing: 12) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Theme.accent)
+                    .padding(.top, 2)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(presentation.title)
+                        .font(WCFont.sans(14, weight: 500))
+                        .foregroundStyle(Theme.text)
+                    Text(presentation.detail)
+                        .font(WCFont.sans(12.5))
+                        .foregroundStyle(Theme.textMuted)
+                        .lineSpacing(3)
+                    HStack(spacing: 10) {
+                        MetaText(
+                            text: presentation.elapsedLabel,
+                            font: WCFont.mono(9), tracking: 0.45,
+                            color: Theme.metaFaint
+                        )
+                        MetaText(
+                            text: presentation.checkedLabel,
+                            font: WCFont.mono(9), tracking: 0.45,
+                            color: Theme.metaFaint
+                        )
+                    }
+                    MetaText(
+                        text: "NO CONCEPTS OR CARDS CREATED YET",
+                        font: WCFont.mono(9), tracking: 0.45,
+                        color: Theme.metaFaint
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+            .overlay(RoundedRectangle(cornerRadius: Metrics.inlineRadius).stroke(Theme.border))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "\(presentation.title). In progress. No concepts or cards have been created yet."
+            )
+            .accessibilityIdentifier("material-import-progress")
+        }
     }
 }
 

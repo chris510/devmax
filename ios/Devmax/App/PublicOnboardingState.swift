@@ -31,6 +31,8 @@ final class PublicOnboardingState: ObservableObject {
     @Published var lessonProgress: LessonProgress?
     @Published var lessonArtifactState: LessonArtifactState = .idle
     @Published var lessonExportURL: URL?
+    @Published private(set) var importStartedAt: Date?
+    @Published private(set) var lastImportCheckedAt: Date?
 
     let api: DevmaxAPI
     let founderClaimAvailable: Bool
@@ -49,6 +51,7 @@ final class PublicOnboardingState: ObservableObject {
         step = Self.initialStep(
             route: route, founderClaimAvailable: founderClaimAvailable
         )
+        if step == .importing { importStartedAt = Date() }
         if step == .lesson {
             draft.importPath = "lesson"
             draft.intent = "already_studied"
@@ -70,7 +73,13 @@ final class PublicOnboardingState: ObservableObject {
         return false
     }
 
-    var isLessonDraft: Bool { draft.importPath == "lesson" }
+    var isLessonDraft: Bool {
+        if let job,
+           [.importing, .importFailed, .importReady, .topics].contains(step) {
+            return job.importPath == "lesson"
+        }
+        return draft.importPath == "lesson"
+    }
 
     var lessonSourceURLIsValid: Bool {
         let value = draft.sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,6 +171,8 @@ final class PublicOnboardingState: ObservableObject {
         }
         busy = true
         error = ""
+        importStartedAt = Date()
+        lastImportCheckedAt = nil
         step = .importing
         do {
             let value = try await api.startMaterialImport(
@@ -178,9 +189,13 @@ final class PublicOnboardingState: ObservableObject {
                 )
             )
             job = value
+            lastImportCheckedAt = Date()
+            if ["pending", "processing"].contains(value.status) {
+                importStartedAt = value.updatedAt
+            }
             draft.sourceID = value.id
             persist()
-            beginPolling(value.id)
+            routeImportResult()
         } catch {
             self.error = isLessonDraft
                 ? "Your lesson is still saved, but processing couldn't start."
@@ -191,11 +206,32 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     func retryImport() async {
+        guard !busy else { return }
         guard let id = job?.id ?? draft.sourceID else { return await startImport() }
+        busy = true
+        defer { busy = false }
+        error = ""
+        importStartedAt = Date()
+        lastImportCheckedAt = nil
         step = .importing
         do {
+            // The server may have finished after this screen last refreshed.
+            // Reconcile first so a stale failure screen never retries a ready job.
+            if let latest = try? await api.materialImport(id), latest.status != "failed" {
+                job = latest
+                lastImportCheckedAt = Date()
+                if ["pending", "processing"].contains(latest.status) {
+                    importStartedAt = latest.updatedAt
+                }
+                routeImportResult()
+                return
+            }
             job = try await api.retryMaterialImport(id)
-            beginPolling(id)
+            lastImportCheckedAt = Date()
+            if let job, ["pending", "processing"].contains(job.status) {
+                importStartedAt = job.updatedAt
+            }
+            routeImportResult()
         } catch {
             self.error = isLessonDraft
                 ? "The lesson is still saved. Try again when the service is reachable."
@@ -208,12 +244,22 @@ final class PublicOnboardingState: ObservableObject {
         guard draft.sourceID == nil else {
             if let id = draft.sourceID {
                 job = try? await api.materialImport(id)
+                if let job {
+                    lastImportCheckedAt = Date()
+                    if ["pending", "processing"].contains(job.status) {
+                        importStartedAt = job.updatedAt
+                    }
+                }
                 routeImportResult()
             }
             return
         }
         guard let latest = try? await api.materialImports().first else { return }
         job = latest
+        lastImportCheckedAt = Date()
+        if ["pending", "processing"].contains(latest.status) {
+            importStartedAt = latest.updatedAt
+        }
         draft.sourceID = latest.id
         persist()
         routeImportResult()
@@ -223,12 +269,31 @@ final class PublicOnboardingState: ObservableObject {
         guard let job else { return }
         switch job.status {
         case "ready", "needs_attention":
+            error = ""
             selectedTopics = job.cleanTopicIDs
             step = .importReady
         case "failed": step = .importFailed
         case "confirmed", "superseded": step = .empty
-        default: step = .importing; beginPolling(job.id)
+        default:
+            if importStartedAt == nil { importStartedAt = job.updatedAt }
+            step = .importing
+            beginPolling(job.id)
         }
+    }
+
+    func refreshActiveImport() async {
+        guard [.importing, .importFailed].contains(step),
+              let id = job?.id ?? draft.sourceID,
+              let latest = try? await api.materialImport(id)
+        else { return }
+        let previousStatus = job?.status
+        job = latest
+        lastImportCheckedAt = Date()
+        if latest.status != previousStatus,
+           ["pending", "processing"].contains(latest.status) {
+            importStartedAt = latest.updatedAt
+        }
+        routeImportResult()
     }
 
     private func beginPolling(_ id: UUID) {
@@ -241,7 +306,14 @@ final class PublicOnboardingState: ObservableObject {
                 catch { return }
                 guard let self else { return }
                 do {
-                    self.job = try await self.api.materialImport(id)
+                    let previousStatus = self.job?.status
+                    let latest = try await self.api.materialImport(id)
+                    self.job = latest
+                    self.lastImportCheckedAt = Date()
+                    if latest.status != previousStatus,
+                       ["pending", "processing"].contains(latest.status) {
+                        self.importStartedAt = latest.updatedAt
+                    }
                     guard ["pending", "processing"].contains(self.job?.status ?? "") else {
                         self.routeImportResult()
                         return
@@ -394,6 +466,17 @@ final class PublicOnboardingState: ObservableObject {
 
     func loadStudyMaterial() async {
         imports = (try? await api.materialImports()) ?? []
+    }
+
+    func openSavedImport(_ source: MaterialImport) {
+        pollTask?.cancel()
+        job = source
+        error = ""
+        lastImportCheckedAt = Date()
+        if ["pending", "processing"].contains(source.status) {
+            importStartedAt = source.updatedAt
+        }
+        routeImportResult()
     }
 
     func beginGuideUpdate(_ source: MaterialImport) {
