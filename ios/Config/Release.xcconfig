@@ -6,6 +6,7 @@
 // from a direct Debug device build; public archives use Keychain bearer tokens.
 WC_API_KEY =
 WC_FOUNDER_CLAIM_TOKEN =
+WC_DEFAULT_MOCK = 0
 
 // The Railway public domain (project `profound-purpose`, service `devmax`).
 WC_BASE_URL = https:/$()/devmax-production.up.railway.app
