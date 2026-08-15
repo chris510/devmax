@@ -137,15 +137,21 @@ actor MockAPI: DevmaxAPI {
     let materialImportDelay: Duration
     let confirmMaterialDelay: Duration
     let lessonArtifactDelay: Duration
+    let materialImportFixture: MaterialImport?
+    let retryMaterialImportFixture: MaterialImport?
 
     init(
         materialImportDelay: Duration = .zero,
         confirmMaterialDelay: Duration = .zero,
-        lessonArtifactDelay: Duration = .zero
+        lessonArtifactDelay: Duration = .zero,
+        materialImportFixture: MaterialImport? = nil,
+        retryMaterialImportFixture: MaterialImport? = nil
     ) {
         self.materialImportDelay = materialImportDelay
         self.confirmMaterialDelay = confirmMaterialDelay
         self.lessonArtifactDelay = lessonArtifactDelay
+        self.materialImportFixture = materialImportFixture
+        self.retryMaterialImportFixture = retryMaterialImportFixture
     }
 
     /// Only the forced-failure alternation reads this. It counts submits across

@@ -146,12 +146,17 @@ struct MaterialImport: Codable, Identifiable, Equatable {
     let planDraftId: UUID?
     let comparison: [String: Int]
     var topics: [MaterialTopic]
+    /// Additive server hint for a saved lesson preview that has not completed
+    /// the current grounding gate, including a failed recovery pass. Optional so
+    /// a newer client can still read an older API response during rollout.
+    var lessonGroundingRequired: Bool?
     var artifactsReady: Bool? = nil
     var distilledAt: Date? = nil
     let createdAt: Date
     let updatedAt: Date
 
     var cleanTopicIDs: Set<UUID> { Set(topics.filter(\.isClean).map(\.id)) }
+    var requiresLessonGroundingRecovery: Bool { lessonGroundingRequired == true }
 }
 
 struct MaterialImportRequest: Encodable {

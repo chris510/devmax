@@ -1034,6 +1034,10 @@ class MaterialImportOut(BaseModel):
     plan_draft_id: uuid.UUID | None = None
     comparison: dict[str, int] = Field(default_factory=dict)
     topics: list[MaterialTopicOut] = Field(default_factory=list)
+    # Additive rollout signal for lesson previews that have not completed the
+    # current independent source-grounding gate, including a failed recovery
+    # pass. These previews cannot be confirmed; the source can be retried in place.
+    lesson_grounding_required: bool = False
     artifacts_ready: bool = False
     distilled_at: datetime | None = None
     created_at: datetime

@@ -71,6 +71,7 @@ extension MockAPI {
         if materialImportDelay != .zero {
             try await Task.sleep(for: materialImportDelay)
         }
+        if let materialImportFixture { return materialImportFixture }
         let route = await MainActor.run { DebugFlags.shared.route }
         let status = ["extracting", "import-background"].contains(route)
             ? "processing"
@@ -140,7 +141,10 @@ extension MockAPI {
         try await materialImport(Self.sourceID)
     }
 
-    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport { try await materialImport(id) }
+    func retryMaterialImport(_ id: UUID) async throws -> MaterialImport {
+        if let retryMaterialImportFixture { return retryMaterialImportFixture }
+        return try await materialImport(id)
+    }
     func deleteMaterialImport(_ id: UUID) async throws {}
 
     func editMaterialTopic(

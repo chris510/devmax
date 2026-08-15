@@ -301,21 +301,50 @@ struct PublicOnboardingView: View {
 
     private var importFailed: some View {
         PublicPage(
-            kicker: "PROCESSING STOPPED",
-            title: flow.isLessonDraft ? "Your lesson is still here." : "The guide is still here."
+            kicker: flow.lessonGroundingRecheckFailed
+                ? "GROUNDING CHECK STOPPED"
+                : (flow.lessonGroundingRecoveryRequired
+                    ? "SOURCE CHECK REQUIRED" : "PROCESSING STOPPED"),
+            title: flow.lessonGroundingRecoveryRequired
+                ? "Your lesson is safe."
+                : (flow.isLessonDraft ? "Your lesson is still here." : "The guide is still here.")
         ) {
-            Text(flow.error.isEmpty ? "Processing didn't finish. No topics or cards were created." : flow.error).publicBody()
+            Text(
+                flow.lessonGroundingRecheckFailed
+                    ? "The source-grounding check failed. Your full source and prior "
+                        + "concept preview remain safe, and no cards were created."
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "This lesson was processed before Devmax's current source-grounding "
+                            + "check. Recheck it before reviewing concepts. Your source is safe "
+                            + "and no cards were created."
+                        : (flow.error.isEmpty
+                            ? "Processing didn't finish. No topics or cards were created."
+                            : flow.error))
+            ).publicBody()
             PublicMaterialCard(
                 title: flow.job?.title ?? flow.preparedTitle,
-                meta: "FULL SOURCE RETAINED · NOTHING CREATED"
+                meta: flow.lessonGroundingRecheckFailed
+                    ? "SOURCE + PRIOR PREVIEW RETAINED · NO CARDS CREATED"
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "FULL SOURCE RETAINED · NO CARDS CREATED"
+                        : "FULL SOURCE RETAINED · NOTHING CREATED")
             )
             PublicNote(
-                "Retry checks the saved job first. If processing already finished "
-                    + "in the background, Devmax will take you straight to the result."
+                flow.lessonGroundingRecheckFailed
+                    ? "Retry runs the current grounding check again. The prior preview "
+                        + "cannot be confirmed unless that check finishes."
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "The old concept preview stays available until a replacement passes "
+                            + "the current grounding check."
+                        : "Retry checks the saved job first. If processing already finished "
+                            + "in the background, Devmax will take you straight to the result.")
             )
         } footer: {
             PrimaryButton(
-                title: flow.busy ? "Checking status…" : "Try processing again",
+                title: flow.busy
+                    ? "Checking status…"
+                    : (flow.lessonGroundingRecoveryRequired
+                        ? "Recheck source grounding" : "Try processing again"),
                 enabled: !flow.busy
             ) {
                 Task { await flow.retryImport() }
@@ -821,7 +850,10 @@ struct PublicOnboardingView: View {
     }
 
     private func savedImportAction(_ source: MaterialImport) -> String? {
-        switch source.status {
+        if source.requiresLessonGroundingRecovery {
+            return "Recheck source grounding"
+        }
+        return switch source.status {
         case "pending", "processing": "View progress"
         case "ready", "needs_attention":
             source.importPath == "lesson" ? "Review concepts" : "Review proposals"

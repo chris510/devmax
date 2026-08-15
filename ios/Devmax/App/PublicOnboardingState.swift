@@ -98,6 +98,7 @@ final class PublicOnboardingState: ObservableObject {
     var canConfirmSelectedTopics: Bool {
         guard !busy, !selectedTopics.isEmpty else { return false }
         guard isLessonDraft else { return true }
+        guard job?.requiresLessonGroundingRecovery != true else { return false }
         guard lessonContentProvenanceIsSelected else { return false }
         guard let job else { return false }
         let selectedAreClean = job.topics
@@ -113,6 +114,14 @@ final class PublicOnboardingState: ObservableObject {
         draft.title.isEmpty
             ? (draft.originalFilename.isEmpty ? "Your study guide" : draft.originalFilename)
             : draft.title
+    }
+
+    var lessonGroundingRecoveryRequired: Bool {
+        job?.requiresLessonGroundingRecovery == true
+    }
+
+    var lessonGroundingRecheckFailed: Bool {
+        lessonGroundingRecoveryRequired && job?.status == "failed"
     }
 
     var handoffTitle: String {
@@ -278,7 +287,9 @@ final class PublicOnboardingState: ObservableObject {
             // Reconcile first so a stale failure screen never retries a ready job.
             let latest = try? await api.materialImport(id)
             guard generation == importGeneration else { return }
-            if let latest, latest.status != "failed" {
+            if let latest,
+               latest.status != "failed",
+               !latest.requiresLessonGroundingRecovery {
                 job = latest
                 lastImportCheckedAt = Date()
                 if ["pending", "processing"].contains(latest.status) {
@@ -349,6 +360,11 @@ final class PublicOnboardingState: ObservableObject {
         switch job.status {
         case "ready", "needs_attention":
             error = ""
+            if job.requiresLessonGroundingRecovery {
+                selectedTopics = []
+                step = .importFailed
+                return
+            }
             // A focused lesson is a small set of concepts the learner can review
             // individually. Do not turn a structural check into implicit approval.
             selectedTopics = job.importPath == "lesson" ? [] : job.cleanTopicIDs

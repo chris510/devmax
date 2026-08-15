@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from sqlalchemy import func, update
+from sqlalchemy import func
 from sqlalchemy.orm import defer
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -56,6 +56,8 @@ from app.services.card_lifecycle import (
 from app.services.scoring_contract import project_card_score
 
 router = APIRouter(prefix="/materials", tags=["study material"])
+
+LESSON_GROUNDING_RECOVERY_MARKER = "lesson_grounding_recovery_required"
 
 COLLECTION = CollectionDetail(
     id="system-design-foundations",
@@ -139,6 +141,28 @@ def _artifacts_ready(source: MaterialSource) -> bool:
     )
 
 
+def _legacy_lesson_preview_requires_grounding(source: MaterialSource) -> bool:
+    return bool(
+        source.import_path == "lesson"
+        and source.status in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}
+        and source.result_summary.get("grounding_gate_version")
+        != materials.LESSON_GROUNDING_GATE_VERSION
+    )
+
+
+def _lesson_grounding_required(source: MaterialSource) -> bool:
+    """Whether a legacy preview needs its first successful current-gate pass."""
+    if _legacy_lesson_preview_requires_grounding(source):
+        return True
+    return bool(
+        source.import_path == "lesson"
+        and source.status == SOURCE_FAILED
+        and source.result_summary.get(LESSON_GROUNDING_RECOVERY_MARKER) is True
+        and source.result_summary.get("grounding_gate_version")
+        != materials.LESSON_GROUNDING_GATE_VERSION
+    )
+
+
 def _response_from_topics(
     source: MaterialSource,
     topics: list[MaterialTopicProposal],
@@ -165,6 +189,7 @@ def _response_from_topics(
         plan_draft_id=source.plan_draft_id,
         comparison={key: int(value) for key, value in (summary.get("comparison") or {}).items()},
         topics=[MaterialTopicOut.model_validate(row) for row in topics],
+        lesson_grounding_required=_lesson_grounding_required(source),
         artifacts_ready=(
             _artifacts_ready(source) if artifacts_ready is None else artifacts_ready
         ),
@@ -271,31 +296,27 @@ async def retry_import(
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
 ) -> MaterialImportOut:
-    source = await _owned_source(db, source_id)
-    retried_id = (
-        await db.exec(
-            update(MaterialSource)
-            .where(
-                MaterialSource.id == source.id,
-                MaterialSource.user_id == current_user_id(),
-                MaterialSource.status == SOURCE_FAILED,
-            )
-            .values(
-                status=SOURCE_PENDING,
-                processing_run_id=None,
-                processing_heartbeat_at=None,
-                error="",
-                updated_at=datetime.now(UTC),
-            )
-            .returning(MaterialSource.id)
-        )
-    ).one_or_none()
-    if retried_id is None:
+    source = await _owned_source(db, source_id, for_update=True)
+    legacy_recovery = _legacy_lesson_preview_requires_grounding(source)
+    if source.status != SOURCE_FAILED and not legacy_recovery:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="only a failed import can be retried")
+        raise HTTPException(
+            status_code=409,
+            detail="only a failed import or a pre-gate lesson can be retried",
+        )
+    if legacy_recovery:
+        source.result_summary = {
+            **source.result_summary,
+            LESSON_GROUNDING_RECOVERY_MARKER: True,
+        }
+    source.status = SOURCE_PENDING
+    source.processing_run_id = None
+    source.processing_heartbeat_at = None
+    source.error = ""
+    source.updated_at = datetime.now(UTC)
+    db.add(source)
     await db.commit()
-    source = await db.get(MaterialSource, retried_id, populate_existing=True)
-    assert source is not None
+    await db.refresh(source)
     background.add_task(materials.process_import, source.id)
     return await _response(db, source)
 
@@ -385,6 +406,16 @@ async def confirm_topics(
             detail={"code": "material_not_confirmable"},
         )
     if source.import_path == "lesson":
+        if source.result_summary.get("grounding_gate_version") != (
+            materials.LESSON_GROUNDING_GATE_VERSION
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "lesson_grounding_required",
+                    "message": "Process this lesson again before confirming concepts.",
+                },
+            )
         classification = body.content_provenance or source.content_provenance
         if classification == CONTENT_PROVENANCE_LEGACY_UNSPECIFIED:
             raise HTTPException(

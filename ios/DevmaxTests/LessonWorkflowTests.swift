@@ -25,16 +25,18 @@ final class LessonWorkflowTests: XCTestCase {
     }
 
     private static func lessonImport(
-        topics: [MaterialTopic], status: String = "ready"
+        topics: [MaterialTopic], status: String = "ready", id: UUID = UUID(),
+        lessonGroundingRequired: Bool? = nil
     ) -> MaterialImport {
         MaterialImport(
-            id: UUID(), title: "Networking 101", kind: "article", version: 1,
+            id: id, title: "Networking 101", kind: "article", version: 1,
             status: status, importPath: "lesson", intent: "already_studied",
             originalFilename: "", sourceUrl: "https://example.com/networking",
             contentProvenance: LessonContentProvenance.learnerNotes.rawValue,
             characterCount: 876, cleanCount: topics.filter(\.isClean).count,
             attentionCount: topics.filter { !$0.isClean }.count, error: "",
             planDraftId: nil, comparison: [:], topics: topics,
+            lessonGroundingRequired: lessonGroundingRequired,
             createdAt: Date(), updatedAt: Date()
         )
     }
@@ -181,6 +183,18 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertNil(artifacts.writebackBundle)
     }
 
+    func testMaterialImportStillDecodesWhenOlderServerOmitsGroundingHint() throws {
+        let original = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        let data = try JSONEncoder().encode(original)
+
+        let decoded = try JSONDecoder().decode(MaterialImport.self, from: data)
+
+        XCTAssertNil(decoded.lessonGroundingRequired)
+        XCTAssertFalse(decoded.requiresLessonGroundingRecovery)
+    }
+
     func testImportProgressUsesRealServerStateAndElapsedTime() {
         let now = Date(timeIntervalSince1970: 10_000)
         let value = ImportProgressPresentation(
@@ -216,6 +230,77 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertEqual(flow.step, .importReady)
         XCTAssertEqual(flow.job?.status, "ready")
         XCTAssertNotNil(flow.lastImportCheckedAt)
+    }
+
+    @MainActor
+    func testPreGateReadyLessonRoutesToGroundingRecovery() {
+        let lesson = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)],
+            lessonGroundingRequired: true
+        )
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+
+        flow.openSavedImport(lesson)
+
+        XCTAssertEqual(flow.step, .importFailed)
+        XCTAssertTrue(flow.lessonGroundingRecoveryRequired)
+        XCTAssertTrue(flow.selectedTopics.isEmpty)
+        XCTAssertFalse(flow.canConfirmSelectedTopics)
+    }
+
+    @MainActor
+    func testPreGateReadyLessonRetriesEvenWhenLatestGetIsStillReady() async {
+        let id = UUID()
+        let topic = Self.topic("TCP reliability", position: 1)
+        let legacyReady = Self.lessonImport(
+            topics: [topic], id: id, lessonGroundingRequired: true
+        )
+        let requeued = Self.lessonImport(
+            topics: [topic], status: "pending", id: id,
+            lessonGroundingRequired: false
+        )
+        let api = MockAPI(
+            materialImportFixture: legacyReady,
+            retryMaterialImportFixture: requeued
+        )
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        flow.openSavedImport(legacyReady)
+
+        await flow.retryImport()
+
+        XCTAssertEqual(flow.job?.status, "pending")
+        XCTAssertEqual(flow.step, .importing)
+        XCTAssertFalse(flow.lessonGroundingRecoveryRequired)
+        XCTAssertNotNil(flow.lastImportCheckedAt)
+    }
+
+    @MainActor
+    func testFailedGroundingRecheckKeepsRecoveryStateAndCanRetryAgain() async {
+        let id = UUID()
+        let topic = Self.topic("TCP reliability", position: 1)
+        let failedRecheck = Self.lessonImport(
+            topics: [topic], status: "failed", id: id,
+            lessonGroundingRequired: true
+        )
+        let requeued = Self.lessonImport(
+            topics: [topic], status: "pending", id: id,
+            lessonGroundingRequired: false
+        )
+        let api = MockAPI(
+            materialImportFixture: failedRecheck,
+            retryMaterialImportFixture: requeued
+        )
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        flow.openSavedImport(failedRecheck)
+
+        XCTAssertEqual(flow.step, .importFailed)
+        XCTAssertTrue(flow.lessonGroundingRecheckFailed)
+
+        await flow.retryImport()
+
+        XCTAssertEqual(flow.job?.status, "pending")
+        XCTAssertEqual(flow.step, .importing)
+        XCTAssertFalse(flow.lessonGroundingRecoveryRequired)
     }
 
     @MainActor

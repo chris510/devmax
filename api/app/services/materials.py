@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 from contextlib import suppress
+from copy import deepcopy
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -43,6 +44,8 @@ def _now() -> datetime:
 _OPEN_QUESTION_PREFIXES = tuple(
     f"{starter} " for starter in llm.LESSON_OPEN_QUESTION_STARTERS
 )
+LESSON_GROUNDING_GATE_VERSION = 1
+LESSON_GROUNDING_ISSUE_PREFIX = "Source grounding could not verify:"
 
 
 def _is_open_question(value: str) -> bool:
@@ -133,6 +136,7 @@ def _guide_authorizer(
     run_id: uuid.UUID,
     *,
     model: str | None = None,
+    operation: str = "guide_import",
 ):
     config = get_settings()
 
@@ -155,7 +159,7 @@ def _guide_authorizer(
     return usage.provider_call_authorizer(
         db,
         user_id,
-        "guide_import",
+        operation,
         config=config,
         provider="anthropic",
         model=model or config.studyplan_model,
@@ -501,6 +505,9 @@ async def _process_lesson(
             model=get_settings().card_proposal_model,
         ),
     )
+    concepts, grounding_issues = await _ground_lesson_concepts(
+        db, source, run_id, concepts
+    )
     source = await _lock_result_claim(
         db,
         user_id=source.user_id,
@@ -508,7 +515,10 @@ async def _process_lesson(
         run_id=run_id,
     )
     clean, attention, comparison = await _store_lesson_proposals(
-        db, source, concepts
+        db,
+        source,
+        concepts,
+        grounding_issues=grounding_issues,
     )
     source.status = SOURCE_NEEDS_ATTENTION if attention else SOURCE_READY
     source.result_summary = {
@@ -518,6 +528,7 @@ async def _process_lesson(
         "attention_count": attention,
         "subject": source.title,
         "comparison": comparison,
+        "grounding_gate_version": LESSON_GROUNDING_GATE_VERSION,
     }
     return source
 
@@ -535,7 +546,7 @@ def _validated_lesson_concepts(
         if not isinstance(concept, dict):
             raise llm.LLMError(f"lesson concept {index} is not an object")
         topic = str(concept.get("topic", "")).strip()
-        section = str(concept.get("section_title", "")).strip() or source.title
+        section = str(concept.get("section_title", "")).strip()
         excerpt = str(concept.get("source_excerpt", "")).strip()
         answer_basis = str(concept.get("answer_basis", "")).strip()
         canonical_question = str(concept.get("canonical_question", "")).strip()
@@ -551,6 +562,10 @@ def _validated_lesson_concepts(
         if not normalized or normalized in normalized_topics:
             raise llm.LLMError(
                 f"lesson concept {index} has an empty or duplicate topic"
+            )
+        if not section:
+            raise llm.LLMError(
+                f"lesson concept {index} has an empty section title"
             )
         normalized_topics.add(normalized)
         if len(topic) > 200 or len(section) > 1000:
@@ -632,10 +647,243 @@ def _validated_lesson_concepts(
     return validated
 
 
+def _validated_lesson_grounding(
+    source: MaterialSource,
+    concepts: list[dict],
+    findings: list[dict],
+) -> dict[tuple[int, str], dict]:
+    """Require one literal-evidence verdict for every user-visible field."""
+    expected = {
+        (concept_index, field)
+        for concept_index in range(1, len(concepts) + 1)
+        for field in llm.LESSON_GROUNDING_FIELDS
+    }
+    validated: dict[tuple[int, str], dict] = {}
+    for finding_index, finding in enumerate(findings, 1):
+        if not isinstance(finding, dict):
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} is not an object"
+            )
+        concept_index = finding.get("concept_index")
+        field = finding.get("field")
+        if (
+            isinstance(concept_index, bool)
+            or not isinstance(concept_index, int)
+            or not isinstance(field, str)
+        ):
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} has an invalid field key"
+            )
+        key = (concept_index, field)
+        if key not in expected or key in validated:
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} is unexpected or duplicated"
+            )
+
+        verdict = finding.get("verdict")
+        reason = finding.get("reason")
+        repair = finding.get("repair")
+        spans = finding.get("evidence_spans")
+        if verdict not in llm.LESSON_GROUNDING_VERDICTS:
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} has an invalid verdict"
+            )
+        if (
+            verdict == "bounded_absence"
+            and field not in llm.LESSON_BOUNDED_ABSENCE_FIELDS
+        ):
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} uses bounded absence "
+                "for a required positive field"
+            )
+        if (
+            not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason) > 800
+            or not isinstance(repair, str)
+            or len(repair) > 2000
+            or not isinstance(spans, list)
+            or len(spans) > 4
+            or sum(len(span) for span in spans if isinstance(span, str)) > 1200
+        ):
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} has invalid evidence"
+            )
+        if verdict != "unsupported" and repair.strip():
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} repairs a passing field"
+            )
+        if verdict != "unsupported" and not spans:
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} has no supporting span"
+            )
+
+        excerpt = concepts[concept_index - 1]["source_excerpt"]
+        for span in spans:
+            if (
+                not isinstance(span, str)
+                or not span.strip()
+                or len(span) > 500
+                or span not in source.source_text
+                or span not in excerpt
+            ):
+                raise llm.LLMError(
+                    f"lesson grounding finding {finding_index} has a non-literal span"
+                )
+        validated[key] = {
+            "concept_index": concept_index,
+            "field": field,
+            "verdict": verdict,
+            "evidence_spans": list(spans),
+            "reason": reason.strip(),
+            "repair": repair.strip(),
+        }
+
+    missing = expected - set(validated)
+    if missing:
+        raise llm.LLMError(
+            f"lesson grounding is missing {len(missing)} required field verdicts"
+        )
+    return validated
+
+
+def _unsupported_grounding(
+    review: dict[tuple[int, str], dict],
+) -> dict[int, list[dict]]:
+    unsupported: dict[int, list[dict]] = {}
+    for finding in review.values():
+        if finding["verdict"] == "unsupported":
+            unsupported.setdefault(finding["concept_index"], []).append(finding)
+    return unsupported
+
+
+def _grounding_issues(
+    review: dict[tuple[int, str], dict],
+) -> dict[int, str]:
+    return {
+        concept_index: _grounding_issue(findings)
+        for concept_index, findings in _unsupported_grounding(review).items()
+    }
+
+
+def _grounding_issue(findings: list[dict]) -> str:
+    fields = sorted({finding["field"] for finding in findings})
+    return f"{LESSON_GROUNDING_ISSUE_PREFIX} {', '.join(fields)}."
+
+
+def _set_lesson_field(concept: dict, field: str, value: str) -> None:
+    if field in {"topic", "section_title", "answer_basis", "canonical_question"}:
+        concept[field] = value
+        return
+    rubric_prefix = "answer_rubric."
+    if field.startswith(rubric_prefix):
+        concept["answer_rubric"][field.removeprefix(rubric_prefix)] = value
+        return
+    recall_prefix = "recall_questions."
+    if field.startswith(recall_prefix):
+        level = field.removeprefix(recall_prefix)
+        prompt = next(
+            item
+            for item in concept["recall_questions"]
+            if item.get("level") == level
+        )
+        prompt["question"] = value
+        return
+    raise llm.LLMError(f"lesson grounding repair has an unknown field: {field}")
+
+
+async def _ground_lesson_concepts(
+    db: AsyncSession,
+    source: MaterialSource,
+    run_id: uuid.UUID,
+    concepts: list[dict],
+) -> tuple[list[dict], dict[int, str]]:
+    """Verify once, then allow at most one repair-and-reverify pass."""
+    original = _validated_lesson_concepts(source, concepts)
+    first_findings = await llm.verify_lesson_grounding(
+        source_text=source.source_text,
+        concepts=original,
+        before_provider_call=_guide_authorizer(
+            db,
+            source.user_id,
+            source.id,
+            run_id,
+            model=get_settings().card_proposal_model,
+            operation="lesson_grounding",
+        ),
+    )
+    first_review = _validated_lesson_grounding(
+        source, original, first_findings
+    )
+    first_unsupported = _unsupported_grounding(first_review)
+    repairable = {
+        concept_index
+        for concept_index, findings in first_unsupported.items()
+        if all(finding["repair"] for finding in findings)
+    }
+    if not repairable:
+        return original, _grounding_issues(first_review)
+
+    repaired = deepcopy(original)
+    for concept_index in repairable:
+        for finding in first_unsupported[concept_index]:
+            _set_lesson_field(
+                repaired[concept_index - 1],
+                finding["field"],
+                finding["repair"],
+            )
+    try:
+        repaired = _validated_lesson_concepts(source, repaired)
+    except llm.LLMError:
+        # A structurally invalid repair is advisory only. Keep the original
+        # concepts review-only rather than failing or trusting a partial change.
+        return original, _grounding_issues(first_review)
+
+    second_findings = await llm.verify_lesson_grounding(
+        source_text=source.source_text,
+        concepts=repaired,
+        before_provider_call=_guide_authorizer(
+            db,
+            source.user_id,
+            source.id,
+            run_id,
+            model=get_settings().card_proposal_model,
+            operation="lesson_grounding_recheck",
+        ),
+    )
+    second_review = _validated_lesson_grounding(source, repaired, second_findings)
+    second_unsupported = _unsupported_grounding(second_review)
+    issues = {
+        concept_index: _grounding_issue(findings)
+        for concept_index, findings in second_unsupported.items()
+    }
+    first_issues = _grounding_issues(first_review)
+    for concept_index in first_unsupported.keys() - repairable:
+        issues[concept_index] = first_issues[concept_index]
+    for concept_index in repairable & second_unsupported.keys():
+        # Restoring the original pack also restores every first-pass rejected
+        # field, so the review issue must name both rejection sets.
+        issues[concept_index] = _grounding_issue(
+            [
+                *first_unsupported[concept_index],
+                *second_unsupported[concept_index],
+            ]
+        )
+    accepted = deepcopy(repaired)
+    for concept_index in issues:
+        # A rejected second-pass repair is advisory only. Keep the exact
+        # originally extracted pack reviewable; never persist text that the
+        # independent verifier just rejected.
+        accepted[concept_index - 1] = deepcopy(original[concept_index - 1])
+    return accepted, issues
+
+
 async def _store_lesson_proposals(
     db: AsyncSession,
     source: MaterialSource,
     concepts: list[dict],
+    *,
+    grounding_issues: dict[int, str] | None = None,
 ) -> tuple[int, int, dict[str, int]]:
     """Validate the complete concept pack, then replace its durable preview."""
     validated = _validated_lesson_concepts(source, concepts)
@@ -646,11 +894,12 @@ async def _store_lesson_proposals(
     attention = 0
     for position, concept in enumerate(validated, 1):
         normalized = study_plan_service.normalize_topic(concept["topic"])
-        issue = (
-            "A topic with this name already exists in your library."
-            if normalized in existing
-            else ""
-        )
+        issues = []
+        if grounding_issues and grounding_issues.get(position):
+            issues.append(grounding_issues[position])
+        if normalized in existing:
+            issues.append("A topic with this name already exists in your library.")
+        issue = " ".join(issues)
         status = PROPOSAL_NEEDS_ATTENTION if issue else PROPOSAL_CLEAN
         attention += status == PROPOSAL_NEEDS_ATTENTION
         clean += status == PROPOSAL_CLEAN
