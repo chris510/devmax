@@ -31,7 +31,7 @@ OPENAI_REQUEST_FORMAT_VERSION = 1
 # branch to the qualification evidence. Bump the relevant value whenever a
 # parser rule or Recall-to-product decision changes, even if the wire schema and
 # public scoring-contract number stay the same.
-V2_PARSER_POLICY_VERSION = 1
+V2_PARSER_POLICY_VERSION = 2
 PRODUCT_DECISION_POLICY_VERSION = 1
 OPENAI_V2_SCHEMA_NAME = "devmax_recall_score_v2"
 QUALIFICATION_DYNAMIC_USER_CONTENT = "<dynamic-user-content>"

@@ -1389,13 +1389,21 @@ def test_payload_rejects_a_tampered_semantic_or_stored_decision(tmp_path: Path) 
 
 
 @pytest.mark.parametrize(
-    ("follow_up_question", "needs_more_evidence"),
-    [("", True), ("What evidence distinguishes the adjacent scores?", False)],
+    ("follow_up_question", "needs_more_evidence", "expected_error"),
+    [
+        ("", True, "strict V2 contract"),
+        (
+            "What evidence distinguishes the adjacent scores?",
+            False,
+            "does not exactly match the strict V2 parser",
+        ),
+    ],
 )
 def test_frozen_binding_reparses_hand_edited_follow_up_policy_fields(
     tmp_path: Path,
     follow_up_question: str,
     needs_more_evidence: bool,
+    expected_error: str,
 ) -> None:
     case = trusted_case(
         expected_recall=2,
@@ -1426,7 +1434,7 @@ def test_frozen_binding_reparses_hand_edited_follow_up_policy_fields(
         provider="luna",
     )
 
-    with pytest.raises(ValueError, match="strict V2 contract"):
+    with pytest.raises(ValueError, match=expected_error):
         v2_recall_compare.validate_frozen_case_bindings([run], [case])
 
 

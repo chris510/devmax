@@ -219,11 +219,13 @@ not measured. `scripts/effort_sweep.py` is hardwired to `settings.scoring_effort
 `run_case`, so it needs a re-attempt path before the value is calibrated. Flagged in
 `app/config.py`. Independent of the deploy — it can happen before or after.
 
-**Scoring Contract V2 is implemented but deliberately inactive.** Keep
-`SCORING_CONTRACT_VERSION=1` until the compatible iOS build has been deployed and
-the activation checks in RUNBOOK §Scoring Contract V2 activation and rollback
-have been completed. Activation changes only that setting; do not combine it
-with a model or provider change. Rollback first sets
+**Scoring Contract V2 is implemented and currently rolled back to V1.** The
+first Claude stabilization window produced two surplus-probe contract failures
+in one session, with every write correctly left untouched. Keep
+`SCORING_CONTRACT_VERSION=1` until parser-policy version 2 passes the offline
+matrix and a separately approved Claude-only reactivation window. Activation
+changes only that setting; do not combine it with a model or provider change.
+Rollback first sets
 `OPENAI_V2_SCORING_MODE=off`, then returns the contract setting to `1` in the
 same deploy; enabled OpenAI routing deliberately cannot boot against V1. All
 versioned history remains intact.
@@ -238,13 +240,11 @@ preview claim metadata only. They rewrite no score, guide, preview, status, or
 scheduling state; the disposable Postgres test proves the 0016→0017→0016→0017
 round trip before deployment.
 
-**AI consent policy activation is separate from code deployment.** Keep
-`AI_CONSENT_REQUIRED_POLICY_VERSION=anthropic-2026-08-12-v1` while build 7 may
-still be installed. Code may report the combined policy as latest-supported in
-`/health`; that alone does not activate it. Distribute build 8+, record its
-combined choice, and only then change the required-policy variable to
-`anthropic-openai-2026-08-13-v2`. The server refuses every OpenAI mode until that
-activation is complete.
+**AI consent policy activation is complete for the owner.** Build 8 is installed,
+the synchronized public policy is live, production requires
+`anthropic-openai-2026-08-13-v2`, and the owner has a recorded combined grant.
+Keep consent enforcement enabled. The server still refuses every OpenAI mode
+until the independent V2 stabilization and provider gates pass.
 
 Before a separately approved shadow stage, predeclare a fresh
 `OPENAI_V2_SCORING_SHADOW_STAGE_ID` UUID. Qualification is the immutable,

@@ -201,14 +201,15 @@ distinguish between adjacent Recall scores and one further probe would settle it
 reports missing signal, not a wrong answer: a wrong essential account is scored, not \
 probed. Otherwise it is false.
 
-`follow_up_question` is one short probe at the single missing essential link, and is \
-non-empty in exactly two cases. When the transcript says no scored follow-up has been \
-used, write it prefaced "One more — " whenever recall_score is 1-3; for recall_score \
-0 or 4-5 return an empty string and `needs_more_evidence` false. When one scored \
-follow-up has been used, write it prefaced "Last one — " if and only if \
-`needs_more_evidence` is true. On the final scored turn, return an empty string and \
-`needs_more_evidence` false. The server validates this policy and structurally caps \
-the session at two scored follow-ups.
+`follow_up_question` is one short candidate probe at the single missing essential link. \
+When the transcript says no scored follow-up has been used, write it prefaced \
+"One more — " whenever recall_score is 1-3; for recall_score 0 or 4-5 prefer an \
+empty string and `needs_more_evidence` false. When one scored follow-up has been used, \
+write it prefaced "Last one — " if and only if `needs_more_evidence` is true. On the \
+final scored turn, prefer an empty string and `needs_more_evidence` false. The server, \
+not this response, decides whether the candidate is shown and structurally caps the \
+session at two scored follow-ups. A surplus candidate is ignored; never change the \
+Recall score merely to make a candidate eligible.
 
 `mastery_summary` replaces the prior rolling summary. Write one or two sentences \
 in lowercase fragment style describing essential-account recall only: unaided, \
@@ -1844,9 +1845,10 @@ def parse_score_result(data: dict[str, Any], *, probes_used: int) -> ScoreResult
 def parse_score_v2_result(data: dict[str, Any], *, probes_used: int) -> ScoreResult:
     """Apply the Recall-only V2 contract to provider-structured data.
 
-    Fail-closed, unlike V1: every departure from the follow-up policy is an
-    LLMError rather than a silent coercion, because V2 is still dark and a
-    tolerated violation would be invisible until activation.
+    Fail closed on malformed data and on a missing candidate when the server's
+    policy requires another scored turn. A surplus candidate is safe to ignore:
+    the server owns the turn decision, so model text can never widen the Recall
+    band or exceed the structural cap.
     """
     if not isinstance(data, dict):
         raise LLMError("V2 scoring response was not an object")
@@ -1875,20 +1877,35 @@ def parse_score_v2_result(data: dict[str, Any], *, probes_used: int) -> ScoreRes
 
     probe = data["follow_up_question"].strip()
     should_probe = _should_probe(recall, probes_used, needs)
-    # An insufficiency claim has to carry the probe that would settle it. This is
-    # also what rejects `needs_more_evidence` at the cap, where no probe is legal.
-    if needs is True and not probe:
-        raise LLMError("V2 scoring response claimed missing evidence without a probe")
-    if bool(probe) != should_probe:
+    if should_probe and not probe:
         raise LLMError(
-            "V2 scoring response violated the Recall follow-up policy: "
-            f"probe={'present' if probe else 'absent'} at probes_used={probes_used}"
+            "V2 scoring response omitted the required follow-up candidate: "
+            f"recall={recall}, probes_used={probes_used}, "
+            f"needs_more_evidence={needs}"
         )
     if should_probe:
         return ScoreResult(
             status="follow_up",
             follow_up_question=probe,
             scoring_contract_version=SCORING_CONTRACT_V2,
+        )
+
+    if probe or needs:
+        if probes_used >= MAX_SCORED_FOLLOW_UPS:
+            reason = "follow_up_cap"
+        elif probes_used == 0:
+            reason = "outside_initial_band"
+        else:
+            reason = "evidence_sufficient"
+        log.warning(
+            "llm purpose=score_v2 event=surplus_probe_candidate_ignored "
+            "reason=%s recall=%d probes_used=%d needs_more_evidence=%s "
+            "candidate_present=%s",
+            reason,
+            recall,
+            probes_used,
+            needs,
+            bool(probe),
         )
 
     feedback = data["feedback"].strip()
