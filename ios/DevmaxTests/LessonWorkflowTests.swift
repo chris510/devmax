@@ -24,6 +24,18 @@ final class LessonWorkflowTests: XCTestCase {
         )
     }
 
+    private static func lessonImport(topics: [MaterialTopic]) -> MaterialImport {
+        MaterialImport(
+            id: UUID(), title: "Networking 101", kind: "article", version: 1,
+            status: "ready", importPath: "lesson", intent: "already_studied",
+            originalFilename: "", sourceUrl: "https://example.com/networking",
+            characterCount: 876, cleanCount: topics.filter(\.isClean).count,
+            attentionCount: topics.filter { !$0.isClean }.count, error: "",
+            planDraftId: nil, comparison: [:], topics: topics,
+            createdAt: Date(), updatedAt: Date()
+        )
+    }
+
     @MainActor
     func testConfirmedLessonCardsFollowSourceOrderAndKeepUnmatchedCards() {
         let first = Self.summary(Self.firstID, topic: "First concept")
@@ -209,5 +221,54 @@ final class LessonWorkflowTests: XCTestCase {
         XCTAssertEqual(flow.step, .importReady)
         XCTAssertEqual(flow.job?.id, source.id)
         XCTAssertEqual(flow.selectedTopics, source.cleanTopicIDs)
+    }
+
+    @MainActor
+    func testLessonConceptsRequireExplicitSelectionAfterStructuralCheck() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        let source = Self.lessonImport(topics: [Self.topic("TCP reliability", position: 1)])
+
+        flow.openSavedImport(source)
+
+        XCTAssertEqual(flow.step, .importReady)
+        XCTAssertTrue(flow.isLessonDraft)
+        XCTAssertTrue(flow.selectedTopics.isEmpty)
+        XCTAssertFalse(flow.canConfirmSelectedTopics)
+
+        flow.selectedTopics.insert(source.topics[0].id)
+
+        XCTAssertTrue(flow.canConfirmSelectedTopics)
+    }
+
+    @MainActor
+    func testLessonCannotPartiallyConfirmAndSilentlyDiscardConcepts() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        let topics = [
+            Self.topic("IP delivery", position: 1),
+            Self.topic("TCP reliability", position: 2)
+        ]
+        let source = Self.lessonImport(topics: topics)
+        flow.openSavedImport(source)
+
+        flow.selectedTopics.insert(topics[0].id)
+        XCTAssertFalse(flow.canConfirmSelectedTopics)
+
+        flow.selectedTopics.insert(topics[1].id)
+        XCTAssertTrue(flow.canConfirmSelectedTopics)
+    }
+
+    @MainActor
+    func testLessonCannotConfirmWhileAProposalStillNeedsAttention() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        let clean = Self.topic("IP delivery", position: 1)
+        var unresolved = Self.topic("TCP reliability", position: 2)
+        unresolved.status = "needs_attention"
+        unresolved.issue = "Grounding review required."
+        let source = Self.lessonImport(topics: [clean, unresolved])
+        flow.openSavedImport(source)
+
+        flow.selectedTopics.insert(clean.id)
+
+        XCTAssertFalse(flow.canConfirmSelectedTopics)
     }
 }

@@ -362,6 +362,41 @@ async def confirm_topics(
         raise HTTPException(status_code=404, detail="topic not found")
     if any(row.status != PROPOSAL_CLEAN or not row.answer_anchor.strip() for row in rows):
         raise HTTPException(status_code=409, detail="topics still need attention")
+    if source.import_path == "lesson":
+        unselected_clean = (
+            await db.exec(
+                select(MaterialTopicProposal)
+                .where(
+                    MaterialTopicProposal.source_id == source.id,
+                    MaterialTopicProposal.status == PROPOSAL_CLEAN,
+                    col(MaterialTopicProposal.id).not_in(body.selected_topic_ids),
+                )
+                .order_by(MaterialTopicProposal.position)
+            )
+        ).all()
+        needs_attention = (
+            await db.exec(
+                select(MaterialTopicProposal)
+                .where(
+                    MaterialTopicProposal.source_id == source.id,
+                    MaterialTopicProposal.status == PROPOSAL_NEEDS_ATTENTION,
+                )
+                .order_by(MaterialTopicProposal.position)
+            )
+        ).all()
+        if unselected_clean or needs_attention:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "lesson_decisions_incomplete",
+                    "unselected_clean_topic_ids": [
+                        str(row.id) for row in unselected_clean
+                    ],
+                    "needs_attention_topic_ids": [
+                        str(row.id) for row in needs_attention
+                    ],
+                },
+            )
     existing = await study_plan.normalized_card_index(db, current_user_id())
     normalized = [study_plan.normalize_topic(row.topic) for row in rows]
     if len(set(normalized)) != len(normalized) or any(key in existing for key in normalized):

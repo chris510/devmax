@@ -84,6 +84,24 @@ def lesson_concept(source_text: str, **overrides) -> dict:
     return {**base, **overrides}
 
 
+def lesson_proposal(
+    source: MaterialSource, *, position: int, topic: str, status: str = "clean"
+) -> MaterialTopicProposal:
+    concept = lesson_concept(GUIDE, topic=topic)
+    return MaterialTopicProposal(
+        source_id=source.id,
+        position=position,
+        section_title=concept["section_title"],
+        topic=concept["topic"],
+        answer_anchor=concept["answer_basis"],
+        source_excerpt=concept["source_excerpt"],
+        canonical_question=concept["canonical_question"],
+        answer_rubric=concept["answer_rubric"],
+        recall_questions=concept["recall_questions"],
+        status=status,
+    )
+
+
 async def _claim(db, source: MaterialSource) -> uuid.UUID:
     run_id = uuid.uuid4()
     source.status = "processing"
@@ -898,6 +916,8 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert writeback_concept["card_id"] == f"devmax:card:{card.id}"
     assert len(writeback_concept["answer_rubric"]) == 5
     assert len(writeback_concept["recall_candidates"]) == 5
+
+
     assert writeback_concept["quiz_evidence"] == [
         {
             "id": f"devmax:session:{session.id}",
@@ -938,6 +958,95 @@ async def test_lesson_confirmation_progress_and_distillation_reuse_card_mastery(
     assert source.status == SOURCE_CONFIRMED
     assert source.canonical_note_markdown == artifact["canonical_note_markdown"]
     assert source.recall_export_markdown == artifact["recall_export_markdown"]
+
+
+async def test_lesson_confirmation_requires_an_explicit_decision_for_every_concept(
+    client, db
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Two request-path concepts",
+        source_text=GUIDE,
+        import_path="lesson",
+        status=SOURCE_READY,
+    )
+    first = lesson_proposal(
+        source, position=1, topic="Request routing boundaries"
+    )
+    second = lesson_proposal(
+        source, position=2, topic="Request routing failure points"
+    )
+    db.add(source)
+    db.add(first)
+    db.add(second)
+    await db.commit()
+
+    partial = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(first.id)]},
+    )
+
+    assert partial.status_code == 409, partial.text
+    assert partial.json()["detail"] == {
+        "code": "lesson_decisions_incomplete",
+        "unselected_clean_topic_ids": [str(second.id)],
+        "needs_attention_topic_ids": [],
+    }
+    assert not (await db.exec(select(Card))).all()
+    await db.refresh(first)
+    await db.refresh(second)
+    assert first.status == "clean"
+    assert second.status == "clean"
+
+    second.status = "excluded"
+    db.add(second)
+    await db.commit()
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(first.id)]},
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
+async def test_lesson_confirmation_rejects_any_concept_that_still_needs_attention(
+    client, db
+):
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Request-path concepts needing review",
+        source_text=GUIDE,
+        import_path="lesson",
+        status=SOURCE_NEEDS_ATTENTION,
+    )
+    clean = lesson_proposal(source, position=1, topic="Request routing boundaries")
+    attention = lesson_proposal(
+        source,
+        position=2,
+        topic="Request routing failure points",
+        status="needs_attention",
+    )
+    db.add(source)
+    db.add(clean)
+    db.add(attention)
+    await db.commit()
+
+    response = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=API_HEADERS,
+        json={"selected_topic_ids": [str(clean.id)]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "code": "lesson_decisions_incomplete",
+        "unselected_clean_topic_ids": [],
+        "needs_attention_topic_ids": [str(attention.id)],
+    }
+    assert not (await db.exec(select(Card))).all()
 
 
 async def test_plan_import_reuses_its_preview_for_review_topics(db, stub_import):

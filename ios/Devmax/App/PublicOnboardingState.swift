@@ -88,6 +88,19 @@ final class PublicOnboardingState: ObservableObject {
 
     var lessonIsValid: Bool { guideIsValid && lessonSourceURLIsValid }
 
+    var canConfirmSelectedTopics: Bool {
+        guard !busy, !selectedTopics.isEmpty else { return false }
+        guard isLessonDraft else { return true }
+        guard let job else { return false }
+        let selectedAreClean = job.topics
+            .filter { selectedTopics.contains($0.id) }
+            .allSatisfy(\.isClean)
+        let everyProposalHasDecision = job.topics.allSatisfy {
+            $0.status == "excluded" || selectedTopics.contains($0.id)
+        }
+        return selectedAreClean && everyProposalHasDecision
+    }
+
     var preparedTitle: String {
         draft.title.isEmpty
             ? (draft.originalFilename.isEmpty ? "Your study guide" : draft.originalFilename)
@@ -270,7 +283,9 @@ final class PublicOnboardingState: ObservableObject {
         switch job.status {
         case "ready", "needs_attention":
             error = ""
-            selectedTopics = job.cleanTopicIDs
+            // A focused lesson is a small set of concepts the learner can review
+            // individually. Do not turn a structural check into implicit approval.
+            selectedTopics = job.importPath == "lesson" ? [] : job.cleanTopicIDs
             step = .importReady
         case "failed": step = .importFailed
         case "confirmed", "superseded": step = .empty
@@ -429,8 +444,15 @@ final class PublicOnboardingState: ObservableObject {
                let index = current.topics.firstIndex(where: { $0.id == topic.id }) {
                 current.topics[index] = updated
                 job = current
-                if updated.isClean { selectedTopics.insert(updated.id) }
-                else { selectedTopics.remove(updated.id) }
+                if isLessonDraft {
+                    // Editing changes the content that was reviewed. A learner
+                    // must inspect and select it again, even if structure is clean.
+                    selectedTopics.remove(updated.id)
+                } else if updated.isClean {
+                    selectedTopics.insert(updated.id)
+                } else {
+                    selectedTopics.remove(updated.id)
+                }
             }
             editingTopic = nil
         } catch { self.error = "That topic edit couldn't be saved." }
@@ -604,7 +626,8 @@ final class PublicOnboardingState: ObservableObject {
         case "extracting", "import-background": .importing
         case "extract-error": .importFailed
         case "import-ready": .importReady
-        case "topics", "topics-grouped", "needs-attention", "topic-edit": .topics
+        case "topics", "topics-grouped", "needs-attention", "topic-edit",
+             "lesson-concepts", "lesson-concept-expanded": .topics
         case "manual", "manual-anchor": .manual
         case "collections": .collections
         case "collection-detail": .collectionDetail

@@ -25,6 +25,7 @@ struct PublicOnboardingView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var plan: StudyPlanState
     @EnvironmentObject private var auth: AuthState
+    @State private var expandedTopics: Set<UUID> = []
 
     var body: some View {
         Group {
@@ -116,7 +117,11 @@ struct PublicOnboardingView: View {
                let item = try? await flow.api.materialImports().first
             {
                 flow.job = item
-                flow.selectedTopics = item.cleanTopicIDs
+                flow.selectedTopics = item.importPath == "lesson" ? [] : item.cleanTopicIDs
+                if DebugFlags.shared.route == "lesson-concept-expanded",
+                   let first = item.topics.first {
+                    expandedTopics.insert(first.id)
+                }
                 if DebugFlags.shared.route == "topic-edit" {
                     flow.editingTopic = item.topics.first
                 }
@@ -258,25 +263,35 @@ struct PublicOnboardingView: View {
 
     private var importing: some View {
         PublicPage(
-            kicker: "SAVED · PROCESSING",
-            title: flow.isLessonDraft ? "Your lesson is safe." : "Your guide is safe."
+            kicker: flow.job == nil ? "SAVING" : "SAVED · PROCESSING",
+            title: flow.job == nil
+                ? (flow.isLessonDraft ? "Saving your lesson…" : "Saving your guide…")
+                : (flow.isLessonDraft ? "Your lesson is safe." : "Your guide is safe.")
         ) {
             Text(
-                "Devmax is reading the source structure and preparing proposals "
-                    + "for your review. A long source may take a while."
+                flow.job == nil
+                    ? "Your draft is safe on this device while Devmax saves it to your account."
+                    : "Devmax is reading the source structure and preparing proposals "
+                        + "for your review. A long source may take a while."
             )
             .publicBody()
             PublicMaterialCard(
                 title: flow.job?.title ?? flow.preparedTitle,
-                meta: "\(flow.job?.characterCount ?? flow.draft.guideText.count) "
-                    + "CHARACTERS · SAVED TO YOUR ACCOUNT"
+                meta: "\(flow.job?.characterCount ?? flow.draft.guideText.count) CHARACTERS · "
+                    + (flow.job == nil ? "SAVED ON THIS DEVICE" : "SAVED TO YOUR ACCOUNT")
             )
             ImportProgressStatus(
                 status: flow.job?.status,
                 startedAt: flow.importStartedAt ?? flow.job?.updatedAt ?? Date(),
                 checkedAt: flow.lastImportCheckedAt
             )
-            PublicNote("You can leave this screen or close the app. Processing continues, and the result will remain in Study material.")
+            PublicNote(
+                flow.job == nil
+                    ? "Keep this screen open until the account save finishes. If it fails, "
+                        + "your draft remains on this device."
+                    : "You can leave this screen or close the app. Processing continues, "
+                        + "and the result will remain in Study material."
+            )
         } footer: {
             SecondaryButton(title: "Go to Today") { leaveToToday() }
         }
@@ -338,13 +353,32 @@ struct PublicOnboardingView: View {
             title: "Confirm what you'll practice"
         ) {
             if let job = flow.job {
+                if flow.isLessonDraft {
+                    PublicNote(
+                        "Review every clean concept. Select each one you want, or remove it. "
+                            + "Nothing is created until every remaining concept has a decision."
+                    )
+                }
                 ForEach(job.topics) { topic in
                     Button {
-                        if flow.selectedTopics.contains(topic.id) { flow.selectedTopics.remove(topic.id) }
-                        else if topic.isClean { flow.selectedTopics.insert(topic.id) }
+                        if flow.isLessonDraft {
+                            if expandedTopics.contains(topic.id) {
+                                expandedTopics.remove(topic.id)
+                            } else {
+                                expandedTopics.insert(topic.id)
+                            }
+                        } else if flow.selectedTopics.contains(topic.id) {
+                            flow.selectedTopics.remove(topic.id)
+                        } else if topic.isClean {
+                            flow.selectedTopics.insert(topic.id)
+                        }
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            Text(flow.selectedTopics.contains(topic.id) ? "✓" : "○")
+                            Text(
+                                flow.isLessonDraft
+                                    ? (expandedTopics.contains(topic.id) ? "⌄" : "›")
+                                    : (flow.selectedTopics.contains(topic.id) ? "✓" : "○")
+                            )
                                 .foregroundStyle(topic.isClean ? Theme.accent : Theme.metaFaint)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(topic.topic).font(WCFont.sans(15, weight: 500)).foregroundStyle(Theme.text)
@@ -356,7 +390,9 @@ struct PublicOnboardingView: View {
                                    let prompts = topic.recallQuestions, !prompts.isEmpty
                                 {
                                     MetaText(
-                                        text: prompts.map(\.levelLabel).joined(separator: " · "),
+                                        text: topic.isClean
+                                            ? "STRUCTURE CHECKED · REVIEW MEANING"
+                                            : "NEEDS ATTENTION",
                                         font: WCFont.mono(9), tracking: 0.3,
                                         color: Theme.metaFaint, uppercased: true
                                     )
@@ -370,6 +406,29 @@ struct PublicOnboardingView: View {
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
+                    if flow.isLessonDraft, expandedTopics.contains(topic.id) {
+                        LessonConceptEvidence(topic: topic)
+                        Button(
+                            flow.selectedTopics.contains(topic.id)
+                                ? "Remove from practice"
+                                : "Select this concept for practice"
+                        ) {
+                            if flow.selectedTopics.contains(topic.id) {
+                                flow.selectedTopics.remove(topic.id)
+                            } else if topic.isClean {
+                                flow.selectedTopics.insert(topic.id)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(WCFont.sans(13.5, weight: 500))
+                        .foregroundStyle(topic.isClean ? Theme.accent : Theme.metaFaint)
+                        .frame(maxWidth: .infinity, minHeight: Metrics.minTapTarget)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Metrics.secondaryRadius)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                        .disabled(!topic.isClean)
+                    }
                     HStack(spacing: 18) {
                         Button("Edit source anchor") { flow.editingTopic = topic }
                         Button("Remove") {
@@ -399,7 +458,7 @@ struct PublicOnboardingView: View {
                             ? "Study 1 concept"
                             : "Study \(flow.selectedTopics.count) concepts")
                         : "Create selected topics"),
-                enabled: !flow.selectedTopics.isEmpty && !flow.busy
+                enabled: flow.canConfirmSelectedTopics
             ) {
                 Task { await flow.confirmTopics(app: app) }
             }
@@ -753,6 +812,75 @@ struct PublicOnboardingView: View {
     }
 }
 
+private struct LessonConceptEvidence: View {
+    let topic: MaterialTopic
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PublicNote(
+                "Structure checked means required fields and pasted-source spans "
+                    + "were validated. Review the meaning before selecting this concept."
+            )
+            evidence("PASTED SOURCE EXCERPT", topic.sourceExcerpt)
+            evidence("ANSWER BASIS", topic.answerAnchor)
+            if let question = topic.canonicalQuestion, !question.isEmpty {
+                evidence("CANONICAL QUESTION", question)
+            }
+            if !rubricRows.isEmpty {
+                MetaText(
+                    text: "ANSWER RUBRIC", font: WCFont.mono(10),
+                    tracking: 0.8, color: Theme.meta
+                )
+                ForEach(Array(rubricRows.enumerated()), id: \.offset) { _, row in
+                    evidence(row.label.uppercased(), row.value)
+                }
+            }
+            if let prompts = topic.recallQuestions, !prompts.isEmpty {
+                MetaText(
+                    text: "RECALL QUESTIONS", font: WCFont.mono(10),
+                    tracking: 0.8, color: Theme.meta
+                )
+                ForEach(prompts) { prompt in
+                    evidence(prompt.levelLabel.uppercased(), prompt.question)
+                }
+            }
+        }
+        .padding(14)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+        .overlay(RoundedRectangle(cornerRadius: Metrics.inlineRadius).stroke(Theme.border))
+    }
+
+    private var rubricRows: [(label: String, value: String)] {
+        let values = topic.answerRubric ?? [:]
+        let fields = [
+            ("Mechanism", ["mechanism", "essential_account"]),
+            ("Acceptable alternative", ["acceptable_alternative"]),
+            ("Trade-off / depth", ["trade_off", "depth_extension"]),
+            ("Failure boundary", ["failure_mode", "boundary_extension"]),
+            ("Misconception", ["misconception"])
+        ]
+        return fields.compactMap { label, keys in
+            guard let value = keys.compactMap({ values[$0] }).first(where: { !$0.isEmpty })
+            else { return nil }
+            return (label, value)
+        }
+    }
+
+    private func evidence(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            MetaText(
+                text: label, font: WCFont.mono(9),
+                tracking: 0.55, color: Theme.metaFaint
+            )
+            Text(value.isEmpty ? "Not supplied." : value)
+                .font(WCFont.sans(13))
+                .foregroundStyle(Theme.textMuted)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 struct ImportProgressPresentation: Equatable {
     let status: String
     let elapsedSeconds: Int
@@ -768,7 +896,7 @@ struct ImportProgressPresentation: Equatable {
         switch status {
         case "pending": "Saved and waiting to start"
         case "processing": "Reading and checking the source"
-        default: "Starting safely"
+        default: "Saving to your account"
         }
     }
 
@@ -776,7 +904,7 @@ struct ImportProgressPresentation: Equatable {
         switch status {
         case "pending": "Your lesson is queued; no cards exist yet."
         case "processing": "Devmax is preparing proposals for your review."
-        default: "Saving the lesson before source analysis begins."
+        default: "Your draft remains on this device until the account save finishes."
         }
     }
 
