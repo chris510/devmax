@@ -217,14 +217,8 @@ enum SettingsValidation {
         return nil
     }
 
-    static func normalizedReminderSettings(_ settings: AppSettings) -> AppSettings {
-        var value = settings
-        value.reviewsPerDay = min(6, max(1, settings.windows.filter(\.on).count))
-        return value
-    }
-
     static func weeklyReminderValue(for settings: AppSettings) -> String {
-        switch normalizedReminderSettings(settings).weeklyReminderMaximum {
+        switch settings.normalizedReminderSettings.weeklyReminderMaximum {
         case 0: "Off"
         case 1: "Up to 1/week"
         case let count: "Up to \(count)/week"

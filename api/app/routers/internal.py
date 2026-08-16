@@ -165,13 +165,14 @@ async def _trigger_review_for_user(
     # ordinary foreign-key inserts. Taking it first preserves the account-wide
     # User → Settings → Card order: deletion cannot cascade through Cards and
     # then wait on Settings while this transaction does the reverse.
-    user = await db.get(
-        User,
-        user_id,
-        with_for_update={"read": True, "key_share": True},
-        populate_existing=True,
-    )
-    if user is None:
+    locked_user_id = (
+        await db.exec(
+            select(User.id)
+            .where(User.id == user_id)
+            .with_for_update(read=True, key_share=True)
+        )
+    ).one_or_none()
+    if locked_user_id is None:
         return TriggerResult(sent=False, reason="outside_window")
 
     # Serialize every poll for one account on its settings row. Card locks keep
@@ -302,23 +303,6 @@ async def _trigger_review_for_user(
             due_count=due_count,
         )
 
-    # Another poll may have passed the cheap guards and then waited on this row.
-    # Re-read both account-level guards after acquiring the candidate lock so two
-    # concurrent polls cannot advance to different cards inside one window.
-    pushed_today, latest_push = (
-        await db.exec(
-            select(func.count(), func.max(col(Card.last_pushed_at))).where(
-                Card.user_id == user_id, col(Card.last_pushed_at) >= day_start
-            )
-        )
-    ).one()
-    if latest_push is not None and as_utc(latest_push) >= window_start:
-        await db.commit()  # release the candidate lock before returning
-        return TriggerResult(sent=False, reason="already_pushed")
-    if pushed_today >= settings.reviews_per_day:
-        await db.commit()  # release the candidate lock before returning
-        return TriggerResult(sent=False, reason="daily_limit")
-
     # This is the queue after the candidate was serialized with Learn/session,
     # so the notification count does not include a card that gated while the
     # poll was waiting for its lock.
@@ -415,18 +399,17 @@ async def trigger_review(
     are multiple users, the aggregate reports counts while each user's window,
     daily cap, cards, and APNs tokens remain isolated inside the helper above.
     """
-    rows = (await db.exec(select(Settings))).all()
-    if not rows:
+    user_ids = (await db.exec(select(Settings.user_id))).all()
+    if not user_ids:
         return TriggerResult(sent=False, reason="outside_window")
 
-    if len(rows) == 1:
-        return await _trigger_review_for_user(rows[0].user_id, db)
+    if len(user_ids) == 1:
+        return await _trigger_review_for_user(user_ids[0], db)
 
     # Snapshot identities before ending the discovery transaction. Each account
     # then gets an independent session and locks its current settings row, so an
     # eight-second APNs timeout for one account cannot serially consume the
     # poller's entire 60-second deadline.
-    user_ids = [row.user_id for row in rows]
     await db.rollback()
     factory, concurrency = sibling_session_factory(
         db, max_concurrency=REVIEW_ACCOUNT_CONCURRENCY
@@ -444,7 +427,7 @@ async def trigger_review(
         reasons[reason] = reasons.get(reason, 0) + 1
     return TriggerBatchResult(
         sent=sent_count > 0,
-        processed_users=len(rows),
+        processed_users=len(user_ids),
         sent_count=sent_count,
         failed_count=failed_count,
         reasons=reasons,

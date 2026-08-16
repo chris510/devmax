@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -69,10 +70,7 @@ DEFAULT_WINDOWS: list[dict[str, Any]] = [
 
 def default_windows() -> list[dict[str, Any]]:
     """Return isolated JSON values for a new settings row."""
-    return [
-        {**window, "days": list(window["days"])}
-        for window in DEFAULT_WINDOWS
-    ]
+    return deepcopy(DEFAULT_WINDOWS)
 
 
 def _now() -> datetime:

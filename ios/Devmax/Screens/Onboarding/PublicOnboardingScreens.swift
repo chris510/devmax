@@ -834,47 +834,36 @@ struct PublicOnboardingView: View {
     }
 
     private var normalizedReminderDraft: AppSettings {
-        SettingsValidation.normalizedReminderSettings(reminderDraft)
+        reminderDraft.normalizedReminderSettings
     }
 
     private func onboardingWindow(_ index: Int) -> some View {
-        let window = reminderDraft.windows[index]
+        let window = Binding(
+            get: { reminderDraft.windows[index] },
+            set: { reminderDraft.windows[index] = $0 }
+        )
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 10) {
                 Toggle34(
-                    isOn: Binding(
-                        get: { reminderDraft.windows[index].on },
-                        set: { reminderDraft.windows[index].on = $0 }
-                    ),
-                    accessibilityLabel: "\(window.label) reminder"
+                    isOn: window.on,
+                    accessibilityLabel: "\(window.wrappedValue.label) reminder"
                 )
-                Text(window.label)
+                Text(window.wrappedValue.label)
                     .font(WCFont.sans(15, weight: 500))
                     .foregroundStyle(Theme.text)
                 Spacer(minLength: 4)
                 TimeChip(
-                    time: Binding(
-                        get: { reminderDraft.windows[index].from },
-                        set: { reminderDraft.windows[index].from = $0 }
-                    ),
-                    accessibilityLabel: "\(window.label) start time"
+                    time: window.from,
+                    accessibilityLabel: "\(window.wrappedValue.label) start time"
                 )
                 Text("–").font(WCFont.mono(10)).foregroundStyle(Theme.metaDim)
                 TimeChip(
-                    time: Binding(
-                        get: { reminderDraft.windows[index].to },
-                        set: { reminderDraft.windows[index].to = $0 }
-                    ),
-                    accessibilityLabel: "\(window.label) end time"
+                    time: window.to,
+                    accessibilityLabel: "\(window.wrappedValue.label) end time"
                 )
             }
-            WeekdayPicker(
-                days: Binding(
-                    get: { reminderDraft.windows[index].days },
-                    set: { reminderDraft.windows[index].days = $0 }
-                )
-            )
-            .opacity(window.on ? 1 : 0.55)
+            WeekdayPicker(days: window.days)
+                .opacity(window.wrappedValue.on ? 1 : 0.55)
         }
         .padding(12)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))

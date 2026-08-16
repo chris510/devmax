@@ -310,6 +310,14 @@ struct AppSettings: Codable, Equatable {
 
     var usesRecallContract: Bool { activeScoringContractVersion == 2 }
 
+    /// The endpoint retains a daily safety cap, while the product exposes one
+    /// reminder per enabled window. Keep the wire value aligned with that UI.
+    var normalizedReminderSettings: AppSettings {
+        var value = self
+        value.reviewsPerDay = min(6, max(1, windows.filter(\.on).count))
+        return value
+    }
+
     /// The push endpoint can issue at most one reminder per enabled window and
     /// never more than `reviewsPerDay` in a local day. Summing that capped count
     /// across the seven ISO weekdays is therefore the honest weekly maximum;

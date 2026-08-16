@@ -514,18 +514,17 @@ class SettingsIn(SettingsBase):
         # enabled windows with the same start on the same weekday would collapse
         # into one slot while the client counted two, so reject that ambiguous
         # schedule at the write boundary.
-        for index, left in enumerate(self.windows):
-            if not left.on:
+        slots: set[tuple[int, str]] = set()
+        for window in self.windows:
+            if not window.on:
                 continue
-            for right in self.windows[index + 1 :]:
-                if (
-                    right.on
-                    and set(left.days).intersection(right.days)
-                    and time.fromisoformat(left.from_) == time.fromisoformat(right.from_)
-                ):
+            for day in window.days:
+                slot = (day, window.from_)
+                if slot in slots:
                     raise ValueError(
                         "enabled windows on the same weekday must have distinct start times"
                     )
+                slots.add(slot)
         return self
 
 
@@ -562,7 +561,7 @@ class TriggerBatchResult(BaseModel):
 
 
 def window_to_dict(w: NotificationWindow) -> dict[str, Any]:
-    return {"label": w.label, "from": w.from_, "to": w.to, "on": w.on, "days": w.days}
+    return w.model_dump(by_alias=True)
 
 
 # ---------------------------------------------------------------------------

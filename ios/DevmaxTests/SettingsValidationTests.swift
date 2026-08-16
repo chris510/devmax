@@ -47,7 +47,7 @@ final class SettingsValidationTests: XCTestCase {
         settings.reviewsPerDay = 6
 
         XCTAssertEqual(
-            SettingsValidation.normalizedReminderSettings(settings).reviewsPerDay,
+            settings.normalizedReminderSettings.reviewsPerDay,
             2
         )
         XCTAssertEqual(SettingsValidation.weeklyReminderValue(for: settings), "Up to 14/week")
@@ -55,7 +55,7 @@ final class SettingsValidationTests: XCTestCase {
         settings.windows[0].on = false
         settings.windows[1].on = false
         XCTAssertEqual(
-            SettingsValidation.normalizedReminderSettings(settings).reviewsPerDay,
+            settings.normalizedReminderSettings.reviewsPerDay,
             1
         )
         XCTAssertEqual(SettingsValidation.weeklyReminderValue(for: settings), "Off")

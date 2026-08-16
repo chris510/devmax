@@ -353,7 +353,7 @@ struct ReviewRemindersScreen: View {
     /// product exposes window recurrence directly, so the cap must not silently
     /// suppress any enabled window the editor presents.
     private var normalizedDraft: AppSettings {
-        SettingsValidation.normalizedReminderSettings(draft)
+        draft.normalizedReminderSettings
     }
 
     private func startSaving() {
@@ -371,12 +371,11 @@ struct ReviewRemindersScreen: View {
 
     @MainActor
     private func persist(_ value: AppSettings) async {
-        do {
-            state.settings = try await state.api.updateSettings(value)
-            saving = false
+        let saved = await state.persistSettings(value)
+        saving = false
+        if saved {
             dismissIfPresented()
-        } catch {
-            saving = false
+        } else {
             errorText = "Couldn't save changes. Your edits are still here."
         }
     }
