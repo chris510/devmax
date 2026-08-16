@@ -529,6 +529,9 @@ async def _process_lesson(
         "subject": source.title,
         "comparison": comparison,
         "grounding_gate_version": LESSON_GROUNDING_GATE_VERSION,
+        "grounding_evidence_transport_version": (
+            llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+        ),
     }
     return source
 
@@ -652,11 +655,18 @@ def _validated_lesson_grounding(
     concepts: list[dict],
     findings: list[dict],
 ) -> dict[tuple[int, str], dict]:
-    """Require one literal-evidence verdict for every user-visible field."""
+    """Require one server-issued evidence verdict for every visible field."""
     expected = {
         (concept_index, field)
         for concept_index in range(1, len(concepts) + 1)
         for field in llm.LESSON_GROUNDING_FIELDS
+    }
+    catalog = llm.lesson_evidence_catalog(concepts)
+    issued_by_concept = {
+        entry["concept_index"]: {
+            span["span_id"]: span["text"] for span in entry["spans"]
+        }
+        for entry in catalog
     }
     validated: dict[tuple[int, str], dict] = {}
     for finding_index, finding in enumerate(findings, 1):
@@ -683,7 +693,7 @@ def _validated_lesson_grounding(
         verdict = finding.get("verdict")
         reason = finding.get("reason")
         repair = finding.get("repair")
-        spans = finding.get("evidence_spans")
+        span_ids = finding.get("evidence_span_ids")
         if verdict not in llm.LESSON_GROUNDING_VERDICTS:
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} has an invalid verdict"
@@ -702,9 +712,14 @@ def _validated_lesson_grounding(
             or len(reason) > 800
             or not isinstance(repair, str)
             or len(repair) > 2000
-            or not isinstance(spans, list)
-            or len(spans) > 4
-            or sum(len(span) for span in spans if isinstance(span, str)) > 1200
+            or "evidence_spans" in finding
+            or not isinstance(span_ids, list)
+            or len(span_ids) > 4
+            or any(
+                not isinstance(span_id, str) or len(span_id) > 100
+                for span_id in span_ids
+            )
+            or len(span_ids) != len(dict.fromkeys(span_ids))
         ):
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} has invalid evidence"
@@ -713,28 +728,32 @@ def _validated_lesson_grounding(
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} repairs a passing field"
             )
-        if verdict != "unsupported" and not spans:
+        if verdict != "unsupported" and not span_ids:
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} has no supporting span"
             )
-
-        excerpt = concepts[concept_index - 1]["source_excerpt"]
-        for span in spans:
-            if (
-                not isinstance(span, str)
-                or not span.strip()
-                or len(span) > 500
-                or span not in source.source_text
-                or span not in excerpt
-            ):
-                raise llm.LLMError(
-                    f"lesson grounding finding {finding_index} has a non-literal span"
-                )
+        issued = issued_by_concept[concept_index]
+        if any(
+            span_id not in issued or not issued[span_id].strip()
+            for span_id in span_ids
+        ):
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} has an unissued "
+                "evidence span ID"
+            )
+        selected = set(span_ids)
+        canonical_span_ids = [
+            span_id for span_id in issued if span_id in selected
+        ]
+        if sum(len(issued[span_id]) for span_id in canonical_span_ids) > 1200:
+            raise llm.LLMError(
+                f"lesson grounding finding {finding_index} has invalid evidence"
+            )
         validated[key] = {
             "concept_index": concept_index,
             "field": field,
             "verdict": verdict,
-            "evidence_spans": list(spans),
+            "evidence_span_ids": canonical_span_ids,
             "reason": reason.strip(),
             "repair": repair.strip(),
         }

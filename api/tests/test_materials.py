@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+from copy import deepcopy
 from datetime import UTC, date, datetime
 
 import pytest
@@ -108,9 +109,14 @@ def lesson_findings(
 ) -> list[dict]:
     verdicts = verdicts or {}
     repairs = repairs or {}
+    issued = {
+        entry["concept_index"]: [
+            span["span_id"] for span in entry["spans"]
+        ]
+        for entry in llm.lesson_evidence_catalog(concepts)
+    }
     findings = []
-    for concept_index, concept in enumerate(concepts, 1):
-        evidence = concept["source_excerpt"][:300]
+    for concept_index, _concept in enumerate(concepts, 1):
         for field in llm.LESSON_GROUNDING_FIELDS:
             key = (concept_index, field)
             verdict = verdicts.get(key, "supported")
@@ -119,7 +125,7 @@ def lesson_findings(
                     "concept_index": concept_index,
                     "field": field,
                     "verdict": verdict,
-                    "evidence_spans": [evidence],
+                    "evidence_span_ids": issued[concept_index][:1],
                     "reason": (
                         "The expected answer is stated in the excerpt."
                         if verdict != "unsupported"
@@ -408,6 +414,9 @@ async def test_lesson_extraction_stores_one_complete_concept_pack(
     assert processed.result_summary["grounding_gate_version"] == (
         materials.LESSON_GROUNDING_GATE_VERSION
     )
+    assert processed.result_summary["grounding_evidence_transport_version"] == (
+        llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+    )
     assert len(verifier_calls) == 1
     assert proposal.canonical_question.startswith("How would you trace")
     assert proposal.answer_rubric == LESSON_RUBRIC
@@ -478,7 +487,7 @@ def test_lesson_post_validation_owns_provider_unsupported_array_bounds():
         materials._validated_lesson_concepts(source, [empty_section])
 
 
-def test_networking_grounding_requires_a_complete_literal_evidence_matrix():
+def test_networking_grounding_requires_a_complete_issued_evidence_matrix():
     source = MaterialSource(
         user_id=FOUNDER_USER_ID,
         title="Networking 101",
@@ -502,12 +511,10 @@ def test_networking_grounding_requires_a_complete_literal_evidence_matrix():
     with pytest.raises(llm.LLMError, match="unexpected or duplicated"):
         materials._validated_lesson_grounding(source, concepts, duplicate)
 
-    non_literal = lesson_findings(concepts)
-    non_literal[0]["evidence_spans"] = [
-        "Each packet can take a different path through the network."
-    ]
-    with pytest.raises(llm.LLMError, match="non-literal span"):
-        materials._validated_lesson_grounding(source, concepts, non_literal)
+    unissued = lesson_findings(concepts)
+    unissued[0]["evidence_span_ids"] = ["c1-s999-not-issued"]
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
+        materials._validated_lesson_grounding(source, concepts, unissued)
 
     passing_repair = lesson_findings(concepts)
     passing_repair[0]["repair"] = "A replacement that must not be trusted."
@@ -547,12 +554,118 @@ def test_networking_grounding_rejects_source_text_outside_the_concept_excerpt():
         source, [networking_concept(source_excerpt=excerpt)]
     )
     findings = lesson_findings(concepts)
-    findings[0]["evidence_spans"] = [
-        "Reusing persistent connections avoids repeated setup"
-    ]
+    outside = "Reusing persistent connections avoids repeated setup"
+    outside_id = llm.lesson_evidence_catalog(
+        [{"source_excerpt": outside}]
+    )[0]["spans"][0]["span_id"]
+    findings[0]["evidence_span_ids"] = [outside_id]
 
-    with pytest.raises(llm.LLMError, match="non-literal span"):
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
         materials._validated_lesson_grounding(source, concepts, findings)
+
+
+def test_server_span_ids_bind_exactly_to_the_concept_and_fail_closed():
+    expanded_source = f"{NETWORKING_101_SOURCE} {NETWORKING_101_SOURCE}"
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=expanded_source,
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source,
+        [
+            networking_concept(source_excerpt=expanded_source),
+            networking_concept(
+                topic="Persistent connection capacity",
+                section_title="Networking connection capacity",
+            ),
+        ],
+    )
+    findings = lesson_findings(concepts)
+    catalog = llm.lesson_evidence_catalog(concepts)
+    first_ids = [span["span_id"] for span in catalog[0]["spans"]]
+    second_id = catalog[1]["spans"][0]["span_id"]
+
+    cross_concept = deepcopy(findings)
+    cross_concept[0]["evidence_span_ids"] = [second_id]
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
+        materials._validated_lesson_grounding(source, concepts, cross_concept)
+
+    duplicate = deepcopy(findings)
+    duplicate[0]["evidence_span_ids"] = [first_ids[0], first_ids[0]]
+    with pytest.raises(llm.LLMError, match="invalid evidence"):
+        materials._validated_lesson_grounding(source, concepts, duplicate)
+
+    non_string = deepcopy(findings)
+    non_string[0]["evidence_span_ids"] = [[first_ids[0]]]
+    with pytest.raises(llm.LLMError, match="invalid evidence"):
+        materials._validated_lesson_grounding(source, concepts, non_string)
+
+    too_many = deepcopy(findings)
+    assert len(first_ids) >= 5
+    too_many[0]["evidence_span_ids"] = first_ids[:5]
+    with pytest.raises(llm.LLMError, match="invalid evidence"):
+        materials._validated_lesson_grounding(source, concepts, too_many)
+
+    unknown = deepcopy(findings)
+    unknown[0]["evidence_span_ids"] = ["c1-s999-not-issued"]
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
+        materials._validated_lesson_grounding(source, concepts, unknown)
+
+    reversed_ids = deepcopy(findings)
+    reversed_ids[0]["evidence_span_ids"] = [first_ids[1], first_ids[0]]
+    review = materials._validated_lesson_grounding(
+        source, concepts, reversed_ids
+    )
+    assert review[(1, llm.LESSON_GROUNDING_FIELDS[0])][
+        "evidence_span_ids"
+    ] == first_ids[:2]
+
+
+def test_networking_finding_16_uses_ids_without_copy_normalization_failures():
+    punctuation_trap = (
+        "TCP’s acknowledgement path preserves   exact spacing and an em—dash "
+        "across the server-issued excerpt."
+    )
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=f"{NETWORKING_101_SOURCE}\n{punctuation_trap}",
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source,
+        [
+            networking_concept(),
+            networking_concept(
+                topic="Acknowledgement path notation",
+                section_title="Networking punctuation boundary",
+                source_excerpt=punctuation_trap,
+            ),
+        ],
+    )
+    findings = lesson_findings(concepts)
+    finding_16 = findings[15]
+
+    assert finding_16["concept_index"] == 2
+    assert finding_16["field"] == llm.LESSON_GROUNDING_FIELDS[1]
+    assert "TCP's acknowledgement path preserves exact spacing" not in punctuation_trap
+    issued_id = finding_16["evidence_span_ids"][0]
+    issued_text = llm.lesson_evidence_catalog(concepts)[1]["spans"][0]["text"]
+    assert "TCP’s" in issued_text
+    assert "preserves   exact" in issued_text
+    assert "em—dash" in issued_text
+
+    for _ in range(2):
+        review = materials._validated_lesson_grounding(
+            source, concepts, deepcopy(findings)
+        )
+        assert review[(2, llm.LESSON_GROUNDING_FIELDS[1])][
+            "evidence_span_ids"
+        ] == [issued_id]
 
 
 async def test_networking_unsupported_additions_are_review_only(
