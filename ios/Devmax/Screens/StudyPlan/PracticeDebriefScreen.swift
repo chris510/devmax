@@ -20,6 +20,8 @@ struct PracticeDebriefScreen: View {
     @EnvironmentObject private var flags: DebugFlags
     @StateObject private var speech = SpeechService()
     @State private var stage: Stage
+    @State private var finalizingRecording = false
+    @State private var recordingGeneration = 0
 
     init(planID: UUID, itemID: UUID, showCompletionOffer: Bool) {
         self.planID = planID
@@ -94,6 +96,7 @@ struct PracticeDebriefScreen: View {
             enterTextMode(with: transcript.isEmpty ? nil : transcript)
         }
         .onDisappear {
+            recordingGeneration += 1
             speech.stop()
             plan.flushPracticeDebriefDraft()
         }
@@ -343,11 +346,12 @@ struct PracticeDebriefScreen: View {
             case .recording:
                 HStack(spacing: 10) {
                     SecondaryButton(title: "Type", fillsWidth: false) {
-                        speech.stop()
-                        enterTextMode()
+                        finishRecording()
                     }
                     PrimaryButton(title: "Stop") { finishRecording() }
                 }
+                .disabled(finalizingRecording)
+                .opacity(finalizingRecording ? 0.55 : 1)
             case .text, .saveFailed:
                 VStack(spacing: 4) {
                     PrimaryButton(
@@ -379,6 +383,8 @@ struct PracticeDebriefScreen: View {
     }
 
     private func startRecording() {
+        recordingGeneration += 1
+        finalizingRecording = false
         stage = .recording
         speech.start(
             continuing: plan.debriefDraft,
@@ -389,9 +395,18 @@ struct PracticeDebriefScreen: View {
     }
 
     private func finishRecording() {
+        guard !finalizingRecording else { return }
+        finalizingRecording = true
+        let generation = recordingGeneration
         Task {
             let text = await speech.finish()
-            enterTextMode(with: text)
+            finalizingRecording = false
+            guard generation == recordingGeneration,
+                  plan.item?.id == itemID else {
+                if !text.isEmpty { PracticeDebriefDraftStore.save(text, for: itemID) }
+                return
+            }
+            enterTextMode(with: text.isEmpty ? nil : text)
         }
     }
 
@@ -429,6 +444,7 @@ struct PracticeDebriefScreen: View {
     }
 
     private func close() {
+        recordingGeneration += 1
         speech.stop()
         plan.flushPracticeDebriefDraft()
         if !state.path.isEmpty { state.path.removeLast() }

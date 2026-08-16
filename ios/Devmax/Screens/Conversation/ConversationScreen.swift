@@ -2,6 +2,13 @@ import SwiftUI
 
 /// One continuous thread; no screen change per turn.
 struct ConversationScreen: View {
+    private struct RecordingContext {
+        let generation: Int
+        let sessionID: UUID?
+        let cardID: UUID?
+        let fallbackDraft: String
+    }
+
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var flags: DebugFlags
     @StateObject private var speech = SpeechService()
@@ -12,6 +19,7 @@ struct ConversationScreen: View {
     /// stage is still a recording one during that gap, so without this a second
     /// tap would submit the same answer twice.
     @State private var finalizing = false
+    @State private var recordingGeneration = 0
 
     /// Answer bubbles and the live transcript cap at 84% — of the thread's content
     /// width, not the screen's.
@@ -65,7 +73,11 @@ struct ConversationScreen: View {
             guard captureState == .needsReview else { return }
             moveUncertainSpeechToText()
         }
-        .onDisappear { speech.stop(); speaker.stop() }
+        .onDisappear {
+            recordingGeneration += 1
+            speech.stop()
+            speaker.stop()
+        }
     }
 
     // MARK: - Chrome
@@ -73,6 +85,7 @@ struct ConversationScreen: View {
     private var chrome: some View {
         HStack {
             Button {
+                recordingGeneration += 1
                 speech.stop()
                 speaker.stop()
                 state.finish()
@@ -529,9 +542,18 @@ struct ConversationScreen: View {
                 // Reading the transcript straight after stop() dropped whatever
                 // was still in flight. On a turn with no live capture `finishResult()`
                 // returns nothing, so `state.draft` is the value — not a fallback.
+                guard !finalizing else { return }
+                finalizing = true
+                let context = recordingContext()
                 Task {
                     let result = await speech.finishResult()
-                    enterTextMode(with: result.text.isEmpty ? state.draft : result.text)
+                    let text = result.text.isEmpty ? context.fallbackDraft : result.text
+                    guard owns(context) else {
+                        preserve(text, from: context)
+                        return
+                    }
+                    finalizing = false
+                    enterTextMode(with: text)
                 }
             } label: {
                 Text("Type instead")
@@ -539,6 +561,8 @@ struct ConversationScreen: View {
                     .foregroundStyle(Theme.meta)
             }
             .buttonStyle(.plain)
+            .disabled(finalizing || speech.isPreparing)
+            .opacity(finalizing || speech.isPreparing ? 0.4 : 1)
             .frame(minHeight: Metrics.minTapTarget)
             .accessibilityIdentifier("conversation-type-instead")
         }
@@ -560,24 +584,19 @@ struct ConversationScreen: View {
             // it carries which turn this answer belongs to, and `sendAnswer`
             // rewinds to it if the submit fails.
             finalizing = true
-            let recordingSessionID = state.sessionID
-            let recordingCardID = state.currentCard?.id
+            let context = recordingContext()
             Task {
                 // finishResult(), not stop(): the recognizer's last corrected result
                 // arrives after the audio ends, and reading the transcript
                 // synchronously cut the end off every spoken answer.
                 let result = await speech.finishResult()
-                finalizing = false
-                let text = result.text.isEmpty ? state.draft : result.text
+                let text = result.text.isEmpty ? context.fallbackDraft : result.text
 
                 // Final recognition can outlive this screen. Preserve the answer
                 // under the card that captured it, but never let a late callback
                 // write or submit against a session opened in the meantime.
-                guard state.sessionID == recordingSessionID,
-                      state.currentCard?.id == recordingCardID else {
-                    if let recordingCardID, !text.isEmpty {
-                        DraftStore.save(text, for: recordingCardID)
-                    }
+                guard owns(context) else {
+                    preserve(text, from: context)
                     return
                 }
                 guard result.isSafeToSubmit else {
@@ -585,16 +604,19 @@ struct ConversationScreen: View {
                     // the exact partial and require an editable text submission
                     // instead of letting it alter Recall and the schedule.
                     enterTextMode(with: text)
+                    finalizing = false
                     return
                 }
                 state.updateDraft(text)
                 // Submitting is the other moment a pending debounce can't be waited out.
                 await state.flushDraftForSubmission()
-                guard state.sessionID == recordingSessionID,
-                      state.currentCard?.id == recordingCardID else { return }
+                guard owns(context) else { return }
                 await state.submit(result.text)
+                guard context.generation == recordingGeneration else { return }
+                finalizing = false
             }
         } else {
+            recordingGeneration += 1
             state.submitError = false
             state.stage = state.stage.recordingTwin
             speech.start(
@@ -607,6 +629,26 @@ struct ConversationScreen: View {
                 simulate: Self.simulatedAnswer(for: state.stage)
             )
         }
+    }
+
+    private func recordingContext() -> RecordingContext {
+        RecordingContext(
+            generation: recordingGeneration,
+            sessionID: state.sessionID,
+            cardID: state.currentCard?.id,
+            fallbackDraft: state.draft
+        )
+    }
+
+    private func owns(_ context: RecordingContext) -> Bool {
+        context.generation == recordingGeneration
+            && context.sessionID == state.sessionID
+            && context.cardID == state.currentCard?.id
+    }
+
+    private func preserve(_ text: String, from context: RecordingContext) {
+        guard let cardID = context.cardID, !text.isEmpty else { return }
+        DraftStore.save(text, for: cardID)
     }
 
     private func moveUncertainSpeechToText() {
