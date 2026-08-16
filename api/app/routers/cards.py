@@ -72,6 +72,116 @@ async def _owned_card(
     return (await db.exec(statement)).first()
 
 
+def _invalid_lineage() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"code": "invalid_replacement_lineage"},
+    )
+
+
+async def _owned_card_links(
+    db: AsyncSession,
+) -> dict[uuid.UUID, tuple[uuid.UUID | None, uuid.UUID | None]]:
+    rows = (
+        await db.exec(
+            select(Card.id, Card.replaces_card_id, Card.replaced_by_card_id).where(
+                Card.user_id == current_user_id()
+            )
+        )
+    ).all()
+    return {
+        card_id: (predecessor_id, successor_id)
+        for card_id, predecessor_id, successor_id in rows
+    }
+
+
+def _lineage_root_id(
+    card_id: uuid.UUID,
+    links: dict[uuid.UUID, tuple[uuid.UUID | None, uuid.UUID | None]],
+) -> uuid.UUID:
+    """Find the immutable oldest card used as this lineage's transaction mutex."""
+    seen: set[uuid.UUID] = set()
+    cursor = card_id
+    while True:
+        if cursor in seen:
+            raise _invalid_lineage()
+        seen.add(cursor)
+        link = links.get(cursor)
+        if link is None:
+            raise _invalid_lineage()
+        predecessor_id = link[0]
+        if predecessor_id is None:
+            return cursor
+        if predecessor_id not in links:
+            raise _invalid_lineage()
+        cursor = predecessor_id
+
+
+def _lineage_component_ids(
+    card_id: uuid.UUID,
+    links: dict[uuid.UUID, tuple[uuid.UUID | None, uuid.UUID | None]],
+) -> set[uuid.UUID]:
+    """Return every card connected by either side of the bidirectional links."""
+    adjacency: dict[uuid.UUID, set[uuid.UUID]] = {
+        member_id: set() for member_id in links
+    }
+    for member_id, (predecessor_id, successor_id) in links.items():
+        for linked_id in (predecessor_id, successor_id):
+            if linked_id is None:
+                continue
+            if linked_id not in links:
+                raise _invalid_lineage()
+            adjacency[member_id].add(linked_id)
+            adjacency[linked_id].add(member_id)
+
+    component: set[uuid.UUID] = set()
+    pending = [card_id]
+    while pending:
+        member_id = pending.pop()
+        if member_id in component:
+            continue
+        component.add(member_id)
+        pending.extend(adjacency[member_id] - component)
+    return component
+
+
+async def _owned_lineage_for_update(
+    db: AsyncSession, card_id: uuid.UUID
+) -> tuple[Card, list[Card]] | None:
+    """Lock one replacement lineage from its stable root outwards.
+
+    Every archive/restore/replace request takes the oldest card first. That row is
+    the lineage mutex: a concurrent append cannot change the component while this
+    transaction decides which member may be active. Remaining members are locked
+    in UUID order for a deterministic secondary order. Reading links again after
+    acquiring the root includes any replacement committed while this request was
+    waiting.
+    """
+    links = await _owned_card_links(db)
+    if card_id not in links:
+        return None
+    root_id = _lineage_root_id(card_id, links)
+    root = await _owned_card(db, root_id, for_update=True)
+    if root is None:
+        raise _invalid_lineage()
+
+    links = await _owned_card_links(db)
+    if card_id not in links or _lineage_root_id(card_id, links) != root_id:
+        raise _invalid_lineage()
+    component_ids = _lineage_component_ids(card_id, links)
+    if root_id not in component_ids:
+        raise _invalid_lineage()
+
+    locked = {root_id: root}
+    for member_id in sorted(component_ids - {root_id}, key=lambda value: value.bytes):
+        member = await _owned_card(db, member_id, for_update=True)
+        if member is None:
+            raise _invalid_lineage()
+        locked[member_id] = member
+    ordered_ids = sorted(locked, key=lambda value: value.bytes)
+    return locked[card_id], [locked[member_id] for member_id in ordered_ids]
+
+
 def _learning_basis(card: Card) -> str:
     return card.answer_basis.strip() or card.answer_anchor.strip()
 
@@ -547,9 +657,13 @@ async def update_card_grounding(
     db: AsyncSession = Depends(get_session),
 ) -> CardMaintenance:
     """Add trusted authority to a legacy card without touching review state."""
-    card = await _owned_card(db, card_id)
+    # The same lock closes the session-start race for every maintenance write,
+    # not only archive/replace. Authority and the canonical question are scoring
+    # inputs and must never change underneath an answer already in progress.
+    card = await _owned_card(db, card_id, for_update=True)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
+    await _require_no_live_session(db, card)
 
     changes = body.model_dump(exclude_unset=True)
     question = changes.pop("canonical_question", None)
@@ -580,9 +694,13 @@ async def update_card_grounding(
 async def archive_card(
     card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardMaintenance:
-    card = await _owned_card(db, card_id)
-    if card is None:
+    # Session creation takes the target-card lock for its final eligibility check
+    # and insert. Lifecycle mutations additionally take the stable lineage root
+    # first so restores and replacements of different members cannot both win.
+    locked = await _owned_lineage_for_update(db, card_id)
+    if locked is None:
         raise HTTPException(status_code=404, detail="card not found")
+    card, _lineage = locked
     await _require_no_live_session(db, card)
     archive(card)
     db.add(card)
@@ -595,21 +713,31 @@ async def archive_card(
 async def restore_card(
     card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardMaintenance:
-    card = await _owned_card(db, card_id)
-    if card is None:
+    locked = await _owned_lineage_for_update(db, card_id)
+    if locked is None:
         raise HTTPException(status_code=404, detail="card not found")
+    card, lineage = locked
+    conflict = next(
+        (
+            member
+            for member in lineage
+            if member.id != card.id and member.lifecycle_status == CARD_ACTIVE
+        ),
+        None,
+    )
+    if conflict is not None:
+        # Keep the established error code for wire compatibility. It now means
+        # any other active member, including an active predecessor.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "replacement_is_active",
+                "card_id": str(conflict.id),
+            },
+        )
     if card.lifecycle_status == CARD_ACTIVE:
+        await db.commit()
         return _maintenance(card)
-    if card.replaced_by_card_id is not None:
-        replacement = await db.get(Card, card.replaced_by_card_id)
-        if replacement is not None and replacement.lifecycle_status == CARD_ACTIVE:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "replacement_is_active",
-                    "card_id": str(replacement.id),
-                },
-            )
     restore(card)
     db.add(card)
     await db.commit()
@@ -623,14 +751,56 @@ async def replace_card(
     body: ReplaceCard,
     db: AsyncSession = Depends(get_session),
 ) -> CardSummary:
-    card = await _owned_card(db, card_id)
-    if card is None:
+    # Resolve the settings row before taking the card lock. The compatibility
+    # path in `get_settings_row` may create and commit a missing row; doing that
+    # under `FOR UPDATE` would silently release the maintenance/session lock.
+    today, tz = await local_calendar(db)
+    # See `archive_card`: the lineage lock excludes restores/replacements of
+    # related cards, and its target-card lock excludes session creation.
+    locked = await _owned_lineage_for_update(db, card_id)
+    if locked is None:
         raise HTTPException(status_code=404, detail="card not found")
+    card, lineage = locked
     if card.lifecycle_status == CARD_ARCHIVED:
         raise HTTPException(status_code=409, detail="archived cards cannot be replaced")
+    conflict = next(
+        (
+            member
+            for member in lineage
+            if member.id != card.id and member.lifecycle_status == CARD_ACTIVE
+        ),
+        None,
+    )
+    if conflict is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "replacement_is_active",
+                "card_id": str(conflict.id),
+            },
+        )
+    successor = next(
+        (
+            member
+            for member in lineage
+            if member.replaces_card_id == card.id
+            or member.id == card.replaced_by_card_id
+        ),
+        None,
+    )
+    if successor is not None:
+        # Replacing a restored historical member would either fork the scalar
+        # lineage or overwrite its existing successor. Restore the newest member
+        # instead; history and both links remain intact.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "newer_replacement_exists",
+                "card_id": str(successor.id),
+            },
+        )
     await _require_no_live_session(db, card)
 
-    today, tz = await local_calendar(db)
     try:
         replacement = build_grounded_card(
             user_id=current_user_id(),

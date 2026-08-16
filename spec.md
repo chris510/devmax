@@ -524,9 +524,14 @@ endpoint that creates an ungrounded active card.
   or history. Its question cannot be rewritten after history exists.
 - `POST /cards/{id}/archive` removes the card from every active selection while
   preserving history and all SM-2 fields.
-- `POST /cards/{id}/restore` reverses archive unless an active replacement exists.
+- `POST /cards/{id}/restore` reverses archive only when no other member of the
+  full replacement lineage is active.
 - `POST /cards/{id}/replace` creates a fresh blank-history card with the edited
-  question, archives the predecessor, and records both lineage links.
+  question, archives the predecessor, and records both lineage links. A restored
+  historical member with a newer archived successor must not be replaced: doing
+  so would overwrite or fork the scalar lineage. Archive, restore, and replace
+  lock the immutable oldest member first, then the full lineage in deterministic
+  order, so concurrent operations can never leave two related cards active.
 
 ### `POST /cards/{id}/learning`
 
@@ -582,12 +587,17 @@ Behavior:
 - Otherwise generate a question via `llm.generate_question`, create a
   session with `status: 'open'`, return it.
 - Supply the card's trusted answer basis and rubric to question generation.
+- Generate outside the card lock, then compare every generation input after the
+  final card lock. If grounding or other question context changed during the
+  provider call, account for and discard that result and retry once from the
+  fresh authority; never persist a canonical question built from stale inputs.
 
 ```json
 {
   "session_id": "uuid",
   "question": "You're adding a node to a consistent-hashing ring...",
   "is_follow_up": false,
+  "turn_index": 0,
   "draft_text": "",
   "resumed": false
 }
@@ -597,12 +607,14 @@ When resuming, `draft_text` carries the saved partial answer and
 `resumed: true`. When the resumed session is `'awaiting_follow_up'`,
 `is_follow_up` is true and `question` is the **pending probe's** question — the
 last `session_probes` row, the one still unanswered — not the card's opening
-question and not an earlier probe.
+question and not an earlier probe. `turn_index` is `0` for the opening answer
+and the pending probe's 1-based `idx` thereafter. It is the session-scoped turn
+coordinate the client echoes on draft and answer writes.
 
 ### `PATCH /sessions/{id}/draft`
 
 ```json
-{"draft_text": "so the key space is a ring of hashes and..."}
+{"draft_text": "so the key space is a ring of hashes and...", "turn_index": 0}
 ```
 
 Persists an in-progress answer. The client calls this periodically while
@@ -610,31 +622,49 @@ recording or typing (debounced, roughly every few seconds). Returns 204.
 This is what makes the "you were mid-answer" resume state possible after
 the app is backgrounded — losing a spoken answer is the worst failure
 mode in the product, so this endpoint should be cheap, idempotent, and
-never blocked behind anything slow.
+never blocked behind anything slow. The update is conditional on `turn_index`
+still being current and is otherwise an acknowledged no-op. This condition is
+checked in the `UPDATE` itself, after a separate ownership-filtered lock of only
+the session row. `/answers` takes that same short row barrier immediately before
+its transcript/probe write, after every provider call; `/draft` never locks the
+card. The draft's conditional `UPDATE` is a fresh statement after the barrier,
+so Postgres cannot retain a command-start view where probe N was unanswered and
+repopulate turn N+1 after the answer commit. `turn_index` is optional only for
+compatibility with older clients; their writes are accepted only while the
+session remains live. Durable server drafts are a scored, pre-correction recovery
+path. Re-attempt and qualitative-coaching turns happen after the session is
+complete and have no server reopen path, so a draft PATCH in those states is
+intentionally a 204 no-op; the client keeps only its contextual local
+crash-recovery copy.
 
 ### `POST /sessions/{id}/answers`
 
 ```json
-{"text": "so the key space is a ring of hashes..."}
+{"text": "so the key space is a ring of hashes...", "turn_index": 0}
 ```
 
 Behavior:
-1. Load the session's probes in `idx` order. The answer belongs to
+1. Reject empty or whitespace-only text with 422 before consent, provider work,
+   or state mutation. Empty string is the durable unanswered-probe sentinel.
+2. Load the session's probes in `idx` order. The answer belongs to
    `answer_text` on the first turn, and to the pending probe's `answer`
    (the last row, still empty) once `status == 'awaiting_follow_up'`.
    Clear `draft_text`.
-2. Call `llm.score_answer` with the probe pairs, **before writing anything** —
-   an exact replay of the last answered turn short-circuits here and returns the
-   pending probe again without a model call.
-3. If `status: "follow_up"` — insert a `session_probes` row at
+3. Call `llm.score_answer` with the probe pairs, **before writing anything**.
+   A retry carries the same `turn_index`; session id plus turn index identifies
+   the submitted turn, and stored-text equality proves that key was not reused
+   with different content. A committed retry returns the pending probe or
+   terminal result without another model call. This is intentionally not
+   text-only: the same spoken answer is valid evidence on adjacent questions.
+4. If `status: "follow_up"` — insert a `session_probes` row at
    `idx = len(probes) + 1` holding the new question, set `follow_up_used = true`,
    set session status to `'awaiting_follow_up'`, return:
    ```json
-   {"status": "follow_up", "question": "One more — ..."}
+   {"status": "follow_up", "question": "One more — ...", "turn_index": 1}
    ```
    Refuse a follow-up returned at `MAX_SCORED_FOLLOW_UPS`: the parsers already
    do, and the write site checks again so the cap survives a parser bug.
-4. If `status: "complete"` — store `score`, `feedback`; set session status
+5. If `status: "complete"` — store `score`, `feedback`; set session status
    `'complete'` and `ended_at`; update the card's `last_score` and
    `mastery_summary`; run `apply_sm2` and persist the new
    `ease_factor`/`interval_days`/`repetitions`/`next_review_at`. Return:
@@ -648,14 +678,19 @@ Behavior:
    }
    ```
 
-Steps 1–4 for the complete case must be a **single transaction** — a
+Steps 2–5 for the complete case must be a **single transaction** — a
 partial write here (answer saved, SM-2 not applied) leaves a card
 permanently stuck. The follow-up case is one transaction too: the answered
 probe (or `answer_text`), the new probe row, and the session status commit
 together, so a session can never be `'awaiting_follow_up'` with no pending
 probe to answer.
 
-Return 409 if the session is already `'complete'`.
+An exact turn-aware retry of the answer that completed the card returns the same
+terminal shape without rescoring or rescheduling, but only while this session is
+still the card's latest review and its current schedule fields can reconstruct
+that response. Return 409 for a different turn, changed text under the same turn
+index, a terminal request from a pre-index client, or a result superseded by a
+later review.
 
 ### `POST /device-tokens`
 

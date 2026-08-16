@@ -190,8 +190,9 @@ class Card(SQLModel, table=True):
     )
 
     # Archive is recoverable and leaves sessions untouched. Replacing a question
-    # creates a new card and joins the pair here instead of rewriting the retrieval
-    # that the old card's scores measured.
+    # creates a new card and appends the pair here instead of rewriting the
+    # retrieval that the old card's scores measured. Lifecycle writes serialize
+    # on the oldest linked card so at most one member of the full lineage is active.
     lifecycle_status: str = CARD_ACTIVE
     archived_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     replaces_card_id: uuid.UUID | None = Field(
@@ -315,8 +316,8 @@ class Session(SQLModel, table=True):
         default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
     )
 
-    # Reserved for the optional post-result qualitative turn. Stage 1 adds only
-    # storage; no endpoint writes these fields yet.
+    # The V2 score transaction freezes focus/question for the optional qualitative
+    # turn; that later endpoint writes answer/feedback against the stored prompt.
     coaching_focus: str | None = None
     coaching_question: str | None = None
     coaching_answer: str | None = None

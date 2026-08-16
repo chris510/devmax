@@ -78,6 +78,17 @@ final class AppState: ObservableObject {
     // Navigation
     @Published var path: [Screen] = []
 
+    /// A Conversation continues to own its state while a child screen, such as
+    /// Card History, is pushed above it. Notification routing must wait until
+    /// the whole flow has left the stack instead of treating `.result` as an
+    /// invitation to append a second Conversation.
+    var hasConversationInPath: Bool {
+        path.contains { screen in
+            if case .conversation = screen { return true }
+            return false
+        }
+    }
+
     // Conversation
     @Published var stage: Stage = .loadingQuestion
     @Published var thread: [ThreadEntry] = []
@@ -90,6 +101,19 @@ final class AppState: ObservableObject {
     @Published var sessionCards: [DueCard] = []
     @Published var cursor = 0
     @Published var sessionID: UUID?
+    /// The server-owned answer slot: 0 for the opening question, then the probe
+    /// index returned with each follow-up. Drafts and answer retries carry it so
+    /// a delayed request from the preceding turn is a no-op rather than data for
+    /// the current one.
+    @Published private(set) var answerTurnIndex = 0
+    /// True from the first tap on Submit through the draft-upload barrier and
+    /// the answer request. It lives here rather than in either input view so a
+    /// double tap on text Submit or the inline retry cannot enqueue two turns.
+    @Published private(set) var submissionPending = false
+    /// While an explicit Start over (or its tombstone retry) clears the matching
+    /// server turn, answer controls stay inert so a new draft cannot race behind
+    /// the clearing PATCH.
+    @Published private(set) var draftResetPending = false
     /// A Review Sprint run — suppresses SM-2 server-side and swaps the schedule line.
     @Published var practice = false
     /// This session's scored cards, in walk order. Drives the rail and the recap.
@@ -134,6 +158,11 @@ final class AppState: ObservableObject {
 
     /// In-flight debounced draft upload; cancelled and replaced on each edit.
     private var draftSync: Task<Void, Never>?
+    /// Closing Conversation while an answer is in flight returns to Today
+    /// immediately, but Today must not reload until that write settles. A
+    /// pre-commit reload can put the just-answered card back under the user's
+    /// finger even though the server reschedules it a moment later.
+    private var refreshTodayAfterSubmission = false
     /// The question request currently allowed to write conversation state.
     ///
     /// Card identity alone is insufficient: two retries for the same card can
@@ -505,20 +534,36 @@ final class AppState: ObservableObject {
 
     /// Entering from a single row, from Start with the whole filtered queue, or
     /// from a Review Sprint's suggested set.
+    var canBeginSession: Bool {
+        // A replacement load resets stage/session/draft synchronously. While an
+        // answerable Conversation owns a session, doing that (notably from a
+        // foreground push tap) can happen before the outgoing view's onDisappear
+        // snapshots the recognizer tail. `finish` clears sessionID before leaving,
+        // which is the explicit handoff point for a retained launcher.
+        !submissionPending && !(stage.acceptsAnswer && sessionID != nil)
+    }
+
+    @discardableResult
     func beginSession(
         cards: [DueCard], startingAt index: Int = 0, practice: Bool = false,
         replacingPath: Bool = false, origin: SessionOrigin = .review
-    ) {
+    ) -> Bool {
+        // Closing during scoring intentionally returns to Today immediately,
+        // where the pre-commit queue may still contain the submitted card. No
+        // launcher may replace the in-flight conversation identity until its
+        // response settles and the queue has been refreshed.
+        guard canBeginSession else { return false }
         sessionCards = cards
         cursor = index
         self.practice = practice
         sessionOrigin = origin
         run = []
         recapOpen = nil
-        guard let card = cards[safe: index] else { return }
+        guard let card = cards[safe: index] else { return false }
         // A sprint replaces Setup rather than stacking on it, so ✕ lands on Today.
         if replacingPath { path = [.conversation(card.id)] } else { path.append(.conversation(card.id)) }
         launchQuestionLoad(card)
+        return true
     }
 
     /// Rescues the empty-history path without turning Card History into an
@@ -528,8 +573,7 @@ final class AppState: ObservableObject {
     func beginReviewFromHistory(cardID: UUID) -> Bool {
         guard RecallGate.isOpen(learningRecallNotBefore[cardID]) else { return false }
         guard let card = queue.first(where: { $0.id == cardID }) else { return false }
-        beginSession(cards: [card], replacingPath: true)
-        return true
+        return beginSession(cards: [card], replacingPath: true)
     }
 
     func beginLearningFromHistory(cardID: UUID) {
@@ -583,6 +627,55 @@ final class AppState: ObservableObject {
 
     var currentCard: DueCard? { sessionCards[safe: cursor] }
 
+    /// The identity a speech finalization belongs to. Recognition can deliver
+    /// its last correction after the screen has closed or another card has
+    /// opened, so card identity alone (or session identity alone) is not enough.
+    struct ConversationIdentity: Equatable {
+        let sessionID: UUID
+        let cardID: UUID
+        let turnIndex: Int
+    }
+
+    var conversationIdentity: ConversationIdentity? {
+        guard let sessionID, let cardID = currentCard?.id else { return nil }
+        return ConversationIdentity(
+            sessionID: sessionID, cardID: cardID, turnIndex: answerTurnIndex
+        )
+    }
+
+    /// Accepts a recognizer's finalized text only for the conversation that
+    /// started it. A late result is still saved under its original card so the
+    /// words are not lost, but it can never populate or submit the next card.
+    @discardableResult
+    func acceptFinalizedDraft(_ text: String, from identity: ConversationIdentity) -> Bool {
+        guard conversationIdentity == identity else {
+            if !text.isEmpty {
+                // `updateDraft` persists on a debounce. If a second turn on the
+                // same card already has words in memory, occupy the card's single
+                // disk slot with that newer context before an older recognizer's
+                // final callback can claim it. With no newer words, preserve the
+                // old turn contextually so it remains recoverable without ever
+                // hydrating into the new turn.
+                if let current = conversationIdentity,
+                   current.cardID == identity.cardID, !draft.isEmpty
+                {
+                    DraftStore.save(
+                        draft, for: current.cardID, sessionID: current.sessionID,
+                        turnIndex: current.turnIndex
+                    )
+                } else {
+                    DraftStore.preserveIfCurrentOrEmpty(
+                        text, for: identity.cardID, sessionID: identity.sessionID,
+                        turnIndex: identity.turnIndex
+                    )
+                }
+            }
+            return false
+        }
+        updateDraft(text)
+        return true
+    }
+
     /// The current card's topic in a multi-card session, otherwise its category.
     ///
     /// This replaced `CARD 2 OF 3`: the rail below already carries position, so
@@ -628,6 +721,8 @@ final class AppState: ObservableObject {
         // `startSession` used to leave the *previous* card's id in place, and the
         // next answer submitted against it scored the wrong card.
         sessionID = nil
+        answerTurnIndex = 0
+        draftResetPending = false
         result = nil
         resumeAvailable = false
         storedPartial = ""
@@ -682,6 +777,7 @@ final class AppState: ObservableObject {
             // card's session, even if cancellation did not reach the transport.
             guard questionLoadID == loadID, currentCard?.id == card.id else { return }
             sessionID = start.sessionId
+            answerTurnIndex = start.turnIndex
             // A session resumed mid-probe comes back with the *probe* as `question`,
             // so it has to be tagged as one — otherwise it renders at the opening
             // question's 25px instead of the follow-up's 21px serif.
@@ -693,12 +789,45 @@ final class AppState: ObservableObject {
 
             // Disk wins over the server's copy — it's the more recent of the two
             // when the app was backgrounded mid-answer.
-            let partial = DraftStore.read(for: card.id) ?? start.draftText
+            stage = start.isFollowUp ? .followUp : .idle
+            if DraftStore.isDiscarded(
+                for: card.id, sessionID: start.sessionId, turnIndex: start.turnIndex
+            ) {
+                // Honor Start over locally even when its first network clear
+                // failed. Retry the exact server turn before enabling a new
+                // answer, preventing the retry from erasing freshly typed text.
+                draftResetPending = true
+                do {
+                    try await api.saveDraft(
+                        sessionID: start.sessionId, text: "", turnIndex: start.turnIndex
+                    )
+                    guard questionLoadID == loadID, conversationIdentity == .init(
+                        sessionID: start.sessionId, cardID: card.id, turnIndex: start.turnIndex
+                    ) else { return }
+                    DraftStore.clear(for: card.id)
+                } catch {
+                    // The tombstone remains and suppresses the stale server copy.
+                }
+                guard questionLoadID == loadID, conversationIdentity == .init(
+                    sessionID: start.sessionId, cardID: card.id, turnIndex: start.turnIndex
+                ) else { return }
+                draftResetPending = false
+                return
+            }
+
+            // A local partial is valid only for the exact server session and
+            // turn. A prior-turn answer must never prefill a newly issued probe.
+            let adoptedLegacy = DraftStore.adoptLegacy(
+                for: card.id, sessionID: start.sessionId, turnIndex: start.turnIndex,
+                sessionResumed: start.resumed, serverDraftText: start.draftText
+            )
+            let partial = DraftStore.read(
+                for: card.id, sessionID: start.sessionId, turnIndex: start.turnIndex
+            ) ?? adoptedLegacy ?? start.draftText
             if !partial.isEmpty {
                 storedPartial = partial
                 resumeAvailable = true
             }
-            stage = start.isFollowUp ? .followUp : .idle
         } catch {
             // A superseded request may fail after the replacement has already
             // loaded. Its error belongs to the old screen and is discarded.
@@ -726,11 +855,34 @@ final class AppState: ObservableObject {
         resumeAvailable = false
     }
 
-    func startOver() {
+    func startOver() async {
+        guard !draftResetPending, let identity = conversationIdentity else { return }
+        draftResetPending = true
+        defer { draftResetPending = false }
+        // A cancelled task may already have put its PATCH on the wire. Waiting
+        // before the empty PATCH makes the user's explicit discard the final
+        // server write as well as the final local write.
+        let pendingUpload = draftSync
+        draftSync = nil
+        pendingUpload?.cancel()
         draft = ""
         storedPartial = ""
         resumeAvailable = false
-        if let card = currentCard { DraftStore.clear(for: card.id) }
+        DraftStore.discard(
+            for: identity.cardID, sessionID: identity.sessionID, turnIndex: identity.turnIndex
+        )
+        await pendingUpload?.value
+        do {
+            try await api.saveDraft(
+                sessionID: identity.sessionID, text: "", turnIndex: identity.turnIndex
+            )
+            if conversationIdentity == identity, draft.isEmpty {
+                DraftStore.clear(for: identity.cardID)
+            }
+        } catch {
+            // Keep the contextual tombstone. Reopening this exact turn retries
+            // the clear and never hydrates the stale server text meanwhile.
+        }
     }
 
     /// The single way the in-progress answer changes.
@@ -748,7 +900,24 @@ final class AppState: ObservableObject {
     /// Write the current draft everywhere, immediately. Called when the app is
     /// backgrounded and when recording stops — the moments a delay isn't free.
     func flushDraft() {
-        syncDraft(debounced: false, uploadToServer: true)
+        // An empty contextual tombstone is the durable meaning of Start over.
+        // Backgrounding or closing while its server clear is in flight must not
+        // run the ordinary empty-draft save, which would remove the tombstone and
+        // allow the old server partial to resurrect on the next launch.
+        guard !draftResetPending else { return }
+        // `sendAnswer` deliberately clears the in-memory draft while leaving the
+        // disk copy as crash recovery. Backgrounding during that request must
+        // not turn the empty presentation value into a destructive draft write.
+        if submissionPending {
+            if let card = currentCard, !draft.isEmpty {
+                guard let sessionID else { return }
+                DraftStore.save(
+                    draft, for: card.id, sessionID: sessionID, turnIndex: answerTurnIndex
+                )
+            }
+            return
+        }
+        syncDraft(debounced: false, uploadToServer: stage.supportsServerDraft)
     }
 
     /// Persist the final transcript to disk immediately before `/answers`, while
@@ -768,7 +937,7 @@ final class AppState: ObservableObject {
     }
 
     private func scheduleDraftSync() {
-        syncDraft(debounced: true, uploadToServer: true)
+        syncDraft(debounced: true, uploadToServer: stage.supportsServerDraft)
     }
 
     /// Disk is the source of truth for instant rehydration; the server copy is the
@@ -779,28 +948,72 @@ final class AppState: ObservableObject {
     /// auto-scroll for the same main-thread frame budget. `flushDraft` on
     /// backgrounding and on recording-stop is what makes the guarantee exact.
     private func syncDraft(debounced: Bool, uploadToServer: Bool) {
-        draftSync?.cancel()
-        guard let card = currentCard else { return }
+        let previousSync = draftSync
+        previousSync?.cancel()
+        draftSync = nil
+        guard let card = currentCard, let sessionID else { return }
         let text = draft
+        let turnIndex = answerTurnIndex
 
         guard debounced else {
-            DraftStore.save(text, for: card.id)
-            if uploadToServer, let sessionID {
-                Task { [api] in try? await api.saveDraft(sessionID: sessionID, text: text) }
+            DraftStore.save(
+                text, for: card.id, sessionID: sessionID, turnIndex: turnIndex
+            )
+            if uploadToServer {
+                draftSync = Task { [api] in
+                    // Cancellation is not an ordering guarantee once URLSession
+                    // has sent the old PATCH. Keep the chain and make every newer
+                    // server write wait for its predecessor to return.
+                    await previousSync?.value
+                    guard !Task.isCancelled else { return }
+                    await Self.uploadDraftWithoutCancellation(
+                        api: api,
+                        sessionID: sessionID, text: text, turnIndex: turnIndex
+                    )
+                }
+            } else {
+                draftSync = nil
             }
             return
         }
 
-        draftSync = Task { [api, sessionID] in
+        draftSync = Task { [api] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            DraftStore.save(text, for: card.id)
+            DraftStore.save(
+                text, for: card.id, sessionID: sessionID, turnIndex: turnIndex
+            )
 
-            guard let sessionID else { return }
+            await previousSync?.value
+            guard !Task.isCancelled else { return }
+            guard uploadToServer else { return }
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
-            try? await api.saveDraft(sessionID: sessionID, text: text)
+            await Self.uploadDraftWithoutCancellation(
+                api: api,
+                sessionID: sessionID, text: text, turnIndex: turnIndex
+            )
         }
+    }
+
+    /// Once a PATCH has started, cancellation of the debounce wrapper must not
+    /// make that wrapper appear finished while URLSession/server work is still
+    /// outstanding. The unstructured task does not inherit later cancellation;
+    /// awaiting its nonthrowing value keeps the same-turn write chain ordered.
+    /// Cancellation before this helper is reached still suppresses the upload.
+    private nonisolated static func uploadDraftWithoutCancellation(
+        api: DevmaxAPI, sessionID: UUID, text: String, turnIndex: Int
+    ) async {
+        let upload = Task<Void, Never> {
+            do {
+                try await api.saveDraft(
+                    sessionID: sessionID, text: text, turnIndex: turnIndex
+                )
+            } catch {
+                // Draft syncing is best effort; the disk copy remains canonical.
+            }
+        }
+        await upload.value
     }
 
     /// The submit envelope every turn shares: the optimistic thread write, the
@@ -811,10 +1024,12 @@ final class AppState: ObservableObject {
     /// the caller handles the outcome. Returns nil when the call failed or the
     /// text was empty, in which case the rollback has already run.
     private func sendAnswer<T>(
-        _ text: String, via send: (UUID, String) async throws -> T
+        _ text: String, expectedTurnIndex: Int? = nil,
+        via send: (UUID, String) async throws -> T
     ) async -> T? {
         guard let sessionID, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         let answering = stage
+        let submittedCardID = currentCard?.id
         submitError = false
 
         // Optimistic: the answer appears in the thread immediately.
@@ -829,14 +1044,25 @@ final class AppState: ObservableObject {
 
         do {
             let value = try await send(sessionID, text)
+            let ownsResponse = self.sessionID == sessionID
+                && (expectedTurnIndex.map { self.answerTurnIndex == $0 } ?? true)
+            // A success means the server committed the answer even if the user
+            // closed this screen while it was in flight. The crash-recovery copy
+            // belongs to that committed turn and must not reappear next review.
+            // A *different live turn* wins, however: clearing by card alone there
+            // would erase its newer contextual draft.
+            if ownsResponse || self.sessionID == nil, let submittedCardID {
+                DraftStore.clear(for: submittedCardID)
+            }
             // The request outlives the screen: ✕ is live during `.processing`, so the
             // user can close the session and open another card while this is in
             // flight. Applying a stale result would score the wrong card.
-            guard self.sessionID == sessionID else { return nil }
-            if let card = currentCard { DraftStore.clear(for: card.id) }
+            guard ownsResponse else { return nil }
             return value
         } catch {
-            guard self.sessionID == sessionID else { return nil }
+            guard self.sessionID == sessionID,
+                  expectedTurnIndex.map({ self.answerTurnIndex == $0 }) ?? true
+            else { return nil }
             // Remove the optimistic answer, restore the text verbatim, rewind the
             // stage so the control is live again, and show the inline strip. No
             // toast, no data loss.
@@ -853,6 +1079,21 @@ final class AppState: ObservableObject {
     }
 
     func submit(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, stage.acceptsAnswer, !submissionPending, !draftResetPending,
+              let identity = conversationIdentity
+        else { return }
+
+        // Every input path crosses the same ordering barrier. Keeping this in
+        // AppState means Voice, typed Submit, inline Try again, debug routes, and
+        // future callers cannot accidentally let a delayed draft PATCH land
+        // after `/answers` has cleared the turn.
+        let answeringStage = stage
+        submissionPending = true
+        defer { submissionDidFinish() }
+        await flushDraftForSubmission()
+        guard conversationIdentity == identity, stage == answeringStage else { return }
+
         // Turn 3 goes to a different endpoint. Dispatched here rather than at each
         // of the three call sites in ConversationScreen — the view sends an answer
         // and doesn't need to know which turn it belongs to.
@@ -865,12 +1106,19 @@ final class AppState: ObservableObject {
             return
         }
 
+        let submittedTurnIndex = answerTurnIndex
         guard let outcome = await sendAnswer(
-            text, via: { id, body in try await self.api.submitAnswer(sessionID: id, text: body) }
+            text, expectedTurnIndex: submittedTurnIndex,
+            via: { id, body in
+                try await self.api.submitAnswer(
+                    sessionID: id, text: body, turnIndex: submittedTurnIndex
+                )
+            }
         ) else { return }
 
         switch outcome {
-        case .followUp(let question):
+        case .followUp(let question, let turnIndex):
+            answerTurnIndex = turnIndex ?? submittedTurnIndex + 1
             thread.append(ThreadEntry(role: .followUpQuestion, text: question))
             stage = .followUp
         case .complete(
@@ -1016,7 +1264,36 @@ final class AppState: ObservableObject {
         // late success and a late failure. The server may still finish and retain
         // a resumable session; reopening the card will retrieve it normally.
         invalidateQuestionLoad()
+        let waitForAnswer = submissionPending
+        // This is also the ownership token checked by `sendAnswer` and speech
+        // finalization. Clearing it makes every late callback harmless.
+        sessionID = nil
         path = []
+        if waitForAnswer {
+            refreshTodayAfterSubmission = true
+            return
+        }
+        completeConversationExit()
+    }
+
+    /// NavigationStack's interactive back gesture can remove Conversation
+    /// without invoking its custom close button. The view first snapshots and
+    /// flushes speech, then calls this after SwiftUI has committed the path.
+    /// Child pushes, next-card replacement, recap, and the explicit close path
+    /// all fail one of these guards, making the recovery idempotent.
+    func finishConversationAfterNavigationPopIfNeeded() {
+        guard path.isEmpty, sessionID != nil || questionLoadTask != nil else { return }
+        finish()
+    }
+
+    private func submissionDidFinish() {
+        submissionPending = false
+        guard refreshTodayAfterSubmission else { return }
+        refreshTodayAfterSubmission = false
+        completeConversationExit()
+    }
+
+    private func completeConversationExit() {
         if let completion = firstReviewCompletion {
             firstReviewCompletion = nil
             completion()

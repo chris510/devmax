@@ -624,7 +624,7 @@ actor MockAPI: DevmaxAPI {
         )
     }
 
-    func saveDraft(sessionID: UUID, text: String) async throws {}
+    func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws {}
 
     /// The two probes, in the voice and about the card the Conversation
     /// screenshots were taken against. Only the second is prefaced `Last one — `,
@@ -635,7 +635,9 @@ actor MockAPI: DevmaxAPI {
     private static let secondProbe =
         "Last one — while the new node takes over its slice, which node serves those keys?"
 
-    func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome {
+    func submitAnswer(
+        sessionID: UUID, text: String, turnIndex: Int
+    ) async throws -> AnswerOutcome {
         try await Task.sleep(nanoseconds: 1_200_000_000)
         submitAttempts += 1
         if await MainActor.run(body: { DebugFlags.shared.failSubmit }), submitAttempts % 2 == 1 {
@@ -651,7 +653,7 @@ actor MockAPI: DevmaxAPI {
             let question = progress.issued == 0 ? Self.firstProbe : Self.secondProbe
             progress.issued += 1
             probeProgress[sessionID] = progress
-            return .followUp(question: question)
+            return .followUp(question: question, turnIndex: progress.issued)
         }
         // Sprint runs vary so the recap has something to show; a daily review
         // keeps the fixture the Conversation screenshots were taken against.

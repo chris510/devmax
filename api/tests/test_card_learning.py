@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -14,17 +15,21 @@ from app.db import engine_kwargs
 from app.models import (
     CARD_ARCHIVED,
     FOUNDER_USER_ID,
+    STATUS_AWAITING_FOLLOW_UP,
     STATUS_OPEN,
     MaterialSource,
     PendingCapture,
     Session,
+    SessionProbe,
     Settings,
     User,
 )
 from app.routers import cards as cards_router
 from app.routers import internal
 from app.routers import sessions as sessions_router
+from app.schemas import DraftUpdate, ScoredAnswerIn
 from app.services import llm, usage
+from app.services.llm import ScoreResult
 from tests.conftest import (
     API_HEADERS,
     CRON_HEADERS,
@@ -66,6 +71,32 @@ async def start_session_as_founder(factory, card_id):
     try:
         async with factory() as session_db:
             return await sessions_router.start_session(card_id, False, session_db)
+    finally:
+        auth._current_user_id.reset(token)
+
+
+async def submit_answer_as_founder(factory, session_id, *, text, turn_index):
+    token = auth._current_user_id.set(FOUNDER_USER_ID)
+    try:
+        async with factory() as answer_db:
+            return await sessions_router.submit_answer(
+                session_id,
+                ScoredAnswerIn(text=text, turn_index=turn_index),
+                answer_db,
+            )
+    finally:
+        auth._current_user_id.reset(token)
+
+
+async def save_draft_as_founder(factory, session_id, *, text, turn_index):
+    token = auth._current_user_id.set(FOUNDER_USER_ID)
+    try:
+        async with factory() as draft_db:
+            return await sessions_router.save_draft(
+                session_id,
+                DraftUpdate(draft_text=text, turn_index=turn_index),
+                draft_db,
+            )
     finally:
         auth._current_user_id.reset(token)
 
@@ -579,6 +610,292 @@ async def test_concurrent_first_opens_generate_one_canonical_question(
         ).all()
         assert stored.canonical_question == first_result.question
         assert len(sessions) == 1
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+@pytest.mark.parametrize("same_payload", [True, False])
+async def test_concurrent_same_turn_submissions_reconcile_by_index_and_text(
+    db, monkeypatch, concurrent_session_factory, same_payload
+):
+    """One turn scores once; duplicate payload replays and key reuse conflicts."""
+    card = grounded_card()
+    session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        status=STATUS_OPEN,
+    )
+    db.add(card)
+    db.add(session)
+    await db.commit()
+
+    provider_entered = asyncio.Event()
+    release_provider = asyncio.Event()
+    calls = 0
+
+    async def paused_score(**_kwargs):
+        nonlocal calls
+        calls += 1
+        provider_entered.set()
+        await release_provider.wait()
+        return ScoreResult(
+            status="follow_up",
+            follow_up_question="One more — name the ownership boundary?",
+        )
+
+    monkeypatch.setattr(llm, "score_answer", paused_score)
+    first = asyncio.create_task(
+        submit_answer_as_founder(
+            concurrent_session_factory,
+            session.id,
+            text="the committed answer",
+            turn_index=0,
+        )
+    )
+    second = None
+    try:
+        await asyncio.wait_for(provider_entered.wait(), timeout=3)
+        second = asyncio.create_task(
+            submit_answer_as_founder(
+                concurrent_session_factory,
+                session.id,
+                text=("the committed answer" if same_payload else "different text"),
+                turn_index=0,
+            )
+        )
+        await asyncio.sleep(0.1)
+        assert calls == 1
+        assert not second.done()
+    finally:
+        release_provider.set()
+
+    first_result = await asyncio.wait_for(first, timeout=3)
+    assert first_result.turn_index == 1
+    if same_payload:
+        second_result = await asyncio.wait_for(second, timeout=3)
+        assert second_result == first_result
+    else:
+        with pytest.raises(HTTPException) as exc_info:
+            await asyncio.wait_for(second, timeout=3)
+        assert exc_info.value.status_code == 409
+        assert "different text" in exc_info.value.detail
+    assert calls == 1
+
+    async with concurrent_session_factory() as verify_db:
+        stored = await verify_db.get(Session, session.id)
+        probes = (
+            await verify_db.exec(
+                select(SessionProbe).where(SessionProbe.session_id == session.id)
+            )
+        ).all()
+        assert stored.status == STATUS_AWAITING_FOLLOW_UP
+        assert stored.answer_text == "the committed answer"
+        assert len(probes) == 1
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_stale_draft_update_rechecks_turn_after_waiting_on_answer_commit(
+    db, concurrent_session_factory
+):
+    """Postgres re-evaluates the conditional UPDATE after the session row unlocks."""
+    card = grounded_card()
+    session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        status=STATUS_OPEN,
+    )
+    db.add(card)
+    db.add(session)
+    await db.commit()
+
+    async with concurrent_session_factory() as advancing_db:
+        advancing = await advancing_db.get(Session, session.id)
+        advancing.status = STATUS_AWAITING_FOLLOW_UP
+        advancing.draft_text = ""
+        advancing_db.add(advancing)
+        advancing_db.add(
+            SessionProbe(
+                session_id=session.id,
+                idx=1,
+                question="One more — name the ownership boundary?",
+            )
+        )
+        await advancing_db.flush()
+
+        stale = asyncio.create_task(
+            save_draft_as_founder(
+                concurrent_session_factory,
+                session.id,
+                text="late opening partial",
+                turn_index=0,
+            )
+        )
+        await asyncio.sleep(0.1)
+        assert not stale.done()
+        await advancing_db.commit()
+
+    response = await asyncio.wait_for(stale, timeout=3)
+    assert response.status_code == 204
+    async with concurrent_session_factory() as verify_db:
+        stored = await verify_db.get(Session, session.id)
+        assert stored.status == STATUS_AWAITING_FOLLOW_UP
+        assert stored.draft_text == ""
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_probe_to_probe_commit_orders_a_stale_draft_on_the_session_row(
+    db, monkeypatch, concurrent_session_factory
+):
+    """Probe 1 -> 2 has a barrier even when no Session value becomes dirty."""
+    card = grounded_card()
+    session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        answer_text="opening evidence",
+        follow_up_used=True,
+        draft_text="",
+        status=STATUS_AWAITING_FOLLOW_UP,
+    )
+    db.add(card)
+    db.add(session)
+    await db.flush()
+    db.add(
+        SessionProbe(
+            session_id=session.id,
+            idx=1,
+            question="First probe?",
+        )
+    )
+    await db.commit()
+
+    async def second_probe(**_kwargs):
+        return ScoreResult(
+            status="follow_up",
+            follow_up_question="Second probe?",
+        )
+
+    original_owned_session = sessions_router._owned_session
+    answer_barrier_held = asyncio.Event()
+    release_answer = asyncio.Event()
+    paused = False
+
+    async def pause_first_write_barrier(
+        request_db, session_id, *, for_update=False
+    ):
+        nonlocal paused
+        stored = await original_owned_session(
+            request_db, session_id, for_update=for_update
+        )
+        if for_update and not paused:
+            paused = True
+            answer_barrier_held.set()
+            await release_answer.wait()
+        return stored
+
+    monkeypatch.setattr(llm, "score_answer", second_probe)
+    monkeypatch.setattr(sessions_router, "_owned_session", pause_first_write_barrier)
+    answer = asyncio.create_task(
+        submit_answer_as_founder(
+            concurrent_session_factory,
+            session.id,
+            text="probe one evidence",
+            turn_index=1,
+        )
+    )
+    stale_draft = None
+    try:
+        await asyncio.wait_for(answer_barrier_held.wait(), timeout=3)
+        stale_draft = asyncio.create_task(
+            save_draft_as_founder(
+                concurrent_session_factory,
+                session.id,
+                text="late probe one partial",
+                turn_index=1,
+            )
+        )
+        await asyncio.sleep(0.1)
+        assert not stale_draft.done()
+    finally:
+        release_answer.set()
+
+    answer_result = await asyncio.wait_for(answer, timeout=3)
+    assert answer_result.turn_index == 2
+    draft_result = await asyncio.wait_for(stale_draft, timeout=3)
+    assert draft_result.status_code == 204
+
+    async with concurrent_session_factory() as verify_db:
+        stored = await verify_db.get(Session, session.id)
+        probes = (
+            await verify_db.exec(
+                select(SessionProbe)
+                .where(SessionProbe.session_id == session.id)
+                .order_by(SessionProbe.idx)
+            )
+        ).all()
+        assert stored.status == STATUS_AWAITING_FOLLOW_UP
+        assert stored.draft_text == ""
+        assert [(probe.idx, probe.answer) for probe in probes] == [
+            (1, "probe one evidence"),
+            (2, ""),
+        ]
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_draft_session_barrier_does_not_wait_for_provider_work(
+    db, monkeypatch, concurrent_session_factory
+):
+    card = grounded_card()
+    session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        status=STATUS_OPEN,
+    )
+    db.add(card)
+    db.add(session)
+    await db.commit()
+
+    provider_entered = asyncio.Event()
+    release_provider = asyncio.Event()
+
+    async def paused_score(**_kwargs):
+        provider_entered.set()
+        await release_provider.wait()
+        return ScoreResult(
+            status="follow_up",
+            follow_up_question="First probe?",
+        )
+
+    monkeypatch.setattr(llm, "score_answer", paused_score)
+    answer = asyncio.create_task(
+        submit_answer_as_founder(
+            concurrent_session_factory,
+            session.id,
+            text="opening evidence",
+            turn_index=0,
+        )
+    )
+    try:
+        await asyncio.wait_for(provider_entered.wait(), timeout=3)
+        draft = await asyncio.wait_for(
+            save_draft_as_founder(
+                concurrent_session_factory,
+                session.id,
+                text="durable while scoring",
+                turn_index=0,
+            ),
+            timeout=3,
+        )
+        assert draft.status_code == 204
+        async with concurrent_session_factory() as verify_db:
+            stored = await verify_db.get(Session, session.id)
+            assert stored.draft_text == "durable while scoring"
+    finally:
+        release_provider.set()
+
+    result = await asyncio.wait_for(answer, timeout=3)
+    assert result.turn_index == 1
+    async with concurrent_session_factory() as verify_db:
+        stored = await verify_db.get(Session, session.id)
+        assert stored.draft_text == ""
 
 
 @pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")

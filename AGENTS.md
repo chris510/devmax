@@ -82,7 +82,11 @@ Break any of these and the product is subtly wrong in a way tests won't always c
 - **Archive never deletes history or changes scheduling state.** Every active-card
   selection uses `card_lifecycle.active_card_filter`. Replacing a question creates a
   fresh blank-history card at default SM-2 values, archives the predecessor, and keeps
-  bidirectional lineage; a question is never rewritten underneath scored history.
+  bidirectional lineage; a question is never rewritten underneath scored history. At
+  most one member of the full replacement lineage may be active. Archive, restore, and
+  replace serialize on the oldest lineage card before locking the remaining members;
+  replacement appends only to the newest member so concurrent or historical restores
+  cannot fork the scalar links.
 - **A practice session scores and writes history but never moves the schedule.** `ease_factor`,
   `interval_days`, `repetitions`, and `next_review_at` are the four fields a Review Sprint
   must leave alone. Mastery signal is written normally.
@@ -175,7 +179,15 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   never delay or block a due card.
 - **Losing a spoken answer is the worst failure mode in the product.** `PATCH /sessions/{id}/draft`
   must stay cheap, idempotent, and never blocked behind anything slow. On the client, disk is
-  the source of truth for instant rehydration; the server draft is the durable backup.
+  the source of truth for instant rehydration; the server draft is the durable backup. Draft
+  and answer writes carry the session-scoped `turn_index` (`0` for the opening, probe `idx`
+  thereafter). A stale or future draft is an acknowledged conditional no-op, with the turn
+  check inside the `UPDATE`, so a late turn-N upload can never repopulate turn N+1. Draft and
+  answer commits share a short session-row barrier; `/answers` acquires it only after provider
+  work, and `/draft` never locks the card. After waiting, the draft predicate runs as a fresh
+  statement so Postgres cannot reuse the pre-wait probe snapshot. Server drafts are only for
+  scored, pre-correction turns: re-attempt/coaching happens after completion, has no server
+  reopen path, and an attempted draft PATCH there is a 204 no-op.
 - **A question that failed to load is a *load* failure, never a submit failure.** `openCard`
   failing means no session was created, so nothing was said and nothing was saved: the answer
   control must be off, `sessionID` must be cleared — a leftover one posts the next answer

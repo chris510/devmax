@@ -46,7 +46,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Unprompted listens while you answer a question out loud.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Your spoken answers are transcribed on this device so they can be scored.</string>
+	<string>Speech recognition turns your spoken answers into text so they can be scored.</string>
 	<!-- Injected from ios/Config/*.xcconfig. Release force-clears both secrets
 	     after any optional Secrets.xcconfig include. The founder claim token is
 	     accepted only by the explicit one-time Apple account-claim request. -->
