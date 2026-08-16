@@ -102,7 +102,7 @@ struct SprintSetupScreen: View {
         .padding(.bottom, 18)
     }
 
-    /// The Settings "reviews per day" stepper verbatim, ranged 4–10.
+    /// The shared bordered stepper, ranged 4–10.
     private var sessionSize: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {

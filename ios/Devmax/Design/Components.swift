@@ -135,9 +135,8 @@ struct CountSegments: View {
     }
 }
 
-/// Bordered − / value / +. Settings' "reviews per day" and Review Sprint's
-/// "session size" are the same control at the same geometry in the design, so
-/// they are the same component here.
+/// Bordered − / value / + used by compact numeric controls such as Review
+/// Sprint's session size.
 struct StepperControl: View {
     /// The rendered readout, not the raw number. Study Plan's steppers show
     /// units ("12 weeks", "7h · 420 min") where the two original call sites show

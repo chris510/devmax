@@ -34,11 +34,18 @@ loudly. All of that was arithmetic in a YAML file trying to *predict* a value th
 database already held, and it had to be redone by hand every time a window moved.
 
 **It is now a 15-minute loop in the single-replica API process, and that loop
-encodes nothing else.** `_active_window_start` compares the current *local* time
-against the settings row on every call, so DST is not a special case: `ZoneInfo`
-resolves the offset for the wall time being tested. Changing a window in the app
-takes effect on the next poll with no commit and no redeploy, which is the property
-the paired schedule could never have.
+encodes nothing else.** `_active_window_start` compares the current local ISO
+weekday and time against the settings row on every call, so DST is not a special
+case: `ZoneInfo` resolves the offset for the wall time being tested. Changing a
+selected day or window in the app takes effect on the next poll with no commit
+and no redeploy, which is the property the paired schedule could never have.
+
+Weekday membership belongs to each window for the same reason its time range
+does. `days` uses ISO values `1 = Monday` through `7 = Sunday`; missing `days`
+means every day so pre-weekday rows and rolling clients keep the shipped daily
+behavior. The poll still has no schedule of its own. These days only bound when
+an already-due card may produce a nudge — they never reach SM-2 or
+`next_review_at`.
 
 The first provider for this dumb poll was GitHub Actions. Its own documentation
 says scheduled events may be delayed or dropped, and the first production evening
@@ -60,9 +67,10 @@ independent manual fallback.
 
 What that costs, and why it is still the right trade:
 
-- `outside_window` is the overwhelmingly common response (~94 of 96 daily runs).
-  It is logged at INFO. Exhausted HTTP retries and `no_devices` are logged as
-  errors, but one bad request never kills later polls.
+- `outside_window` is the overwhelmingly common response (~85 of 96 runs on a
+  day selected by both default windows, and all 96 on an unselected day). It is
+  logged at INFO. Exhausted HTTP retries and `no_devices` are logged as errors,
+  but one bad request never kills later polls.
 - Polling inside a window would push repeatedly, so the endpoint gained a
   per-window guard (§17) — the poll had to become idempotent within a window.
 - `SettingsIn` still rejects windows under 30 minutes. The 15-minute poll no
@@ -81,6 +89,8 @@ once.
 
 Due dates are dealt across each card's target week at the configured
 `reviews_per_day` rate (one a day for desk cards, which never enter the push loop).
+That one-time import batching does not make notification weekdays a card schedule:
+changing a window's `days` never revisits an existing `next_review_at`.
 The 2026 curriculum revision added `--activate-week N`: it selects one learned
 cohort and schedules it from `--start-date`, so lesson completion rather than the
 calendar controls activation. `--weeks-through` remains for bulk verification.
@@ -369,10 +379,27 @@ fixes live in `/internal/trigger-review`.
 
 **A poll is not a push.** Firing every 15 minutes inside an 80-minute window would
 send several notifications and empty a `reviews_per_day` of 2 before evening opened.
-So `_active_window` returns the matched window's local start instead of a bool, and
-the endpoint refuses if any card was pushed at or after it — `already_pushed`. The
-guard is per window rather than per day precisely so the evening window still gets
-its own push.
+So `_active_window_start` first excludes windows that do not select the current local
+ISO weekday, then returns the matched window's local start instead of a bool. The
+endpoint refuses if any card was pushed at or after it — `already_pushed`. The guard
+is per eligible window rather than per day precisely so a selected evening window
+still gets its own push.
+
+That start is a timezone transition boundary, not a naive wall-time attachment.
+A configured start in a spring-forward gap advances to the first real minute;
+if the whole configured range is nonexistent, it resumes there for its original
+wall-clock duration. An ambiguous fall-back start uses the first occurrence. Both
+polls in a repeated hour therefore compare against one stable instant. Settings also reject enabled
+equal-start windows on intersecting weekdays, because the start is the durable
+identity available to the existing guard.
+
+Card locks alone cannot enforce that account-wide guard: concurrent polls may pick
+different due cards and both observe an unspent window. Each account evaluation now
+takes a deletion-conflicting User key-share boundary before Settings, then holds its
+settings-row lock through APNs and the card stamp. The `User → Settings → Card`
+order prevents account deletion from cascading through Cards and waiting back on
+Settings. Same-account polls serialize there; different account rows still evaluate
+in parallel.
 
 **A card is not offered twice in one day.** Without that, the evening window would
 re-push the ignored morning card. `due_count` still reports the whole queue — it is

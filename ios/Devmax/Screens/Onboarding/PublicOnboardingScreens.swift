@@ -26,8 +26,10 @@ struct PublicOnboardingView: View {
     @EnvironmentObject private var plan: StudyPlanState
     @EnvironmentObject private var auth: AuthState
     @State private var expandedTopics: Set<UUID> = []
-    @State private var savingReminderSettings = false
     @State private var collectionsOpenedFromStudyMaterial = false
+    @State private var reminderDraft: AppSettings = .placeholder
+    @State private var savingReminders = false
+    @State private var reminderSaveError = ""
 
     var body: some View {
         Group {
@@ -110,6 +112,10 @@ struct PublicOnboardingView: View {
             .presentationBackground(Theme.surface)
         }
         .task(id: flow.step.rawValue) {
+            if flow.step == .pace {
+                reminderDraft = app.settings
+                reminderSaveError = ""
+            }
             if flow.step == .importing, flow.job == nil,
                DebugFlags.shared.useMockAPI,
                let item = try? await flow.api.materialImports().first {
@@ -742,44 +748,52 @@ struct PublicOnboardingView: View {
             }
             PublicNote("Your answer and relevant study material are sent for scoring. Devmax receives the transcript, not an audio recording.")
         } footer: {
-            PrimaryButton(title: "Set review reminders") { flow.step = .pace }
+            PrimaryButton(title: "Set review reminders") {
+                reminderDraft = app.settings
+                reminderSaveError = ""
+                flow.step = .pace
+            }
         }
     }
 
     private var pace: some View {
         PublicPage(kicker: "REVIEW REMINDERS", title: "Choose when to be nudged") {
-            Text("One reminder per enabled window, only when a review is due.").publicBody()
-            QuietPanel {
-                ForEach(Array(app.settings.windows.indices), id: \.self) { index in
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(app.settings.windows[index].label)
-                                .font(WCFont.sans(15, weight: 500))
-                                .foregroundStyle(Theme.text)
-                            MetaText(
-                                text: "\(app.settings.windows[index].from)–\(app.settings.windows[index].to)",
-                                font: WCFont.mono(10.5), tracking: 0.4,
-                                color: Theme.metaAlt
-                            )
-                        }
-                        Spacer()
-                        Toggle34(
-                            isOn: $app.settings.windows[index].on,
-                            accessibilityLabel: "\(app.settings.windows[index].label) reminder"
-                        )
-                    }
-                    .frame(minHeight: 62)
-                    if index < app.settings.windows.count - 1 { Hairline() }
-                }
+            MetaText(
+                text: normalizedReminderDraft.weeklyReminderMaximumLabel + " · due cards only",
+                font: WCFont.mono(10), tracking: 0.7, color: Theme.metaFaint
+            )
+            MetaText(
+                text: "DELIVERY WINDOWS", font: WCFont.mono(10),
+                tracking: 1.0, color: Theme.meta
+            )
+            ForEach(reminderDraft.windows.indices, id: \.self) { index in
+                onboardingWindow(index)
             }
-            PublicNote("Times use your local time zone. You can edit them later in Settings.")
-            if !flow.error.isEmpty { PublicError(flow.error) }
+            if let validation = reminderDraft.reminderScheduleValidationMessage {
+                PublicError(validation)
+            } else if !reminderSaveError.isEmpty {
+                PublicError(reminderSaveError)
+            }
+            PublicNote("Choose the days and times when a due card may nudge you. Each window sends at most once, and only when a card is due. iOS permission comes next.")
         } footer: {
             PrimaryButton(
-                title: savingReminderSettings ? "Saving…" : "Continue",
-                enabled: !savingReminderSettings
+                title: savingReminders ? "Saving…" : "Continue",
+                enabled: normalizedReminderDraft.reminderScheduleValidationMessage == nil
+                    && !savingReminders
             ) {
-                saveReminderSettings()
+                guard !savingReminders else { return }
+                savingReminders = true
+                Task {
+                    reminderSaveError = ""
+                    let value = normalizedReminderDraft
+                    if await app.persistSettings(value) {
+                        flow.step = value.windows.contains(where: \.on)
+                            ? .reminders : .remindersDenied
+                    } else {
+                        reminderSaveError = "Couldn't save those reminders. Try again."
+                    }
+                    savingReminders = false
+                }
             }
         }
     }
@@ -787,6 +801,12 @@ struct PublicOnboardingView: View {
     private var reminders: some View {
         PublicPage(kicker: flow.step == .remindersDenied ? "REMINDERS OFF" : "OPTIONAL REMINDERS", title: flow.step == .remindersDenied ? "You're all set." : "Allow notifications?") {
             Text(reminderPermissionBody).publicBody()
+            if flow.step != .remindersDenied {
+                MetaText(
+                    text: app.settings.weeklyReminderMaximumLabel,
+                    font: WCFont.mono(10), tracking: 0.7, color: Theme.metaFaint
+                )
+            }
             PublicNote("You can change this later in Settings. Declining does not block setup.")
             if !flow.error.isEmpty { PublicError(flow.error) }
         } footer: {
@@ -813,27 +833,52 @@ struct PublicOnboardingView: View {
         return "Notifications are off. Devmax still works whenever you open it."
     }
 
-    private func saveReminderSettings() {
-        guard !savingReminderSettings else { return }
-        var value = app.settings
-        value.reviewsPerDay = max(1, value.windows.filter(\.on).count)
-        if let validation = SettingsValidation.message(for: value) {
-            flow.error = validation
-            return
-        }
+    private var normalizedReminderDraft: AppSettings {
+        SettingsValidation.normalizedReminderSettings(reminderDraft)
+    }
 
-        savingReminderSettings = true
-        flow.error = ""
-        Task {
-            do {
-                app.settings = try await app.api.updateSettings(value)
-                savingReminderSettings = false
-                flow.step = enabledReminderWindows == 0 ? .remindersDenied : .reminders
-            } catch {
-                savingReminderSettings = false
-                flow.error = "Couldn't save reminder times. Your choices are still here."
+    private func onboardingWindow(_ index: Int) -> some View {
+        let window = reminderDraft.windows[index]
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                Toggle34(
+                    isOn: Binding(
+                        get: { reminderDraft.windows[index].on },
+                        set: { reminderDraft.windows[index].on = $0 }
+                    ),
+                    accessibilityLabel: "\(window.label) reminder"
+                )
+                Text(window.label)
+                    .font(WCFont.sans(15, weight: 500))
+                    .foregroundStyle(Theme.text)
+                Spacer(minLength: 4)
+                TimeChip(
+                    time: Binding(
+                        get: { reminderDraft.windows[index].from },
+                        set: { reminderDraft.windows[index].from = $0 }
+                    ),
+                    accessibilityLabel: "\(window.label) start time"
+                )
+                Text("–").font(WCFont.mono(10)).foregroundStyle(Theme.metaDim)
+                TimeChip(
+                    time: Binding(
+                        get: { reminderDraft.windows[index].to },
+                        set: { reminderDraft.windows[index].to = $0 }
+                    ),
+                    accessibilityLabel: "\(window.label) end time"
+                )
             }
+            WeekdayPicker(
+                days: Binding(
+                    get: { reminderDraft.windows[index].days },
+                    set: { reminderDraft.windows[index].days = $0 }
+                )
+            )
+            .opacity(window.on ? 1 : 0.55)
         }
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+        .overlay(RoundedRectangle(cornerRadius: Metrics.inlineRadius).stroke(Theme.border))
     }
 
     private var learnBranch: some View {

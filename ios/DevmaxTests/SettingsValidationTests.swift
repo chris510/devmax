@@ -50,7 +50,7 @@ final class SettingsValidationTests: XCTestCase {
             SettingsValidation.normalizedReminderSettings(settings).reviewsPerDay,
             2
         )
-        XCTAssertEqual(SettingsValidation.reminderValue(for: settings), "Up to 2")
+        XCTAssertEqual(SettingsValidation.weeklyReminderValue(for: settings), "Up to 14/week")
 
         settings.windows[0].on = false
         settings.windows[1].on = false
@@ -58,7 +58,7 @@ final class SettingsValidationTests: XCTestCase {
             SettingsValidation.normalizedReminderSettings(settings).reviewsPerDay,
             1
         )
-        XCTAssertEqual(SettingsValidation.reminderValue(for: settings), "Off")
+        XCTAssertEqual(SettingsValidation.weeklyReminderValue(for: settings), "Off")
     }
 
     func testReviewReminderDismissOnlyPopsItsOwnRoute() {

@@ -267,6 +267,38 @@ struct NotificationWindow: Codable, Equatable, Identifiable {
     var on: Bool
     var from: String
     var to: String
+    /// ISO weekday numbers: Monday = 1 through Sunday = 7.
+    ///
+    /// `days` is additive on the wire. A server that predates weekday-aware
+    /// windows omits it, which must retain the old every-day behaviour during a
+    /// rolling deployment rather than quietly silencing reminders.
+    var days: [Int]
+
+    init(
+        label: String, on: Bool, from: String, to: String,
+        days: [Int] = Array(1...7)
+    ) {
+        self.label = label
+        self.on = on
+        self.from = from
+        self.to = to
+        self.days = days
+    }
+
+    private enum CodingKeys: String, CodingKey { case label, on, from, to, days }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        label = try values.decode(String.self, forKey: .label)
+        on = try values.decode(Bool.self, forKey: .on)
+        from = try values.decode(String.self, forKey: .from)
+        to = try values.decode(String.self, forKey: .to)
+        days = if values.contains(.days) {
+            try values.decode([Int].self, forKey: .days)
+        } else {
+            Array(1...7)
+        }
+    }
 }
 
 struct AppSettings: Codable, Equatable {
@@ -277,6 +309,73 @@ struct AppSettings: Codable, Equatable {
     var activeScoringContractVersion: Int? = nil
 
     var usesRecallContract: Bool { activeScoringContractVersion == 2 }
+
+    /// The push endpoint can issue at most one reminder per enabled window and
+    /// never more than `reviewsPerDay` in a local day. Summing that capped count
+    /// across the seven ISO weekdays is therefore the honest weekly maximum;
+    /// multiplying either input alone overstates schedules with sparse or
+    /// overlapping windows.
+    var weeklyReminderMaximum: Int {
+        (1...7).reduce(into: 0) { total, isoWeekday in
+            let windowsThatDay = windows.filter {
+                $0.on && $0.days.contains(isoWeekday)
+            }.count
+            total += min(reviewsPerDay, windowsThatDay)
+        }
+    }
+
+    var weeklyReminderMaximumLabel: String {
+        switch weeklyReminderMaximum {
+        case 0: "No reminders scheduled"
+        case 1: "Up to 1 reminder per week"
+        case let count: "Up to \(count) reminders per week"
+        }
+    }
+
+    var reminderScheduleValidationMessage: String? {
+        for window in windows {
+            guard !window.days.isEmpty else {
+                return "Choose at least one day for every reminder window."
+            }
+            guard window.days.allSatisfy({ (1...7).contains($0) }),
+                  Set(window.days).count == window.days.count
+            else {
+                return "Reminder days must be unique weekdays from Monday through Sunday."
+            }
+            guard let start = Self.minutes(window.from),
+                  let end = Self.minutes(window.to),
+                  end - start >= 30
+            else {
+                return "Each reminder window must end at least 30 minutes after it starts."
+            }
+        }
+
+        return reminderWindowCollisionMessage
+    }
+
+    var reminderWindowCollisionMessage: String? {
+        for (index, left) in windows.enumerated() where left.on {
+            for right in windows.dropFirst(index + 1) where right.on {
+                let sharesDay = !Set(left.days).isDisjoint(with: Set(right.days))
+                if sharesDay, Self.minutes(left.from) == Self.minutes(right.from) {
+                    return "Windows on the same day need different start times."
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func timeComponents(_ value: String) -> (hour: Int, minute: Int)? {
+        let parts = value.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2, (0...23).contains(parts[0]), (0...59).contains(parts[1])
+        else { return nil }
+        return (parts[0], parts[1])
+    }
+
+    private static func minutes(_ value: String) -> Int? {
+        guard let time = timeComponents(value) else { return nil }
+        return time.hour * 60 + time.minute
+    }
 
     static let placeholder = AppSettings(
         reviewsPerDay: 2,

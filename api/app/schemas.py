@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.models import ALL_ISO_WEEKDAYS
 from app.services.scoring_contract import CoachingFocus, ScoreKind, ScoringContractVersion
 
 
@@ -400,6 +401,9 @@ class NotificationWindow(BaseModel):
     # `from` is a Python keyword, so the field is aliased to match the wire format.
     from_: str = Field(alias="from")
     to: str
+    # ISO weekdays: Monday=1 through Sunday=7. Missing on an old stored row or
+    # pre-weekday client request means every day.
+    days: list[int] = Field(default_factory=lambda: list(ALL_ISO_WEEKDAYS))
 
     model_config = {"populate_by_name": True}
 
@@ -458,8 +462,25 @@ class NotificationWindowIn(NotificationWindow):
     def _nonblank_label(cls, value: str) -> str:
         return _strip_nonblank(value, "window label must not be blank")
 
+    @field_validator("days", mode="before")
+    @classmethod
+    def _valid_iso_weekdays(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        if any(isinstance(day, bool) or not isinstance(day, int) for day in value):
+            raise ValueError("days must contain ISO weekday integers from 1 through 7")
+        if any(day < 1 or day > 7 for day in value):
+            raise ValueError("days must contain ISO weekday integers from 1 through 7")
+        if len(set(value)) != len(value):
+            raise ValueError("days must not contain duplicate weekdays")
+        return value
+
     @model_validator(mode="after")
     def _usable(self) -> "NotificationWindowIn":
+        # The On toggle is how a window is silenced. Keeping its recurrence
+        # non-empty preserves the exact days to restore when it is enabled again.
+        if not self.days:
+            raise ValueError("a window must include at least one weekday")
         try:
             span = _minutes(time.fromisoformat(self.to)) - _minutes(time.fromisoformat(self.from_))
         except ValueError as exc:
@@ -486,6 +507,26 @@ class SettingsIn(SettingsBase):
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise ValueError("timezone must be a known IANA timezone") from exc
         return value
+
+    @model_validator(mode="after")
+    def _distinct_enabled_delivery_slots(self) -> "SettingsIn":
+        # The push guard identifies a window by its local start instant. Two
+        # enabled windows with the same start on the same weekday would collapse
+        # into one slot while the client counted two, so reject that ambiguous
+        # schedule at the write boundary.
+        for index, left in enumerate(self.windows):
+            if not left.on:
+                continue
+            for right in self.windows[index + 1 :]:
+                if (
+                    right.on
+                    and set(left.days).intersection(right.days)
+                    and time.fromisoformat(left.from_) == time.fromisoformat(right.from_)
+                ):
+                    raise ValueError(
+                        "enabled windows on the same weekday must have distinct start times"
+                    )
+        return self
 
 
 class TriggerResult(BaseModel):
@@ -521,7 +562,7 @@ class TriggerBatchResult(BaseModel):
 
 
 def window_to_dict(w: NotificationWindow) -> dict[str, Any]:
-    return {"label": w.label, "from": w.from_, "to": w.to, "on": w.on}
+    return {"label": w.label, "from": w.from_, "to": w.to, "on": w.on, "days": w.days}
 
 
 # ---------------------------------------------------------------------------

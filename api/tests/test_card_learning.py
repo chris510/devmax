@@ -906,9 +906,6 @@ async def test_push_holds_candidate_lock_until_stamp_before_learning_exposure(
     card = grounded_card(next_review_at=local_today() - timedelta(days=3))
     db.add(card)
     await db.commit()
-    settings = (
-        await db.exec(select(Settings).where(Settings.user_id == FOUNDER_USER_ID))
-    ).one()
 
     push_started = asyncio.Event()
     release_push = asyncio.Event()
@@ -926,9 +923,7 @@ async def test_push_holds_candidate_lock_until_stamp_before_learning_exposure(
 
     async def run_trigger():
         async with concurrent_session_factory() as trigger_db:
-            return await internal._trigger_review_for_user(
-                settings, FOUNDER_USER_ID, trigger_db
-            )
+            return await internal._trigger_review_for_user(FOUNDER_USER_ID, trigger_db)
 
     trigger_task = asyncio.create_task(run_trigger())
     learning_task = None
@@ -952,6 +947,103 @@ async def test_push_holds_candidate_lock_until_stamp_before_learning_exposure(
         stored = await verify_db.get(type(card), card.id)
         assert stored.last_pushed_at is not None
         assert stored.last_learning_exposure_at >= stored.last_pushed_at
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_same_account_concurrent_polls_spend_one_window_once(
+    db, monkeypatch, concurrent_session_factory
+):
+    db.add_all(
+        [
+            grounded_card(topic="first due card", next_review_at=local_today()),
+            grounded_card(topic="second due card", next_review_at=local_today()),
+        ]
+    )
+    await db.commit()
+
+    push_started = asyncio.Event()
+    release_push = asyncio.Event()
+    send_count = 0
+    monkeypatch.setattr(internal, "now_in", lambda _tz: local_today_at(7, 30))
+
+    async def paused_push(**_kwargs):
+        nonlocal send_count
+        send_count += 1
+        push_started.set()
+        await release_push.wait()
+        return PushDelivery(sent=1, attempted=1)
+
+    monkeypatch.setattr(internal, "send_push", paused_push)
+
+    async def run_trigger():
+        async with concurrent_session_factory() as trigger_db:
+            return await internal._trigger_review_for_user(FOUNDER_USER_ID, trigger_db)
+
+    first = asyncio.create_task(run_trigger())
+    second = None
+    try:
+        await asyncio.wait_for(push_started.wait(), timeout=3)
+        second = asyncio.create_task(run_trigger())
+        await asyncio.sleep(0.1)
+        assert send_count == 1
+    finally:
+        release_push.set()
+
+    results = await asyncio.wait_for(asyncio.gather(first, second), timeout=3)
+
+    assert sum(result.sent for result in results) == 1
+    assert {result.reason for result in results} == {None, "already_pushed"}
+    assert send_count == 1
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_trigger_waits_at_deletion_boundary_before_locking_settings(
+    db, monkeypatch, concurrent_session_factory
+):
+    db.add(grounded_card(next_review_at=local_today()))
+    await db.commit()
+    monkeypatch.setattr(internal, "now_in", lambda _tz: local_today_at(7, 30))
+
+    async def delivered(**_kwargs):
+        return PushDelivery(sent=1, attempted=1)
+
+    monkeypatch.setattr(internal, "send_push", delivered)
+
+    async def run_trigger():
+        async with concurrent_session_factory() as trigger_db:
+            return await internal._trigger_review_for_user(FOUNDER_USER_ID, trigger_db)
+
+    async with concurrent_session_factory() as deletion_db:
+        # DELETE takes this exclusive user-row boundary before cascading through
+        # child tables. Hold the equivalent lock so the trigger must prove it
+        # waits here rather than taking Settings first.
+        locked_user = (
+            await deletion_db.exec(
+                select(User)
+                .where(User.id == FOUNDER_USER_ID)
+                .with_for_update()
+            )
+        ).one()
+        assert locked_user.id == FOUNDER_USER_ID
+
+        trigger = asyncio.create_task(run_trigger())
+        await asyncio.sleep(0.1)
+        assert trigger.done() is False
+
+        # If the trigger had already taken Settings, NOWAIT would fail and expose
+        # the Settings → Card / deletion Card → Settings deadlock order.
+        locked_settings = (
+            await deletion_db.exec(
+                select(Settings)
+                .where(Settings.user_id == FOUNDER_USER_ID)
+                .with_for_update(nowait=True)
+            )
+        ).one()
+        assert locked_settings.user_id == FOUNDER_USER_ID
+        await deletion_db.rollback()
+
+    result = await asyncio.wait_for(trigger, timeout=3)
+    assert result.sent is True
 
 
 @pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")

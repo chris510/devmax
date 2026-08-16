@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -13,12 +13,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db import get_session, sibling_session_factory
 from app.models import (
+    ALL_ISO_WEEKDAYS,
     DELIVERY_CONVERSATIONAL,
     LIVE_STATUSES,
     Card,
     DeviceToken,
     Session,
     Settings,
+    User,
 )
 from app.routers.deps import as_utc, now_in
 from app.schemas import TriggerBatchResult, TriggerResult
@@ -49,6 +51,25 @@ def _unresolved_push_filters(cutoff: datetime):
     )
 
 
+def _first_real_local_datetime(day: date, wall_time: time, zone: tzinfo) -> datetime:
+    """Resolve a wall time, advancing through a timezone gap when necessary.
+
+    Attaching ZoneInfo directly does not reject a nonexistent spring-forward
+    time; it creates an imaginary instant with the pre-transition offset. The
+    round trip detects that case. Advancing to the first real minute gives every
+    poll in the window the same guard boundary. Ambiguous fall-back times use
+    fold=0, so both occurrences still belong to one delivery slot.
+    """
+    naive = datetime.combine(day, wall_time)
+    for minute_offset in range(24 * 60 + 1):
+        candidate_naive = naive + timedelta(minutes=minute_offset)
+        candidate = candidate_naive.replace(tzinfo=zone, fold=0)
+        round_trip = candidate.astimezone(UTC).astimezone(zone)
+        if round_trip.replace(tzinfo=None) == candidate_naive:
+            return candidate
+    raise ValueError(f"no real local instant on or after {naive.isoformat()}")
+
+
 def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
     """The local start of the enabled window `at` falls inside, or None.
 
@@ -59,29 +80,57 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
     a push already spent in it suppress the window the user is actually in.
 
     A malformed window is skipped rather than raised on, so one bad entry costs
-    its own window and not its neighbours. But if *every* enabled window is
-    unparseable the poll raises: `outside_window` is the normal answer ~46 times
-    a day, so quietly returning it would turn a broken settings row into "no push
-    ever arrives again" with nothing to notice it by. A 500 fails the cron run,
-    which is the breakage signal.
+    its own window and not its neighbours. But if *every* enabled window
+    scheduled for today is unparseable, the poll raises: `outside_window` is the
+    normal answer roughly 85 times a day, so quietly returning it would turn a broken
+    settings row into "no push ever arrives again" with nothing to notice it by.
+    A 500 fails the cron run, which is the breakage signal.
     """
-    now = at.time()
-    starts: list[time] = []
+    if at.tzinfo is None:
+        raise ValueError("notification-window evaluation requires an aware datetime")
+
+    starts: list[datetime] = []
     parsed = 0
     malformed = 0
     for window in settings.windows:
         if not window.get("on"):
             continue
         try:
+            days = window.get("days", ALL_ISO_WEEKDAYS)
+            if (
+                not isinstance(days, list | tuple)
+                or not days
+                or any(isinstance(day, bool) or not isinstance(day, int) for day in days)
+                or any(day < 1 or day > 7 for day in days)
+                or len(set(days)) != len(days)
+            ):
+                raise ValueError("invalid ISO weekdays")
+            if at.isoweekday() not in days:
+                continue
             start = time.fromisoformat(window["from"])
             end = time.fromisoformat(window["to"])
+            if start.tzinfo is not None or end.tzinfo is not None:
+                raise ValueError("notification-window times must not carry UTC offsets")
+            start_minutes = start.hour * 60 + start.minute
+            end_minutes = end.hour * 60 + end.minute
+            if end_minutes <= start_minutes:
+                raise ValueError("notification-window end must follow its start")
         except (KeyError, TypeError, ValueError):
             malformed += 1
             logger.warning("skipping malformed notification window: %r", window)
             continue
         parsed += 1
-        if start <= now <= end:
-            starts.append(start)
+
+        start_local = _first_real_local_datetime(at.date(), start, at.tzinfo)
+        end_local = _first_real_local_datetime(at.date(), end, at.tzinfo)
+        if end_local <= start_local:
+            # If the whole nominal range falls in a spring-forward gap, both
+            # boundaries resolve to the first real minute. Preserve the user's
+            # configured wall-clock duration from that point instead of silently
+            # dropping this one weekly slot.
+            end_local = start_local + timedelta(minutes=end_minutes - start_minutes)
+        if start_local <= at <= end_local:
+            starts.append(start_local)
 
     if not starts:
         if malformed and not parsed:
@@ -90,13 +139,11 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
                 detail=f"every enabled notification window is unparseable ({malformed})",
             )
         return None
-    # `at.tzinfo` is the ZoneInfo itself, not a fixed offset, so combine()
-    # re-resolves the offset for that wall time and stays right across DST.
-    return datetime.combine(at.date(), max(starts), tzinfo=at.tzinfo)
+    return max(starts)
 
 
 async def _trigger_review_for_user(
-    settings: Settings, user_id: uuid.UUID, db: AsyncSession
+    user_id: uuid.UUID, db: AsyncSession
 ) -> TriggerResult:
     """Polled by the production API process; decides whether to push.
 
@@ -114,6 +161,36 @@ async def _trigger_review_for_user(
     never be opened wastes tokens and latency. Question generation happens on
     engagement, in POST /cards/{id}/sessions.
     """
+    # A user-row KEY SHARE lock conflicts with account deletion without blocking
+    # ordinary foreign-key inserts. Taking it first preserves the account-wide
+    # User → Settings → Card order: deletion cannot cascade through Cards and
+    # then wait on Settings while this transaction does the reverse.
+    user = await db.get(
+        User,
+        user_id,
+        with_for_update={"read": True, "key_share": True},
+        populate_existing=True,
+    )
+    if user is None:
+        return TriggerResult(sent=False, reason="outside_window")
+
+    # Serialize every poll for one account on its settings row. Card locks keep
+    # Learn/session creation safe, but two polls can choose two different cards;
+    # without this account-level lock both can pass the same window and daily
+    # guards before either stamps its card. Different accounts still run in
+    # parallel because each owns a different row.
+    locked_settings = (
+        await db.exec(
+            select(Settings)
+            .where(Settings.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if locked_settings is None:
+        return TriggerResult(sent=False, reason="outside_window")
+    settings = locked_settings
+
     local_now = now_in(settings.timezone)
 
     window_start_local = _active_window_start(settings, local_now)
@@ -126,7 +203,9 @@ async def _trigger_review_for_user(
     # 00:00 against 07:00 and shifts the day by the offset. Postgres is right
     # either way; only normalising makes the two backends agree.
     today = local_now.date()
-    day_start = datetime.combine(today, time.min, tzinfo=local_now.tzinfo).astimezone(UTC)
+    if local_now.tzinfo is None:
+        raise ValueError("notification polling requires an aware local clock")
+    day_start = _first_real_local_datetime(today, time.min, local_now.tzinfo).astimezone(UTC)
     window_start = window_start_local.astimezone(UTC)
 
     # Both guards below read the same fact, so they share one query. `window_start`
@@ -286,15 +365,12 @@ async def _trigger_review_for_user(
 
 async def _evaluate_review_target(
     user_id: uuid.UUID,
-    settings_row: Settings,
     factory: async_sessionmaker[AsyncSession],
 ) -> TriggerResult | None:
     """Evaluate one account in an isolated transaction."""
     async with factory() as account_db:
         try:
-            result = await _trigger_review_for_user(
-                settings_row, user_id, account_db
-            )
+            result = await _trigger_review_for_user(user_id, account_db)
             # Several normal early returns are read-only. End their transaction
             # before releasing the worker slot so a later failure cannot affect it.
             await account_db.commit()
@@ -311,18 +387,18 @@ async def _evaluate_review_target(
 
 
 async def _evaluate_review_targets(
-    targets: list[tuple[uuid.UUID, Settings]],
+    user_ids: list[uuid.UUID],
     factory: async_sessionmaker[AsyncSession],
     *,
     concurrency: int,
 ) -> list[TriggerResult | None]:
     """Evaluate an arbitrary account set with a fixed number of workers."""
-    target_iterator = iter(targets)
+    target_iterator = iter(user_ids)
 
     async def worker() -> list[TriggerResult | None]:
         return [
-            await _evaluate_review_target(user_id, settings_row, factory)
-            for user_id, settings_row in target_iterator
+            await _evaluate_review_target(user_id, factory)
+            for user_id in target_iterator
         ]
 
     worker_outcomes = await asyncio.gather(*(worker() for _ in range(concurrency)))
@@ -344,18 +420,19 @@ async def trigger_review(
         return TriggerResult(sent=False, reason="outside_window")
 
     if len(rows) == 1:
-        return await _trigger_review_for_user(rows[0], rows[0].user_id, db)
+        return await _trigger_review_for_user(rows[0].user_id, db)
 
-    # Snapshot settings before ending the discovery transaction. Each account
-    # then gets an independent session, so an eight-second APNs timeout for one
-    # account cannot serially consume the poller's entire 60-second deadline.
-    targets = [(row.user_id, row.model_copy(deep=True)) for row in rows]
+    # Snapshot identities before ending the discovery transaction. Each account
+    # then gets an independent session and locks its current settings row, so an
+    # eight-second APNs timeout for one account cannot serially consume the
+    # poller's entire 60-second deadline.
+    user_ids = [row.user_id for row in rows]
     await db.rollback()
     factory, concurrency = sibling_session_factory(
         db, max_concurrency=REVIEW_ACCOUNT_CONCURRENCY
     )
     outcomes = await _evaluate_review_targets(
-        targets, factory, concurrency=concurrency
+        user_ids, factory, concurrency=concurrency
     )
     results = [result for result in outcomes if result is not None]
     failed_count = len(outcomes) - len(results)

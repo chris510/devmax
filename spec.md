@@ -237,10 +237,28 @@ Single row, `id` fixed to 1, enforced with a CHECK constraint.
 |---|---|---|
 | `id` | int PK CHECK (id = 1) | 1 |
 | `reviews_per_day` | int NOT NULL | 2 |
-| `windows` | jsonb NOT NULL | `[{"label":"Morning","from":"07:10","to":"08:30","on":true},{"label":"Evening","from":"21:00","to":"22:30","on":true}]` |
+| `windows` | jsonb NOT NULL | `[{"label":"Morning","from":"07:10","to":"08:30","on":true,"days":[1,2,3,4,5,6,7]},{"label":"Evening","from":"21:00","to":"22:30","on":true,"days":[1,2,3,4,5,6,7]}]` |
 | `timezone` | text NOT NULL | `'America/Los_Angeles'` |
 
 Seed this row in a migration.
+
+`reviews_per_day` is the maximum number of notification pushes on one local
+calendar day. It is not the number of cards that become due and it is not a
+weekly review-frequency target. SM-2 remains the only scheduler for existing
+cards.
+
+Each notification window may carry `days`, a non-empty set of unique ISO weekday numbers:
+`1` is Monday through `7` for Sunday. A window is eligible only when it
+is on, the current local weekday is selected, and the current local time is
+inside its range. Missing `days` means all seven days. That fallback is required
+for rows and clients from before weekday-aware windows; writes normalize the
+omission to `[1,2,3,4,5,6,7]`. The On toggle is how a window is silenced; its
+weekday selection remains non-empty so enabling it restores the saved recurrence.
+The app changes weekly nudge frequency by selecting or deselecting days on windows;
+those choices never move `next_review_at`.
+Two enabled windows that select any of the same weekdays must have distinct local
+start times. The per-window idempotency boundary is that local start instant, so
+accepting an equal-start collision would advertise two slots that can deliver only one.
 
 ---
 
@@ -719,26 +737,52 @@ Upsert on token. Returns 204.
   "reviews_per_day": 2,
   "timezone": "America/Los_Angeles",
   "windows": [
-    {"label": "Morning", "from": "07:10", "to": "08:30", "on": true},
-    {"label": "Evening", "from": "21:00", "to": "22:30", "on": true}
+    {"label": "Morning", "from": "07:10", "to": "08:30", "on": true,
+     "days": [1, 3, 5]},
+    {"label": "Evening", "from": "21:00", "to": "22:30", "on": true,
+     "days": [2, 4]}
   ]
 }
 ```
+
+The window `days` are the nudge schedule. They do not make cards due, promise a
+push on every selected day, or alter the SM-2 interval. A selected window with no
+due conversational card remains quiet. `reviews_per_day` is a daily safety cap
+across all eligible windows. The UI's honest weekly maximum is:
+
+```text
+sum(min(reviews_per_day, enabled windows selecting that ISO day) for day in 1...7)
+```
+
+This is a maximum, not a promise: due-only selection may deliver fewer or none.
+`PUT /settings` rejects a window shorter than 30 minutes and equal local start
+times on intersecting enabled weekdays.
 
 ### `POST /internal/trigger-review`
 
 Requires `X-Cron-Secret`. Called by GitHub Actions on a schedule.
 
 Behavior:
-1. Check current time (in the configured timezone) against enabled
-   windows. If outside all of them, return `{"sent": false, "reason":
-   "outside_window"}` and do nothing.
+1. In the configured timezone, check the current ISO weekday and local time
+   against enabled windows. A window with missing `days` is eligible every day.
+   If a configured start falls in a spring-forward gap, its guard boundary is the
+   first real local minute after the gap. If the entire range is nonexistent, the
+   range resumes there for its configured wall-clock duration. During a fall-back
+   fold, both occurrences share the first occurrence's boundary and therefore remain one window.
+   If no window selects today and contains the current time, return
+   `{"sent": false, "reason": "outside_window"}` and do nothing.
+   Evaluation takes the user's deletion-conflicting boundary first, then holds that
+   user's settings-row lock through delivery. Concurrent polls cannot spend the same
+   account window on two different cards, account deletion cannot invert the child-row
+   lock order, and other users remain independent.
 2. Check how many pushes have already been sent today against
    `reviews_per_day`. If at limit, return `{"sent": false, "reason":
    "daily_limit"}`.
-3. Query due conversational cards. If none, return `{"sent": false,
+3. Query due conversational cards. The window schedule never creates due work.
+   If none, return `{"sent": false,
    "reason": "nothing_due"}`.
-4. Send one APNs push naming the top due topic and the count — e.g.
+4. Send at most one APNs push for this eligible window, naming the top due topic
+   and the count — e.g.
    title `"3 due"`, body `"Consistent hashing"`. Payload includes the
    card id so the client can deep-link straight into that session.
 5. Return `{"sent": true, "card_id": "...", "due_count": 3}`.
@@ -828,6 +872,10 @@ At minimum:
   leaves the session and card unchanged, not half-written.
 - **Auth** — wrong/missing key returns 401 on both client and internal
   endpoints.
+- **Notification windows** — selected and unselected ISO weekdays,
+  missing `days` as every day, invalid/duplicate/empty lists, timezone
+  and DST boundaries, one push per eligible window, the daily cap across
+  windows, and due-only silence on a selected day.
 
 Mock all Anthropic and APNs calls in tests. No live API calls in CI.
 
