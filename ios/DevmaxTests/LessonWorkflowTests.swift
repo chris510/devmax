@@ -331,6 +331,94 @@ final class LessonWorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testReadyUnassignedLessonFallsBackToLegacyTopicReview() async {
+        let api = MockAPI(pilotSourceNotAssigned: true)
+        let source = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        flow.openSavedImport(source)
+
+        XCTAssertEqual(flow.step, .importReady)
+        await flow.openLessonPilotPreview(sourceID: source.id)
+
+        XCTAssertEqual(flow.step, .topics)
+        XCTAssertNil(flow.lessonPilotPreview)
+    }
+
+    @MainActor
+    func testConfirmedAndSupersededUnassignedLessonsRemainLegacyEmpty() async {
+        for status in ["confirmed", "superseded"] {
+            let api = MockAPI(pilotSourceNotAssigned: true)
+            let source = Self.lessonImport(
+                topics: [Self.topic("TCP reliability", position: 1)], status: status
+            )
+            let flow = PublicOnboardingState(api: api, route: "welcome")
+
+            flow.openSavedImport(source)
+            await waitForTerminalLessonRouting(flow)
+
+            XCTAssertEqual(flow.step, .empty, "status: \(status)")
+            XCTAssertNil(flow.lessonPilotPreview, "status: \(status)")
+        }
+    }
+
+    func testLessonCheckDraftStoreCanClearEveryDraft() {
+        let first = UUID()
+        let second = UUID()
+        LessonCheckDraftStore.clearAll()
+        defer { LessonCheckDraftStore.clearAll() }
+        LessonCheckDraftStore.save("first answer", for: first)
+        LessonCheckDraftStore.save("second answer", for: second)
+
+        LessonCheckDraftStore.clearAll()
+
+        XCTAssertNil(LessonCheckDraftStore.read(for: first))
+        XCTAssertNil(LessonCheckDraftStore.read(for: second))
+    }
+
+    @MainActor
+    func testSuccessfulMaterialDeletionClearsAllLessonCheckDrafts() async {
+        let first = UUID()
+        let second = UUID()
+        LessonCheckDraftStore.clearAll()
+        defer { LessonCheckDraftStore.clearAll() }
+        LessonCheckDraftStore.save("formation", for: first)
+        LessonCheckDraftStore.save("transfer", for: second)
+        let source = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        flow.imports = [source]
+
+        await flow.deleteMaterial(source.id)
+
+        XCTAssertNil(LessonCheckDraftStore.read(for: first))
+        XCTAssertNil(LessonCheckDraftStore.read(for: second))
+        XCTAssertTrue(flow.imports.isEmpty)
+    }
+
+    @MainActor
+    func testFailedMaterialDeletionPreservesLessonCheckDrafts() async {
+        let checkID = UUID()
+        LessonCheckDraftStore.clearAll()
+        defer { LessonCheckDraftStore.clearAll() }
+        LessonCheckDraftStore.save("keep this answer", for: checkID)
+        let source = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)]
+        )
+        let flow = PublicOnboardingState(
+            api: MockAPI(materialDeletionFails: true), route: "welcome"
+        )
+        flow.imports = [source]
+
+        await flow.deleteMaterial(source.id)
+
+        XCTAssertEqual(LessonCheckDraftStore.read(for: checkID), "keep this answer")
+        XCTAssertEqual(flow.imports.map(\.id), [source.id])
+    }
+
+    @MainActor
     func testStartingAnotherGuideClearsThePriorImportIdentity() async throws {
         let api = MockAPI()
         let source = try await api.materialImport(UUID())
@@ -505,5 +593,215 @@ final class LessonWorkflowTests: XCTestCase {
         flow.selectedTopics.insert(clean.id)
 
         XCTAssertFalse(flow.canConfirmSelectedTopics)
+    }
+
+    @MainActor
+    private func pilotFlow(
+        api: MockAPI
+    ) async throws -> (PublicOnboardingState, MaterialTopicPreview) {
+        let sourceID = UUID()
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+        flow.draft.sourceID = sourceID
+        flow.draft.importPath = "lesson"
+        flow.draft.contentProvenance = LessonContentProvenance.exactSourceExcerpt.rawValue
+        flow.lessonPilotPreview = try await api.lessonPilotPreview(sourceID)
+        flow.step = .lessonCheck
+        return (flow, try XCTUnwrap(flow.lessonPilotPreview?.topics.first))
+    }
+
+    @MainActor
+    private func waitForTerminalLessonRouting(_ flow: PublicOnboardingState) async {
+        for _ in 0..<100 {
+            if !flow.busy, flow.step != .lessonCheck { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    func testUnavailablePilotProposalCannotBeStarted() {
+        let preview = MaterialTopicPreview(
+            id: UUID(), position: 1, sectionTitle: "Section", topic: "Hidden target",
+            formationQuestion: "This must not render.", status: "clean", issue: "",
+            formationState: "unavailable", transferState: "unavailable"
+        )
+
+        XCTAssertFalse(preview.isAvailable)
+        XCTAssertFalse(preview.isTransferAvailable)
+    }
+
+    @MainActor
+    func testAttemptFirstFormationConfirmsHeldCardWithoutStartingConversation() async throws {
+        let api = MockAPI()
+        let (flow, preview) = try await pilotFlow(api: api)
+
+        await flow.beginLessonActivity(preview)
+        XCTAssertEqual(flow.lessonCheckStage, .attempt)
+        XCTAssertEqual(flow.activeLessonCheck?.condition, .attemptFirst)
+
+        flow.updateLessonCheckDraft(
+            "IP is best effort, so transport supplies the guarantees the application needs."
+        )
+        await flow.submitLessonAttempt()
+        XCTAssertEqual(flow.lessonCheckStage, .authority)
+        XCTAssertEqual(flow.lessonAuthority?.check.qualitativeOutcome, .accurateAccount)
+
+        await flow.acceptLessonAuthority()
+
+        XCTAssertEqual(flow.lessonCheckStage, .held)
+        XCTAssertEqual(flow.step, .lessonCheck)
+        XCTAssertEqual(flow.confirmedLessonCardIDs.count, 1)
+        XCTAssertNil(flow.activeLessonCheck)
+        XCTAssertNil(flow.lessonAuthority)
+    }
+
+    @MainActor
+    func testRestudyDoesNotShowAQuestionBeforeAuthorityExposure() async throws {
+        let api = MockAPI()
+        let (flow, original) = try await pilotFlow(api: api)
+        let restudy = MaterialTopicPreview(
+            id: original.id, position: original.position,
+            sectionTitle: original.sectionTitle, topic: original.topic,
+            formationQuestion: nil, status: original.status, issue: original.issue,
+            formationState: original.formationState, transferState: original.transferState
+        )
+
+        XCTAssertNil(restudy.formationQuestion)
+        await flow.beginLessonActivity(restudy)
+
+        XCTAssertEqual(flow.lessonCheckStage, .authority)
+        XCTAssertEqual(flow.activeLessonCheck?.condition, .restudy)
+        XCTAssertEqual(flow.activeLessonCheck?.promptText, "")
+        XCTAssertNotNil(flow.lessonAuthority?.sourceExcerpt)
+    }
+
+    @MainActor
+    func testFormationProviderFailurePreservesTheExactDiskDraft() async throws {
+        let api = MockAPI(pilotFormationFailsOnce: true)
+        let (flow, preview) = try await pilotFlow(api: api)
+        await flow.beginLessonActivity(preview)
+        let checkID = try XCTUnwrap(flow.activeLessonCheck?.id)
+        defer { LessonCheckDraftStore.clear(for: checkID) }
+        let answer = "IP can lose or reorder packets, so transport adds a stronger contract."
+
+        flow.updateLessonCheckDraft(answer)
+        await flow.submitLessonAttempt()
+
+        XCTAssertEqual(flow.lessonCheckStage, .submitFailed)
+        XCTAssertEqual(flow.lessonCheckDraft, answer)
+        XCTAssertEqual(LessonCheckDraftStore.read(for: checkID), answer)
+        XCTAssertNil(flow.lessonAuthority)
+
+        await flow.submitLessonAttempt()
+        XCTAssertEqual(flow.lessonCheckStage, .authority)
+        XCTAssertNil(LessonCheckDraftStore.read(for: checkID))
+    }
+
+    @MainActor
+    func testLessonDraftRehydratesAfterAFlowIsRecreated() async throws {
+        let api = MockAPI()
+        let (firstFlow, preview) = try await pilotFlow(api: api)
+        await firstFlow.beginLessonActivity(preview)
+        let checkID = try XCTUnwrap(firstFlow.activeLessonCheck?.id)
+        defer { LessonCheckDraftStore.clear(for: checkID) }
+        let answer = "The network routes best-effort packets; delivery guarantees live above it."
+        firstFlow.updateLessonCheckDraft(answer)
+
+        let resumed = PublicOnboardingState(api: api, route: "welcome")
+        resumed.draft.sourceID = firstFlow.draft.sourceID
+        resumed.draft.importPath = "lesson"
+        resumed.lessonPilotPreview = firstFlow.lessonPilotPreview
+        resumed.step = .lessonCheck
+        await resumed.beginLessonActivity(preview)
+
+        XCTAssertEqual(resumed.activeLessonCheck?.id, checkID)
+        XCTAssertEqual(resumed.lessonCheckDraft, answer)
+        XCTAssertEqual(resumed.lessonCheckStage, .resume)
+    }
+
+    @MainActor
+    func testExcludingAfterAuthorityStillConfirmsAZeroKeptSource() async throws {
+        let api = MockAPI()
+        let (flow, preview) = try await pilotFlow(api: api)
+        await flow.beginLessonActivity(preview)
+        flow.updateLessonCheckDraft("IP is unreliable, so TCP makes it reliable.")
+        await flow.submitLessonAttempt()
+        XCTAssertEqual(flow.lessonCheckStage, .authority)
+
+        await flow.excludeLessonProposal(preview.id)
+
+        XCTAssertEqual(flow.lessonCheckStage, .completeNoCards)
+        XCTAssertTrue(flow.confirmedLessonCardIDs.isEmpty)
+        let confirmations = await api.confirmedMaterialSelections
+        XCTAssertEqual(confirmations, [[]])
+    }
+
+    @MainActor
+    func testFailedConfirmationKeepsAuthorityAndRetriesWithoutReexposure() async throws {
+        let api = MockAPI(pilotConfirmationFailsOnce: true)
+        let (flow, preview) = try await pilotFlow(api: api)
+        await flow.beginLessonActivity(preview)
+        flow.updateLessonCheckDraft(
+            "IP is best effort, so transport supplies the guarantees the application needs."
+        )
+        await flow.submitLessonAttempt()
+        let exposedAt = try XCTUnwrap(flow.lessonAuthority?.exposedAt)
+
+        await flow.acceptLessonAuthority()
+
+        XCTAssertEqual(flow.lessonCheckStage, .authority)
+        XCTAssertNotNil(flow.lessonAuthority)
+        XCTAssertEqual(flow.lessonAuthority?.exposedAt, exposedAt)
+        XCTAssertNil(flow.activeLessonCheck)
+
+        await flow.retryPilotLessonConfirmation()
+
+        XCTAssertEqual(flow.lessonCheckStage, .held)
+        XCTAssertNil(flow.lessonAuthority)
+        XCTAssertEqual(flow.confirmedLessonCardIDs.count, 1)
+        let confirmations = await api.confirmedMaterialSelections
+        XCTAssertEqual(confirmations, [[preview.id], [preview.id]])
+    }
+
+    @MainActor
+    func testTransferSubmissionIsBlindNonnumericAndRetryable() async throws {
+        let api = MockAPI(pilotTransferFailsOnce: true)
+        let (flow, original) = try await pilotFlow(api: api)
+        let transfer = MaterialTopicPreview(
+            id: original.id, position: original.position,
+            sectionTitle: original.sectionTitle, topic: original.topic,
+            formationQuestion: nil, status: original.status, issue: original.issue,
+            formationState: "unavailable", transferState: "available"
+        )
+        await flow.beginTransferCheck(transfer)
+        let checkID = try XCTUnwrap(flow.activeLessonCheck?.id)
+        defer { LessonCheckDraftStore.clear(for: checkID) }
+        let response = "Sequencing and retransmission must live above best-effort IP."
+        flow.updateLessonCheckDraft(response)
+
+        await flow.submitLessonTransfer()
+        XCTAssertEqual(flow.lessonCheckStage, .transferFailed)
+        XCTAssertEqual(flow.lessonCheckDraft, response)
+        XCTAssertNil(flow.lessonAuthority)
+
+        await flow.submitLessonTransfer()
+        XCTAssertEqual(flow.lessonCheckStage, .transferSubmitted)
+        XCTAssertEqual(flow.activeLessonCheck?.status, .submitted)
+        XCTAssertNil(flow.activeLessonCheck?.qualitativeOutcome)
+        XCTAssertFalse(flow.activeLessonCheck?.hasFeedback ?? true)
+
+        let sourceID = try XCTUnwrap(flow.draft.sourceID)
+        let resumedPreview = try await api.lessonPilotPreview(sourceID)
+        let submitted = try XCTUnwrap(resumedPreview.topics.first)
+        XCTAssertEqual(submitted.transferState, "submitted")
+        XCTAssertTrue(submitted.hasTransferEntryPoint)
+
+        let resumed = PublicOnboardingState(api: api, route: "welcome")
+        resumed.draft.sourceID = sourceID
+        resumed.draft.importPath = "lesson"
+        resumed.lessonPilotPreview = resumedPreview
+        resumed.step = .lessonCheck
+        await resumed.beginTransferCheck(submitted)
+
+        XCTAssertEqual(resumed.lessonCheckStage, .transferSubmitted)
+        XCTAssertEqual(resumed.activeLessonCheck?.id, checkID)
     }
 }

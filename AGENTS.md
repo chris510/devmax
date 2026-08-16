@@ -28,10 +28,11 @@ delivered to that device. `docs/RUNBOOK.md` is the reproduction and operations p
 |---|---|
 | `spec.md` | The backend: schema, endpoints, SM-2, LLM prompt rules, and an explicit out-of-scope list. It says "build exactly what's described here" — take that literally. |
 | `design_handoff_devmax_initial/` | The iOS client: final tokens, type, copy, motion, and 29 state screenshots, plus an HTML prototype used as a *design reference, not code to lift*. |
+| `design_handoff_adaptive_study_pilot/` | The adaptive-study pilot's focused lesson-check behavior and presentation amendment. It inherits the initial handoff's tokens and owns the formation, held Recall, no-card completion, and transfer research-check states. |
 | `docs/STUDY-PLAN-SPEC.md` | Study Plan, end to end. Extends `spec.md` rather than amending it; `design_handoff_study_plan/` is its design source (V3.4 owns behaviour, V3.5 owns presentation). |
 | `docs/PUBLIC-APP-SPEC.md` | Accounts, authentication, per-user ownership, onboarding, public guide ingestion, and subject-agnostic vocabulary. Approved for implementation 2026-08-07. |
 | `docs/SCORING-CONTRACT-V2-SPEC.md` | Approved target for Recall-only numeric scoring, qualitative coaching, historical compatibility, and the staged migration. V1 remains the runtime contract until its activation gate is complete. |
-| `docs/ADAPTIVE-STUDY-PILOT-SPEC.md` | Approved 2026-08-15 product target and three-week experiment for bounded sources, unscored formation, delayed Recall, separate transfer evidence, and the gate before any browser or Mac capture surface. The current runtime remains in `docs/ADAPTIVE-STUDY-MVP.md` until this target is implemented. |
+| `docs/ADAPTIVE-STUDY-PILOT-SPEC.md` | Approved 2026-08-15 product target and three-week experiment for bounded sources, unscored formation, delayed Recall, separate transfer evidence, and the gate before any browser or Mac capture surface. It is implemented only for explicitly enrolled pilot sources; nonpilot runtime remains in `docs/ADAPTIVE-STUDY-MVP.md`. |
 
 **Where the first two disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
@@ -105,9 +106,9 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   GET; every later disclosure or transfer debrief extends the boundary monotonically
   before its response. Only the later ordinary closed-book session may drive the
   scheduler or qualify distillation. `practice=true` is not a shortcut because Practice
-  still writes scored history and mastery. This is an approved target rather than
-  current runtime until the pilot gate is implemented; do not partially ship its
-  learner-facing claims.
+  still writes scored history and mastery. This runtime is available only behind
+  active pilot enrollment, frozen assignment, and the minimum-client-build gate;
+  nonpilot lessons retain the legacy flow.
 - **Maximum `llm.MAX_SCORED_FOLLOW_UPS` (2) *scored* follow-ups per session, enforced
   server-side.** The model may *request* a further probe — `needs_more_evidence` says the
   transcript cannot distinguish adjacent scores — but it never decides. The server owns
@@ -294,6 +295,15 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 `submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
 `learning` `ai-consent` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
+Adaptive-study pilot routes are `lesson-pilot-preview` `lesson-pilot-attempt`
+`lesson-pilot-attempt-text` `lesson-pilot-resume` `lesson-pilot-provider-failure`
+`lesson-pilot-correction` `lesson-pilot-authority` `lesson-pilot-restudy`
+`lesson-pilot-confirm-failure`
+`lesson-pilot-held` `lesson-pilot-recall-ready` `lesson-pilot-no-cards`
+`lesson-pilot-transfer` `lesson-pilot-transfer-text` `lesson-pilot-transfer-failure`
+`lesson-pilot-transfer-submitted` `lesson-pilot-transfer-debrief`. Their approved
+390×844 reference is `design_handoff_adaptive_study_pilot/README.md` and its
+`screenshots/` acceptance set.
 An unrecognised
 value falls through to the conversation question state rather than erroring, so check the
 spelling. Also `WC_LOAD` (`auto|loading|error`),

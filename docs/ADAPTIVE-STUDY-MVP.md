@@ -1,6 +1,6 @@
 # Adaptive lesson MVP
 
-> **Runtime record:** This document describes the shipping first pass. The
+> **Runtime record:** This document describes the nonpilot shipping first pass. The
 > product direction approved on 2026-08-15 is specified in
 > `ADAPTIVE-STUDY-PILOT-SPEC.md`: immediate lesson formation becomes unscored,
 > answer disclosure creates a recall hold, and only delayed closed-book Recall

@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -97,6 +98,22 @@ async def _column_exists(url: URL, table: str, column: str) -> bool:
         ) AS present
         """,
         {"table": table, "column": column},
+    )
+    return bool(row["present"])
+
+
+async def _table_exists(url: URL, table: str) -> bool:
+    row = await _fetch_one(
+        url,
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = :table
+        ) AS present
+        """,
+        {"table": table},
     )
     return bool(row["present"])
 
@@ -675,6 +692,208 @@ async def _exercise_round_trips() -> None:
             {"source_id": source_id},
         )
         assert provenance == {"content_provenance": "legacy_unspecified"}
+
+        # 0020 adds only proposal-owned, unscored pilot state. Existing source,
+        # proposal, numeric history, and scheduler fields survive both directions.
+        _run_alembic(database_url, "upgrade", "0020")
+        await _assert_revision(database_url, "0020")
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
+        pilot_defaults = await _fetch_one(
+            database_url,
+            """
+            SELECT s.proposals_ready_at, s.review_opened_at, s.confirmed_at,
+                   p.last_learning_exposure_at, p.recall_not_before_at
+            FROM material_sources AS s
+            JOIN material_topic_proposals AS p ON p.source_id = s.id
+            WHERE s.id = :source_id AND p.id = :proposal_id
+            """,
+            {"source_id": source_id, "proposal_id": proposal_id},
+        )
+        assert pilot_defaults == {
+            "proposals_ready_at": None,
+            "review_opened_at": None,
+            "confirmed_at": None,
+            "last_learning_exposure_at": None,
+            "recall_not_before_at": None,
+        }
+        for table in (
+            "lesson_checks",
+            "lesson_proposal_audits",
+            "study_pilot_enrollments",
+            "study_pilot_assignments",
+        ):
+            assert await _table_exists(database_url, table)
+
+        enrollment_id = uuid.uuid4()
+        assignment_id = uuid.uuid4()
+        check_id = uuid.uuid4()
+        audit_id = uuid.uuid4()
+        await _execute(
+            database_url,
+            """
+            UPDATE material_sources
+            SET proposals_ready_at = now(), review_opened_at = now(),
+                confirmed_at = now()
+            WHERE id = :source_id
+            """,
+            {"source_id": source_id},
+        )
+        await _execute(
+            database_url,
+            """
+            UPDATE material_topic_proposals
+            SET last_learning_exposure_at = now(),
+                recall_not_before_at = now() + INTERVAL '8 hours'
+            WHERE id = :proposal_id
+            """,
+            {"proposal_id": proposal_id},
+        )
+        await _execute(
+            database_url,
+            """
+            INSERT INTO study_pilot_enrollments (
+                id, user_id, cohort, consent_version, consented_at,
+                randomization_seed, created_at, updated_at
+            ) VALUES (
+                :enrollment_id, :user_id, 'pilot-2026-08', 'pilot-consent-v1',
+                now(), 'migration-seed', now(), now()
+            )
+            """,
+            {"enrollment_id": enrollment_id, "user_id": FOUNDER_USER_ID},
+        )
+        await _execute(
+            database_url,
+            """
+            INSERT INTO study_pilot_assignments (
+                id, enrollment_id, source_lineage_id, source_id,
+                pair_index, sequence_index, condition, intended_target,
+                target_proposal_id, version_snapshot, assigned_at, bound_at,
+                updated_at
+            ) VALUES (
+                :assignment_id, :enrollment_id, :source_id, :source_id,
+                1, 1, 'attempt_first', 'position:1', :proposal_id,
+                '{"formation_prompt":"v1","model":"frozen"}'::jsonb,
+                now(), now(), now()
+            )
+            """,
+            {
+                "assignment_id": assignment_id,
+                "enrollment_id": enrollment_id,
+                "source_id": source_id,
+                "proposal_id": proposal_id,
+            },
+        )
+        await _execute(
+            database_url,
+            """
+            INSERT INTO lesson_proposal_audits (
+                id, source_id, proposal_id, extraction_route,
+                extraction_prompt_version, grounding_gate_version,
+                original_proposal_pack, original_grounding_findings,
+                reviewer_id, reviewer_decision, reviewer_correction,
+                reviewed_at, created_at
+            ) VALUES (
+                :audit_id, :source_id, :proposal_id,
+                '{"provider":"anthropic","model":"frozen"}'::jsonb,
+                'extract-v1', 'grounding-v1', '{"topic":"Request routing"}'::jsonb,
+                '[]'::jsonb, 'reviewer-1', 'approved', '{}'::jsonb, now(), now()
+            )
+            """,
+            {
+                "audit_id": audit_id,
+                "source_id": source_id,
+                "proposal_id": proposal_id,
+            },
+        )
+        with pytest.raises(IntegrityError):
+            await _execute(
+                database_url,
+                """
+                UPDATE study_pilot_assignments
+                SET intended_target = 'Private topic must not persist'
+                WHERE id = :assignment_id
+                """,
+                {"assignment_id": assignment_id},
+            )
+        await _execute(
+            database_url,
+            """
+            INSERT INTO lesson_checks (
+                id, user_id, proposal_id, kind, condition, prompt_level,
+                prompt_version, provider_route, prompt_text_snapshot,
+                prompt_rubric_version, status, answer_text,
+                qualitative_outcome, feedback, exposed_at,
+                recall_not_before_at, started_at, submitted_at, updated_at
+            ) VALUES (
+                :check_id, :user_id, :proposal_id, 'formation', 'attempt_first',
+                'canonical', 'formation-v1',
+                '{"provider":"anthropic","model":"frozen"}'::jsonb,
+                'How does routing work?', 'formation-rubric-v1', 'exposed',
+                'It passes through named stages.', 'accurate_account',
+                'Accurate source-backed account.', now(),
+                now() + INTERVAL '8 hours', now() - INTERVAL '1 minute',
+                now(), now()
+            )
+            """,
+            {
+                "check_id": check_id,
+                "user_id": FOUNDER_USER_ID,
+                "proposal_id": proposal_id,
+            },
+        )
+        stored_pilot = await _fetch_one(
+            database_url,
+            """
+            SELECT
+              (SELECT count(*) FROM lesson_checks) AS checks,
+              (SELECT count(*) FROM lesson_proposal_audits) AS audits,
+              (SELECT count(*) FROM study_pilot_enrollments) AS enrollments,
+              (SELECT count(*) FROM study_pilot_assignments) AS assignments
+            """,
+        )
+        assert stored_pilot == {
+            "checks": 1,
+            "audits": 1,
+            "enrollments": 1,
+            "assignments": 1,
+        }
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
+
+        _run_alembic(database_url, "downgrade", "0019")
+        await _assert_revision(database_url, "0019")
+        for table in (
+            "lesson_checks",
+            "lesson_proposal_audits",
+            "study_pilot_enrollments",
+            "study_pilot_assignments",
+        ):
+            assert not await _table_exists(database_url, table)
+        assert not await _column_exists(
+            database_url, "material_sources", "proposals_ready_at"
+        )
+        assert not await _column_exists(
+            database_url,
+            "material_topic_proposals",
+            "last_learning_exposure_at",
+        )
+        assert await _material_snapshot(database_url, source_id) == material
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
+
+        _run_alembic(database_url, "upgrade", "0020")
+        await _assert_revision(database_url, "0020")
+        reset_pilot = await _fetch_one(
+            database_url,
+            """
+            SELECT s.proposals_ready_at, s.review_opened_at, s.confirmed_at,
+                   p.last_learning_exposure_at, p.recall_not_before_at
+            FROM material_sources AS s
+            JOIN material_topic_proposals AS p ON p.source_id = s.id
+            WHERE s.id = :source_id AND p.id = :proposal_id
+            """,
+            {"source_id": source_id, "proposal_id": proposal_id},
+        )
+        assert reset_pilot == pilot_defaults
+        assert await _numeric_snapshot(database_url, card_id, session_id) == original
         await _execute(
             database_url,
             """

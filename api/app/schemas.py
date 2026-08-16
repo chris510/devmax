@@ -1007,6 +1007,125 @@ class MaterialTopicOut(BaseModel):
     issue: str
 
 
+LessonCheckKind = Literal["formation", "transfer"]
+LessonCheckCondition = Literal["attempt_first", "restudy"]
+LessonCheckStatus = Literal["open", "submitted", "exposed"]
+LessonCheckOutcome = Literal[
+    "accurate_account",
+    "missing_mechanism",
+    "misconception",
+    "missing_boundary",
+    "insufficient_evidence",
+]
+
+
+class MaterialTopicPreviewOut(BaseModel):
+    """Pilot-safe proposal preview: deliberately contains no answer authority."""
+
+    id: uuid.UUID
+    position: int
+    section_title: str
+    topic: str
+    formation_question: str | None = None
+    status: Literal["clean", "needs_attention", "excluded", "confirmed"]
+    issue: str
+    formation_state: Literal[
+        "not_started", "open", "submitted", "exposed", "unavailable"
+    ]
+    transfer_state: Literal[
+        "unavailable", "locked", "available", "submitted", "debriefed"
+    ] = "unavailable"
+
+
+class MaterialImportPreviewOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    kind: str
+    source_url: str
+    content_provenance: ContentProvenance
+    status: Literal[
+        "draft",
+        "pending",
+        "processing",
+        "ready",
+        "needs_attention",
+        "failed",
+        "confirmed",
+        "superseded",
+    ]
+    import_path: Literal["topics", "plan", "lesson"]
+    intent: Literal["already_studied", "learn"]
+    clean_count: int
+    attention_count: int
+    error: str
+    lesson_grounding_required: bool = False
+    proposals_ready_at: datetime | None = None
+    review_opened_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    topics: list[MaterialTopicPreviewOut] = Field(default_factory=list)
+
+
+class LessonCheckDraftIn(BaseModel):
+    draft_text: str = Field(default="", max_length=20_000)
+
+
+class LessonCheckSubmitIn(BaseModel):
+    answer_text: str = Field(min_length=1, max_length=20_000)
+
+    @field_validator("answer_text")
+    @classmethod
+    def answer_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("answer_text must not be blank")
+        return normalized
+
+
+class LessonCheckOut(BaseModel):
+    """Resumable check state with no correction or answer authority."""
+
+    id: uuid.UUID
+    proposal_id: uuid.UUID
+    card_id: uuid.UUID | None = None
+    kind: LessonCheckKind
+    condition: LessonCheckCondition | None = None
+    prompt_level: Literal["canonical", "application", "failure_tradeoff"]
+    prompt_version: str
+    prompt_text: str
+    status: LessonCheckStatus
+    draft_text: str
+    qualitative_outcome: LessonCheckOutcome | None = None
+    has_feedback: bool = False
+    exposed_at: datetime | None = None
+    recall_not_before_at: datetime | None = None
+    available_at: datetime | None = None
+    started_at: datetime
+    submitted_at: datetime | None = None
+    updated_at: datetime
+
+
+class MaterialTopicAuthorityOut(BaseModel):
+    """Authority-bearing response returned only after an exposure commit."""
+
+    check: LessonCheckOut
+    proposal_id: uuid.UUID
+    topic: str
+    section_title: str
+    source_title: str
+    source_url: str
+    content_provenance: ContentProvenance
+    source_excerpt: str
+    answer_basis: str
+    canonical_question: str
+    answer_rubric: dict[str, str]
+    recall_questions: list[LessonRecallPrompt]
+    feedback: str
+    exposed_at: datetime
+    recall_not_before_at: datetime
+    confirmation_title: str
+    confirmation_message: str
+
+
 class MaterialImportOut(BaseModel):
     id: uuid.UUID
     title: str
@@ -1052,7 +1171,9 @@ class MaterialTopicEdit(BaseModel):
 
 
 class MaterialConfirmIn(BaseModel):
-    selected_topic_ids: list[uuid.UUID] = Field(min_length=1)
+    # Pilot exclusion may intentionally confirm a source with zero kept concepts.
+    # The router retains the legacy nonpilot requirement of at least one.
+    selected_topic_ids: list[uuid.UUID] = Field(default_factory=list)
     # Lets an upgraded client classify an already-imported legacy lesson at the
     # final review boundary without re-uploading or reprocessing its source.
     content_provenance: ContentProvenance | None = None
@@ -1234,3 +1355,9 @@ class AccountExport(BaseModel):
     study_plans: list[dict[str, object]]
     ai_consent_events: list[dict[str, object]]
     llm_usage: list[dict[str, object]]
+    # This is the private, user-requested account export. These records remain
+    # excluded from second-brain writeback and aggregate pilot reports.
+    lesson_checks: list[dict[str, object]]
+    lesson_proposal_audits: list[dict[str, object]]
+    study_pilot_enrollments: list[dict[str, object]]
+    study_pilot_assignments: list[dict[str, object]]

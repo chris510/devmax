@@ -2,6 +2,8 @@ import Foundation
 
 enum APIError: Error {
     case unauthorized
+    case pilotUpgradeRequired(minimumBuild: Int?)
+    case pilotSourceNotAssigned
     /// Scoring failed server-side; nothing was written, so retrying the same
     /// payload is safe. This is what drives the inline submit-failure strip.
     case scoringUnavailable
@@ -14,7 +16,10 @@ extension Notification.Name {
 }
 
 private struct APIErrorEnvelope: Decodable {
-    struct Detail: Decodable { let code: String? }
+    struct Detail: Decodable {
+        let code: String?
+        let minimumClientBuild: Int?
+    }
     let detail: Detail?
 }
 
@@ -31,6 +36,8 @@ extension Error {
         switch apiError {
         case .scoringUnavailable: return "QUESTION GENERATION UNAVAILABLE"
         case .unauthorized: return "API KEY REJECTED"
+        case .pilotUpgradeRequired: return "PILOT BUILD UPDATE REQUIRED"
+        case .pilotSourceNotAssigned: return "PILOT SOURCE NOT ASSIGNED"
         case .status(let code): return "SERVER ERROR \(code)"
         case .transport: return "SERVER UNREACHABLE"
         }
@@ -82,6 +89,16 @@ enum WireDate {
     }
 }
 
+enum APIClientBuild {
+    /// `CFBundleVersion` is the server's rollout boundary. Keep this centralized
+    /// so a newly added pilot endpoint cannot accidentally omit the build gate.
+    static var current: Int {
+        let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")
+        if let number = value as? NSNumber { return number.intValue }
+        return Int(value as? String ?? "") ?? 0
+    }
+}
+
 protocol DevmaxAPI {
     func due() async throws -> [DueCard]
     func cards(sort: String, mode: String) async throws -> [CardSummary]
@@ -130,6 +147,18 @@ protocol DevmaxAPI {
     func confirmMaterial(
         _ id: UUID, topics: [UUID], contentProvenance: String?
     ) async throws -> MaterialConfirmation
+    func lessonPilotPreview(_ id: UUID) async throws -> MaterialLessonPreview
+    func markLessonReviewOpened(_ id: UUID) async throws -> MaterialLessonPreview
+    func excludePilotLessonProposal(_ id: UUID) async throws -> MaterialTopicPreview
+    func startFormationCheck(proposalID: UUID) async throws -> LessonCheck
+    func saveLessonCheckDraft(checkID: UUID, text: String) async throws -> LessonCheck
+    func submitFormationCheck(checkID: UUID, text: String) async throws -> MaterialTopicAuthority
+    func startLessonRestudy(proposalID: UUID) async throws -> MaterialTopicAuthority
+    func startTransferCheck(proposalID: UUID) async throws -> LessonCheck
+    func lessonCheck(_ id: UUID) async throws -> LessonCheck
+    func submitTransferCheck(checkID: UUID, text: String) async throws -> LessonCheck
+    func reopenLessonAuthority(checkID: UUID) async throws -> MaterialTopicAuthority
+    func lessonTransferDebrief(checkID: UUID) async throws -> MaterialTopicAuthority
     func lessonProgress(_ id: UUID) async throws -> LessonProgress
     func distillLesson(_ id: UUID) async throws -> MaterialArtifacts
     func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts
@@ -220,6 +249,40 @@ extension DevmaxAPI {
     ) async throws -> MaterialConfirmation {
         throw APIError.status(501)
     }
+    func lessonPilotPreview(_ id: UUID) async throws -> MaterialLessonPreview {
+        throw APIError.status(501)
+    }
+    func markLessonReviewOpened(_ id: UUID) async throws -> MaterialLessonPreview {
+        throw APIError.status(501)
+    }
+    func excludePilotLessonProposal(_ id: UUID) async throws -> MaterialTopicPreview {
+        throw APIError.status(501)
+    }
+    func startFormationCheck(proposalID: UUID) async throws -> LessonCheck {
+        throw APIError.status(501)
+    }
+    func saveLessonCheckDraft(checkID: UUID, text: String) async throws -> LessonCheck {
+        throw APIError.status(501)
+    }
+    func submitFormationCheck(
+        checkID: UUID, text: String
+    ) async throws -> MaterialTopicAuthority { throw APIError.status(501) }
+    func startLessonRestudy(proposalID: UUID) async throws -> MaterialTopicAuthority {
+        throw APIError.status(501)
+    }
+    func startTransferCheck(proposalID: UUID) async throws -> LessonCheck {
+        throw APIError.status(501)
+    }
+    func lessonCheck(_ id: UUID) async throws -> LessonCheck { throw APIError.status(501) }
+    func submitTransferCheck(checkID: UUID, text: String) async throws -> LessonCheck {
+        throw APIError.status(501)
+    }
+    func reopenLessonAuthority(checkID: UUID) async throws -> MaterialTopicAuthority {
+        throw APIError.status(501)
+    }
+    func lessonTransferDebrief(checkID: UUID) async throws -> MaterialTopicAuthority {
+        throw APIError.status(501)
+    }
     func lessonProgress(_ id: UUID) async throws -> LessonProgress { throw APIError.status(501) }
     func distillLesson(_ id: UUID) async throws -> MaterialArtifacts { throw APIError.status(501) }
     func materialArtifacts(_ id: UUID) async throws -> MaterialArtifacts {
@@ -294,6 +357,7 @@ struct LiveAPI: DevmaxAPI {
     var apiKey: String
     var session: URLSession = .shared
     var tokenStore: AuthTokenStore = .shared
+    var clientBuild: Int = APIClientBuild.current
 
     // Not private: DevmaxTests decodes captured server responses through this
     // exact decoder, which is the only wire-format check available without a server.
@@ -334,6 +398,7 @@ struct LiveAPI: DevmaxAPI {
             // Founder migration only. New accounts never receive this value.
             req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         }
+        req.setValue(String(clientBuild), forHTTPHeaderField: "X-Devmax-Client-Build")
         if let body {
             req.httpBody = body
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -347,6 +412,15 @@ struct LiveAPI: DevmaxAPI {
         }
 
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let envelope = try? Self.decoder.decode(APIErrorEnvelope.self, from: data)
+        if envelope?.detail?.code == "pilot_upgrade_required" {
+            throw APIError.pilotUpgradeRequired(
+                minimumBuild: envelope?.detail?.minimumClientBuild
+            )
+        }
+        if code == 404, envelope?.detail?.code == "pilot_source_not_assigned" {
+            throw APIError.pilotSourceNotAssigned
+        }
         switch code {
         case 200..<300: return data
         case 401 where mayRefresh && accessToken != nil:
@@ -575,6 +649,86 @@ struct LiveAPI: DevmaxAPI {
                 selectedTopicIds: topics,
                 contentProvenance: contentProvenance
             )
+        )
+    }
+
+    func lessonPilotPreview(_ id: UUID) async throws -> MaterialLessonPreview {
+        try await get("materials/imports/\(id)/preview", MaterialLessonPreview.self)
+    }
+
+    func markLessonReviewOpened(_ id: UUID) async throws -> MaterialLessonPreview {
+        try await post(
+            "materials/imports/\(id)/review-opened", MaterialLessonPreview.self
+        )
+    }
+
+    func excludePilotLessonProposal(_ id: UUID) async throws -> MaterialTopicPreview {
+        struct Body: Encodable { let action = "exclude" }
+        let data = try await request(
+            "PATCH", "materials/topics/\(id)", body: Self.encoder.encode(Body())
+        )
+        return try Self.decoder.decode(MaterialTopicPreview.self, from: data)
+    }
+
+    func startFormationCheck(proposalID: UUID) async throws -> LessonCheck {
+        try await post(
+            "materials/topics/\(proposalID)/formation-check", LessonCheck.self
+        )
+    }
+
+    func saveLessonCheckDraft(checkID: UUID, text: String) async throws -> LessonCheck {
+        struct Body: Encodable { let draftText: String }
+        let data = try await request(
+            "PATCH", "materials/lesson-checks/\(checkID)/draft",
+            body: Self.encoder.encode(Body(draftText: text))
+        )
+        return try Self.decoder.decode(LessonCheck.self, from: data)
+    }
+
+    func submitFormationCheck(
+        checkID: UUID, text: String
+    ) async throws -> MaterialTopicAuthority {
+        struct Body: Encodable { let answerText: String }
+        return try await post(
+            "materials/lesson-checks/\(checkID)/submit", MaterialTopicAuthority.self,
+            body: Body(answerText: text)
+        )
+    }
+
+    func startLessonRestudy(proposalID: UUID) async throws -> MaterialTopicAuthority {
+        try await post(
+            "materials/topics/\(proposalID)/restudy", MaterialTopicAuthority.self
+        )
+    }
+
+    func startTransferCheck(proposalID: UUID) async throws -> LessonCheck {
+        try await post(
+            "materials/topics/\(proposalID)/transfer-check", LessonCheck.self
+        )
+    }
+
+    func lessonCheck(_ id: UUID) async throws -> LessonCheck {
+        try await get("materials/lesson-checks/\(id)", LessonCheck.self)
+    }
+
+    func submitTransferCheck(checkID: UUID, text: String) async throws -> LessonCheck {
+        struct Body: Encodable { let answerText: String }
+        return try await post(
+            "materials/lesson-checks/\(checkID)/submit", LessonCheck.self,
+            body: Body(answerText: text)
+        )
+    }
+
+    func reopenLessonAuthority(checkID: UUID) async throws -> MaterialTopicAuthority {
+        try await post(
+            "materials/lesson-checks/\(checkID)/authority", MaterialTopicAuthority.self
+        )
+    }
+
+    func lessonTransferDebrief(checkID: UUID) async throws -> MaterialTopicAuthority {
+        try await post(
+            "materials/lesson-checks/\(checkID)/transfer-debrief",
+            MaterialTopicAuthority.self
         )
     }
 

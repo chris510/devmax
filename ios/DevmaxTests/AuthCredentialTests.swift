@@ -49,6 +49,17 @@ private final class LockedRequestCount: @unchecked Sendable {
 final class AuthCredentialTests: XCTestCase {
     private struct ExpectedFailure: Error {}
 
+    @MainActor
+    private func authState(api: DevmaxAPI = MockAPI()) -> AuthState {
+        AuthState(
+            client: AuthClient(
+                baseURL: URL(string: "https://devmax.example")!,
+                store: AuthTokenStore(persistence: nil)
+            ),
+            api: api
+        )
+    }
+
     private var credentials: AuthCredentials {
         AuthCredentials(
             accessToken: "access-token",
@@ -119,6 +130,36 @@ final class AuthCredentialTests: XCTestCase {
         let usable = await relaunched.hasUsableSession()
         XCTAssertEqual(recovered, credentials.accessToken)
         XCTAssertTrue(usable)
+    }
+
+    @MainActor
+    func testLocalSignOutClearsEveryLessonCheckDraft() async {
+        let first = UUID()
+        let second = UUID()
+        LessonCheckDraftStore.clearAll()
+        defer { LessonCheckDraftStore.clearAll() }
+        LessonCheckDraftStore.save("formation draft", for: first)
+        LessonCheckDraftStore.save("transfer draft", for: second)
+
+        await authState().signOutLocally()
+
+        XCTAssertNil(LessonCheckDraftStore.read(for: first))
+        XCTAssertNil(LessonCheckDraftStore.read(for: second))
+    }
+
+    @MainActor
+    func testSuccessfulAccountDeletionClearsEveryLessonCheckDraft() async throws {
+        let first = UUID()
+        let second = UUID()
+        LessonCheckDraftStore.clearAll()
+        defer { LessonCheckDraftStore.clearAll() }
+        LessonCheckDraftStore.save("formation draft", for: first)
+        LessonCheckDraftStore.save("transfer draft", for: second)
+
+        try await authState().deleteAccount()
+
+        XCTAssertNil(LessonCheckDraftStore.read(for: first))
+        XCTAssertNil(LessonCheckDraftStore.read(for: second))
     }
 }
 

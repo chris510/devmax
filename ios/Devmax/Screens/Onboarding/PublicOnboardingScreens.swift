@@ -59,6 +59,7 @@ struct PublicOnboardingView: View {
             case .learnBranch: learnBranch
             case .returning: existingOwner
             case .studyMaterial: studyMaterial
+            case .lessonCheck: LessonCheckScreen()
             }
         }
         .background(Theme.bg)
@@ -133,6 +134,9 @@ struct PublicOnboardingView: View {
                 let id = UUID(uuidString: "00000000-0000-0000-0000-000000000904")!
                 plan.preview = try? await flow.api.savedPlanPreview(id)
                 plan.previewLoad = plan.preview == nil ? .error : .ready
+            }
+            if flow.step == .lessonCheck {
+                await flow.prepareLessonCheckDebugRoute(DebugFlags.shared.route)
             }
         }
     }
@@ -857,6 +861,7 @@ struct PublicOnboardingView: View {
         case "pending", "processing": "View progress"
         case "ready", "needs_attention":
             source.importPath == "lesson" ? "Review concepts" : "Review proposals"
+        case "confirmed" where source.importPath == "lesson": "Open lesson"
         case "failed": "Review and retry"
         default: nil
         }

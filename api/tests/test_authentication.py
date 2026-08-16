@@ -10,16 +10,27 @@ from sqlmodel import select
 from app.config import get_settings
 from app.models import (
     FOUNDER_USER_ID,
+    LESSON_CHECK_FORMATION,
+    LESSON_CHECK_OPEN,
+    LESSON_CHECK_TRANSFER,
+    LESSON_CONDITION_ATTEMPT_FIRST,
+    LESSON_PROMPT_APPLICATION,
+    LESSON_PROMPT_CANONICAL,
+    PROPOSAL_AUDIT_APPROVED,
     AppleIdentity,
     AuthSession,
     Card,
     DeviceToken,
+    LessonCheck,
+    LessonProposalAudit,
     LLMUsage,
     MaterialSource,
     MaterialTopicProposal,
     PendingCapture,
     Session,
     Settings,
+    StudyPilotAssignment,
+    StudyPilotEnrollment,
     StudyPlan,
     StudyPlanCardLink,
     StudyPlanCardProposal,
@@ -33,6 +44,12 @@ from app.models import (
     StudyPlanRevision,
     StudyPlanWeek,
     User,
+)
+from app.pilot_contract import (
+    PILOT_RESEARCH_CONSENT_VERSION,
+    TRANSFER_OPENED_AT_KEY,
+    TRANSFER_PROMPT_RUBRIC_VERSION,
+    TRANSFER_PROMPT_VERSION,
 )
 from app.services import authentication
 
@@ -53,6 +70,98 @@ async def _account(db, *, topic: str) -> tuple[User, dict[str, str], Card]:
     pair = await authentication.issue_session(db, user.id, get_settings())
     await db.commit()
     return user, {"Authorization": f"Bearer {pair.access_token}"}, card
+
+
+async def _pilot_records(
+    db, *, user: User
+) -> tuple[
+    MaterialSource,
+    MaterialTopicProposal,
+    LessonCheck,
+    LessonProposalAudit,
+    StudyPilotEnrollment,
+    StudyPilotAssignment,
+]:
+    now = datetime.now(UTC)
+    source = MaterialSource(
+        user_id=user.id,
+        kind="lesson",
+        title="Private pilot lesson",
+        source_text="Private pilot source text.",
+        import_path="lesson",
+        status="ready",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(source)
+    await db.flush()
+    proposal = MaterialTopicProposal(
+        source_id=source.id,
+        position=1,
+        topic="Private pilot concept",
+        answer_anchor="Private pilot answer authority.",
+        canonical_question="Explain the private pilot concept.",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(proposal)
+    enrollment = StudyPilotEnrollment(
+        user_id=user.id,
+        cohort="pilot-2026-08",
+        consent_version=PILOT_RESEARCH_CONSENT_VERSION,
+        consented_at=now,
+        randomization_seed=f"seed-{user.id}",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(enrollment)
+    await db.flush()
+    audit = LessonProposalAudit(
+        source_id=source.id,
+        proposal_id=proposal.id,
+        extraction_route={"provider": "anthropic", "model": "frozen-model"},
+        extraction_prompt_version="lesson-extract-v1",
+        grounding_gate_version="lesson-grounding-v1",
+        original_proposal_pack={"topic": "Original private pilot concept"},
+        original_grounding_findings=[{"field": "answer_basis", "status": "supported"}],
+        reviewer_id="reviewer-01",
+        reviewer_decision=PROPOSAL_AUDIT_APPROVED,
+        reviewed_at=now,
+        created_at=now,
+    )
+    check = LessonCheck(
+        user_id=user.id,
+        proposal_id=proposal.id,
+        kind=LESSON_CHECK_FORMATION,
+        condition=LESSON_CONDITION_ATTEMPT_FIRST,
+        prompt_level=LESSON_PROMPT_CANONICAL,
+        prompt_version="lesson-formation-v1",
+        provider_route={"provider": "anthropic", "model": "frozen-model"},
+        prompt_text_snapshot=proposal.canonical_question,
+        status=LESSON_CHECK_OPEN,
+        draft_text="Private draft answer.",
+        started_at=now,
+        updated_at=now,
+    )
+    assignment = StudyPilotAssignment(
+        enrollment_id=enrollment.id,
+        source_lineage_id=source.lineage_id,
+        source_id=source.id,
+        pair_index=1,
+        sequence_index=1,
+        condition=LESSON_CONDITION_ATTEMPT_FIRST,
+        intended_target="position:1",
+        target_proposal_id=proposal.id,
+        version_snapshot={"formation_prompt_version": "lesson-formation-v1"},
+        assigned_at=now,
+        bound_at=now,
+        updated_at=now,
+    )
+    db.add(audit)
+    db.add(check)
+    db.add(assignment)
+    await db.commit()
+    return source, proposal, check, audit, enrollment, assignment
 
 
 def _canonical_rows(rows) -> str:
@@ -126,6 +235,45 @@ async def _founder_study_data_snapshot(db) -> dict[str, str]:
             .order_by(MaterialTopicProposal.id)
         )
     ).all()
+    lesson_checks = (
+        await db.exec(
+            select(LessonCheck)
+            .where(LessonCheck.user_id == FOUNDER_USER_ID)
+            .order_by(LessonCheck.id)
+        )
+    ).all()
+    lesson_proposal_audits = (
+        await db.exec(
+            select(LessonProposalAudit)
+            .join(MaterialSource, MaterialSource.id == LessonProposalAudit.source_id)
+            .where(MaterialSource.user_id == FOUNDER_USER_ID)
+            .order_by(LessonProposalAudit.id)
+        )
+    ).all()
+    pilot_enrollments = (
+        await db.exec(
+            select(StudyPilotEnrollment)
+            .where(StudyPilotEnrollment.user_id == FOUNDER_USER_ID)
+            .order_by(StudyPilotEnrollment.id)
+        )
+    ).all()
+    pilot_assignments = (
+        list(
+            (
+                await db.exec(
+                    select(StudyPilotAssignment)
+                    .where(
+                        StudyPilotAssignment.enrollment_id.in_(
+                            [row.id for row in pilot_enrollments]
+                        )
+                    )
+                    .order_by(StudyPilotAssignment.id)
+                )
+            ).all()
+        )
+        if pilot_enrollments
+        else []
+    )
     usage = (
         await db.exec(
             select(LLMUsage)
@@ -219,6 +367,10 @@ async def _founder_study_data_snapshot(db) -> dict[str, str]:
         "study_plan_guide_drafts": _canonical_rows(drafts),
         "material_sources": _canonical_rows(sources),
         "material_topic_proposals": _canonical_rows(material_proposals),
+        "lesson_checks": _canonical_rows(lesson_checks),
+        "lesson_proposal_audits": _canonical_rows(lesson_proposal_audits),
+        "study_pilot_enrollments": _canonical_rows(pilot_enrollments),
+        "study_pilot_assignments": _canonical_rows(pilot_assignments),
         "llm_usage": _canonical_rows(usage),
         "study_plan_phases": _canonical_rows(phases),
         "study_plan_weeks": _canonical_rows(weeks),
@@ -1232,6 +1384,29 @@ async def test_legacy_api_key_can_be_disabled_without_disabling_bearer_auth(
 
 async def test_onboarding_completion_and_export_are_account_scoped(client, db):
     user, headers, card = await _account(db, topic="Exported topic")
+    source, proposal, check, audit, enrollment, assignment = await _pilot_records(
+        db, user=user
+    )
+    unopened_transfer_prompt = "Private frozen transfer prompt."
+    unopened_transfer = LessonCheck(
+        user_id=user.id,
+        proposal_id=proposal.id,
+        kind=LESSON_CHECK_TRANSFER,
+        condition=LESSON_CONDITION_ATTEMPT_FIRST,
+        prompt_level=LESSON_PROMPT_APPLICATION,
+        prompt_version=TRANSFER_PROMPT_VERSION,
+        provider_route={},
+        source_candidate_id="application-1",
+        prompt_text_snapshot=unopened_transfer_prompt,
+        prompt_rubric_version=TRANSFER_PROMPT_RUBRIC_VERSION,
+        prompt_reviewer_id="reviewer-02",
+        prompt_approved_at=datetime.now(UTC),
+        status=LESSON_CHECK_OPEN,
+    )
+    db.add(unopened_transfer)
+    founder = await db.get(User, FOUNDER_USER_ID)
+    assert founder is not None
+    await _pilot_records(db, user=founder)
     db.add(
         LLMUsage(
             user_id=user.id,
@@ -1256,12 +1431,50 @@ async def test_onboarding_completion_and_export_are_account_scoped(client, db):
         "provider": "openai",
         "outcome": "success",
     }
+    assert [row["id"] for row in body["sources"]] == [str(source.id)]
+    assert [row["id"] for row in body["lesson_checks"]] == [str(check.id)]
+    assert body["lesson_checks"][0]["draft_text"] == "Private draft answer."
+    assert unopened_transfer_prompt not in exported.text
+    assert [row["id"] for row in body["lesson_proposal_audits"]] == [str(audit.id)]
+    assert body["lesson_proposal_audits"][0]["original_proposal_pack"] == {
+        "topic": "Original private pilot concept"
+    }
+    assert [row["id"] for row in body["study_pilot_enrollments"]] == [
+        str(enrollment.id)
+    ]
+    assert [row["id"] for row in body["study_pilot_assignments"]] == [
+        str(assignment.id)
+    ]
+
+    unopened_transfer.provider_route = {
+        TRANSFER_OPENED_AT_KEY: datetime.now(UTC).isoformat()
+    }
+    db.add(unopened_transfer)
+    await db.commit()
+    opened_export = await client.get("/auth/export", headers=headers)
+    opened_row = next(
+        row
+        for row in opened_export.json()["lesson_checks"]
+        if row["id"] == str(unopened_transfer.id)
+    )
+    assert opened_row["prompt_text_snapshot"] == unopened_transfer_prompt
 
 
 async def test_account_deletion_revokes_apple_before_cascading(client, db, monkeypatch):
     if db.bind.dialect.name == "sqlite":
         await db.exec(text("PRAGMA foreign_keys=ON"))
     user, headers, _ = await _account(db, topic="Deleted topic")
+    source, proposal, check, audit, enrollment, assignment = await _pilot_records(
+        db, user=user
+    )
+    pilot_ids = {
+        "source": source.id,
+        "proposal": proposal.id,
+        "check": check.id,
+        "audit": audit.id,
+        "enrollment": enrollment.id,
+        "assignment": assignment.id,
+    }
     db.add(
         AppleIdentity(
             user_id=user.id,
@@ -1284,6 +1497,12 @@ async def test_account_deletion_revokes_apple_before_cascading(client, db, monke
     assert revoked == ["apple-refresh"]
     assert await db.get(User, user.id) is None
     assert not (await db.exec(select(Card).where(Card.user_id == user.id))).all()
+    assert await db.get(MaterialSource, pilot_ids["source"]) is None
+    assert await db.get(MaterialTopicProposal, pilot_ids["proposal"]) is None
+    assert await db.get(LessonCheck, pilot_ids["check"]) is None
+    assert await db.get(LessonProposalAudit, pilot_ids["audit"]) is None
+    assert await db.get(StudyPilotEnrollment, pilot_ids["enrollment"]) is None
+    assert await db.get(StudyPilotAssignment, pilot_ids["assignment"]) is None
 
 
 async def test_invalid_bearer_token_is_rejected(client):

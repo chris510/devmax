@@ -38,6 +38,10 @@ struct UUIDTextDraftStore {
         map.removeValue(forKey: id.uuidString)
         persist(map)
     }
+
+    func clearAll() {
+        LocalJSONStore.clear(filename)
+    }
 }
 
 /// Local persistence for an in-progress answer.

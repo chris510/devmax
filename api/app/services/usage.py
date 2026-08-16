@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import Settings
@@ -14,6 +14,7 @@ from app.models import LLMUsage
 from app.services import ai_consent
 
 SCORING_INTENT_OPERATION = "score_v2_intent"
+LESSON_FORMATION_TERMINAL_OPERATION = "lesson_formation_terminal"
 ProviderBoundaryCheck = Callable[[AsyncSession], Awaitable[None]]
 
 
@@ -51,7 +52,12 @@ async def ensure_available(
                 # A scoring intent is durable crash-gap evidence, not another
                 # provider call. Terminal rows below remain the physical-call
                 # units counted against the daily safeguard.
-                LLMUsage.operation != SCORING_INTENT_OPERATION,
+                col(LLMUsage.operation).not_in(
+                    (
+                        SCORING_INTENT_OPERATION,
+                        LESSON_FORMATION_TERMINAL_OPERATION,
+                    )
+                ),
             )
         )
     ).one()
@@ -123,6 +129,7 @@ async def authorize_provider_call(
     operation_id: uuid.UUID,
     attempt: int,
     boundary_check: ProviderBoundaryCheck | None = None,
+    audit_context: dict[str, object] | None = None,
 ) -> None:
     """Authorize one long-running physical call at its transmission boundary.
 
@@ -159,6 +166,7 @@ async def authorize_provider_call(
         recorded_operation,
         call_details=[
             {
+                **(audit_context or {}),
                 "audit_type": "provider_call_authorization",
                 "outcome": "authorized",
                 "authorized_at": datetime.now(UTC).isoformat(),
@@ -184,9 +192,11 @@ def provider_call_authorizer(
     provider: str,
     model: str,
     boundary_check: ProviderBoundaryCheck | None = None,
+    operation_id: uuid.UUID | None = None,
+    audit_context: dict[str, object] | None = None,
 ) -> Callable[[int], Awaitable[None]]:
     """Build the one-operation callback consumed by the provider call loop."""
-    operation_id = uuid.uuid4()
+    logical_operation_id = operation_id or uuid.uuid4()
 
     async def authorize(attempt: int) -> None:
         await authorize_provider_call(
@@ -196,9 +206,10 @@ def provider_call_authorizer(
             config=config,
             provider=provider,
             model=model,
-            operation_id=operation_id,
+            operation_id=logical_operation_id,
             attempt=attempt,
             boundary_check=boundary_check,
+            audit_context=audit_context,
         )
 
     return authorize

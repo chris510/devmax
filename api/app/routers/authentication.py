@@ -8,17 +8,23 @@ from app.auth import bearer_token, current_user_id, require_user
 from app.config import get_settings
 from app.db import get_session
 from app.models import (
+    LESSON_CHECK_TRANSFER,
     AIConsentEvent,
     AppleIdentity,
     AuthSession,
     Card,
+    LessonCheck,
+    LessonProposalAudit,
     LLMUsage,
     MaterialSource,
     Session,
     Settings,
+    StudyPilotAssignment,
+    StudyPilotEnrollment,
     StudyPlan,
     User,
 )
+from app.pilot_contract import TRANSFER_OPENED_AT_KEY
 from app.schemas import (
     AccountExport,
     AIConsentIn,
@@ -256,6 +262,43 @@ async def export_account(db: AsyncSession = Depends(get_session)) -> AccountExpo
             .order_by(LLMUsage.created_at, LLMUsage.id)
         )
     ).all()
+    lesson_checks = (
+        await db.exec(
+            select(LessonCheck)
+            .where(LessonCheck.user_id == user_id)
+            .order_by(LessonCheck.started_at, LessonCheck.id)
+        )
+    ).all()
+    proposal_audits = (
+        await db.exec(
+            select(LessonProposalAudit)
+            .join(MaterialSource, MaterialSource.id == LessonProposalAudit.source_id)
+            .where(MaterialSource.user_id == user_id)
+            .order_by(LessonProposalAudit.created_at, LessonProposalAudit.id)
+        )
+    ).all()
+    pilot_enrollments = (
+        await db.exec(
+            select(StudyPilotEnrollment)
+            .where(StudyPilotEnrollment.user_id == user_id)
+            .order_by(StudyPilotEnrollment.created_at, StudyPilotEnrollment.id)
+        )
+    ).all()
+    enrollment_ids = [row.id for row in pilot_enrollments]
+    pilot_assignments = (
+        (
+            await db.exec(
+                select(StudyPilotAssignment)
+                .where(col(StudyPilotAssignment.enrollment_id).in_(enrollment_ids))
+                .order_by(
+                    StudyPilotAssignment.enrollment_id,
+                    StudyPilotAssignment.sequence_index,
+                )
+            )
+        ).all()
+        if enrollment_ids
+        else []
+    )
     return AccountExport(
         exported_at=datetime.now(UTC),
         account=user.model_dump() if user else {},
@@ -266,6 +309,15 @@ async def export_account(db: AsyncSession = Depends(get_session)) -> AccountExpo
         study_plans=[row.model_dump() for row in plans],
         ai_consent_events=[row.model_dump() for row in consent_events],
         llm_usage=[row.model_dump() for row in model_usage],
+        lesson_checks=[
+            row.model_dump()
+            for row in lesson_checks
+            if row.kind != LESSON_CHECK_TRANSFER
+            or isinstance(row.provider_route.get(TRANSFER_OPENED_AT_KEY), str)
+        ],
+        lesson_proposal_audits=[row.model_dump() for row in proposal_audits],
+        study_pilot_enrollments=[row.model_dump() for row in pilot_enrollments],
+        study_pilot_assignments=[row.model_dump() for row in pilot_assignments],
     )
 
 

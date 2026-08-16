@@ -4,6 +4,12 @@ import re
 from pathlib import Path
 
 from app.consent_policy import LATEST_POLICY_VERSION, policy_for
+from app.pilot_contract import (
+    PILOT_ASSIGNMENT_ALGORITHM_VERSION,
+    PILOT_MINIMUM_CLIENT_BUILD,
+    PILOT_RESEARCH_CONSENT_CATALOG,
+    PILOT_RESEARCH_CONSENT_VERSION,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,3 +38,23 @@ def test_latest_policy_requires_a_new_enough_ios_build() -> None:
     )
 
     assert build >= policy_for(LATEST_POLICY_VERSION).minimum_ios_build
+
+
+def test_adaptive_pilot_requires_a_compatible_ios_build() -> None:
+    build = int(
+        _one_match(
+            r'CURRENT_PROJECT_VERSION: "(\d+)"',
+            REPO_ROOT / "ios/project.yml",
+        )
+    )
+
+    assert PILOT_MINIMUM_CLIENT_BUILD == 10
+    assert build >= PILOT_MINIMUM_CLIENT_BUILD
+
+
+def test_adaptive_pilot_research_consent_freezes_its_runtime_contract() -> None:
+    assert set(PILOT_RESEARCH_CONSENT_CATALOG) == {PILOT_RESEARCH_CONSENT_VERSION}
+    assert PILOT_RESEARCH_CONSENT_CATALOG[PILOT_RESEARCH_CONSENT_VERSION] == {
+        "minimum_client_build": PILOT_MINIMUM_CLIENT_BUILD,
+        "assignment_algorithm": PILOT_ASSIGNMENT_ALGORITHM_VERSION,
+    }

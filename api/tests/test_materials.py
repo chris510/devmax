@@ -1,7 +1,7 @@
 import asyncio
 import json
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -20,12 +20,28 @@ from app.models import (
     SOURCE_READY,
     SOURCE_SUPERSEDED,
     Card,
+    LessonCheck,
+    LessonProposalAudit,
+    LLMUsage,
     MaterialSource,
     MaterialTopicProposal,
     Session,
+    SessionProbe,
+    StudyPilotAssignment,
+    StudyPilotEnrollment,
     StudyPlanGuideDraft,
 )
+from app.pilot_contract import (
+    PILOT_MINIMUM_CLIENT_BUILD,
+    PILOT_RESEARCH_CONSENT_VERSION,
+    RESTUDY_PROMPT_VERSION,
+    TRANSFER_PROMPT_RUBRIC_VERSION,
+    TRANSFER_PROMPT_VERSION,
+)
+from app.routers import materials as materials_router
+from app.routers.deps import as_utc
 from app.services import llm, materials, usage
+from app.services.scoring_provider import ProviderCallTrace, ScoringTrace
 from tests.conftest import (
     API_HEADERS,
     GUIDE,
@@ -41,6 +57,8 @@ LESSON_RUBRIC = {
     "failure_mode": "A failed routing stage can stop the request before storage.",
     "misconception": "The request does not jump directly from DNS to the database.",
 }
+
+PILOT_HEADERS = {**API_HEADERS, "X-Devmax-Client-Build": "10"}
 
 NETWORKING_101_SOURCE = (
     "Networking 101 focuses on three layers relevant to system design. At the "
@@ -259,6 +277,136 @@ def lesson_proposal(
     )
 
 
+async def pilot_lesson(
+    db,
+    *,
+    condition: str = "attempt_first",
+    review_opened: bool = True,
+) -> tuple[
+    MaterialSource,
+    MaterialTopicProposal,
+    StudyPilotEnrollment,
+    StudyPilotAssignment,
+]:
+    now = datetime.now(UTC)
+    source_created_at = now - timedelta(hours=1)
+    assignment_assigned_at = now - timedelta(minutes=55)
+    proposals_ready_at = now - timedelta(minutes=50)
+    assignment_bound_at = now - timedelta(minutes=45)
+    review_opened_at = now - timedelta(minutes=40)
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Pilot request path",
+        source_text=GUIDE,
+        source_url="https://example.com/request-path",
+        content_provenance="exact_source_excerpt",
+        kind="article",
+        import_path="lesson",
+        intent="learn",
+        status=SOURCE_READY,
+        result_summary={
+            "workflow": "lesson",
+            "concept_count": 1,
+            "clean_count": 1,
+            "attention_count": 0,
+            "grounding_gate_version": materials.LESSON_GROUNDING_GATE_VERSION,
+        },
+        proposals_ready_at=proposals_ready_at,
+        review_opened_at=(review_opened_at if review_opened else None),
+        created_at=source_created_at,
+        updated_at=review_opened_at,
+    )
+    proposal = lesson_proposal(source, position=1, topic="Pilot request routing")
+    proposal.created_at = proposals_ready_at
+    proposal.updated_at = review_opened_at
+    enrollment = StudyPilotEnrollment(
+        user_id=FOUNDER_USER_ID,
+        cohort="pilot-2026-08",
+        consent_version=PILOT_RESEARCH_CONSENT_VERSION,
+        consented_at=now - timedelta(hours=2),
+        randomization_seed=f"seed-{uuid.uuid4()}",
+        created_at=now - timedelta(hours=2),
+        updated_at=source_created_at,
+    )
+    assignment = StudyPilotAssignment(
+        enrollment_id=enrollment.id,
+        source_lineage_id=source.lineage_id,
+        source_id=source.id,
+        pair_index=1,
+        sequence_index=1,
+        condition=condition,
+        intended_target="position:1",
+        target_proposal_id=proposal.id,
+        version_snapshot={
+            "formation_provider_route": {
+                "provider": "anthropic",
+                "model": "pilot-test-model",
+                "effort": "low",
+            },
+            "formation_prompt_version": llm.LESSON_CHECK_PROMPT_VERSION,
+            "restudy_prompt_version": RESTUDY_PROMPT_VERSION,
+            "transfer_prompt_version": TRANSFER_PROMPT_VERSION,
+            "transfer_prompt_rubric_version": TRANSFER_PROMPT_RUBRIC_VERSION,
+            "minimum_client_build": PILOT_MINIMUM_CLIENT_BUILD,
+        },
+        assigned_at=assignment_assigned_at,
+        bound_at=assignment_bound_at,
+        updated_at=review_opened_at,
+    )
+    concept = lesson_concept(GUIDE, topic=proposal.topic)
+    audit = LessonProposalAudit(
+        source_id=source.id,
+        proposal_id=proposal.id,
+        extraction_route={"provider": "anthropic", "model": "pilot-test-model"},
+        extraction_prompt_version=llm.LESSON_EXTRACTION_PROMPT_VERSION,
+        grounding_gate_version=str(materials.LESSON_GROUNDING_GATE_VERSION),
+        original_proposal_pack=concept,
+        original_grounding_findings=lesson_findings([concept]),
+        reviewer_id="reviewer-1",
+        reviewer_decision="approved",
+        reviewed_at=assignment_bound_at,
+        created_at=assignment_bound_at,
+    )
+    # These fixtures use Python-generated UUIDs rather than ORM relationships.
+    # Flush each parent tier explicitly so Postgres cannot insert the dependent
+    # audit/assignment rows before their source, proposal, and enrollment.
+    db.add(source)
+    await db.flush()
+    db.add(proposal)
+    db.add(enrollment)
+    await db.flush()
+    db.add(assignment)
+    db.add(audit)
+    await db.commit()
+    return source, proposal, enrollment, assignment
+
+
+def lesson_check_result(
+    outcome: str = "missing_mechanism",
+    feedback: str = "A request crosses each routing stage before storage responds.",
+) -> llm.LessonCheckResult:
+    return llm.LessonCheckResult(
+        qualitative_outcome=outcome,
+        feedback=feedback,
+        trace=ScoringTrace(
+            route="anthropic",
+            authoritative_provider="anthropic",
+            qualification_fingerprint="",
+            calls=(
+                ProviderCallTrace(
+                    provider="anthropic",
+                    model="pilot-test-model",
+                    response_model="pilot-test-model",
+                    response_id="formation-response-1",
+                    latency_ms=25,
+                    input_tokens=100,
+                    output_tokens=40,
+                ),
+            ),
+        ),
+    )
+
+
 async def _claim(db, source: MaterialSource) -> uuid.UUID:
     run_id = uuid.uuid4()
     source.status = "processing"
@@ -378,6 +526,947 @@ async def test_lesson_url_is_metadata_and_never_replaces_pasted_text(client):
     assert "provenance metadata only" in response.text
 
 
+async def test_pilot_build_gate_and_safe_poll_never_return_answer_authority(
+    client, db
+):
+    source, proposal, _, _ = await pilot_lesson(db)
+
+    blocked = await client.get(
+        f"/materials/imports/{source.id}", headers=API_HEADERS
+    )
+    assert blocked.status_code == 426
+    assert blocked.json()["detail"] == {
+        "code": "pilot_upgrade_required",
+        "minimum_client_build": 10,
+    }
+
+    safe = await client.get(
+        f"/materials/imports/{source.id}", headers=PILOT_HEADERS
+    )
+    assert safe.status_code == 200, safe.text
+    assert safe.json()["topics"] == []
+    assert safe.json()["clean_count"] == 1
+
+    preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert preview.status_code == 200, preview.text
+    topic = preview.json()["topics"][0]
+    assert topic == {
+        "id": str(proposal.id),
+        "position": 1,
+        "section_title": proposal.section_title,
+        "topic": proposal.topic,
+        "formation_question": proposal.canonical_question,
+        "status": "clean",
+        "issue": "",
+        "formation_state": "not_started",
+        "transfer_state": "unavailable",
+    }
+    serialized = json.dumps(preview.json(), sort_keys=True)
+    for authority_key in (
+        "answer_anchor",
+        "answer_basis",
+        "answer_rubric",
+        "source_excerpt",
+        "recall_questions",
+        "feedback",
+    ):
+        assert f'"{authority_key}"' not in serialized
+
+    # Enrollment does not silently route ordinary, unassigned material into the
+    # experiment. Its installed polling/detail flow remains unchanged.
+    ordinary = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Voluntary lesson",
+        source_text=GUIDE,
+        content_provenance="exact_source_excerpt",
+        import_path="lesson",
+        status=SOURCE_READY,
+        result_summary=grounded_summary(),
+    )
+    ordinary_topic = lesson_proposal(
+        ordinary, position=1, topic="Voluntary request routing"
+    )
+    db.add(ordinary)
+    db.add(ordinary_topic)
+    await db.commit()
+
+    listing = await client.get("/materials/imports", headers=PILOT_HEADERS)
+    by_id = {row["id"]: row for row in listing.json()}
+    assert by_id[str(source.id)]["topics"] == []
+    assert by_id[str(ordinary.id)]["topics"][0]["answer_anchor"]
+    fallback = await client.get(
+        f"/materials/imports/{ordinary.id}/preview", headers=PILOT_HEADERS
+    )
+    assert fallback.status_code == 404
+    assert fallback.json()["detail"]["code"] == "pilot_source_not_assigned"
+
+
+async def test_pilot_runtime_rejects_frozen_minimum_build_contract_drift(client, db):
+    source, _, _, assignment = await pilot_lesson(db)
+    snapshot = dict(assignment.version_snapshot)
+    snapshot["minimum_client_build"] = PILOT_MINIMUM_CLIENT_BUILD + 1
+    assignment.version_snapshot = snapshot
+    db.add(assignment)
+    await db.commit()
+
+    response = await client.get(
+        f"/materials/imports/{source.id}",
+        headers={**PILOT_HEADERS, "X-Devmax-Client-Build": "999"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {"code": "pilot_contract_mismatch"}
+
+
+async def test_pilot_runtime_rejects_invalid_or_future_research_consent(client, db):
+    source, _, enrollment, _ = await pilot_lesson(db)
+    enrollment.consent_version = "unsupported-pilot-consent"
+    db.add(enrollment)
+    await db.commit()
+
+    unsupported = await client.get(
+        f"/materials/imports/{source.id}",
+        headers=PILOT_HEADERS,
+    )
+    assert unsupported.status_code == 409
+    assert unsupported.json()["detail"] == {"code": "pilot_consent_invalid"}
+
+    enrollment.consent_version = PILOT_RESEARCH_CONSENT_VERSION
+    enrollment.consented_at = datetime.now(UTC) + timedelta(hours=1)
+    db.add(enrollment)
+    await db.commit()
+    future = await client.get(
+        f"/materials/imports/{source.id}",
+        headers=PILOT_HEADERS,
+    )
+    assert future.status_code == 409
+    assert future.json()["detail"] == {"code": "pilot_consent_invalid"}
+
+
+async def test_attempt_first_formation_is_unscored_replayable_and_copies_exact_gate(
+    client, db, monkeypatch
+):
+    source, proposal, _, _ = await pilot_lesson(db)
+    start = await client.post(
+        f"/materials/topics/{proposal.id}/formation-check",
+        headers=PILOT_HEADERS,
+    )
+    assert start.status_code == 200, start.text
+    check_id = start.json()["id"]
+    assert start.json()["prompt_text"] == proposal.canonical_question
+    assert "feedback" not in start.json()
+
+    drafted = await client.patch(
+        f"/materials/lesson-checks/{check_id}/draft",
+        headers=PILOT_HEADERS,
+        json={"draft_text": "My recoverable partial explanation"},
+    )
+    assert drafted.status_code == 200
+
+    exposure_base = datetime.now(UTC)
+    exposures = iter((exposure_base, exposure_base + timedelta(minutes=1)))
+    monkeypatch.setattr(materials_router, "now_in", lambda _tz: next(exposures))
+    model_calls = 0
+
+    async def evaluate(**kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        await kwargs["before_provider_call"](1)
+        return lesson_check_result()
+
+    monkeypatch.setattr(llm, "evaluate_lesson_check", evaluate)
+    before_cards = list((await db.exec(select(Card))).all())
+    before_sessions = list((await db.exec(select(Session))).all())
+    before_probes = list((await db.exec(select(SessionProbe))).all())
+    answer = "DNS and the load balancer route work before storage responds."
+
+    submitted = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": answer},
+    )
+    assert submitted.status_code == 200, submitted.text
+    first = submitted.json()
+    assert first["check"]["status"] == "exposed"
+    assert first["check"]["qualitative_outcome"] == "missing_mechanism"
+    assert first["source_excerpt"] == proposal.source_excerpt
+    assert first["answer_basis"] == proposal.answer_anchor
+    assert first["confirmation_title"] == "Choose what becomes a card"
+    assert "unscored" in first["confirmation_message"]
+    assert model_calls == 1
+    assert list((await db.exec(select(Card))).all()) == before_cards
+    assert list((await db.exec(select(Session))).all()) == before_sessions
+    assert list((await db.exec(select(SessionProbe))).all()) == before_probes
+
+    state = await client.get(
+        f"/materials/lesson-checks/{check_id}", headers=PILOT_HEADERS
+    )
+    state_body = state.json()
+    assert state_body["has_feedback"] is True
+    for authority_key in (
+        "feedback",
+        "source_excerpt",
+        "answer_basis",
+        "answer_rubric",
+        "recall_questions",
+    ):
+        assert authority_key not in state_body
+
+    await db.refresh(proposal)
+    first_learning_exposure = as_utc(proposal.last_learning_exposure_at)
+    replay = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": answer},
+    )
+    assert replay.status_code == 200, replay.text
+    assert model_calls == 1
+    assert datetime.fromisoformat(replay.json()["recall_not_before_at"]) >= (
+        datetime.fromisoformat(first["recall_not_before_at"])
+    )
+    await db.refresh(proposal)
+    assert as_utc(proposal.last_learning_exposure_at) > first_learning_exposure
+    changed_replay = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": "A different answer"},
+    )
+    assert changed_replay.status_code == 409
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=PILOT_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    card_id = uuid.UUID(confirmed.json()["created_card_ids"][0])
+    card = await db.get(Card, card_id)
+    await db.refresh(proposal)
+    assert card is not None
+    assert as_utc(card.last_learning_exposure_at) == as_utc(
+        proposal.last_learning_exposure_at
+    )
+    assert as_utc(card.recall_not_before_at) == as_utc(proposal.recall_not_before_at)
+    assert card.ease_factor == 2.5
+    assert card.interval_days == 1
+    assert card.repetitions == 0
+    assert card.last_score is None
+    assert card.mastery_summary == ""
+
+    formation_only = await client.post(
+        f"/materials/imports/{source.id}/distill", headers=PILOT_HEADERS
+    )
+    assert formation_only.status_code == 409
+    assert formation_only.json()["detail"] == {
+        "code": "lesson_incomplete",
+        "reviewed_count": 0,
+        "concept_count": 1,
+    }
+
+    due = await client.get("/cards/due", headers=PILOT_HEADERS)
+    assert all(row["id"] != str(card.id) for row in due.json())
+    blocked_session = await client.post(
+        f"/cards/{card.id}/sessions", headers=PILOT_HEADERS
+    )
+    assert blocked_session.status_code == 409
+    assert blocked_session.json()["detail"]["code"] == "recall_cooldown"
+
+    await db.refresh(proposal)
+    boundary_before_live_session = (
+        as_utc(proposal.last_learning_exposure_at),
+        as_utc(proposal.recall_not_before_at),
+    )
+    live_session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        status="open",
+    )
+    db.add(live_session)
+    await db.commit()
+    blocked_authority = await client.post(
+        f"/materials/lesson-checks/{check_id}/authority",
+        headers=PILOT_HEADERS,
+    )
+    assert blocked_authority.status_code == 409
+    assert blocked_authority.json()["detail"]["code"] == "live_session"
+    await db.refresh(proposal)
+    assert (
+        as_utc(proposal.last_learning_exposure_at),
+        as_utc(proposal.recall_not_before_at),
+    ) == boundary_before_live_session
+    await db.delete(live_session)
+    await db.commit()
+
+    confirmation_replay = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=PILOT_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmation_replay.json()["created_card_ids"] == [str(card.id)]
+    reopened = await client.post(
+        f"/materials/imports/{source.id}/review-opened", headers=PILOT_HEADERS
+    )
+    assert reopened.status_code == 200
+    assert datetime.fromisoformat(reopened.json()["review_opened_at"]) == as_utc(
+        source.review_opened_at
+    )
+
+
+async def test_restudy_is_source_backed_unscored_and_can_explicitly_keep_zero(
+    client, db
+):
+    source, proposal, _, _ = await pilot_lesson(db, condition="restudy")
+    opposite = await client.post(
+        f"/materials/topics/{proposal.id}/formation-check",
+        headers=PILOT_HEADERS,
+    )
+    assert opposite.status_code == 409
+    assert opposite.json()["detail"]["code"] == "pilot_condition_mismatch"
+
+    skipped = await client.patch(
+        f"/materials/topics/{proposal.id}",
+        headers=PILOT_HEADERS,
+        json={"action": "exclude"},
+    )
+    assert skipped.status_code == 409
+    assert skipped.json()["detail"]["code"] == "pilot_condition_required"
+
+    usage_before = len((await db.exec(select(LLMUsage))).all())
+    response = await client.post(
+        f"/materials/topics/{proposal.id}/restudy",
+        headers=PILOT_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+    authority = response.json()
+    assert authority["check"]["condition"] == "restudy"
+    assert authority["check"]["prompt_text"] == ""
+    assert authority["check"]["status"] == "exposed"
+    assert authority["answer_basis"] == proposal.answer_anchor
+    assert len((await db.exec(select(LLMUsage))).all()) == usage_before
+    assert not (await db.exec(select(Card))).all()
+    assert not (await db.exec(select(Session))).all()
+
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=PILOT_HEADERS,
+        json={"selected_topic_ids": []},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["created_card_ids"] == []
+    await db.refresh(proposal)
+    assert proposal.status == "excluded"
+    assert not (await db.exec(select(Card))).all()
+
+    replay = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=PILOT_HEADERS,
+        json={"selected_topic_ids": []},
+    )
+    assert replay.status_code == 200
+    assert replay.json()["created_card_ids"] == []
+
+
+async def test_formation_provider_failure_preserves_only_draft_and_call_audit(
+    client, db, monkeypatch
+):
+    _, proposal, _, _ = await pilot_lesson(db)
+    started = await client.post(
+        f"/materials/topics/{proposal.id}/formation-check",
+        headers=PILOT_HEADERS,
+    )
+    check_id = uuid.UUID(started.json()["id"])
+    private_answer = "private formation transcript that must not enter usage details"
+
+    async def fail(**kwargs):
+        await kwargs["before_provider_call"](1)
+        raise llm.LLMError(
+            "formation provider unavailable",
+            trace=lesson_check_result().trace,
+        )
+
+    monkeypatch.setattr(llm, "evaluate_lesson_check", fail)
+    response = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": private_answer},
+    )
+    assert response.status_code == 503
+
+    check = await db.get(LessonCheck, check_id)
+    await db.refresh(proposal)
+    assert check is not None
+    assert check.status == "open"
+    assert check.draft_text == private_answer
+    assert check.answer_text == ""
+    assert check.qualitative_outcome == ""
+    assert check.feedback == ""
+    assert check.exposed_at is None
+    assert check.recall_not_before_at is None
+    assert proposal.last_learning_exposure_at is None
+    assert proposal.recall_not_before_at is None
+    assert not (await db.exec(select(Card))).all()
+    assert not (await db.exec(select(Session))).all()
+
+    usage_rows = (await db.exec(select(LLMUsage))).all()
+    assert {row.operation for row in usage_rows} >= {
+        "lesson_formation",
+        usage.LESSON_FORMATION_TERMINAL_OPERATION,
+    }
+    assert private_answer not in json.dumps(
+        [row.details for row in usage_rows], sort_keys=True
+    )
+    unavailable = await client.post(
+        f"/materials/lesson-checks/{check_id}/authority",
+        headers=PILOT_HEADERS,
+    )
+    assert unavailable.status_code == 409
+
+
+async def test_formation_provider_boundary_rechecks_the_bound_assignment(
+    client, db, monkeypatch
+):
+    _, proposal, _, assignment = await pilot_lesson(db)
+    started = await client.post(
+        f"/materials/topics/{proposal.id}/formation-check",
+        headers=PILOT_HEADERS,
+    )
+    check_id = uuid.UUID(started.json()["id"])
+    transmissions = 0
+
+    async def evaluate(**kwargs):
+        nonlocal transmissions
+        # Simulate withdrawal/rebinding after the endpoint's initial validation
+        # but before the physical provider boundary.
+        assignment.target_proposal_id = None
+        db.add(assignment)
+        await db.commit()
+        await kwargs["before_provider_call"](1)
+        transmissions += 1
+        return lesson_check_result()
+
+    monkeypatch.setattr(llm, "evaluate_lesson_check", evaluate)
+    response = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": "The request crosses the routing path."},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "pilot_assignment_not_ready"
+    assert transmissions == 0
+    check = await db.get(LessonCheck, check_id)
+    assert check is not None
+    assert check.status == "open"
+    assert check.draft_text == "The request crosses the routing path."
+    assert not [
+        row
+        for row in (await db.exec(select(LLMUsage))).all()
+        if row.operation.startswith("lesson_formation")
+    ]
+
+
+async def test_formation_reservation_blocks_an_indeterminate_call_but_retries_audited_failure(
+    client, db, monkeypatch
+):
+    _, proposal, _, _ = await pilot_lesson(db)
+    started = await client.post(
+        f"/materials/topics/{proposal.id}/formation-check",
+        headers=PILOT_HEADERS,
+    )
+    check_id = uuid.UUID(started.json()["id"])
+    prior_operation_id = uuid.uuid4()
+    db.add(
+        LLMUsage(
+            user_id=FOUNDER_USER_ID,
+            operation="lesson_formation",
+            details={
+                "audit_type": "provider_call_authorization",
+                "operation_id": str(prior_operation_id),
+                "provider_attempt": 1,
+                "lesson_check_id": str(check_id),
+            },
+        )
+    )
+    await db.commit()
+    transmissions = 0
+
+    async def evaluate(**kwargs):
+        nonlocal transmissions
+        await kwargs["before_provider_call"](1)
+        transmissions += 1
+        return lesson_check_result()
+
+    monkeypatch.setattr(llm, "evaluate_lesson_check", evaluate)
+    answer = "A request crosses the routing stages before storage responds."
+    indeterminate = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": answer},
+    )
+    assert indeterminate.status_code == 409
+    assert indeterminate.json()["detail"] == {
+        "code": "lesson_check_evaluation_indeterminate",
+        "retryable": False,
+    }
+    assert transmissions == 0
+
+    # Once terminal evidence proves that the earlier transmission failed, the
+    # same durable draft can explicitly retry. A pending/success result would
+    # remain fail-closed until its product commit is reconciled.
+    db.add(
+        LLMUsage(
+            user_id=FOUNDER_USER_ID,
+            operation=usage.LESSON_FORMATION_TERMINAL_OPERATION,
+            details={
+                "lesson_check_id": str(check_id),
+                "lesson_operation_id": str(prior_operation_id),
+                "product_outcome": "failed",
+                "call": {"outcome": "transport_error"},
+            },
+        )
+    )
+    await db.commit()
+    retried = await client.post(
+        f"/materials/lesson-checks/{check_id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": answer},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["check"]["status"] == "exposed"
+    assert transmissions == 1
+
+
+async def test_operator_frozen_transfer_is_inaccessible_before_eligibility(
+    client, db
+):
+    source, proposal, _, _ = await pilot_lesson(db, condition="restudy")
+    formed = await client.post(
+        f"/materials/topics/{proposal.id}/restudy",
+        headers=PILOT_HEADERS,
+    )
+    assert formed.status_code == 200, formed.text
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=PILOT_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    card_id = uuid.UUID(confirmed.json()["created_card_ids"][0])
+    formation = await db.get(LessonCheck, uuid.UUID(formed.json()["check"]["id"]))
+    assert formation is not None and formation.exposed_at is not None
+    prompt = "How would this request path fail at an application boundary?"
+    transfer = LessonCheck(
+        user_id=FOUNDER_USER_ID,
+        proposal_id=proposal.id,
+        card_id=card_id,
+        kind="transfer",
+        condition="restudy",
+        prompt_level="failure_tradeoff",
+        prompt_version=TRANSFER_PROMPT_VERSION,
+        provider_route={},
+        source_candidate_id="failure-tradeoff-1",
+        prompt_text_snapshot=prompt,
+        prompt_rubric_version=TRANSFER_PROMPT_RUBRIC_VERSION,
+        prompt_reviewer_id="reviewer-2",
+        prompt_approved_at=datetime.now(UTC),
+        status="open",
+        available_at=as_utc(formation.exposed_at) + timedelta(days=7),
+    )
+    db.add(transfer)
+    await db.commit()
+
+    blocked = (
+        await client.get(
+            f"/materials/lesson-checks/{transfer.id}", headers=PILOT_HEADERS
+        ),
+        await client.patch(
+            f"/materials/lesson-checks/{transfer.id}/draft",
+            headers=PILOT_HEADERS,
+            json={"draft_text": "early draft"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{transfer.id}/submit",
+            headers=PILOT_HEADERS,
+            json={"answer_text": "early answer"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{transfer.id}/transfer-debrief",
+            headers=PILOT_HEADERS,
+        ),
+    )
+    assert [response.status_code for response in blocked] == [409] * len(blocked)
+    assert {
+        response.json()["detail"]["code"] for response in blocked
+    } == {"first_recall_required"}
+    assert all(prompt not in response.text for response in blocked)
+    preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert preview.json()["topics"][0]["transfer_state"] == "locked"
+    assert prompt not in preview.text
+    exported = await client.get("/auth/export", headers=API_HEADERS)
+    assert str(transfer.id) not in {
+        row["id"] for row in exported.json()["lesson_checks"]
+    }
+    assert prompt not in exported.text
+    await db.refresh(transfer)
+    assert transfer.status == "open"
+    assert transfer.draft_text == ""
+    assert transfer.answer_text == ""
+
+
+async def test_transfer_submit_is_blind_and_debrief_alone_restamps_card(
+    client, db, monkeypatch
+):
+    source, proposal, _, _ = await pilot_lesson(db, condition="restudy")
+    formed = await client.post(
+        f"/materials/topics/{proposal.id}/restudy",
+        headers=PILOT_HEADERS,
+    )
+    assert formed.status_code == 200, formed.text
+    formation_id = uuid.UUID(formed.json()["check"]["id"])
+    confirmed = await client.post(
+        f"/materials/imports/{source.id}/confirm",
+        headers=PILOT_HEADERS,
+        json={"selected_topic_ids": [str(proposal.id)]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    card_id = uuid.UUID(confirmed.json()["created_card_ids"][0])
+
+    now = datetime.now(UTC)
+    formation = await db.get(LessonCheck, formation_id)
+    card = await db.get(Card, card_id)
+    await db.refresh(proposal)
+    assert formation is not None and card is not None
+    formation.started_at = now - timedelta(days=8, minutes=1)
+    formation.exposed_at = now - timedelta(days=8)
+    formation.recall_not_before_at = now - timedelta(days=7, hours=12)
+    formation.submitted_at = formation.exposed_at
+    proposal.last_learning_exposure_at = formation.exposed_at
+    proposal.recall_not_before_at = formation.recall_not_before_at
+    card.last_learning_exposure_at = formation.exposed_at
+    card.recall_not_before_at = formation.recall_not_before_at
+    delayed_recall = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        answer_text="A delayed private Recall answer",
+        score=4,
+        accuracy=4,
+        depth=3,
+        boundaries=3,
+        status="complete",
+        started_at=now - timedelta(days=7),
+        ended_at=now - timedelta(days=7) + timedelta(minutes=1),
+    )
+    transfer_prompt = "How would this routing path behave if the load balancer failed?"
+    transfer = LessonCheck(
+        user_id=FOUNDER_USER_ID,
+        proposal_id=proposal.id,
+        card_id=card.id,
+        kind="transfer",
+        condition="restudy",
+        prompt_level="application",
+        prompt_version=TRANSFER_PROMPT_VERSION,
+        provider_route={},
+        source_candidate_id="application-1",
+        prompt_text_snapshot=transfer_prompt,
+        prompt_rubric_version=TRANSFER_PROMPT_RUBRIC_VERSION,
+        prompt_reviewer_id="reviewer-2",
+        prompt_approved_at=now - timedelta(days=8),
+        status="open",
+        started_at=now - timedelta(days=8),
+        updated_at=now - timedelta(days=8),
+    )
+    for row in (formation, proposal, card, delayed_recall, transfer):
+        db.add(row)
+    await db.commit()
+
+    preview = await client.post(
+        f"/materials/imports/{source.id}/review-opened",
+        headers=PILOT_HEADERS,
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["topics"][0]["transfer_state"] == "available"
+    assert transfer_prompt not in preview.text
+
+    # Concierge storage is not participant-open state. Even after the timing
+    # and Recall gates are satisfied, every direct check surface stays closed
+    # until the server-owned start endpoint marks this exact check open.
+    unopened = (
+        await client.get(
+            f"/materials/lesson-checks/{transfer.id}", headers=PILOT_HEADERS
+        ),
+        await client.patch(
+            f"/materials/lesson-checks/{transfer.id}/draft",
+            headers=PILOT_HEADERS,
+            json={"draft_text": "must not save before open"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{transfer.id}/submit",
+            headers=PILOT_HEADERS,
+            json={"answer_text": "must not submit before open"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{transfer.id}/transfer-debrief",
+            headers=PILOT_HEADERS,
+        ),
+    )
+    assert [response.status_code for response in unopened] == [409] * len(unopened)
+    assert {
+        response.json()["detail"]["code"] for response in unopened
+    } == {"transfer_not_opened"}
+    await db.refresh(transfer)
+    assert transfer.status == "open"
+    assert transfer.draft_text == ""
+    assert transfer.answer_text == ""
+
+    unopened_export = await client.get("/auth/export", headers=API_HEADERS)
+    assert unopened_export.status_code == 200
+    assert str(transfer.id) not in {
+        row["id"] for row in unopened_export.json()["lesson_checks"]
+    }
+    assert transfer_prompt not in unopened_export.text
+
+    opened = await client.post(
+        f"/materials/topics/{proposal.id}/transfer-check",
+        headers=PILOT_HEADERS,
+    )
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["prompt_text"] == transfer_prompt
+    opened_state = await client.get(
+        f"/materials/lesson-checks/{transfer.id}", headers=PILOT_HEADERS
+    )
+    assert opened_state.status_code == 200
+    assert opened_state.json()["prompt_text"] == transfer_prompt
+    opened_export = await client.get("/auth/export", headers=API_HEADERS)
+    exported_transfer = next(
+        row
+        for row in opened_export.json()["lesson_checks"]
+        if row["id"] == str(transfer.id)
+    )
+    assert exported_transfer["prompt_text_snapshot"] == transfer_prompt
+
+    # A later authority exposure advances the linked card's latest boundary.
+    # The old delayed Recall no longer qualifies, and every transfer surface
+    # re-locks even though the check was previously opened.
+    original_now_in = materials_router.now_in
+    restudy_at = now - timedelta(days=2)
+    monkeypatch.setattr(materials_router, "now_in", lambda _timezone: restudy_at)
+    restamped = await client.post(
+        f"/materials/lesson-checks/{formation_id}/authority",
+        headers=PILOT_HEADERS,
+    )
+    assert restamped.status_code == 200, restamped.text
+    monkeypatch.setattr(materials_router, "now_in", original_now_in)
+    await db.refresh(card)
+    latest_boundary = as_utc(card.recall_not_before_at)
+    assert latest_boundary > as_utc(delayed_recall.started_at)
+    relocked_preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert relocked_preview.json()["topics"][0]["transfer_state"] == "locked"
+    relocked = (
+        await client.get(
+            f"/materials/lesson-checks/{transfer.id}", headers=PILOT_HEADERS
+        ),
+        await client.patch(
+            f"/materials/lesson-checks/{transfer.id}/draft",
+            headers=PILOT_HEADERS,
+            json={"draft_text": "must not save while relocked"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{transfer.id}/submit",
+            headers=PILOT_HEADERS,
+            json={"answer_text": "must not submit while relocked"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{transfer.id}/transfer-debrief",
+            headers=PILOT_HEADERS,
+        ),
+        await client.post(
+            f"/materials/topics/{proposal.id}/transfer-check",
+            headers=PILOT_HEADERS,
+        ),
+    )
+    assert [response.status_code for response in relocked] == [409] * len(relocked)
+    assert {
+        response.json()["detail"]["code"] for response in relocked
+    } == {"first_recall_required"}
+    await db.refresh(transfer)
+    assert transfer.status == "open"
+    assert transfer.draft_text == ""
+    assert transfer.answer_text == ""
+
+    refreshed_recall = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        answer_text="A fresh Recall after the latest learning boundary",
+        score=4,
+        accuracy=4,
+        depth=3,
+        boundaries=3,
+        status="complete",
+        started_at=latest_boundary + timedelta(minutes=1),
+        ended_at=latest_boundary + timedelta(minutes=2),
+    )
+    db.add(refreshed_recall)
+    await db.commit()
+    reopened_preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert reopened_preview.json()["topics"][0]["transfer_state"] == "available"
+    reopened_state = await client.get(
+        f"/materials/lesson-checks/{transfer.id}", headers=PILOT_HEADERS
+    )
+    assert reopened_state.status_code == 200
+    assert reopened_state.json()["prompt_text"] == transfer_prompt
+
+    await db.refresh(card)
+    card_before_submit = card.model_dump()
+    session_count = len((await db.exec(select(Session))).all())
+    probe_count = len((await db.exec(select(SessionProbe))).all())
+    blind_answer = "It would stop before application and storage work."
+    submitted = await client.post(
+        f"/materials/lesson-checks/{transfer.id}/submit",
+        headers=PILOT_HEADERS,
+        json={"answer_text": blind_answer},
+    )
+    assert submitted.status_code == 200, submitted.text
+    body = submitted.json()
+    assert body["status"] == "submitted"
+    assert body["exposed_at"] is None
+    assert body["recall_not_before_at"] is None
+    for authority_key in ("feedback", "source_excerpt", "answer_basis", "answer_rubric"):
+        assert authority_key not in body
+    await db.refresh(card)
+    assert card.model_dump() == card_before_submit
+    assert len((await db.exec(select(Session))).all()) == session_count
+    assert len((await db.exec(select(SessionProbe))).all()) == probe_count
+
+    submitted_preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert submitted_preview.json()["topics"][0]["transfer_state"] == "submitted"
+    live_transfer_session = Session(
+        card_id=card.id,
+        question_asked=card.canonical_question or "",
+        status="open",
+    )
+    db.add(live_transfer_session)
+    await db.commit()
+    blocked_debrief = await client.post(
+        f"/materials/lesson-checks/{transfer.id}/transfer-debrief",
+        headers=PILOT_HEADERS,
+    )
+    assert blocked_debrief.status_code == 409
+    assert blocked_debrief.json()["detail"]["code"] == "live_session"
+    await db.delete(live_transfer_session)
+    await db.commit()
+    before_debrief = card.model_dump()
+    debrief = await client.post(
+        f"/materials/lesson-checks/{transfer.id}/transfer-debrief",
+        headers=PILOT_HEADERS,
+    )
+    assert debrief.status_code == 200, debrief.text
+    assert debrief.json()["check"]["status"] == "exposed"
+    assert debrief.json()["answer_basis"] == proposal.answer_anchor
+    await db.refresh(card)
+    changed = {
+        key
+        for key, prior in before_debrief.items()
+        if card.model_dump()[key] != prior
+    }
+    assert changed == {"last_learning_exposure_at", "recall_not_before_at"}
+    assert as_utc(card.recall_not_before_at) > as_utc(
+        before_debrief["recall_not_before_at"]
+    )
+    first_debrief_boundary = as_utc(card.recall_not_before_at)
+    debriefed_preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert debriefed_preview.json()["topics"][0]["transfer_state"] == "debriefed"
+    replayed_debrief = await client.post(
+        f"/materials/lesson-checks/{transfer.id}/transfer-debrief",
+        headers=PILOT_HEADERS,
+    )
+    assert replayed_debrief.status_code == 200, replayed_debrief.text
+    await db.refresh(card)
+    assert as_utc(card.recall_not_before_at) >= first_debrief_boundary
+    later_authority = await client.post(
+        f"/materials/lesson-checks/{formation_id}/authority",
+        headers=PILOT_HEADERS,
+    )
+    assert later_authority.status_code == 200, later_authority.text
+    authority_relocked_preview = await client.get(
+        f"/materials/imports/{source.id}/preview", headers=PILOT_HEADERS
+    )
+    assert (
+        authority_relocked_preview.json()["topics"][0]["transfer_state"]
+        == "locked"
+    )
+
+
+async def test_lesson_check_endpoints_are_scoped_to_the_owning_participant(
+    client, db
+):
+    from app.config import get_settings
+    from app.models import Settings, User
+    from app.services import authentication
+
+    _, proposal, _, _ = await pilot_lesson(db)
+    started = await client.post(
+        f"/materials/topics/{proposal.id}/formation-check",
+        headers=PILOT_HEADERS,
+    )
+    check_id = started.json()["id"]
+
+    other = User()
+    db.add(other)
+    await db.flush()
+    db.add(Settings(user_id=other.id, timezone="UTC"))
+    db.add(
+        StudyPilotEnrollment(
+            user_id=other.id,
+            cohort="pilot-other",
+            consent_version=PILOT_RESEARCH_CONSENT_VERSION,
+            consented_at=datetime.now(UTC),
+            randomization_seed=f"other-{uuid.uuid4()}",
+        )
+    )
+    pair = await authentication.issue_session(db, other.id, get_settings())
+    await db.commit()
+    other_headers = {
+        "Authorization": f"Bearer {pair.access_token}",
+        "X-Devmax-Client-Build": "10",
+    }
+
+    requests = (
+        await client.get(
+            f"/materials/lesson-checks/{check_id}", headers=other_headers
+        ),
+        await client.patch(
+            f"/materials/lesson-checks/{check_id}/draft",
+            headers=other_headers,
+            json={"draft_text": "foreign"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{check_id}/submit",
+            headers=other_headers,
+            json={"answer_text": "foreign"},
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{check_id}/authority",
+            headers=other_headers,
+        ),
+        await client.post(
+            f"/materials/lesson-checks/{check_id}/transfer-debrief",
+            headers=other_headers,
+        ),
+    )
+    assert [response.status_code for response in requests] == [404] * len(requests)
+
+
 async def test_lesson_extraction_stores_one_complete_concept_pack(
     db, monkeypatch
 ):
@@ -416,6 +1505,7 @@ async def test_lesson_extraction_stores_one_complete_concept_pack(
     )
     assert proposal.source_excerpt in source.source_text
     assert not (await db.exec(select(Card))).all()
+    assert not (await db.exec(select(LessonProposalAudit))).all()
 
 
 async def test_invalid_lesson_extraction_writes_no_proposals_or_cards(
@@ -458,14 +1548,14 @@ def test_lesson_post_validation_owns_provider_unsupported_array_bounds():
         status=SOURCE_PENDING,
     )
 
-    with pytest.raises(llm.LLMError, match="between 1 and 7 concepts"):
+    with pytest.raises(llm.LLMError, match="between 1 and 3 concepts"):
         materials._validated_lesson_concepts(source, [])
 
     too_many = [
         lesson_concept(GUIDE, topic=f"Request routing path {index}")
-        for index in range(8)
+        for index in range(4)
     ]
-    with pytest.raises(llm.LLMError, match="between 1 and 7 concepts"):
+    with pytest.raises(llm.LLMError, match="between 1 and 3 concepts"):
         materials._validated_lesson_concepts(source, too_many)
 
     missing_prompt = lesson_concept(GUIDE)
@@ -696,6 +1786,99 @@ async def test_networking_repair_gets_one_independent_recheck(db, monkeypatch):
     assert processed.status == SOURCE_READY
     assert proposal.status == "clean"
     assert proposal.answer_rubric["failure_mode"].startswith("Best-effort IP")
+    assert "video call" not in proposal.recall_questions[3]["question"]
+
+
+async def test_assigned_pilot_audit_preserves_the_untouched_pack_before_repair(
+    db, monkeypatch
+):
+    now = datetime.now(UTC)
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101 pilot",
+        source_text=NETWORKING_101_SOURCE,
+        content_provenance="exact_source_excerpt",
+        kind="article",
+        import_path="lesson",
+        status=SOURCE_PENDING,
+        created_at=now - timedelta(hours=1),
+        updated_at=now - timedelta(minutes=30),
+    )
+    enrollment = StudyPilotEnrollment(
+        user_id=FOUNDER_USER_ID,
+        cohort="pilot-audit",
+        consent_version=PILOT_RESEARCH_CONSENT_VERSION,
+        consented_at=now - timedelta(hours=2),
+        randomization_seed=f"audit-{uuid.uuid4()}",
+        created_at=now - timedelta(hours=2),
+        updated_at=now - timedelta(minutes=30),
+    )
+    db.add(source)
+    db.add(enrollment)
+    await db.flush()
+    assignment = StudyPilotAssignment(
+        enrollment_id=enrollment.id,
+        source_lineage_id=source.lineage_id,
+        source_id=source.id,
+        pair_index=1,
+        sequence_index=1,
+        condition="attempt_first",
+        intended_target="position:1",
+        version_snapshot={"pilot": "frozen"},
+        assigned_at=now - timedelta(minutes=45),
+        updated_at=now - timedelta(minutes=30),
+    )
+    db.add(assignment)
+    await db.commit()
+    original = adversarial_networking_concept()
+
+    async def extract(**_kwargs):
+        return [original]
+
+    def repairable(concepts):
+        return lesson_findings(
+            concepts,
+            verdicts={
+                (1, "answer_rubric.failure_mode"): "unsupported",
+                (1, "recall_questions.application"): "unsupported",
+            },
+            repairs={
+                (1, "answer_rubric.failure_mode"): (
+                    "Best-effort IP packets may be lost, reordered, or duplicated."
+                ),
+                (1, "recall_questions.application"): (
+                    "How does the stated protocol sequence load a webpage from a hostname?"
+                ),
+            },
+        )
+
+    first_findings = repairable([original])
+    authorizer_operations: list[str] = []
+
+    def authorizer(*_args, operation="guide_import", **_kwargs):
+        authorizer_operations.append(operation)
+
+        async def authorize(_attempt):
+            return None
+
+        return authorize
+
+    monkeypatch.setattr(llm, "extract_lesson", extract)
+    monkeypatch.setattr(materials, "_guide_authorizer", authorizer)
+    stub_lesson_verifier(monkeypatch, [repairable])
+    processed = await materials._process_lesson(
+        db, source, await _claim(db, source)
+    )
+    db.add(processed)
+    await db.commit()
+
+    proposal = (await db.exec(select(MaterialTopicProposal))).one()
+    audit = (await db.exec(select(LessonProposalAudit))).one()
+    assert authorizer_operations[0] == materials.PILOT_LESSON_IMPORT_OPERATION
+    assert audit.proposal_id == proposal.id
+    assert audit.original_proposal_pack == original
+    assert audit.original_grounding_findings == first_findings
+    assert "video call" in audit.original_proposal_pack["recall_questions"][3]["question"]
     assert "video call" not in proposal.recall_questions[3]["question"]
 
 

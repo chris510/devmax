@@ -77,6 +77,7 @@ extension MockAPI {
             ? "processing"
             : "ready"
         let isLesson = ["lesson-concepts", "lesson-concept-expanded"].contains(route)
+            || route.hasPrefix("lesson-pilot-")
         return MaterialImport(
             id: id,
             title: isLesson ? "Networking 101" : "Contracts — formation",
@@ -145,7 +146,9 @@ extension MockAPI {
         if let retryMaterialImportFixture { return retryMaterialImportFixture }
         return try await materialImport(id)
     }
-    func deleteMaterialImport(_ id: UUID) async throws {}
+    func deleteMaterialImport(_ id: UUID) async throws {
+        if materialDeletionFails { throw APIError.status(500) }
+    }
 
     func editMaterialTopic(
         _ id: UUID, topic: String?, answerAnchor: String?, action: String,
@@ -165,12 +168,295 @@ extension MockAPI {
         if confirmMaterialDelay != .zero {
             try await Task.sleep(for: confirmMaterialDelay)
         }
+        pilotConfirmationAttempts += 1
+        confirmedMaterialSelections.append(topics)
+        let route = await MainActor.run { DebugFlags.shared.route }
+        if (pilotConfirmationFailsOnce || route == "lesson-pilot-confirm-failure"),
+           pilotConfirmationAttempts == 1 {
+            throw APIError.status(500)
+        }
         let cards = topics.map { topic in
             topic == Self.topicID ? Self.publicCardID : Self.secondPublicCardID
         }
         return MaterialConfirmation(
             sourceId: id,
             createdCardIds: cards
+        )
+    }
+
+    func lessonPilotPreview(_ id: UUID) async throws -> MaterialLessonPreview {
+        let route = await MainActor.run { DebugFlags.shared.route }
+        let restudy = route == "lesson-pilot-restudy"
+        let transferRoute = route.hasPrefix("lesson-pilot-transfer")
+        let formationState = transferRoute ? "unavailable" : "not_started"
+        let transferKey = "transfer:\(Self.topicID.uuidString)"
+        let storedTransfer = pilotLessonCheckByProposal[transferKey]
+            .flatMap { pilotLessonChecks[$0] }
+        let transferState: String
+        if storedTransfer?.status == .submitted {
+            transferState = "submitted"
+        } else if storedTransfer?.status == .exposed {
+            transferState = "debriefed"
+        } else {
+            transferState = transferRoute ? "available" : "unavailable"
+        }
+        return MaterialLessonPreview(
+            id: id, title: "Networking 101", kind: "article",
+            sourceUrl: "https://example.com/networking",
+            contentProvenance: LessonContentProvenance.exactSourceExcerpt.rawValue,
+            status: "ready", importPath: "lesson", intent: "already_studied",
+            cleanCount: 1, attentionCount: 0, error: "",
+            lessonGroundingRequired: false,
+            proposalsReadyAt: WireDate.parse("2026-08-15T16:02:00Z"),
+            reviewOpenedAt: nil, confirmedAt: nil,
+            topics: [
+                MaterialTopicPreview(
+                    id: Self.topicID, position: 1, sectionTitle: "Network layer",
+                    topic: "Network layer best-effort delivery",
+                    formationQuestion: restudy
+                        ? nil
+                        : "How does best-effort IP delivery shape the transport layer above it?",
+                    status: "clean", issue: "", formationState: formationState,
+                    transferState: transferState
+                )
+            ]
+        )
+    }
+
+    func markLessonReviewOpened(_ id: UUID) async throws -> MaterialLessonPreview {
+        if pilotSourceNotAssigned { throw APIError.pilotSourceNotAssigned }
+        var value = try await lessonPilotPreview(id)
+        value = MaterialLessonPreview(
+            id: value.id, title: value.title, kind: value.kind,
+            sourceUrl: value.sourceUrl, contentProvenance: value.contentProvenance,
+            status: value.status, importPath: value.importPath, intent: value.intent,
+            cleanCount: value.cleanCount, attentionCount: value.attentionCount,
+            error: value.error, lessonGroundingRequired: value.lessonGroundingRequired,
+            proposalsReadyAt: value.proposalsReadyAt, reviewOpenedAt: Date(),
+            confirmedAt: value.confirmedAt, topics: value.topics
+        )
+        return value
+    }
+
+    func excludePilotLessonProposal(_ id: UUID) async throws -> MaterialTopicPreview {
+        MaterialTopicPreview(
+            id: id, position: 1, sectionTitle: "Network layer",
+            topic: "Network layer best-effort delivery", formationQuestion: nil,
+            status: "excluded", issue: "", formationState: "unavailable",
+            transferState: "unavailable"
+        )
+    }
+
+    func startFormationCheck(proposalID: UUID) async throws -> LessonCheck {
+        let key = "formation:\(proposalID.uuidString)"
+        if let checkID = pilotLessonCheckByProposal[key],
+           let existing = pilotLessonChecks[checkID] {
+            return existing
+        }
+        let check = Self.pilotCheck(
+            proposalID: proposalID, kind: .formation, condition: .attemptFirst,
+            promptLevel: "canonical",
+            prompt: "How does best-effort IP delivery shape the transport layer above it?"
+        )
+        pilotLessonChecks[check.id] = check
+        pilotLessonCheckByProposal[key] = check.id
+        return check
+    }
+
+    func saveLessonCheckDraft(checkID: UUID, text: String) async throws -> LessonCheck {
+        guard let existing = pilotLessonChecks[checkID] else { throw APIError.status(404) }
+        let saved = Self.replacingPilotCheck(existing, draftText: text)
+        pilotLessonChecks[checkID] = saved
+        return saved
+    }
+
+    func submitFormationCheck(
+        checkID: UUID, text: String
+    ) async throws -> MaterialTopicAuthority {
+        guard let existing = pilotLessonChecks[checkID], existing.kind == .formation
+        else { throw APIError.status(404) }
+        pilotLessonSubmitAttempts += 1
+        let route = await MainActor.run { DebugFlags.shared.route }
+        if (pilotFormationFailsOnce || route == "lesson-pilot-provider-failure"),
+           pilotLessonSubmitAttempts == 1 {
+            pilotLessonChecks[checkID] = Self.replacingPilotCheck(
+                existing, draftText: text
+            )
+            throw APIError.scoringUnavailable
+        }
+        let outcome: LessonCheckOutcome = route == "lesson-pilot-correction"
+            ? .missingMechanism
+            : .accurateAccount
+        let exposed = Self.replacingPilotCheck(
+            existing, status: .exposed, draftText: "", outcome: outcome,
+            hasFeedback: true, exposedAt: Date(), submittedAt: Date()
+        )
+        pilotLessonChecks[checkID] = exposed
+        return Self.pilotAuthority(
+            check: exposed,
+            feedback: outcome == .missingMechanism
+                ? "You named unreliability, but not the mechanism: IP makes no delivery, ordering, or deduplication guarantee, so transport must add the guarantees it needs."
+                : "The mechanism is intact: transport adds only the guarantees the application needs above best-effort IP."
+        )
+    }
+
+    func startLessonRestudy(proposalID: UUID) async throws -> MaterialTopicAuthority {
+        let key = "formation:\(proposalID.uuidString)"
+        if let checkID = pilotLessonCheckByProposal[key],
+           let existing = pilotLessonChecks[checkID], existing.status == .exposed {
+            return Self.pilotAuthority(
+                check: existing,
+                feedback: "Study the grounded account, then reconstruct it after the hold."
+            )
+        }
+        let opened = Self.pilotCheck(
+            proposalID: proposalID, kind: .formation, condition: .restudy,
+            promptLevel: "canonical", prompt: ""
+        )
+        let exposed = Self.replacingPilotCheck(
+            opened, status: .exposed, hasFeedback: true,
+            exposedAt: Date(), submittedAt: Date()
+        )
+        pilotLessonChecks[exposed.id] = exposed
+        pilotLessonCheckByProposal[key] = exposed.id
+        return Self.pilotAuthority(
+            check: exposed,
+            feedback: "Study the grounded account, then reconstruct it after the hold."
+        )
+    }
+
+    func startTransferCheck(proposalID: UUID) async throws -> LessonCheck {
+        let key = "transfer:\(proposalID.uuidString)"
+        if let checkID = pilotLessonCheckByProposal[key],
+           let existing = pilotLessonChecks[checkID] {
+            return existing
+        }
+        let check = Self.pilotCheck(
+            proposalID: proposalID, kind: .transfer, condition: nil,
+            promptLevel: "failure_tradeoff",
+            prompt: "A service needs ordered, duplicate-free delivery over IP. What must move above the network layer, and why?"
+        )
+        pilotLessonChecks[check.id] = check
+        pilotLessonCheckByProposal[key] = check.id
+        return check
+    }
+
+    func lessonCheck(_ id: UUID) async throws -> LessonCheck {
+        guard let check = pilotLessonChecks[id] else { throw APIError.status(404) }
+        return check
+    }
+
+    func submitTransferCheck(checkID: UUID, text: String) async throws -> LessonCheck {
+        guard let existing = pilotLessonChecks[checkID], existing.kind == .transfer
+        else { throw APIError.status(404) }
+        pilotLessonSubmitAttempts += 1
+        let route = await MainActor.run { DebugFlags.shared.route }
+        if (pilotTransferFailsOnce || route == "lesson-pilot-transfer-failure"),
+           pilotLessonSubmitAttempts == 1 {
+            pilotLessonChecks[checkID] = Self.replacingPilotCheck(
+                existing, draftText: text
+            )
+            throw APIError.status(500)
+        }
+        let submitted = Self.replacingPilotCheck(
+            existing, status: .submitted, draftText: "", submittedAt: Date()
+        )
+        pilotLessonChecks[checkID] = submitted
+        return submitted
+    }
+
+    func reopenLessonAuthority(checkID: UUID) async throws -> MaterialTopicAuthority {
+        guard let existing = pilotLessonChecks[checkID], existing.status == .exposed
+        else { throw APIError.status(409) }
+        let restamped = Self.replacingPilotCheck(
+            existing, exposedAt: Date(), submittedAt: existing.submittedAt
+        )
+        pilotLessonChecks[checkID] = restamped
+        return Self.pilotAuthority(
+            check: restamped,
+            feedback: existing.condition == .restudy
+                ? "Study the grounded account, then reconstruct it after the hold."
+                : "The highest-value correction remains grounded in the source below."
+        )
+    }
+
+    func lessonTransferDebrief(checkID: UUID) async throws -> MaterialTopicAuthority {
+        guard let existing = pilotLessonChecks[checkID],
+              existing.kind == .transfer, existing.status == .submitted
+        else { throw APIError.status(409) }
+        let exposed = Self.replacingPilotCheck(
+            existing, status: .exposed, hasFeedback: true, exposedAt: Date(),
+            submittedAt: existing.submittedAt
+        )
+        pilotLessonChecks[checkID] = exposed
+        return Self.pilotAuthority(
+            check: exposed,
+            feedback: "Reliability belongs above best-effort IP: sequencing, acknowledgements, retransmission, and duplicate handling provide the required contract."
+        )
+    }
+
+    private static func pilotCheck(
+        proposalID: UUID, kind: LessonCheckKind, condition: LessonCheckCondition?,
+        promptLevel: String, prompt: String
+    ) -> LessonCheck {
+        let now = Date()
+        return LessonCheck(
+            id: UUID(), proposalId: proposalID, cardId: nil, kind: kind,
+            condition: condition, promptLevel: promptLevel,
+            promptVersion: kind == .formation ? "formation-v1" : "transfer-v1",
+            promptText: prompt, status: .open, draftText: "",
+            qualitativeOutcome: nil, hasFeedback: false, exposedAt: nil,
+            recallNotBeforeAt: nil,
+            availableAt: kind == .transfer ? now : nil,
+            startedAt: now, submittedAt: nil, updatedAt: now
+        )
+    }
+
+    private static func replacingPilotCheck(
+        _ value: LessonCheck,
+        status: LessonCheckStatus? = nil,
+        draftText: String? = nil,
+        outcome: LessonCheckOutcome? = nil,
+        hasFeedback: Bool? = nil,
+        exposedAt: Date? = nil,
+        submittedAt: Date? = nil
+    ) -> LessonCheck {
+        let exposure = exposedAt ?? value.exposedAt
+        return LessonCheck(
+            id: value.id, proposalId: value.proposalId, cardId: value.cardId,
+            kind: value.kind, condition: value.condition,
+            promptLevel: value.promptLevel, promptVersion: value.promptVersion,
+            promptText: value.promptText, status: status ?? value.status,
+            draftText: draftText ?? value.draftText,
+            qualitativeOutcome: outcome ?? value.qualitativeOutcome,
+            hasFeedback: hasFeedback ?? value.hasFeedback,
+            exposedAt: exposure,
+            recallNotBeforeAt: exposure.map { Calendar.current.date(byAdding: .day, value: 1, to: $0)! },
+            availableAt: value.availableAt, startedAt: value.startedAt,
+            submittedAt: submittedAt ?? value.submittedAt, updatedAt: Date()
+        )
+    }
+
+    private static func pilotAuthority(
+        check: LessonCheck, feedback: String
+    ) -> MaterialTopicAuthority {
+        let exposedAt = check.exposedAt ?? Date()
+        let recallAt = check.recallNotBeforeAt
+            ?? Calendar.current.date(byAdding: .day, value: 1, to: exposedAt)!
+        return MaterialTopicAuthority(
+            check: check, proposalId: check.proposalId,
+            topic: "Network layer best-effort delivery", sectionTitle: "Network layer",
+            sourceTitle: "Networking 101", sourceUrl: "https://example.com/networking",
+            contentProvenance: LessonContentProvenance.exactSourceExcerpt.rawValue,
+            sourceExcerpt: "IP routes packets between networks using best-effort delivery, so packets may be lost, reordered, or duplicated.",
+            answerBasis: "IP supplies addressing and routing without delivery, ordering, or deduplication guarantees; transport adds the guarantees an application needs.",
+            canonicalQuestion: "How does best-effort IP delivery shape the transport layer above it?",
+            answerRubric: lessonRubric,
+            recallQuestions: lessonPrompts(for: "network layer best-effort delivery"),
+            feedback: feedback, exposedAt: exposedAt,
+            recallNotBeforeAt: recallAt,
+            confirmationTitle: "Approve this grounded concept?",
+            confirmationMessage: "Approval creates a held Recall card. Formation is not a score."
         )
     }
 

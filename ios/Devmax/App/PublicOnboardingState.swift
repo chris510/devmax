@@ -11,9 +11,19 @@ final class PublicOnboardingState: ObservableObject {
         case reminders, remindersDenied, empty, learnBranch
         case returning
         case studyMaterial
+        case lessonCheck
     }
     enum LessonArtifactState: Equatable {
         case idle, preparing, ready, failed
+    }
+    enum LessonCheckStage: Equatable {
+        case preview, loading, loadFailed
+        case attempt, resume, recording, text
+        case submitting, submitFailed
+        case restudying, authority
+        case confirming, confirmationFailed, held, recallReady, completeNoCards
+        case transfer, transferResume, transferRecording, transferText
+        case transferSubmitting, transferFailed, transferSubmitted, transferDebrief
     }
 
     @Published var step: Step
@@ -31,6 +41,14 @@ final class PublicOnboardingState: ObservableObject {
     @Published var lessonProgress: LessonProgress?
     @Published var lessonArtifactState: LessonArtifactState = .idle
     @Published var lessonExportURL: URL?
+    @Published var lessonPilotPreview: MaterialLessonPreview?
+    @Published var lessonCheckStage: LessonCheckStage = .preview
+    @Published var activeLessonCheck: LessonCheck?
+    @Published var lessonAuthority: MaterialTopicAuthority?
+    @Published var lessonCheckDraft = ""
+    @Published var completedLessonProposalIDs: Set<UUID> = []
+    @Published var lessonRecallNotBeforeAt: Date?
+    @Published var confirmedLessonCardIDs: [UUID] = []
     @Published private(set) var importStartedAt: Date?
     @Published private(set) var lastImportCheckedAt: Date?
 
@@ -38,8 +56,10 @@ final class PublicOnboardingState: ObservableObject {
     let founderClaimAvailable: Bool
     private var pollTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
+    private var lessonDraftSyncTask: Task<Void, Never>?
     private var pendingAfterSignIn: PendingAfterSignIn = .guide
     private var importGeneration = 0
+    private var debugLessonRoutePrepared = false
 
     init(
         api: DevmaxAPI = APIConfig.client,
@@ -58,11 +78,17 @@ final class PublicOnboardingState: ObservableObject {
             draft.intent = "already_studied"
             if draft.sourceType == "guide" { draft.sourceType = "article" }
         }
+        if step == .lessonCheck {
+            draft.importPath = "lesson"
+            draft.intent = "already_studied"
+            draft.sourceType = "article"
+        }
     }
 
     deinit {
         pollTask?.cancel()
         persistTask?.cancel()
+        lessonDraftSyncTask?.cancel()
     }
 
     var guideIsValid: Bool {
@@ -174,6 +200,16 @@ final class PublicOnboardingState: ObservableObject {
         lessonProgress = nil
         lessonArtifactState = .idle
         lessonExportURL = nil
+        lessonPilotPreview = nil
+        lessonCheckStage = .preview
+        activeLessonCheck = nil
+        lessonAuthority = nil
+        lessonCheckDraft = ""
+        completedLessonProposalIDs = []
+        lessonRecallNotBeforeAt = nil
+        confirmedLessonCardIDs = []
+        lessonDraftSyncTask?.cancel()
+        debugLessonRoutePrepared = false
         importStartedAt = nil
         lastImportCheckedAt = nil
         error = ""
@@ -444,8 +480,82 @@ final class PublicOnboardingState: ObservableObject {
             plan.preview = preview
             plan.previewLoad = plan.preview == nil ? .error : .ready
             step = .planPreview
+        } else if job.importPath == "lesson" {
+            await openLessonPilotPreview(sourceID: job.id)
         } else {
             step = .topics
+        }
+    }
+
+    var currentLessonTopicPreview: MaterialTopicPreview? {
+        if let proposalID = activeLessonCheck?.proposalId {
+            return lessonPilotPreview?.topics.first { $0.id == proposalID }
+        }
+        return lessonPilotPreview?.topics.first {
+            $0.isAvailable && !completedLessonProposalIDs.contains($0.id)
+        }
+    }
+
+    var remainingLessonTopicPreviews: [MaterialTopicPreview] {
+        (lessonPilotPreview?.topics ?? []).filter {
+            $0.isAvailable && !completedLessonProposalIDs.contains($0.id)
+        }
+    }
+
+    var displayedLessonTopicPreviews: [MaterialTopicPreview] {
+        (lessonPilotPreview?.topics ?? []).filter {
+            $0.hasTransferEntryPoint
+                || ($0.isAvailable && !completedLessonProposalIDs.contains($0.id))
+        }
+    }
+
+    /// Opens the pilot-only preview contract. A non-enrolled account may still
+    /// receive 404 during the additive rollout and remains on the legacy lesson
+    /// screen; an enrolled account never falls back after any other error.
+    func openLessonPilotPreview(sourceID: UUID? = nil) async {
+        guard !busy, let sourceID = sourceID ?? job?.id ?? draft.sourceID else { return }
+        let generation = importGeneration
+        lessonCheckStage = .loading
+        error = ""
+        busy = true
+        defer {
+            if importContextIsCurrent(generation: generation, sourceID: sourceID) {
+                busy = false
+            }
+        }
+        do {
+            let preview = try await api.markLessonReviewOpened(sourceID)
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            lessonPilotPreview = preview
+            lessonCheckStage = .preview
+            step = .lessonCheck
+        } catch APIError.pilotSourceNotAssigned {
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            lessonPilotPreview = nil
+            if let status = job?.status, ["confirmed", "superseded"].contains(status) {
+                step = .empty
+            } else {
+                step = .topics
+            }
+        } catch APIError.pilotUpgradeRequired(let minimumBuild) {
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            let suffix = minimumBuild.map { " Build \($0) or later is required." } ?? ""
+            error = "This pilot lesson needs a newer Devmax build.\(suffix)"
+            lessonCheckStage = .loadFailed
+            step = .lessonCheck
+        } catch {
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            self.error = "The lesson is safe, but its private concept preview couldn't open."
+            lessonCheckStage = .loadFailed
+            step = .lessonCheck
         }
     }
 
@@ -488,6 +598,394 @@ final class PublicOnboardingState: ObservableObject {
                 return
             }
             self.error = "Resolve the highlighted topics before creating review cards."
+        }
+    }
+
+    func beginLessonActivity(_ preview: MaterialTopicPreview) async {
+        guard !busy, preview.isAvailable else { return }
+        let generation = importGeneration
+        let sourceID = lessonPilotPreview?.id ?? job?.id ?? draft.sourceID
+        guard let sourceID else { return }
+        error = ""
+        lessonAuthority = nil
+        busy = true
+        lessonCheckStage = preview.formationQuestion == nil ? .restudying : .loading
+        defer {
+            if importContextIsCurrent(generation: generation, sourceID: sourceID) {
+                busy = false
+            }
+        }
+        do {
+            if preview.formationQuestion == nil {
+                let authority = try await api.startLessonRestudy(proposalID: preview.id)
+                guard importContextIsCurrent(
+                    generation: generation, sourceID: sourceID
+                ) else { return }
+                receiveLessonAuthority(authority)
+                return
+            }
+
+            let check = try await api.startFormationCheck(proposalID: preview.id)
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            activeLessonCheck = check
+            if check.status == .exposed {
+                let authority = try await api.reopenLessonAuthority(checkID: check.id)
+                guard importContextIsCurrent(
+                    generation: generation, sourceID: sourceID
+                ) else { return }
+                receiveLessonAuthority(authority)
+                return
+            }
+            let local = LessonCheckDraftStore.read(for: check.id)
+            lessonCheckDraft = local ?? check.draftText
+            if local == nil, !check.draftText.isEmpty {
+                LessonCheckDraftStore.save(check.draftText, for: check.id)
+            }
+            lessonCheckStage = lessonCheckDraft.isEmpty ? .attempt : .resume
+        } catch {
+            guard importContextIsCurrent(
+                generation: generation, sourceID: sourceID
+            ) else { return }
+            self.error = preview.formationQuestion == nil
+                ? "The source is safe, but restudy couldn't open."
+                : "The source-closed check couldn't open."
+            lessonCheckStage = .loadFailed
+        }
+    }
+
+    func updateLessonCheckDraft(_ text: String) {
+        lessonCheckDraft = text
+        guard let check = activeLessonCheck else { return }
+        LessonCheckDraftStore.save(text, for: check.id)
+        lessonDraftSyncTask?.cancel()
+        lessonDraftSyncTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            guard let self, self.activeLessonCheck?.id == check.id else { return }
+            do {
+                let saved = try await self.api.saveLessonCheckDraft(
+                    checkID: check.id, text: text
+                )
+                if self.activeLessonCheck?.id == saved.id {
+                    self.activeLessonCheck = saved
+                }
+            } catch {
+                // Disk is intentionally the immediate source of truth. A submit
+                // retries the full answer even when this cheap backup is offline.
+            }
+        }
+    }
+
+    func flushLessonCheckDraft() {
+        lessonDraftSyncTask?.cancel()
+        guard let check = activeLessonCheck else { return }
+        let text = lessonCheckDraft
+        LessonCheckDraftStore.save(text, for: check.id)
+        lessonDraftSyncTask = Task { [weak self] in
+            guard let self else { return }
+            _ = try? await self.api.saveLessonCheckDraft(checkID: check.id, text: text)
+        }
+    }
+
+    func discardLessonCheckDraft() {
+        lessonDraftSyncTask?.cancel()
+        if let check = activeLessonCheck {
+            LessonCheckDraftStore.clear(for: check.id)
+            Task { [api] in
+                _ = try? await api.saveLessonCheckDraft(checkID: check.id, text: "")
+            }
+        }
+        lessonCheckDraft = ""
+    }
+
+    func submitLessonAttempt() async {
+        guard !busy, let check = activeLessonCheck,
+              check.kind == .formation,
+              !lessonCheckDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        let text = lessonCheckDraft
+        LessonCheckDraftStore.save(text, for: check.id)
+        lessonDraftSyncTask?.cancel()
+        busy = true
+        lessonCheckStage = .submitting
+        error = ""
+        defer { busy = false }
+        do {
+            let authority = try await api.submitFormationCheck(
+                checkID: check.id, text: text
+            )
+            guard activeLessonCheck?.id == check.id else { return }
+            LessonCheckDraftStore.clear(for: check.id)
+            lessonCheckDraft = ""
+            receiveLessonAuthority(authority)
+        } catch {
+            guard activeLessonCheck?.id == check.id else { return }
+            self.error = "Couldn't check this explanation. Your words are safe on this phone."
+            lessonCheckStage = .submitFailed
+        }
+    }
+
+    func reopenCurrentLessonAuthority() async {
+        guard !busy, let check = activeLessonCheck else { return }
+        busy = true
+        lessonCheckStage = .loading
+        error = ""
+        defer { busy = false }
+        do {
+            receiveLessonAuthority(
+                try await api.reopenLessonAuthority(checkID: check.id)
+            )
+        } catch {
+            self.error = "The answer boundary is safe, but the source couldn't reopen."
+            lessonCheckStage = .loadFailed
+        }
+    }
+
+    private func receiveLessonAuthority(_ authority: MaterialTopicAuthority) {
+        lessonAuthority = authority
+        activeLessonCheck = authority.check
+        if let current = lessonRecallNotBeforeAt {
+            lessonRecallNotBeforeAt = max(current, authority.recallNotBeforeAt)
+        } else {
+            lessonRecallNotBeforeAt = authority.recallNotBeforeAt
+        }
+        lessonCheckStage = authority.check.kind == .transfer
+            ? .transferDebrief
+            : .authority
+    }
+
+    func acceptLessonAuthority() async {
+        guard !busy, let authority = lessonAuthority,
+              authority.check.kind == .formation
+        else { return }
+        selectedTopics.insert(authority.proposalId)
+        completedLessonProposalIDs.insert(authority.proposalId)
+        lessonDraftSyncTask?.cancel()
+        LessonCheckDraftStore.clear(for: authority.check.id)
+        lessonCheckDraft = ""
+        activeLessonCheck = nil
+        if remainingLessonTopicPreviews.isEmpty {
+            await confirmPilotLesson()
+        } else {
+            lessonAuthority = nil
+            lessonCheckStage = .preview
+        }
+    }
+
+    func excludeLessonProposal(_ proposalID: UUID) async {
+        guard !busy else { return }
+        busy = true
+        error = ""
+        defer { busy = false }
+        do {
+            _ = try await api.excludePilotLessonProposal(proposalID)
+            selectedTopics.remove(proposalID)
+            completedLessonProposalIDs.insert(proposalID)
+            if activeLessonCheck?.proposalId == proposalID,
+               let checkID = activeLessonCheck?.id {
+                clearCompletedLessonCheck(checkID)
+            }
+            if remainingLessonTopicPreviews.isEmpty {
+                await confirmPilotLesson()
+            } else {
+                lessonAuthority = nil
+                lessonCheckStage = .preview
+            }
+        } catch {
+            self.error = "That exclusion couldn't be saved. No card was created."
+        }
+    }
+
+    private func clearCompletedLessonCheck(_ checkID: UUID) {
+        lessonDraftSyncTask?.cancel()
+        LessonCheckDraftStore.clear(for: checkID)
+        lessonCheckDraft = ""
+        activeLessonCheck = nil
+        lessonAuthority = nil
+    }
+
+    private func confirmPilotLesson() async {
+        guard let sourceID = lessonPilotPreview?.id ?? job?.id ?? draft.sourceID else {
+            return
+        }
+        let wasBusy = busy
+        busy = true
+        defer { busy = wasBusy }
+        lessonCheckStage = .confirming
+        do {
+            let result = try await api.confirmMaterial(
+                sourceID, topics: Array(selectedTopics),
+                contentProvenance: lessonPilotPreview?.contentProvenance
+                    ?? draft.contentProvenance
+            )
+            confirmedLessonCardIDs = result.createdCardIds
+            lessonAuthority = nil
+            activeLessonCheck = nil
+            if selectedTopics.isEmpty {
+                lessonCheckStage = .completeNoCards
+            } else {
+                lessonCheckStage = lessonRecallNotBeforeAt.map { $0 <= Date() } == true
+                    ? .recallReady
+                    : .held
+            }
+        } catch {
+            self.error = "The formation work is safe, but these concepts couldn't be confirmed."
+            lessonCheckStage = lessonAuthority == nil ? .confirmationFailed : .authority
+        }
+    }
+
+    func retryPilotLessonConfirmation() async {
+        guard !busy else { return }
+        await confirmPilotLesson()
+    }
+
+    func beginTransferCheck(_ preview: MaterialTopicPreview) async {
+        guard !busy else { return }
+        busy = true
+        error = ""
+        lessonCheckStage = .loading
+        defer { busy = false }
+        do {
+            let check = try await api.startTransferCheck(proposalID: preview.id)
+            activeLessonCheck = check
+            let local = LessonCheckDraftStore.read(for: check.id)
+            lessonCheckDraft = local ?? check.draftText
+            if check.status == .submitted {
+                LessonCheckDraftStore.clear(for: check.id)
+                lessonCheckDraft = ""
+                lessonCheckStage = .transferSubmitted
+            } else {
+                lessonCheckStage = lessonCheckDraft.isEmpty ? .transfer : .transferResume
+            }
+        } catch {
+            self.error = "The research check isn't available yet."
+            lessonCheckStage = .loadFailed
+        }
+    }
+
+    func prepareLessonCheckDebugRoute(_ route: String) async {
+        guard route.hasPrefix("lesson-pilot-"), !debugLessonRoutePrepared else { return }
+        if job == nil, let source = try? await api.materialImports().first {
+            job = source
+            draft.sourceID = source.id
+        }
+        if lessonPilotPreview == nil {
+            await openLessonPilotPreview()
+        }
+        guard let preview = lessonPilotPreview?.topics.first else { return }
+        debugLessonRoutePrepared = true
+
+        switch route {
+        case "lesson-pilot-preview":
+            lessonCheckStage = .preview
+        case "lesson-pilot-attempt":
+            await beginLessonActivity(preview)
+            lessonCheckStage = .attempt
+        case "lesson-pilot-attempt-text":
+            await beginLessonActivity(preview)
+            updateLessonCheckDraft(
+                "IP can lose and reorder packets, so transport adds the guarantees the application needs."
+            )
+            lessonCheckStage = .text
+        case "lesson-pilot-resume":
+            await beginLessonActivity(preview)
+            updateLessonCheckDraft(
+                "IP finds a route between networks, but the delivery contract is only best effort, so"
+            )
+            lessonCheckStage = .resume
+        case "lesson-pilot-provider-failure":
+            await beginLessonActivity(preview)
+            updateLessonCheckDraft("IP is unreliable, so TCP makes it reliable.")
+            await submitLessonAttempt()
+        case "lesson-pilot-correction", "lesson-pilot-authority":
+            await beginLessonActivity(preview)
+            updateLessonCheckDraft("IP is unreliable, so TCP makes it reliable.")
+            await submitLessonAttempt()
+        case "lesson-pilot-restudy":
+            await beginLessonActivity(preview)
+        case "lesson-pilot-held", "lesson-pilot-recall-ready",
+             "lesson-pilot-confirm-failure":
+            await beginLessonActivity(preview)
+            if activeLessonCheck?.condition == .attemptFirst {
+                updateLessonCheckDraft(
+                    "IP has no delivery or ordering guarantee; transport adds the contract it needs."
+                )
+                await submitLessonAttempt()
+            }
+            await acceptLessonAuthority()
+            if route == "lesson-pilot-recall-ready" { lessonCheckStage = .recallReady }
+        case "lesson-pilot-no-cards":
+            await beginLessonActivity(preview)
+            if activeLessonCheck?.condition == .attemptFirst {
+                updateLessonCheckDraft("IP is unreliable, so TCP makes it reliable.")
+                await submitLessonAttempt()
+            }
+            await excludeLessonProposal(preview.id)
+        case "lesson-pilot-transfer":
+            await beginTransferCheck(preview)
+            lessonCheckStage = .transfer
+        case "lesson-pilot-transfer-text":
+            await beginTransferCheck(preview)
+            updateLessonCheckDraft(
+                "Sequencing, acknowledgements, retransmission, and deduplication must live above IP."
+            )
+            lessonCheckStage = .transferText
+        case "lesson-pilot-transfer-failure":
+            await beginTransferCheck(preview)
+            updateLessonCheckDraft("The transport layer supplies those guarantees.")
+            await submitLessonTransfer()
+        case "lesson-pilot-transfer-submitted", "lesson-pilot-transfer-debrief":
+            await beginTransferCheck(preview)
+            updateLessonCheckDraft(
+                "Transport supplies sequencing, acknowledgement, retransmission, and deduplication."
+            )
+            await submitLessonTransfer()
+            if route == "lesson-pilot-transfer-debrief" { await openTransferDebrief() }
+        default:
+            break
+        }
+    }
+
+    func submitLessonTransfer() async {
+        guard !busy, let check = activeLessonCheck,
+              check.kind == .transfer,
+              !lessonCheckDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        let text = lessonCheckDraft
+        LessonCheckDraftStore.save(text, for: check.id)
+        lessonDraftSyncTask?.cancel()
+        busy = true
+        lessonCheckStage = .transferSubmitting
+        error = ""
+        defer { busy = false }
+        do {
+            let saved = try await api.submitTransferCheck(checkID: check.id, text: text)
+            guard activeLessonCheck?.id == check.id else { return }
+            activeLessonCheck = saved
+            LessonCheckDraftStore.clear(for: check.id)
+            lessonCheckDraft = ""
+            lessonCheckStage = .transferSubmitted
+        } catch {
+            self.error = "Couldn't submit the research check. Your words are safe on this phone."
+            lessonCheckStage = .transferFailed
+        }
+    }
+
+    func openTransferDebrief() async {
+        guard !busy, let check = activeLessonCheck, check.kind == .transfer else { return }
+        busy = true
+        lessonCheckStage = .loading
+        error = ""
+        defer { busy = false }
+        do {
+            receiveLessonAuthority(
+                try await api.lessonTransferDebrief(checkID: check.id)
+            )
+        } catch {
+            self.error = "The response is locked, but its debrief couldn't open."
+            lessonCheckStage = .transferSubmitted
         }
     }
 
@@ -652,6 +1150,13 @@ final class PublicOnboardingState: ObservableObject {
         if ["pending", "processing"].contains(source.status) {
             importStartedAt = source.updatedAt
         }
+        if source.importPath == "lesson",
+           ["confirmed", "superseded"].contains(source.status) {
+            lessonCheckStage = .loading
+            step = .lessonCheck
+            Task { await openLessonPilotPreview(sourceID: source.id) }
+            return
+        }
         routeImportResult()
     }
 
@@ -677,6 +1182,7 @@ final class PublicOnboardingState: ObservableObject {
     func deleteMaterial(_ id: UUID) async {
         do {
             try await api.deleteMaterialImport(id)
+            LessonCheckDraftStore.clearAll()
             imports.removeAll { $0.id == id }
         } catch { self.error = "That study material couldn't be removed." }
     }
@@ -799,6 +1305,16 @@ final class PublicOnboardingState: ObservableObject {
         case "import-ready": .importReady
         case "topics", "topics-grouped", "needs-attention", "topic-edit",
              "lesson-concepts", "lesson-concept-expanded": .topics
+        case "lesson-pilot-preview", "lesson-pilot-attempt",
+             "lesson-pilot-attempt-text", "lesson-pilot-resume",
+             "lesson-pilot-provider-failure", "lesson-pilot-correction",
+             "lesson-pilot-authority", "lesson-pilot-restudy",
+             "lesson-pilot-confirm-failure",
+             "lesson-pilot-held", "lesson-pilot-recall-ready",
+             "lesson-pilot-no-cards",
+             "lesson-pilot-transfer", "lesson-pilot-transfer-text",
+             "lesson-pilot-transfer-failure", "lesson-pilot-transfer-submitted",
+             "lesson-pilot-transfer-debrief": .lessonCheck
         case "manual", "manual-anchor": .manual
         case "collections": .collections
         case "collection-detail": .collectionDetail

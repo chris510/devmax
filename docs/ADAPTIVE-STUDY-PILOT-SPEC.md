@@ -1,17 +1,18 @@
 # Adaptive study pilot specification
 
-**Status:** Product direction approved 2026-08-15. Implementation and participant
-launch are not complete.
+**Status:** Product direction approved 2026-08-15. The pilot implementation is
+complete behind explicit enrollment and the minimum-client-build gate;
+participant launch is not complete.
 
 This document owns the approved experiment for turning a bounded source into
 durable learning. It extends `PUBLIC-APP-SPEC.md` and amends the immediate-study
 and distillation steps in `ADAPTIVE-STUDY-MVP.md`. The existing scoring,
 scheduler, card-learning, consent, and Study Plan contracts remain authoritative.
 
-Until this target is implemented behind the pilot gate,
-`ADAPTIVE-STUDY-MVP.md` still describes runtime behavior. No Chrome extension,
-macOS helper, OCR path, full-page capture, or multi-source synthesis may ship on
-the strength of this approval.
+`ADAPTIVE-STUDY-MVP.md` still describes runtime behavior for nonpilot accounts;
+this specification owns only explicitly enrolled pilot sources. No Chrome
+extension, macOS helper, OCR path, full-page capture, or multi-source synthesis
+may ship on the strength of this approval.
 
 ## Decision
 
@@ -449,17 +450,24 @@ or session tables.
 Enrollment must be explicit and durable. Store a cohort, consent timestamp,
 withdrawal timestamp, randomization seed, and source-level assignment. The
 server owns assignment, counterbalancing, and prompt/model version snapshots.
-The client cannot select a favorable condition.
+The client cannot select a favorable condition. Enrollment accepts only a
+frozen, supported research-consent version and rejects a timestamp meaningfully
+later than server time. Runtime requests enforce the assignment's frozen
+minimum client build and fail closed when the running server contract cannot
+satisfy that snapshot.
 
 The pilot feature is available only to active enrolled accounts. A normal app
 account is not silently enrolled by installing a build.
 
 An assignment belongs to `(enrollment_id, source_lineage_id)`. Lock all six source
-chunks, intended target concepts, pairings, and conditions before processing or
-audit. The later binding from that intended target to its extracted proposal ID
-does not change condition. Concierge grounding reviewers remain blind to
-condition. Formation and restudy endpoints reject the opposite assigned
-condition; a new version in the same lineage cannot silently rerandomize it.
+chunks, non-content-bearing target positions (`position:1` through `position:3`),
+and pairings before processing or audit. Derive each condition and sequence from
+the enrollment randomization seed, frozen source lineages, and a versioned
+assignment algorithm; reject operator-provided values that do not match. The
+later binding from that intended position to its extracted proposal ID does not
+change condition. Concierge grounding reviewers remain blind to condition.
+Formation and restudy endpoints reject the opposite assigned condition; a new
+version in the same lineage cannot silently rerandomize it.
 
 After extraction and blinded audit, an idempotent assignment transaction binds
 the predeclared target to its proposal ID and marks every other clean proposal
@@ -546,7 +554,7 @@ Use a counterbalanced within-participant comparison:
 - never split closely related concepts from one source across conditions; and
 - counterbalance condition order across participants and days.
 
-Lock all six chunks, target concepts, pairings, and assignments before any
+Lock all six chunks, target positions, pairings, and assignments before any
 condition-specific screen is shown. Define a **retained participant** as someone
 who remains enrolled through the exit visit, regardless of how many assigned
 activities they complete. Report every funnel against both all enrolled and
