@@ -82,6 +82,8 @@ async def db() -> AsyncIterator[AsyncSession]:
                     "study_plan_card_proposals, "
                     "study_plan_card_proposal_acceptances, "
                     "study_plan_card_links, study_plan_duplications, "
+                    "lesson_checks, lesson_proposal_audits, "
+                    "study_pilot_assignments, study_pilot_enrollments, "
                     "material_topic_proposals, material_sources, llm_usage, "
                     "ai_consent_events, "
                     "auth_nonces, auth_sessions, apple_identities, users "

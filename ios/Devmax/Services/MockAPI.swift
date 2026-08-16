@@ -139,19 +139,34 @@ actor MockAPI: DevmaxAPI {
     let lessonArtifactDelay: Duration
     let materialImportFixture: MaterialImport?
     let retryMaterialImportFixture: MaterialImport?
+    let pilotFormationFailsOnce: Bool
+    let pilotTransferFailsOnce: Bool
+    let pilotConfirmationFailsOnce: Bool
+    let pilotSourceNotAssigned: Bool
+    let materialDeletionFails: Bool
 
     init(
         materialImportDelay: Duration = .zero,
         confirmMaterialDelay: Duration = .zero,
         lessonArtifactDelay: Duration = .zero,
         materialImportFixture: MaterialImport? = nil,
-        retryMaterialImportFixture: MaterialImport? = nil
+        retryMaterialImportFixture: MaterialImport? = nil,
+        pilotFormationFailsOnce: Bool = false,
+        pilotTransferFailsOnce: Bool = false,
+        pilotConfirmationFailsOnce: Bool = false,
+        pilotSourceNotAssigned: Bool = false,
+        materialDeletionFails: Bool = false
     ) {
         self.materialImportDelay = materialImportDelay
         self.confirmMaterialDelay = confirmMaterialDelay
         self.lessonArtifactDelay = lessonArtifactDelay
         self.materialImportFixture = materialImportFixture
         self.retryMaterialImportFixture = retryMaterialImportFixture
+        self.pilotFormationFailsOnce = pilotFormationFailsOnce
+        self.pilotTransferFailsOnce = pilotTransferFailsOnce
+        self.pilotConfirmationFailsOnce = pilotConfirmationFailsOnce
+        self.pilotSourceNotAssigned = pilotSourceNotAssigned
+        self.materialDeletionFails = materialDeletionFails
     }
 
     /// Only the forced-failure alternation reads this. It counts submits across
@@ -166,6 +181,11 @@ actor MockAPI: DevmaxAPI {
     var debriefSubmitAttempts = 0
     var debriefCheckAttempts = 0
     var practiceDebriefs: [UUID: PracticeDebrief] = [:]
+    var pilotLessonChecks: [UUID: LessonCheck] = [:]
+    var pilotLessonCheckByProposal: [String: UUID] = [:]
+    var pilotLessonSubmitAttempts = 0
+    var pilotConfirmationAttempts = 0
+    var confirmedMaterialSelections: [[UUID]] = []
     private var completions = 0
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.

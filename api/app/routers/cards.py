@@ -54,7 +54,7 @@ from app.services.cards import (
     days_since_review,
     due_label,
     effective_review_date,
-    learning_recall_available_at,
+    learning_exposure_boundary,
 )
 from app.services.scoring_contract import project_card_score, project_session_score
 
@@ -561,19 +561,12 @@ async def open_learning(
         source_label = source_title.strip()
 
     local_now = now_in(settings.timezone)
-    exposed_at = local_now.astimezone(UTC)
-    computed_gate = learning_recall_available_at(local_now)
-    existing_gate = card.recall_not_before_at
-    if existing_gate is not None:
-        existing_gate = (
-            existing_gate
-            if existing_gate.tzinfo
-            else existing_gate.replace(tzinfo=UTC)
-        ).astimezone(UTC)
-    card.last_learning_exposure_at = exposed_at
-    card.recall_not_before_at = max(
-        value for value in (existing_gate, computed_gate) if value is not None
+    exposed_at, recall_not_before_at = learning_exposure_boundary(
+        local_now,
+        existing_recall_not_before_at=card.recall_not_before_at,
     )
+    card.last_learning_exposure_at = exposed_at
+    card.recall_not_before_at = recall_not_before_at
     card.updated_at = exposed_at
     db.add(card)
     # Commit the gate before the response can reveal any answer authority.

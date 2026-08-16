@@ -36,6 +36,29 @@ def learning_recall_available_at(local_now: datetime) -> datetime:
     return max(next_midnight, now_utc + MIN_LEARNING_RECALL_DELAY)
 
 
+def learning_exposure_boundary(
+    local_now: datetime,
+    *,
+    existing_recall_not_before_at: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """Return one monotonic exposure instant and recall gate, both in UTC.
+
+    Every endpoint that reveals learning authority must use this calculation.
+    The exposure timestamp records the current disclosure while a pre-existing
+    later gate is preserved, so a replay can extend but never shorten the hold.
+    """
+    exposed_at = _as_utc(local_now)
+    computed_gate = learning_recall_available_at(local_now)
+    existing_gate = (
+        _as_utc(existing_recall_not_before_at)
+        if existing_recall_not_before_at is not None
+        else None
+    )
+    return exposed_at, max(
+        value for value in (existing_gate, computed_gate) if value is not None
+    )
+
+
 def recall_is_available(card: Card, at: datetime) -> bool:
     return (
         card.recall_not_before_at is None

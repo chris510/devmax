@@ -181,6 +181,134 @@ struct MaterialConfirmation: Codable, Equatable {
     let createdCardIds: [UUID]
 }
 
+// MARK: - Adaptive study pilot
+
+/// The only proposal representation the pilot may render before an exposure
+/// boundary exists. Deliberately contains no answer basis, excerpt, rubric, or
+/// generated correction.
+struct MaterialTopicPreview: Codable, Identifiable, Equatable {
+    let id: UUID
+    let position: Int
+    let sectionTitle: String
+    let topic: String
+    let formationQuestion: String?
+    let status: String
+    let issue: String
+    let formationState: String
+    let transferState: String
+
+    var isAvailable: Bool {
+        status == "clean" && formationState != "unavailable"
+    }
+
+    var isTransferAvailable: Bool { transferState == "available" }
+    var hasTransferEntryPoint: Bool {
+        transferState == "available" || transferState == "submitted"
+    }
+}
+
+/// Separate from `MaterialImport`: an enrolled account must not receive the
+/// authority-bearing legacy topic payload merely because the client hides it.
+struct MaterialLessonPreview: Codable, Equatable {
+    let id: UUID
+    let title: String
+    let kind: String
+    let sourceUrl: String
+    let contentProvenance: String
+    let status: String
+    let importPath: String
+    let intent: String
+    let cleanCount: Int
+    let attentionCount: Int
+    let error: String
+    let lessonGroundingRequired: Bool
+    let proposalsReadyAt: Date?
+    let reviewOpenedAt: Date?
+    let confirmedAt: Date?
+    let topics: [MaterialTopicPreview]
+}
+
+enum LessonCheckKind: String, Codable, Equatable {
+    case formation
+    case transfer
+}
+
+enum LessonCheckCondition: String, Codable, Equatable {
+    case attemptFirst = "attempt_first"
+    case restudy
+}
+
+enum LessonCheckStatus: String, Codable, Equatable {
+    case open
+    case submitted
+    case exposed
+}
+
+enum LessonCheckOutcome: String, Codable, CaseIterable, Equatable {
+    case accurateAccount = "accurate_account"
+    case missingMechanism = "missing_mechanism"
+    case misconception
+    case missingBoundary = "missing_boundary"
+    case insufficientEvidence = "insufficient_evidence"
+
+    var label: String {
+        switch self {
+        case .accurateAccount: "Accurate account"
+        case .missingMechanism: "Mechanism missing"
+        case .misconception: "Misconception"
+        case .missingBoundary: "Boundary missing"
+        case .insufficientEvidence: "Not enough evidence"
+        }
+    }
+}
+
+/// Proposal-owned, qualitative work. This is intentionally not a Session and
+/// carries no numeric score or scheduling result.
+struct LessonCheck: Codable, Identifiable, Equatable {
+    let id: UUID
+    let proposalId: UUID
+    let cardId: UUID?
+    let kind: LessonCheckKind
+    let condition: LessonCheckCondition?
+    let promptLevel: String
+    let promptVersion: String
+    let promptText: String
+    let status: LessonCheckStatus
+    let draftText: String
+    let qualitativeOutcome: LessonCheckOutcome?
+    let hasFeedback: Bool
+    let exposedAt: Date?
+    let recallNotBeforeAt: Date?
+    let availableAt: Date?
+    let startedAt: Date
+    let submittedAt: Date?
+    let updatedAt: Date
+
+    var isTransfer: Bool { kind == .transfer }
+}
+
+/// Authority is returned only by a POST that first commits (or monotonically
+/// extends) the server-owned exposure boundary. No GET response uses this type.
+struct MaterialTopicAuthority: Codable, Equatable {
+    let check: LessonCheck
+    let proposalId: UUID
+    let topic: String
+    let sectionTitle: String
+    let sourceTitle: String
+    let sourceUrl: String
+    let contentProvenance: String
+    let sourceExcerpt: String
+    let answerBasis: String
+    let canonicalQuestion: String
+    let answerRubric: [String: String]
+    let recallQuestions: [LessonRecallPrompt]
+    let feedback: String
+    let exposedAt: Date
+    let recallNotBeforeAt: Date
+    let confirmationTitle: String
+    let confirmationMessage: String
+}
+
 struct LessonConceptProgress: Codable, Identifiable, Equatable {
     var id: UUID { proposalId }
     let proposalId: UUID

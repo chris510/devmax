@@ -407,6 +407,34 @@ PROPOSAL_NEEDS_ATTENTION = "needs_attention"
 PROPOSAL_EXCLUDED = "excluded"
 PROPOSAL_CONFIRMED = "confirmed"
 
+LESSON_CHECK_FORMATION = "formation"
+LESSON_CHECK_TRANSFER = "transfer"
+
+LESSON_CONDITION_ATTEMPT_FIRST = "attempt_first"
+LESSON_CONDITION_RESTUDY = "restudy"
+
+LESSON_PROMPT_CANONICAL = "canonical"
+LESSON_PROMPT_APPLICATION = "application"
+LESSON_PROMPT_FAILURE_TRADEOFF = "failure_tradeoff"
+
+LESSON_CHECK_OPEN = "open"
+LESSON_CHECK_SUBMITTED = "submitted"
+LESSON_CHECK_EXPOSED = "exposed"
+
+LESSON_OUTCOME_ACCURATE_ACCOUNT = "accurate_account"
+LESSON_OUTCOME_MISSING_MECHANISM = "missing_mechanism"
+LESSON_OUTCOME_MISCONCEPTION = "misconception"
+LESSON_OUTCOME_MISSING_BOUNDARY = "missing_boundary"
+LESSON_OUTCOME_INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+PILOT_CONDITION_ATTEMPT_FIRST = LESSON_CONDITION_ATTEMPT_FIRST
+PILOT_CONDITION_RESTUDY = LESSON_CONDITION_RESTUDY
+
+PROPOSAL_AUDIT_PENDING = "pending"
+PROPOSAL_AUDIT_APPROVED = "approved"
+PROPOSAL_AUDIT_CORRECTED = "corrected"
+PROPOSAL_AUDIT_BLOCKED = "blocked"
+
 CONTENT_PROVENANCE_LEGACY_UNSPECIFIED = "legacy_unspecified"
 CONTENT_PROVENANCE_EXACT_SOURCE_EXCERPT = "exact_source_excerpt"
 CONTENT_PROVENANCE_LEARNER_NOTES = "learner_notes"
@@ -470,6 +498,11 @@ class MaterialSource(SQLModel, table=True):
     canonical_note_markdown: str = ""
     recall_export_markdown: str = ""
     distilled_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    # Privacy-safe pilot funnel timestamps. Each is server-owned; the client can
+    # request the idempotent review-opened transition but cannot supply a time.
+    proposals_ready_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    review_opened_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    confirmed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     error: str = ""
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
@@ -510,7 +543,188 @@ class MaterialTopicProposal(SQLModel, table=True):
     card_id: uuid.UUID | None = Field(
         default=None, foreign_key="cards.id", ondelete="SET NULL"
     )
+    # The proposal owns learning exposure until confirmation creates a Card.
+    # LessonCheck.exposed_at preserves the first condition exposure; these fields
+    # advance on every later authority replay and are the latest boundary copied
+    # to the card.
+    last_learning_exposure_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    recall_not_before_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class LessonCheck(SQLModel, table=True):
+    """A proposal-owned, unscored formation or transfer attempt.
+
+    This table is intentionally outside Session and SessionProbe. Nothing here
+    is numeric review history or scheduler input. Source deletion reaches it
+    through the proposal, while a confirmed Card can survive independently.
+    """
+
+    __tablename__ = "lesson_checks"
+    __table_args__ = (
+        Index("uq_lesson_checks_proposal_kind", "proposal_id", "kind", unique=True),
+        Index("ix_lesson_checks_user_status", "user_id", "status"),
+        Index("ix_lesson_checks_user_available", "user_id", "kind", "available_at"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    proposal_id: uuid.UUID = Field(
+        foreign_key="material_topic_proposals.id", ondelete="CASCADE"
+    )
+    card_id: uuid.UUID | None = Field(
+        default=None, foreign_key="cards.id", ondelete="SET NULL"
+    )
+    kind: str
+    condition: str | None = None
+    prompt_level: str
+    prompt_version: str
+    # Frozen provider/model/effort binding. Restudy can legitimately use an
+    # empty object because it makes no qualitative-evaluation provider call.
+    provider_route: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    source_candidate_id: str | None = None
+    prompt_text_snapshot: str
+    prompt_rubric_version: str = ""
+    prompt_reviewer_id: str | None = None
+    prompt_approved_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    status: str = LESSON_CHECK_OPEN
+    draft_text: str = ""
+    answer_text: str = ""
+    qualitative_outcome: str = ""
+    feedback: str = ""
+    # This is the check's first disclosure. Authority replays advance the
+    # proposal-level fields above without rewriting this experimental anchor.
+    exposed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    recall_not_before_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    available_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    started_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    submitted_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class LessonProposalAudit(SQLModel, table=True):
+    """Restricted pilot evidence for the untouched proposal and human review."""
+
+    __tablename__ = "lesson_proposal_audits"
+    __table_args__ = (
+        Index("uq_lesson_proposal_audits_proposal", "proposal_id", unique=True),
+        Index("ix_lesson_proposal_audits_source", "source_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    source_id: uuid.UUID = Field(foreign_key="material_sources.id", ondelete="CASCADE")
+    proposal_id: uuid.UUID = Field(
+        foreign_key="material_topic_proposals.id", ondelete="CASCADE"
+    )
+    extraction_route: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    extraction_prompt_version: str
+    grounding_gate_version: str
+    original_proposal_pack: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    original_grounding_findings: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    reviewer_id: str = ""
+    reviewer_decision: str = PROPOSAL_AUDIT_PENDING
+    reviewer_correction: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    reviewed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPilotEnrollment(SQLModel, table=True):
+    __tablename__ = "study_pilot_enrollments"
+    __table_args__ = (
+        Index("uq_study_pilot_enrollments_user_cohort", "user_id", "cohort", unique=True),
+        Index(
+            "uq_study_pilot_enrollments_active_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("withdrawn_at IS NULL"),
+            sqlite_where=text("withdrawn_at IS NULL"),
+        ),
+        Index(
+            "uq_study_pilot_enrollments_randomization_seed",
+            "randomization_seed",
+            unique=True,
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE")
+    cohort: str
+    consent_version: str
+    consented_at: datetime = Field(sa_type=TZ_DATETIME)
+    withdrawn_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    randomization_seed: str
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class StudyPilotAssignment(SQLModel, table=True):
+    """One immutable condition assignment for a source lineage in the pilot."""
+
+    __tablename__ = "study_pilot_assignments"
+    __table_args__ = (
+        Index(
+            "uq_study_pilot_assignments_enrollment_lineage",
+            "enrollment_id",
+            "source_lineage_id",
+            unique=True,
+        ),
+        Index(
+            "uq_study_pilot_assignments_enrollment_sequence",
+            "enrollment_id",
+            "sequence_index",
+            unique=True,
+        ),
+        Index(
+            "uq_study_pilot_assignments_pair_condition",
+            "enrollment_id",
+            "pair_index",
+            "condition",
+            unique=True,
+        ),
+        Index(
+            "uq_study_pilot_assignments_target_proposal",
+            "target_proposal_id",
+            unique=True,
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    enrollment_id: uuid.UUID = Field(
+        foreign_key="study_pilot_enrollments.id", ondelete="CASCADE"
+    )
+    source_lineage_id: uuid.UUID
+    # Keep the immutable lineage assignment after an explicit source deletion;
+    # the content-bearing source/proposal links are cleared independently.
+    source_id: uuid.UUID | None = Field(
+        default=None, foreign_key="material_sources.id", ondelete="SET NULL"
+    )
+    pair_index: int
+    sequence_index: int
+    condition: str
+    # Content-free position key only (position:1 through position:3). Topic text
+    # must not survive after the content-bearing source is deleted.
+    intended_target: str
+    target_proposal_id: uuid.UUID | None = Field(
+        default=None, foreign_key="material_topic_proposals.id", ondelete="SET NULL"
+    )
+    # Cohort-frozen extraction, grounding, formation, and transfer route/prompt
+    # versions. This is data, not a general experimentation framework.
+    version_snapshot: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON_TYPE, nullable=False)
+    )
+    assigned_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+    bound_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 

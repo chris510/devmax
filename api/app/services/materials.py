@@ -27,11 +27,15 @@ from app.models import (
     SOURCE_PROCESSING,
     SOURCE_READY,
     SOURCE_SUPERSEDED,
+    LessonProposalAudit,
     MaterialSource,
     MaterialTopicProposal,
     Settings,
+    StudyPilotAssignment,
+    StudyPilotEnrollment,
     StudyPlanGuideDraft,
 )
+from app.pilot_contract import pilot_consent_is_valid
 from app.services import guide_import, llm, study_plan_import, usage
 from app.services import study_plan as study_plan_service
 from app.services.card_lifecycle import Grounding, GroundingError, clean_rubric
@@ -46,6 +50,7 @@ _OPEN_QUESTION_PREFIXES = tuple(
 )
 LESSON_GROUNDING_GATE_VERSION = 1
 LESSON_GROUNDING_ISSUE_PREFIX = "Source grounding could not verify:"
+PILOT_LESSON_IMPORT_OPERATION = "lesson_pilot_import"
 
 
 def _is_open_question(value: str) -> bool:
@@ -141,6 +146,34 @@ def _guide_authorizer(
     config = get_settings()
 
     async def require_live_claim(boundary_db: AsyncSession) -> None:
+        if operation == PILOT_LESSON_IMPORT_OPERATION:
+            enrollment = (
+                await boundary_db.exec(
+                    select(StudyPilotEnrollment)
+                    .where(
+                        StudyPilotEnrollment.user_id == user_id,
+                        StudyPilotEnrollment.withdrawn_at.is_(None),
+                    )
+                    .with_for_update()
+                )
+            ).first()
+            if enrollment is None:
+                raise HTTPException(status_code=409, detail="pilot enrollment inactive")
+            if not pilot_consent_is_valid(
+                enrollment.consent_version,
+                enrollment.consented_at,
+            ):
+                raise HTTPException(status_code=409, detail="pilot consent invalid")
+            assignment = (
+                await boundary_db.exec(
+                    select(StudyPilotAssignment.id).where(
+                        StudyPilotAssignment.enrollment_id == enrollment.id,
+                        StudyPilotAssignment.source_id == source_id,
+                    )
+                )
+            ).first()
+            if assignment is None:
+                raise HTTPException(status_code=409, detail="pilot assignment missing")
         source = (
             await boundary_db.exec(
                 select(MaterialSource.id)
@@ -317,7 +350,13 @@ async def process_import(source_id: uuid.UUID) -> bool:
                 )
             source.processing_run_id = None
             source.processing_heartbeat_at = None
-            source.updated_at = _now()
+            completed_at = _now()
+            if (
+                source.status in {SOURCE_READY, SOURCE_NEEDS_ATTENTION}
+                and source.proposals_ready_at is None
+            ):
+                source.proposals_ready_at = completed_at
+            source.updated_at = completed_at
             db.add(source)
             await db.commit()
             return True
@@ -492,6 +531,7 @@ async def _process_topics(
 async def _process_lesson(
     db: AsyncSession, source: MaterialSource, run_id: uuid.UUID
 ) -> MaterialSource:
+    pilot_assigned = await _pilot_audit_is_authorized(db, source)
     concepts = await llm.extract_lesson(
         title=source.title,
         source_text=source.source_text,
@@ -503,9 +543,12 @@ async def _process_lesson(
             source.id,
             run_id,
             model=get_settings().card_proposal_model,
+            operation=(
+                PILOT_LESSON_IMPORT_OPERATION if pilot_assigned else "guide_import"
+            ),
         ),
     )
-    concepts, grounding_issues = await _ground_lesson_concepts(
+    concepts, grounding_issues, audit_evidence = await _ground_lesson_concepts(
         db, source, run_id, concepts
     )
     source = await _lock_result_claim(
@@ -519,6 +562,11 @@ async def _process_lesson(
         source,
         concepts,
         grounding_issues=grounding_issues,
+        audit_evidence=(
+            audit_evidence
+            if await _pilot_audit_is_authorized(db, source)
+            else None
+        ),
     )
     source.status = SOURCE_NEEDS_ATTENTION if attention else SOURCE_READY
     source.result_summary = {
@@ -533,12 +581,43 @@ async def _process_lesson(
     return source
 
 
+async def _pilot_audit_is_authorized(
+    db: AsyncSession, source: MaterialSource
+) -> bool:
+    """Research-only proposal evidence requires active consent and preassignment."""
+    enrollment = (
+        await db.exec(
+            select(StudyPilotEnrollment).where(
+                StudyPilotEnrollment.user_id == source.user_id,
+                StudyPilotEnrollment.withdrawn_at.is_(None),
+            )
+        )
+    ).first()
+    if enrollment is None:
+        return False
+    if not pilot_consent_is_valid(
+        enrollment.consent_version,
+        enrollment.consented_at,
+    ):
+        return False
+    assignment = (
+        await db.exec(
+            select(StudyPilotAssignment.id).where(
+                StudyPilotAssignment.enrollment_id == enrollment.id,
+                StudyPilotAssignment.source_lineage_id == source.lineage_id,
+                StudyPilotAssignment.source_id == source.id,
+            )
+        )
+    ).first()
+    return assignment is not None
+
+
 def _validated_lesson_concepts(
     source: MaterialSource, concepts: list[dict]
 ) -> list[dict]:
     """Fail the extraction atomically unless every concept is source-grounded."""
-    if not 1 <= len(concepts) <= 7:
-        raise llm.LLMError("lesson extraction must return between 1 and 7 concepts")
+    if not 1 <= len(concepts) <= 3:
+        raise llm.LLMError("lesson extraction must return between 1 and 3 concepts")
 
     validated: list[dict] = []
     normalized_topics: set[str] = set()
@@ -797,8 +876,9 @@ async def _ground_lesson_concepts(
     source: MaterialSource,
     run_id: uuid.UUID,
     concepts: list[dict],
-) -> tuple[list[dict], dict[int, str]]:
+) -> tuple[list[dict], dict[int, str], list[dict[str, object]]]:
     """Verify once, then allow at most one repair-and-reverify pass."""
+    untouched = deepcopy(concepts)
     original = _validated_lesson_concepts(source, concepts)
     first_findings = await llm.verify_lesson_grounding(
         source_text=source.source_text,
@@ -815,6 +895,17 @@ async def _ground_lesson_concepts(
     first_review = _validated_lesson_grounding(
         source, original, first_findings
     )
+    audit_evidence = [
+        {
+            "original_proposal_pack": deepcopy(untouched[index - 1]),
+            "original_grounding_findings": [
+                deepcopy(finding)
+                for finding in first_findings
+                if finding.get("concept_index") == index
+            ],
+        }
+        for index in range(1, len(original) + 1)
+    ]
     first_unsupported = _unsupported_grounding(first_review)
     repairable = {
         concept_index
@@ -822,7 +913,7 @@ async def _ground_lesson_concepts(
         if all(finding["repair"] for finding in findings)
     }
     if not repairable:
-        return original, _grounding_issues(first_review)
+        return original, _grounding_issues(first_review), audit_evidence
 
     repaired = deepcopy(original)
     for concept_index in repairable:
@@ -837,7 +928,7 @@ async def _ground_lesson_concepts(
     except llm.LLMError:
         # A structurally invalid repair is advisory only. Keep the original
         # concepts review-only rather than failing or trusting a partial change.
-        return original, _grounding_issues(first_review)
+        return original, _grounding_issues(first_review), audit_evidence
 
     second_findings = await llm.verify_lesson_grounding(
         source_text=source.source_text,
@@ -875,7 +966,7 @@ async def _ground_lesson_concepts(
         # originally extracted pack reviewable; never persist text that the
         # independent verifier just rejected.
         accepted[concept_index - 1] = deepcopy(original[concept_index - 1])
-    return accepted, issues
+    return accepted, issues, audit_evidence
 
 
 async def _store_lesson_proposals(
@@ -884,6 +975,7 @@ async def _store_lesson_proposals(
     concepts: list[dict],
     *,
     grounding_issues: dict[int, str] | None = None,
+    audit_evidence: list[dict[str, object]] | None = None,
 ) -> tuple[int, int, dict[str, int]]:
     """Validate the complete concept pack, then replace its durable preview."""
     validated = _validated_lesson_concepts(source, concepts)
@@ -928,12 +1020,41 @@ async def _store_lesson_proposals(
     )
     for row in rows:
         db.add(row)
+    if audit_evidence is not None:
+        if len(audit_evidence) != len(rows):
+            raise llm.LLMError("lesson audit evidence did not match the proposal pack")
+        await db.flush()
+        settings = get_settings()
+        for row, evidence in zip(rows, audit_evidence, strict=True):
+            db.add(
+                LessonProposalAudit(
+                    source_id=source.id,
+                    proposal_id=row.id,
+                    extraction_route={
+                        "provider": "anthropic",
+                        "model": settings.card_proposal_model,
+                        "effort": settings.card_proposal_effort,
+                    },
+                    extraction_prompt_version=llm.LESSON_EXTRACTION_PROMPT_VERSION,
+                    grounding_gate_version=str(LESSON_GROUNDING_GATE_VERSION),
+                    original_proposal_pack=deepcopy(
+                        evidence["original_proposal_pack"]
+                    ),
+                    original_grounding_findings=deepcopy(
+                        evidence["original_grounding_findings"]
+                    ),
+                )
+            )
     return clean, attention, comparison
 
 
 async def confirm_source_version(db, source: MaterialSource, user_id: uuid.UUID) -> None:
     """Confirm one source and supersede its owned predecessor, if any."""
     source.status = SOURCE_CONFIRMED
+    confirmed_at = _now()
+    if source.confirmed_at is None:
+        source.confirmed_at = confirmed_at
+    source.updated_at = confirmed_at
     db.add(source)
     if source.previous_version_id:
         previous = await db.get(MaterialSource, source.previous_version_id)

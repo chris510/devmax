@@ -394,4 +394,128 @@ final class WireFormatTests: XCTestCase {
         XCTAssertEqual(week.plannedMinutes, 1_200)
         XCTAssertEqual(week.capacityMinutes, 1_200)
     }
+
+    func testPilotPreviewDecodesWithoutAnyAnswerAuthority() throws {
+        let data = Data(#"""
+        {"id":"00000000-0000-0000-0000-000000000901",
+         "title":"Networking 101","kind":"article",
+         "source_url":"https://example.com/networking",
+         "content_provenance":"exact_source_excerpt","status":"ready",
+         "import_path":"lesson","intent":"already_studied",
+         "clean_count":1,"attention_count":0,"error":"",
+         "lesson_grounding_required":false,
+         "proposals_ready_at":"2026-08-15T16:02:00.123456Z",
+         "review_opened_at":"2026-08-15T16:04:00Z","confirmed_at":null,
+         "topics":[{"id":"00000000-0000-0000-0000-000000000902",
+           "position":1,"section_title":"Network layer",
+           "topic":"Network layer best-effort delivery",
+           "formation_question":"How does best-effort IP shape transport?",
+           "status":"clean","issue":"","formation_state":"not_started",
+           "transfer_state":"locked"}]}
+        """#.utf8)
+
+        let preview = try LiveAPI.decoder.decode(MaterialLessonPreview.self, from: data)
+
+        XCTAssertEqual(preview.topics.count, 1)
+        XCTAssertTrue(preview.topics[0].isAvailable)
+        XCTAssertEqual(preview.topics[0].transferState, "locked")
+        XCTAssertFalse(preview.topics[0].hasTransferEntryPoint)
+        XCTAssertEqual(preview.topics[0].formationQuestion, "How does best-effort IP shape transport?")
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let topics = try XCTUnwrap(object["topics"] as? [[String: Any]])
+        for forbidden in [
+            "answer_anchor", "source_excerpt", "answer_basis", "answer_rubric",
+            "recall_questions", "feedback", "canonical_question"
+        ] {
+            XCTAssertNil(topics[0][forbidden], "preview leaked \(forbidden)")
+        }
+    }
+
+    func testLessonCheckGetShapeDecodesWithoutCorrectionOrAuthority() throws {
+        let data = Data(#"""
+        {"id":"00000000-0000-0000-0000-000000000903",
+         "proposal_id":"00000000-0000-0000-0000-000000000902",
+         "card_id":null,"kind":"formation","condition":"attempt_first",
+         "prompt_level":"canonical","prompt_version":"formation-v1",
+         "prompt_text":"How does best-effort IP shape transport?","status":"open",
+         "draft_text":"IP routes packets","qualitative_outcome":null,
+         "has_feedback":false,"exposed_at":null,"recall_not_before_at":null,
+         "available_at":null,"started_at":"2026-08-15T16:05:00Z",
+         "submitted_at":null,"updated_at":"2026-08-15T16:05:01.012345Z"}
+        """#.utf8)
+
+        let check = try LiveAPI.decoder.decode(LessonCheck.self, from: data)
+
+        XCTAssertEqual(check.kind, .formation)
+        XCTAssertEqual(check.condition, .attemptFirst)
+        XCTAssertEqual(check.draftText, "IP routes packets")
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        for forbidden in [
+            "feedback", "source_excerpt", "answer_basis", "answer_rubric",
+            "recall_questions", "score"
+        ] {
+            XCTAssertNil(object[forbidden], "GET check leaked \(forbidden)")
+        }
+    }
+
+    func testAuthorityWriteResponseDecodesQualitativeFormation() throws {
+        let data = Data(#"""
+        {"check":{"id":"00000000-0000-0000-0000-000000000903",
+          "proposal_id":"00000000-0000-0000-0000-000000000902",
+          "card_id":null,"kind":"formation","condition":"attempt_first",
+          "prompt_level":"canonical","prompt_version":"formation-v1",
+          "prompt_text":"How does best-effort IP shape transport?","status":"exposed",
+          "draft_text":"","qualitative_outcome":"missing_mechanism",
+          "has_feedback":true,"exposed_at":"2026-08-15T16:06:00Z",
+          "recall_not_before_at":"2026-08-16T07:00:00Z","available_at":null,
+          "started_at":"2026-08-15T16:05:00Z","submitted_at":"2026-08-15T16:06:00Z",
+          "updated_at":"2026-08-15T16:06:00Z"},
+         "proposal_id":"00000000-0000-0000-0000-000000000902",
+         "topic":"Network layer best-effort delivery","section_title":"Network layer",
+         "source_title":"Networking 101","source_url":"https://example.com/networking",
+         "content_provenance":"exact_source_excerpt",
+         "source_excerpt":"IP offers best-effort packet delivery.",
+         "answer_basis":"Transport adds the guarantees an application needs.",
+         "canonical_question":"How does best-effort IP shape transport?",
+         "answer_rubric":{"mechanism":"Name loss, reordering, and duplication."},
+         "recall_questions":[{"level":"mechanism","question":"Where do guarantees live?"}],
+         "feedback":"Name the missing delivery mechanism.",
+         "exposed_at":"2026-08-15T16:06:00Z",
+         "recall_not_before_at":"2026-08-16T07:00:00Z",
+         "confirmation_title":"Approve this grounded concept?",
+         "confirmation_message":"Approval creates a held Recall card."}
+        """#.utf8)
+
+        let authority = try LiveAPI.decoder.decode(MaterialTopicAuthority.self, from: data)
+
+        XCTAssertEqual(authority.check.qualitativeOutcome, .missingMechanism)
+        XCTAssertTrue(authority.check.hasFeedback)
+        XCTAssertEqual(authority.answerRubric["mechanism"], "Name loss, reordering, and duplication.")
+        XCTAssertEqual(authority.recallQuestions.map(\.level), ["mechanism"])
+    }
+
+    func testEnrolledPilotPollingStillDecodesTheLegacyImportShapeWithEmptyTopics() throws {
+        let data = Data(#"""
+        {"id":"00000000-0000-0000-0000-000000000901",
+         "title":"Networking 101","kind":"article",
+         "source_url":"https://example.com/networking",
+         "content_provenance":"exact_source_excerpt","version":1,"status":"ready",
+         "import_path":"lesson","intent":"already_studied","original_filename":"",
+         "character_count":876,"clean_count":1,"attention_count":0,"error":"",
+         "plan_draft_id":null,"comparison":{},"topics":[],
+         "lesson_grounding_required":false,"artifacts_ready":false,"distilled_at":null,
+         "created_at":"2026-08-15T16:00:00Z","updated_at":"2026-08-15T16:02:00Z"}
+        """#.utf8)
+
+        let value = try LiveAPI.decoder.decode(MaterialImport.self, from: data)
+
+        XCTAssertEqual(value.status, "ready")
+        XCTAssertEqual(value.cleanCount, 1)
+        XCTAssertTrue(value.topics.isEmpty)
+        XCTAssertEqual(value.importPath, "lesson")
+    }
 }

@@ -537,6 +537,7 @@ final class AuthState: ObservableObject {
         await client.store.clear()
         GuideDraftStore.clear()
         PublicSetupStore.clear()
+        LessonCheckDraftStore.clearAll()
         profile = nil
         consentInterventionRequested = false
         status = .signedOut
