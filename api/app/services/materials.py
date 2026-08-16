@@ -603,8 +603,17 @@ async def _process_lesson(
             ),
         ),
     )
+    evidence_transport_version = (
+        llm.LESSON_LITERAL_EVIDENCE_TRANSPORT_VERSION
+        if pilot_assigned
+        else llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+    )
     concepts, grounding_issues, audit_evidence = await _ground_lesson_concepts(
-        db, source, run_id, concepts
+        db,
+        source,
+        run_id,
+        concepts,
+        evidence_transport_version=evidence_transport_version,
     )
     source = await _lock_result_claim(
         db,
@@ -632,6 +641,7 @@ async def _process_lesson(
         "subject": source.title,
         "comparison": comparison,
         "grounding_gate_version": LESSON_GROUNDING_GATE_VERSION,
+        "grounding_evidence_transport_version": evidence_transport_version,
     }
     return source
 
@@ -785,13 +795,31 @@ def _validated_lesson_grounding(
     source: MaterialSource,
     concepts: list[dict],
     findings: list[dict],
+    *,
+    evidence_transport_version: str = (
+        llm.LESSON_LITERAL_EVIDENCE_TRANSPORT_VERSION
+    ),
 ) -> dict[tuple[int, str], dict]:
-    """Require one literal-evidence verdict for every user-visible field."""
+    """Require one transport-bound verdict for every user-visible field."""
     expected = {
         (concept_index, field)
         for concept_index in range(1, len(concepts) + 1)
         for field in llm.LESSON_GROUNDING_FIELDS
     }
+    if evidence_transport_version == llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION:
+        catalog = llm.lesson_evidence_catalog(concepts)
+        issued_by_concept = {
+            entry["concept_index"]: {
+                span["span_id"]: span["text"] for span in entry["spans"]
+            }
+            for entry in catalog
+        }
+    elif evidence_transport_version == llm.LESSON_LITERAL_EVIDENCE_TRANSPORT_VERSION:
+        issued_by_concept = {}
+    else:
+        raise llm.LLMError(
+            f"unknown lesson grounding evidence transport: {evidence_transport_version}"
+        )
     validated: dict[tuple[int, str], dict] = {}
     for finding_index, finding in enumerate(findings, 1):
         if not isinstance(finding, dict):
@@ -817,7 +845,6 @@ def _validated_lesson_grounding(
         verdict = finding.get("verdict")
         reason = finding.get("reason")
         repair = finding.get("repair")
-        spans = finding.get("evidence_spans")
         if verdict not in llm.LESSON_GROUNDING_VERDICTS:
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} has an invalid verdict"
@@ -836,9 +863,6 @@ def _validated_lesson_grounding(
             or len(reason) > 800
             or not isinstance(repair, str)
             or len(repair) > 2000
-            or not isinstance(spans, list)
-            or len(spans) > 4
-            or sum(len(span) for span in spans if isinstance(span, str)) > 1200
         ):
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} has invalid evidence"
@@ -847,28 +871,78 @@ def _validated_lesson_grounding(
             raise llm.LLMError(
                 f"lesson grounding finding {finding_index} repairs a passing field"
             )
-        if verdict != "unsupported" and not spans:
-            raise llm.LLMError(
-                f"lesson grounding finding {finding_index} has no supporting span"
-            )
-
-        excerpt = concepts[concept_index - 1]["source_excerpt"]
-        for span in spans:
+        if evidence_transport_version == llm.LESSON_LITERAL_EVIDENCE_TRANSPORT_VERSION:
+            spans = finding.get("evidence_spans")
             if (
-                not isinstance(span, str)
-                or not span.strip()
-                or len(span) > 500
-                or span not in source.source_text
-                or span not in excerpt
+                not isinstance(spans, list)
+                or len(spans) > 4
+                or sum(
+                    len(span) for span in spans if isinstance(span, str)
+                )
+                > 1200
             ):
                 raise llm.LLMError(
-                    f"lesson grounding finding {finding_index} has a non-literal span"
+                    f"lesson grounding finding {finding_index} has invalid evidence"
                 )
+            if verdict != "unsupported" and not spans:
+                raise llm.LLMError(
+                    f"lesson grounding finding {finding_index} has no supporting span"
+                )
+            excerpt = concepts[concept_index - 1]["source_excerpt"]
+            for span in spans:
+                if (
+                    not isinstance(span, str)
+                    or not span.strip()
+                    or len(span) > 500
+                    or span not in source.source_text
+                    or span not in excerpt
+                ):
+                    raise llm.LLMError(
+                        f"lesson grounding finding {finding_index} has a non-literal span"
+                    )
+            evidence = {"evidence_spans": list(spans)}
+        else:
+            span_ids = finding.get("evidence_span_ids")
+            if (
+                "evidence_spans" in finding
+                or not isinstance(span_ids, list)
+                or len(span_ids) > 4
+                or any(
+                    not isinstance(span_id, str) or len(span_id) > 100
+                    for span_id in span_ids
+                )
+                or len(span_ids) != len(dict.fromkeys(span_ids))
+            ):
+                raise llm.LLMError(
+                    f"lesson grounding finding {finding_index} has invalid evidence"
+                )
+            if verdict != "unsupported" and not span_ids:
+                raise llm.LLMError(
+                    f"lesson grounding finding {finding_index} has no supporting span"
+                )
+            issued = issued_by_concept[concept_index]
+            if any(
+                span_id not in issued or not issued[span_id].strip()
+                for span_id in span_ids
+            ):
+                raise llm.LLMError(
+                    f"lesson grounding finding {finding_index} has an unissued "
+                    "evidence span ID"
+                )
+            selected = set(span_ids)
+            canonical_span_ids = [
+                span_id for span_id in issued if span_id in selected
+            ]
+            if sum(len(issued[span_id]) for span_id in canonical_span_ids) > 1200:
+                raise llm.LLMError(
+                    f"lesson grounding finding {finding_index} has invalid evidence"
+                )
+            evidence = {"evidence_span_ids": canonical_span_ids}
         validated[key] = {
             "concept_index": concept_index,
             "field": field,
             "verdict": verdict,
-            "evidence_spans": list(spans),
+            **evidence,
             "reason": reason.strip(),
             "repair": repair.strip(),
         }
@@ -931,6 +1005,8 @@ async def _ground_lesson_concepts(
     source: MaterialSource,
     run_id: uuid.UUID,
     concepts: list[dict],
+    *,
+    evidence_transport_version: str,
 ) -> tuple[list[dict], dict[int, str], list[dict[str, object]]]:
     """Verify once, then allow at most one repair-and-reverify pass."""
     untouched = deepcopy(concepts)
@@ -946,9 +1022,13 @@ async def _ground_lesson_concepts(
             model=get_settings().card_proposal_model,
             operation="lesson_grounding",
         ),
+        evidence_transport_version=evidence_transport_version,
     )
     first_review = _validated_lesson_grounding(
-        source, original, first_findings
+        source,
+        original,
+        first_findings,
+        evidence_transport_version=evidence_transport_version,
     )
     audit_evidence = [
         {
@@ -996,8 +1076,14 @@ async def _ground_lesson_concepts(
             model=get_settings().card_proposal_model,
             operation="lesson_grounding_recheck",
         ),
+        evidence_transport_version=evidence_transport_version,
     )
-    second_review = _validated_lesson_grounding(source, repaired, second_findings)
+    second_review = _validated_lesson_grounding(
+        source,
+        repaired,
+        second_findings,
+        evidence_transport_version=evidence_transport_version,
+    )
     second_unsupported = _unsupported_grounding(second_review)
     issues = {
         concept_index: _grounding_issue(findings)
