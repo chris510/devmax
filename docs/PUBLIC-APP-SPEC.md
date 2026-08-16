@@ -113,6 +113,14 @@ Plan intent is required for the first path:
 - **Learn and practice over time.** A topic becomes eligible for conversational
   review only after the user completes the relevant lesson or study item.
 
+Focused adaptive lessons have a stricter approved target in
+`ADAPTIVE-STUDY-PILOT-SPEC.md`. A just-read source or newly revealed answer
+authority is fresh learning, not evidence for **already studied**: immediate
+formation is unscored, disclosure creates a recall hold, and only the later
+closed-book session may move SM-2 or qualify distillation. The shipping first
+pass remains documented in `ADAPTIVE-STUDY-MVP.md` until that target is
+implemented behind its pilot gate.
+
 If the requested guide does not fit the duration and capacity, Devmax never
 silently compresses, omits, or deprioritizes material. It shows the honest
 required workload and asks the user to increase weekly capacity, extend the

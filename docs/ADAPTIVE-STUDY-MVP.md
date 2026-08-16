@@ -1,5 +1,12 @@
 # Adaptive lesson MVP
 
+> **Runtime record:** This document describes the shipping first pass. The
+> product direction approved on 2026-08-15 is specified in
+> `ADAPTIVE-STUDY-PILOT-SPEC.md`: immediate lesson formation becomes unscored,
+> answer disclosure creates a recall hold, and only delayed closed-book Recall
+> may move SM-2 or qualify distillation. Do not widen capture to a browser or Mac
+> surface until that pilot reaches its declared gate.
+
 Devmax can turn source text you just read into a short, source-grounded recall session.
 The feature extends the existing material, card, session, mastery, and SM-2 domains; it does
 not introduce a second lesson scheduler or a second grading path.

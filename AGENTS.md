@@ -31,6 +31,7 @@ delivered to that device. `docs/RUNBOOK.md` is the reproduction and operations p
 | `docs/STUDY-PLAN-SPEC.md` | Study Plan, end to end. Extends `spec.md` rather than amending it; `design_handoff_study_plan/` is its design source (V3.4 owns behaviour, V3.5 owns presentation). |
 | `docs/PUBLIC-APP-SPEC.md` | Accounts, authentication, per-user ownership, onboarding, public guide ingestion, and subject-agnostic vocabulary. Approved for implementation 2026-08-07. |
 | `docs/SCORING-CONTRACT-V2-SPEC.md` | Approved target for Recall-only numeric scoring, qualitative coaching, historical compatibility, and the staged migration. V1 remains the runtime contract until its activation gate is complete. |
+| `docs/ADAPTIVE-STUDY-PILOT-SPEC.md` | Approved 2026-08-15 product target and three-week experiment for bounded sources, unscored formation, delayed Recall, separate transfer evidence, and the gate before any browser or Mac capture surface. The current runtime remains in `docs/ADAPTIVE-STUDY-MVP.md` until this target is implemented. |
 
 **Where the first two disagree, `spec.md` wins.** The handoff's "Network expectations" section was a
 sketch written before the backend existed. Every delta is already resolved in one place —
@@ -95,6 +96,18 @@ Break any of these and the product is subtly wrong in a way tests won't always c
   none of the four SM-2 fields, any score, or history; it counts as engagement for a push
   so it cannot become a false missed review. The exact canonical question is never part
   of the learning response.
+- **Fresh adaptive-lesson formation is not Recall.** The approved pilot target in
+  `docs/ADAPTIVE-STUDY-PILOT-SPEC.md` moves the immediate source-closed explanation
+  onto a proposal-owned, unscored path. It creates no session or numeric history and
+  changes no card, mastery, or SM-2 field. Before returning correction, source, answer
+  basis, or rubric, the server commits the proposal's exposure boundary; confirmation
+  copies the latest boundary to the newly created card. Authority is never replayed by
+  GET; every later disclosure or transfer debrief extends the boundary monotonically
+  before its response. Only the later ordinary closed-book session may drive the
+  scheduler or qualify distillation. `practice=true` is not a shortcut because Practice
+  still writes scored history and mastery. This is an approved target rather than
+  current runtime until the pilot gate is implemented; do not partially ship its
+  learner-facing claims.
 - **Maximum `llm.MAX_SCORED_FOLLOW_UPS` (2) *scored* follow-ups per session, enforced
   server-side.** The model may *request* a further probe — `needs_more_evidence` says the
   transcript cannot distinguish adjacent scores — but it never decides. The server owns
