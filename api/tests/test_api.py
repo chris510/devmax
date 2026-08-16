@@ -1,5 +1,6 @@
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlmodel import select
@@ -1402,7 +1403,7 @@ async def test_a_malformed_window_is_skipped_rather_than_raising(
 async def test_a_wholly_unparseable_settings_row_fails_loudly(client, db, monkeypatch):
     """The one case where silence would be worse than a red workflow run.
 
-    `outside_window` is the normal answer ~46 times a day, so if every window were
+    `outside_window` is the normal answer ~85 times a day, so if every window were
     skipped the product would degrade to "no push ever arrives again" with nothing
     to notice it by. A 500 fails the job, which is the only breakage signal the
     polled workflow still has.
@@ -1418,6 +1419,27 @@ async def test_a_wholly_unparseable_settings_row_fails_loudly(client, db, monkey
     assert (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).status_code == 500
 
 
+async def test_an_offset_bearing_legacy_window_does_not_crash_valid_neighbours(
+    client, db, monkeypatch, capture_push
+):
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [
+        {"label": "Legacy offset", "from": "07:10Z", "to": "08:30Z", "on": True},
+        {"label": "Morning", "from": "07:10", "to": "08:30", "on": True},
+    ]
+    db.add(settings)
+    db.add(make_card(next_review_at=local_today()))
+    await db.commit()
+
+    pin_clock(monkeypatch, 7, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["sent"] is True
+    assert len(capture_push) == 1
+
+
 async def test_every_window_switched_off_is_quiet_not_an_error(client, db, monkeypatch):
     """Turning pushes off is legitimate, and must not read as a broken row."""
     from app.models import Settings
@@ -1430,6 +1452,138 @@ async def test_every_window_switched_off_is_quiet_not_an_error(client, db, monke
     pin_clock(monkeypatch, 7, 30)
     body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
     assert body["reason"] == "outside_window"
+
+
+def test_window_guard_resolves_a_spring_forward_gap_to_one_real_start():
+    from app.models import Settings
+
+    zone = ZoneInfo("America/Los_Angeles")
+    settings = Settings(
+        timezone=zone.key,
+        windows=[
+            {
+                "label": "Gap",
+                "from": "02:30",
+                "to": "03:30",
+                "on": True,
+                "days": [7],
+            }
+        ],
+    )
+
+    starts = [
+        internal._active_window_start(
+            settings, datetime(2027, 3, 14, hour, minute, tzinfo=zone)
+        )
+        for hour, minute in [(3, 0), (3, 15)]
+    ]
+
+    assert starts == [datetime(2027, 3, 14, 3, 0, tzinfo=zone)] * 2
+    assert starts[0].astimezone(UTC) == datetime(2027, 3, 14, 10, 0, tzinfo=UTC)
+
+
+def test_window_wholly_inside_a_spring_forward_gap_keeps_its_duration():
+    from app.models import Settings
+
+    zone = ZoneInfo("America/Los_Angeles")
+    settings = Settings(
+        timezone=zone.key,
+        windows=[
+            {
+                "label": "Gap",
+                "from": "02:10",
+                "to": "02:50",
+                "on": True,
+                "days": [7],
+            }
+        ],
+    )
+
+    assert internal._active_window_start(
+        settings, datetime(2027, 3, 14, 3, 20, tzinfo=zone)
+    ) == datetime(2027, 3, 14, 3, 0, tzinfo=zone)
+    assert (
+        internal._active_window_start(
+            settings, datetime(2027, 3, 14, 3, 45, tzinfo=zone)
+        )
+        is None
+    )
+
+
+def test_window_guard_uses_the_first_start_during_a_fall_back_fold():
+    from app.models import Settings
+
+    zone = ZoneInfo("America/Los_Angeles")
+    settings = Settings(
+        timezone=zone.key,
+        windows=[
+            {
+                "label": "Fold",
+                "from": "01:00",
+                "to": "01:45",
+                "on": True,
+                "days": [7],
+            }
+        ],
+    )
+
+    first = internal._active_window_start(
+        settings, datetime(2027, 11, 7, 1, 15, tzinfo=zone, fold=0)
+    )
+    second = internal._active_window_start(
+        settings, datetime(2027, 11, 7, 1, 15, tzinfo=zone, fold=1)
+    )
+
+    assert first == second
+    assert first.astimezone(UTC) == datetime(2027, 11, 7, 8, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("scheduled_today", [True, False])
+async def test_trigger_review_obeys_window_weekdays(
+    client, db, monkeypatch, capture_push, scheduled_today
+):
+    from app.models import Settings
+
+    today = local_today().isoweekday()
+    another_day = today % 7 + 1
+    settings = await db.get(Settings, 1)
+    settings.windows = [
+        {
+            "label": "Morning",
+            "from": "07:10",
+            "to": "08:30",
+            "on": True,
+            "days": [today if scheduled_today else another_day],
+        }
+    ]
+    db.add(settings)
+    db.add(make_card(next_review_at=local_today()))
+    await db.commit()
+
+    pin_clock(monkeypatch, 7, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["sent"] is scheduled_today
+    assert body["reason"] == (None if scheduled_today else "outside_window")
+    assert len(capture_push) == int(scheduled_today)
+
+
+async def test_trigger_review_treats_a_legacy_window_without_days_as_daily(
+    client, db, monkeypatch, capture_push
+):
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [{"label": "Morning", "from": "07:10", "to": "08:30", "on": True}]
+    db.add(settings)
+    db.add(make_card(next_review_at=local_today()))
+    await db.commit()
+
+    pin_clock(monkeypatch, 7, 30)
+    body = (await client.post("/internal/trigger-review", headers=CRON_HEADERS)).json()
+
+    assert body["sent"] is True
+    assert len(capture_push) == 1
 
 
 async def test_trigger_review_no_ops_outside_the_window(client, db, monkeypatch):
@@ -1643,8 +1797,20 @@ async def test_settings_round_trip(client):
         "reviews_per_day": 3,
         "timezone": "America/New_York",
         "windows": [
-            {"label": "Morning", "on": True, "from": "06:30", "to": "09:00"},
-            {"label": "Evening", "on": False, "from": "20:00", "to": "22:00"},
+            {
+                "label": "Morning",
+                "on": True,
+                "from": "06:30",
+                "to": "09:00",
+                "days": [1, 3, 5],
+            },
+            {
+                "label": "Evening",
+                "on": False,
+                "from": "20:00",
+                "to": "22:00",
+                "days": [2, 4],
+            },
         ],
     }
 
@@ -1653,6 +1819,30 @@ async def test_settings_round_trip(client):
     expected = {**payload, "active_scoring_contract_version": 1}
     assert put.json() == expected
     assert (await client.get("/settings", headers=API_HEADERS)).json() == expected
+
+
+async def test_settings_normalizes_and_persists_missing_days_as_every_day(client, db):
+    from app.models import Settings
+
+    settings = await db.get(Settings, 1)
+    settings.windows = [{"label": "Legacy", "on": True, "from": "06:30", "to": "09:00"}]
+    db.add(settings)
+    await db.commit()
+
+    legacy_read = (await client.get("/settings", headers=API_HEADERS)).json()
+    assert legacy_read["windows"][0]["days"] == list(range(1, 8))
+
+    payload = {
+        "reviews_per_day": 2,
+        "timezone": "America/Los_Angeles",
+        "windows": [{"label": "Old client", "on": True, "from": "07:00", "to": "08:00"}],
+    }
+    written = await client.put("/settings", headers=API_HEADERS, json=payload)
+
+    assert written.status_code == 200
+    assert written.json()["windows"][0]["days"] == list(range(1, 8))
+    await db.refresh(settings)
+    assert settings.windows[0]["days"] == list(range(1, 8))
 
 
 async def test_settings_rejects_out_of_range_reviews_per_day(client):
@@ -1709,6 +1899,77 @@ async def test_lazy_settings_default_never_commits_unrelated_dirty_state(db):
     assert (await db.exec(select(Settings))).all() == []
 
 
+@pytest.mark.parametrize("days", [[0], [8], [1, 1], [], ["1"], [True]])
+async def test_settings_rejects_invalid_weekday_recurrence(client, days):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["windows"] = [
+        {"label": "Morning", "on": True, "from": "07:10", "to": "08:30", "days": days}
+    ]
+
+    response = await client.put("/settings", headers=API_HEADERS, json=payload)
+
+    assert response.status_code == 422
+
+
+async def test_settings_rejects_empty_weekdays_on_a_disabled_window(client):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["windows"] = [
+        {"label": "Morning", "on": False, "from": "07:10", "to": "08:30", "days": []}
+    ]
+
+    response = await client.put("/settings", headers=API_HEADERS, json=payload)
+
+    assert response.status_code == 422
+
+
+async def test_settings_rejects_equal_starts_on_the_same_selected_day(client):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["windows"] = [
+        {
+            "label": "Morning",
+            "on": True,
+            "from": "07:10",
+            "to": "08:30",
+            "days": [1, 3, 5],
+        },
+        {
+            "label": "Second",
+            "on": True,
+            "from": "07:10",
+            "to": "12:15",
+            "days": [3],
+        },
+    ]
+
+    response = await client.put("/settings", headers=API_HEADERS, json=payload)
+
+    assert response.status_code == 422
+
+
+async def test_settings_allows_equal_starts_on_disjoint_selected_days(client):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["windows"] = [
+        {
+            "label": "Monday",
+            "on": True,
+            "from": "07:10",
+            "to": "08:30",
+            "days": [1],
+        },
+        {
+            "label": "Tuesday",
+            "on": True,
+            "from": "07:10",
+            "to": "08:30",
+            "days": [2],
+        },
+    ]
+
+    response = await client.put("/settings", headers=API_HEADERS, json=payload)
+
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize(
     "from_,to,why",
     [
@@ -1751,6 +2012,7 @@ async def test_settings_defaults_are_served_before_any_write(client):
     assert body["reviews_per_day"] == 2
     assert body["timezone"] == "America/Los_Angeles"
     assert [w["label"] for w in body["windows"]] == ["Morning", "Evening"]
+    assert all(w["days"] == list(range(1, 8)) for w in body["windows"])
 
 
 # --- device tokens ----------------------------------------------------------

@@ -205,15 +205,40 @@ Bottom sheet over a `rgba(4,5,6,.72)` scrim; tapping the scrim closes. `#14171a`
 20px top radius, 22px padding, 30px bottom.
 
 - Title "Settings" 17px/600 + "Close" 13px on the right.
-- **Reviews per day:** label + dynamic sub-line ("2 pushes, spread across windows"), with a
-  bordered stepper (− / value / +), clamped 1–6, default 2.
-- **Notification windows:** one row per window (Morning, Evening) — a 34×20px toggle
-  (accent fill/knob when on, `#4a5257` knob when off), the label, and two tappable mono
-  time chips `07:10 – 08:30`. Tapping a chip advances it through the allowed times
-  (`06:30, 07:10, 07:45, 08:30, 12:15, 18:40, 21:00, 22:30`). Helper line: "Tap a time to
-  shift the window. Reviews are pushed inside these ranges only."
+- **Read questions aloud:** the local preference toggle and its explanatory line.
+- **Review reminders:** a destination row with the dynamic summary `Up to N/week` or
+  `Off`. The dedicated editor owns recurrence and persistence; the fast sheet does not
+  duplicate those controls.
+- **Save changes:** persists the local read-aloud draft. **More settings** opens the full
+  Settings destination.
 
-Settings are reachable **only** from Today — not a destination.
+### Review reminder editor
+
+- One row per window (Morning, Evening): a 34×20px toggle, the label, native local start
+  and end time controls, and seven compact day selectors ordered **M T W T F S S**.
+  Selected days use the restrained chip treatment and remain legible without colour.
+  Tapping a day changes weekly nudge frequency in the draft. A present day list must
+  contain at least one selection; turn the window off to silence it while preserving
+  its days.
+- Enabled windows that share a selected day must use different start times. A
+  conflicting start or a range under 30 minutes shows an inline error and disables
+  Save. The footer has explicit **Cancel** and **Save changes** actions; a failed write
+  leaves the draft visible for retry. Onboarding offers the same weekday recurrence with
+  compact time chips and advances only after the server confirms the write.
+- The summary reads `Up to N reminders per week · due cards only`. For each ISO day,
+  count enabled windows selecting it, cap that count by the normalized daily value,
+  then sum all seven days. The compatibility wire field `reviews_per_day` is normalized
+  to the enabled-window count within its supported 1–6 range (minimum one when all are
+  off). It never controls how many cards are due or changes a card's spaced-repetition
+  interval.
+
+Window days use ISO weekday numbers on the wire (`1 = Monday` … `7 = Sunday`). A
+missing `days` field renders as all seven selected so a pre-weekday settings row remains
+an everyday schedule. This compatibility fallback must not be presented as an inferred
+recommendation.
+
+The fast sheet is reachable only from Today. The Review reminder editor is reachable
+from that sheet and from full Settings.
 
 ### Quick-add sheet (`screenshots/today-quick-add.png`)
 
@@ -382,7 +407,7 @@ failure.
    order: `N shaky` (cold + shaky), else `N untested`, else `N developing`, else
    `N solid`. Same category-grouped tier data that powers Coverage, so weak-area targeting
    is visible where it gets acted on.
-2. **Session size** — the Settings "reviews per day" stepper component verbatim
+2. **Session size** — the bordered − / value / + stepper component
    (bordered − / value / +), range 4–10, default 6. Sub-line: "Weakest and least recently
    reviewed first".
 3. **Shuffle** — 13px `#8b9299` text action, right-aligned opposite the mono `WALK ORDER`
@@ -547,7 +572,7 @@ Client state the prototype exercises (name them however the codebase prefers):
 | `filter` | `null` \| `cold` \| `shaky` \| `solid` \| `new` | mastery-band filter on Today |
 | `sheet` | `null` \| `settings` \| `add` | |
 | `addPending`, `addError` | bool | quick-add in-flight / failed |
-| `perDay`, `windows[]` | int, `[{label,on,from,to}]` | settings |
+| `perDay`, `windows[]` | int, `[{label,on,from,to,days:[1...7]}]` | compatibility daily cap + weekday-aware notification windows; missing `days` = every day |
 | `screen` (added values) | `setup` \| `recap` | the two Review Sprint screens |
 | `setupLoad` | `loading` → `ready` \| `error` | Setup's library fetch; `Retry` re-runs it |
 | `setupCats` | `string[]` | selected category filters; empty = whole library |

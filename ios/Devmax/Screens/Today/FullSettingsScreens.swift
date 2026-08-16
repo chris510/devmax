@@ -34,7 +34,7 @@ struct FullSettingsScreen: View {
                 panelDivider
                 destination(
                     "Review reminders",
-                    value: SettingsValidation.reminderValue(for: state.settings)
+                    value: SettingsValidation.weeklyReminderValue(for: state.settings)
                 ) {
                     state.path.append(.reviewReminders)
                 }
@@ -238,7 +238,7 @@ struct ReviewRemindersScreen: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("One reminder per enabled window when a review is due.")
+                    Text("Choose the days and windows when a due card may remind you.")
                         .font(WCFont.sans(14))
                         .foregroundStyle(Theme.textMuted)
                         .lineSpacing(3)
@@ -266,9 +266,16 @@ struct ReviewRemindersScreen: View {
                     .disabled(saving)
 
                     MetaText(
-                        text: reminderSummary,
+                        text: normalizedDraft.weeklyReminderMaximumLabel + " · due cards only",
                         font: WCFont.mono(10), tracking: 0.5, color: Theme.metaFaint
                     )
+
+                    if let validation = draft.reminderWindowCollisionMessage {
+                        Text(validation)
+                            .font(WCFont.sans(12.5))
+                            .foregroundStyle(Theme.scoreLow)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if !errorText.isEmpty {
                         InlineNotice {
@@ -342,17 +349,11 @@ struct ReviewRemindersScreen: View {
         return part.replacingOccurrences(of: "_", with: " ")
     }
 
-    private var enabledWindowCount: Int { draft.windows.filter(\.on).count }
-
-    private var reminderSummary: String {
-        let value = SettingsValidation.reminderValue(for: draft)
-        return value == "Off" ? value : "\(value) daily"
-    }
-
-    /// The server field stays for wire compatibility. The UI offers one
-    /// reminder per enabled window, so the daily cap must match that promise.
+    /// The daily field remains on the wire as the endpoint's safety cap. The
+    /// product exposes window recurrence directly, so the cap must not silently
+    /// suppress any enabled window the editor presents.
     private var normalizedDraft: AppSettings {
-        SettingsValidation.normalizedReminderSettings(draft)
+        draft.normalizedReminderSettings
     }
 
     private func startSaving() {
@@ -370,12 +371,11 @@ struct ReviewRemindersScreen: View {
 
     @MainActor
     private func persist(_ value: AppSettings) async {
-        do {
-            state.settings = try await state.api.updateSettings(value)
-            saving = false
+        let saved = await state.persistSettings(value)
+        saving = false
+        if saved {
             dismissIfPresented()
-        } catch {
-            saving = false
+        } else {
             errorText = "Couldn't save changes. Your edits are still here."
         }
     }
@@ -408,6 +408,9 @@ private struct ReminderWindowEditor: View {
                 timeField("START", value: $window.from)
                 timeField("END", value: $window.to)
             }
+
+            WeekdayPicker(days: $window.days)
+                .opacity(window.on ? 1 : 0.55)
 
             if let errorText {
                 Text(errorText)

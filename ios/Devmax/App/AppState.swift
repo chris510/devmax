@@ -280,6 +280,23 @@ final class AppState: ObservableObject {
         captureRoute = nil
     }
 
+    @discardableResult
+    func persistSettings(_ new: AppSettings) async -> Bool {
+        let previous = settings
+        settings = new
+        // The server is the authority on whether a window is usable. Adopting
+        // its response keeps normalized recurrence data; restoring the previous
+        // value keeps a rejected or failed write from masquerading as saved.
+        do {
+            let saved = try await api.updateSettings(new)
+            settings = saved
+            return true
+        } catch {
+            settings = previous
+            return false
+        }
+    }
+
     // MARK: - Review Sprint
 
     func loadLibrary() async {

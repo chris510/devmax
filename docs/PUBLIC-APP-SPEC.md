@@ -194,10 +194,10 @@ Welcome
       → Add topics manually → Add answer anchors → Review topics
       → Devmax collection → Collection detail → Review topics
   → If already studied: Try one real review → Explain first score
-      → Choose reminder windows → Request notification permission → Today
+      → Choose reminder days and windows → Request notification permission → Today
   → If learning over time: Today / Week 1
       → Complete first study item → First legitimate review → Explain first score
-      → Choose reminder windows → Request notification permission
+      → Choose reminder days and windows → Request notification permission
 ```
 
 The user can inspect choices and prepare material before signing in. Identity is
@@ -205,7 +205,8 @@ required before the first paid model call. Failed sign-in returns to the
 prepared state without losing anything.
 
 Notification permission is requested only after the user has seen the review
-loop and chosen a window. Declining is a valid completed-onboarding state.
+loop and chosen reminder days and a window. Declining is a valid
+completed-onboarding state.
 
 Microphone and speech-recognition permission are requested only when the user
 first chooses voice. Text remains available throughout.
@@ -242,23 +243,60 @@ No sample scores, fake queue, or empty Study Plan are created.
 
 The Today settings sheet is the fast path for read-aloud and the current review
 reminder summary. Notification-window editing is a dedicated destination with an
-explicit save action. The sheet also has a **More settings** action.
+explicit save action; that destination includes each window's selected weekdays.
+The sheet also has a **More settings** action.
 
 Each enabled window is eligible for at most one review push when a conversational
-card is due. Two enabled windows therefore means up to two reminders per day, one
-means up to one, and zero means reminders are off. This does not cap Today's queue
-or reschedule existing cards. The legacy `reviews_per_day` wire field remains during
-migration and is normalized to the enabled-window count, with a minimum stored value
-of one when all windows are off.
+card is due on one of its selected weekdays. Two enabled windows therefore means
+up to two reminders on a day selected by both, one means up to one, and zero means
+reminders are off. This does not cap Today's queue or reschedule existing cards.
+The legacy `reviews_per_day` wire field remains during migration and is normalized
+to the enabled-window count within its supported 1–6 range, with a minimum stored
+value of one when all windows are off.
 
 The full Settings screen contains:
 
 1. **Study material** — collections, imported guides, topics, and Study Plans.
-2. **Reviews** — reminder windows, read-aloud, and the available voice/text modes.
+2. **Reviews** — due-card behavior, read-aloud, the available voice/text modes,
+   and a dedicated weekday-aware reminder-window editor.
 3. **Notifications** — current iOS permission state and a system-settings link.
 4. **Account** — Apple identity, sign out, and account deletion.
 5. **Data & privacy** — export, deletion, retention, and model-processing copy.
 6. **About** — app version, collection versions, help, privacy, and terms.
+
+## Review reminder contract
+
+Notification cadence and spaced repetition are separate product concepts.
+SM-2 decides when a card becomes due. Reminder settings decide only when Devmax
+may draw attention to an already-due conversational card; they never reschedule
+a card, manufacture due work, or promise a notification on a selected day.
+
+Each notification window stores a non-empty set of ISO weekdays (`1 = Monday` through
+`7 = Sunday`), an on/off state, a local start and end time, and a label.
+Missing weekdays mean all seven days for rolling clients and pre-weekday data.
+The On toggle silences a window while preserving its day selection. The UI
+changes weekly nudge frequency by selecting days directly and
+shows `Up to N reminders per week`. Compute `N` by counting enabled windows for
+each ISO day, capping that day's count by the normalized `reviews_per_day`, then
+summing the seven results. This is a maximum rather than a promise because due-only
+selection may send less. In the simple one-window case, moving from two to three
+times a week is one additional selected day. The existing
+`reviews_per_day` wire field remains a server-enforced daily safety cap during
+migration; the client normalizes it to the enabled-window count, with a minimum
+stored value of one when all windows are off and a maximum of six, instead of
+exposing it as a separate cadence control.
+
+The server's frequent poll remains deliberately schedule-free. For each user it
+reads that user's timezone and windows, checks the current local ISO weekday and
+time, enforces at most one push per eligible window and the daily cap, and then
+selects only an already-due conversational card. IANA timezone evaluation keeps
+wall-clock windows stable across DST. A selected day with nothing due stays quiet.
+Enabled windows on intersecting weekdays must have distinct local start times so
+each visible window maps to one idempotent delivery slot. Onboarding edits a draft,
+shows invalid span/start collisions inline, and advances only after the settings
+write succeeds; a rejected or failed write never becomes the local saved schedule.
+The dedicated reminder editor follows the same confirmed-save rule and remains
+open with retry and discard actions after a failed write.
 
 Sign out removes local credentials and local drafts from the device after
 confirmation. Account deletion is separate and explains server-side deletion
@@ -334,7 +372,7 @@ system. Public signup requires:
 - authenticated scoping on every read and write;
 - cross-user isolation tests for every router;
 - one settings record per user;
-- per-user notification polling using that user's timezone and windows;
+- per-user notification polling using that user's timezone and weekday-aware windows;
 - per-user LLM usage accounting and launch quotas;
 - account export and deletion;
 - abuse protection and rate limits on paid model calls.
@@ -376,9 +414,10 @@ the authenticated root owner, including UUID lookups, duplicate checks,
 idempotency lookups, and resumable-session queries. A foreign object is reported
 as not found rather than forbidden.
 
-The notification poller iterates settings per user. Daily caps, window guards,
-due-card selection, APNs tokens, and missed-review checks never aggregate across
-accounts.
+The notification poller iterates settings per user. Selected weekdays, daily
+caps, window guards, due-card selection, APNs tokens, and missed-review checks
+never aggregate across accounts. The poller carries no weekday or wall-clock
+schedule of its own.
 
 ## Axis migration
 
@@ -412,6 +451,11 @@ session and card before and after the schema change.
   the same visible scoring vocabulary as a system-design guide.
 - No guide-processing failure loses text or creates cards.
 - Notification denial does not block onboarding.
+- A user can change an enabled reminder window from two selected weekdays to
+  three without a redeploy, and the change moves no due date or SM-2 field.
+- A missing notification-window day list behaves as every day; an unselected
+  weekday, an exhausted daily cap, a spent window, and an empty due queue each
+  remain distinct server outcomes.
 - A second user cannot read or mutate any first-user object, including by UUID.
 - The founder account retains every existing card, session, plan, score, and
   schedule value.

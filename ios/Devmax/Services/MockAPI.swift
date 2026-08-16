@@ -144,6 +144,7 @@ actor MockAPI: DevmaxAPI {
     let pilotConfirmationFailsOnce: Bool
     let pilotSourceNotAssigned: Bool
     let materialDeletionFails: Bool
+    let settingsUpdateFails: Bool
 
     init(
         materialImportDelay: Duration = .zero,
@@ -155,7 +156,8 @@ actor MockAPI: DevmaxAPI {
         pilotTransferFailsOnce: Bool = false,
         pilotConfirmationFailsOnce: Bool = false,
         pilotSourceNotAssigned: Bool = false,
-        materialDeletionFails: Bool = false
+        materialDeletionFails: Bool = false,
+        settingsUpdateFails: Bool = false
     ) {
         self.materialImportDelay = materialImportDelay
         self.confirmMaterialDelay = confirmMaterialDelay
@@ -167,6 +169,7 @@ actor MockAPI: DevmaxAPI {
         self.pilotConfirmationFailsOnce = pilotConfirmationFailsOnce
         self.pilotSourceNotAssigned = pilotSourceNotAssigned
         self.materialDeletionFails = materialDeletionFails
+        self.settingsUpdateFails = settingsUpdateFails
     }
 
     /// Only the forced-failure alternation reads this. It counts submits across
@@ -747,6 +750,7 @@ actor MockAPI: DevmaxAPI {
     }
 
     func updateSettings(_ settings: AppSettings) async throws -> AppSettings {
+        if settingsUpdateFails { throw APIError.status(422) }
         storedSettings = settings
         return settings
     }

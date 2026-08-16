@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -47,10 +48,29 @@ STATUS_ABANDONED = "abandoned"
 # A card is resumable only while its session is still in one of these states.
 LIVE_STATUSES = (STATUS_OPEN, STATUS_AWAITING_FOLLOW_UP)
 
+ALL_ISO_WEEKDAYS = tuple(range(1, 8))
+
 DEFAULT_WINDOWS: list[dict[str, Any]] = [
-    {"label": "Morning", "from": "07:10", "to": "08:30", "on": True},
-    {"label": "Evening", "from": "21:00", "to": "22:30", "on": True},
+    {
+        "label": "Morning",
+        "from": "07:10",
+        "to": "08:30",
+        "on": True,
+        "days": list(ALL_ISO_WEEKDAYS),
+    },
+    {
+        "label": "Evening",
+        "from": "21:00",
+        "to": "22:30",
+        "on": True,
+        "days": list(ALL_ISO_WEEKDAYS),
+    },
 ]
+
+
+def default_windows() -> list[dict[str, Any]]:
+    """Return isolated JSON values for a new settings row."""
+    return deepcopy(DEFAULT_WINDOWS)
 
 
 def _now() -> datetime:
@@ -470,7 +490,7 @@ class Settings(SQLModel, table=True):
     user_id: uuid.UUID = Field(default=FOUNDER_USER_ID, foreign_key="users.id", ondelete="CASCADE")
     reviews_per_day: int = 2
     windows: list[dict[str, Any]] = Field(
-        default_factory=lambda: list(DEFAULT_WINDOWS),
+        default_factory=default_windows,
         sa_column=Column(JSON_TYPE, nullable=False),
     )
     timezone: str = "America/Los_Angeles"

@@ -15,7 +15,7 @@ struct SettingsSheet: View {
                     Hairline()
                     destinationRow(
                         "Review reminders",
-                        value: SettingsValidation.reminderValue(for: draft),
+                        value: SettingsValidation.weeklyReminderValue(for: draft),
                         screen: .reviewReminders
                     )
                 }
@@ -93,20 +93,121 @@ struct SettingsSheet: View {
     }
 }
 
+/// Seven compact ISO-weekday chips. The window's toggle is the explicit off
+/// switch, so tapping the sole selected day is intentionally a no-op.
+struct WeekdayPicker: View {
+    struct Day: Identifiable {
+        let id: Int
+        let short: String
+        let name: String
+    }
+
+    static let weekdays = [
+        Day(id: 1, short: "M", name: "Monday"),
+        Day(id: 2, short: "T", name: "Tuesday"),
+        Day(id: 3, short: "W", name: "Wednesday"),
+        Day(id: 4, short: "T", name: "Thursday"),
+        Day(id: 5, short: "F", name: "Friday"),
+        Day(id: 6, short: "S", name: "Saturday"),
+        Day(id: 7, short: "S", name: "Sunday"),
+    ]
+
+    @Binding var days: [Int]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.weekdays) { day in
+                let selected = days.contains(day.id)
+                Button { toggle(day.id) } label: {
+                    Text(day.short)
+                        .font(WCFont.mono(10, weight: 500))
+                        .foregroundStyle(selected ? Theme.accentSelectedText : Theme.metaAlt)
+                        .frame(maxWidth: .infinity, minHeight: Metrics.minTapTarget)
+                        .background(
+                            RoundedRectangle(cornerRadius: Metrics.chipRadius)
+                                .fill(selected ? Theme.accentWash : .clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Metrics.chipRadius)
+                                .strokeBorder(selected ? Theme.accent : Theme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(day.name)
+                .accessibilityValue(selected ? "Selected" : "Not selected")
+                .accessibilityHint(
+                    selected && days.count == 1
+                        ? "Turn off the window to disable its last day"
+                        : "Double tap to \(selected ? "remove" : "add") this day"
+                )
+            }
+        }
+    }
+
+    private func toggle(_ day: Int) {
+        var selection = Set(days.filter { (1...7).contains($0) })
+        if selection.contains(day) {
+            guard selection.count > 1 else { return }
+            selection.remove(day)
+        } else {
+            selection.insert(day)
+        }
+        days = selection.sorted()
+    }
+}
+
+/// Compact time control used by the onboarding cadence editor. The full
+/// reminder screen keeps the platform time picker for unrestricted editing.
+struct TimeChip: View {
+    @Binding var time: String
+    let accessibilityLabel: String
+
+    var body: some View {
+        Button {
+            let times = AppSettings.allowedTimes
+            let index = times.firstIndex(of: time) ?? 0
+            time = times[(index + 1) % times.count]
+        } label: {
+            Text(time)
+                .font(TypeRole.metaBody)
+                .tracking(0.6)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Theme.borderStrong, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(time)
+        .accessibilityHint("Double tap to choose the next time")
+    }
+}
+
 enum SettingsValidation {
     static let minimumWindowMinutes = 30
 
     static func message(for settings: AppSettings) -> String? {
         guard (1...6).contains(settings.reviewsPerDay) else {
-            return "Reviews per day must be between 1 and 6."
+            return "The daily reminder maximum must be between 1 and 6."
         }
         for window in settings.windows {
             if let issue = windowMessage(window) { return "\(window.label): \(issue)" }
         }
-        return nil
+        return settings.reminderWindowCollisionMessage
     }
 
     static func windowMessage(_ window: NotificationWindow) -> String? {
+        guard !window.days.isEmpty else {
+            return "Choose at least one day. Use the On toggle to disable the window."
+        }
+        guard window.days.allSatisfy({ (1...7).contains($0) }),
+              Set(window.days).count == window.days.count
+        else {
+            return "Choose valid weekdays without duplicates."
+        }
         guard let start = minutes(window.from), let end = minutes(window.to) else {
             return "Choose a valid start and end time."
         }
@@ -116,17 +217,11 @@ enum SettingsValidation {
         return nil
     }
 
-    static func normalizedReminderSettings(_ settings: AppSettings) -> AppSettings {
-        var value = settings
-        value.reviewsPerDay = max(1, settings.windows.filter(\.on).count)
-        return value
-    }
-
-    static func reminderValue(for settings: AppSettings) -> String {
-        switch settings.windows.filter(\.on).count {
+    static func weeklyReminderValue(for settings: AppSettings) -> String {
+        switch settings.normalizedReminderSettings.weeklyReminderMaximum {
         case 0: "Off"
-        case 1: "Up to 1"
-        case let count: "Up to \(count)"
+        case 1: "Up to 1/week"
+        case let count: "Up to \(count)/week"
         }
     }
 

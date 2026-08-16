@@ -512,9 +512,11 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
    is still in mock mode.
 3. Confirm `GET /cards/due` is non-empty.
 4. Don't wait for the poll. Widen a window to cover now via `PUT /settings` (at
-   least 30 minutes, or the write is rejected 422), run the Trigger review workflow
-   manually, expect `{"sent": true, "card_id": ..., "due_count": N}` and a banner.
-   **Restore the real windows immediately** — see §Scheduling.
+   least 30 minutes, or the write is rejected 422) and include today's ISO weekday
+   in that window's `days`. Omitting `days` deliberately means every day and is
+   also valid for this compatibility test. Run the Trigger review workflow manually,
+   expect `{"sent": true, "card_id": ..., "due_count": N}` and a banner.
+   **Restore the real windows and selected days immediately** — see §Scheduling.
 5. Tap the notification → it should deep-link into that card. Answer by voice.
 6. Dispatch the workflow a second time while still inside that widened window and
    confirm `{"sent": false, "reason": "already_pushed"}`. That one response is what
@@ -530,22 +532,59 @@ production ↔ false. A mismatch fails silently as `BadDeviceToken`.
 polls `/internal/trigger-review` every 15 minutes. The endpoint decides for itself
 whether to push.
 
-Everything about *when* lives in the settings row: `windows`, `timezone`, and
-`reviews_per_day`. Change a window in the app and the next poll obeys it — no
-commit, no redeploy, and no DST arithmetic anywhere, because the comparison happens
-in local time on the server. That replaced a hand-maintained UTC approximation of
-the windows which disagreed with them for four months a year (`docs/DEVIATIONS.md`
-§1).
+Everything about *when* lives in the settings row: each window's `days`, local
+time range and on/off state, the account `timezone`, and the `reviews_per_day`
+daily safety cap. Change a selected day or a window in the app and the next poll
+obeys it — no commit, no redeploy, and no DST arithmetic in the poller, because the
+comparison happens in the user's local time on the server. That replaced a
+hand-maintained UTC approximation of the windows which disagreed with them for
+four months a year (`docs/DEVIATIONS.md` §1).
+
+Window `days` are ISO weekday numbers: `1` is Monday through `7` for Sunday. A
+missing field means every day so rows and clients from before weekday-aware
+windows retain their original behavior. A present list is unique and non-empty;
+turn the window off to silence it while preserving those days. For
+example, `[1,3,5]` makes that window eligible Monday, Wednesday, and Friday.
+Increasing weekly nudge frequency means selecting another day, not increasing
+`reviews_per_day`. Two enabled windows may reuse a start time only when their
+selected days are disjoint; `PUT /settings` rejects equal starts on a shared day
+because those windows would collapse to one idempotency boundary.
+
+The client summary `Up to N reminders per week` is an upper bound. For each ISO
+day, count enabled windows selecting it, cap that count at `reviews_per_day`, then
+sum the seven capped counts. Do not count only the union of selected days: two
+windows on one day can produce two nudges. The due-only check may still make the
+delivered count lower than this maximum.
+
+This is only a **nudge schedule**. SM-2 and `next_review_at` remain the review
+schedule. A selected day does not make a card due and never guarantees a push;
+the endpoint remains quiet unless an eligible conversational card is already due.
+Changing days, times, or the daily cap must not rewrite any card schedule field.
 
 Consequences worth knowing:
 
-- **Most runs return `outside_window`.** At a 15-minute poll that is ~94 of 96 runs
-  a day. It is the expected steady state and no longer fails the job.
-- **At most one push per window.** The endpoint refuses a second push inside a
-  window that already produced one, and returns `already_pushed`.
+- **Most runs return `outside_window`.** With the two everyday default windows,
+  that is ~85 of 96 runs a day; on an unselected weekday every run does. It is the
+  expected steady state and no longer fails the job.
+- **At most one push per eligible window.** The endpoint refuses a second push
+  inside a selected-day window that already produced one, and returns
+  `already_pushed`. The poll takes the account-deletion boundary before its settings
+  row, then holds the settings lock through delivery. Concurrent polls for one
+  account serialize without inverting deletion's child-row order, while different
+  accounts remain parallel.
+- **The daily cap remains a backstop.** `reviews_per_day` counts delivered pushes
+  on the user's local calendar day across every eligible window. It is not a
+  weekly-frequency setting and does not cap the due queue.
+- **Due-only is absolute.** Selected weekdays and open windows never create a
+  notification when `GET /cards/due` has no eligible conversational card.
 - **A window must be at least 30 minutes long.** `PUT /settings` rejects anything
   shorter with a 422. The 15-minute cadence gives every accepted window multiple
   attempts; keeping the 30-minute product constraint preserves that margin.
+- **DST gaps and folds remain one window.** A start inside a spring-forward gap
+  resolves to the first real local minute; a range wholly inside that gap resumes
+  there for its configured wall-clock duration. Both occurrences of a fall-back
+  hour share the first occurrence's guard boundary, so neither transition permits
+  a second push from the same window.
   There is deliberately no *maximum* — widening a window to cover now is how you
   test a push.
 
@@ -573,14 +612,17 @@ In order.
 1. **Did the API poller run?** Search the `devmax` service logs for
    `trigger-review poll`. Startup logs must include
    `review poller enabled interval_seconds=900`. A 500
-   means every enabled notification window in `settings` is unparseable — the one
-   configuration fault the endpoint refuses to answer quietly, precisely because
-   `outside_window` is otherwise indistinguishable from working normally.
+   means every relevant enabled notification window in `settings` is unparseable
+   (including malformed `days`) — the one configuration fault the endpoint refuses
+   to answer quietly, precisely because `outside_window` is otherwise
+   indistinguishable from working normally.
 2. **`{"sent": false, "reason": ...}`** — each reason is specific. All but the last
    are routine at a 15-minute poll and none of them fail the job:
-   - `outside_window` — no enabled window contains the current local time. The
-     usual answer, ~94 times a day. If it is *always* this, check `GET /settings`:
-     a window turned off, or a timezone that no longer matches where you are.
+   - `outside_window` — no enabled window selects the current local ISO weekday
+     and contains the current local time. The usual answer is ~85 times on a day
+     selected by both default windows, and every time on an unselected day. If it
+     is unexpectedly constant, check `GET /settings`: the window's `days`, its
+     on/off state, its time range, and a timezone that no longer matches the user.
    - `already_pushed` — this window already produced a push.
    - `already_offered` — the window is free, but every due card already went out
      earlier today. A card is never pushed twice in one day.

@@ -54,7 +54,7 @@ async def test_review_accounts_run_with_bounded_parallelism(monkeypatch) -> None
     active = 0
     maximum_active = 0
 
-    async def evaluate(_settings, _user_id, _db):
+    async def evaluate(_user_id, _db):
         nonlocal active, maximum_active
         active += 1
         maximum_active = max(maximum_active, active)
@@ -77,10 +77,7 @@ async def test_review_accounts_run_with_bounded_parallelism(monkeypatch) -> None
 
     monkeypatch.setattr(internal, "_trigger_review_for_user", evaluate)
     outcomes = await internal._evaluate_review_targets(
-        [
-            (user_id, Settings(user_id=user_id))
-            for user_id in (uuid.uuid4(), uuid.uuid4(), uuid.uuid4())
-        ],
+        [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()],
         FakeSession,
         concurrency=2,
     )

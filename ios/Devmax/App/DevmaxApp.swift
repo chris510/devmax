@@ -81,7 +81,11 @@ struct AppEntryView: View {
                 NavigationStack { LibraryScreen() }
             } else if flags.route == "review-reminders" {
                 NavigationStack { ReviewRemindersScreen() }
-            } else if flags.route == "settings" {
+            // `settings` belongs to Today's fast sheet in `applyDebugRoute`.
+            // Keep Full Settings on its own route so screenshot verification
+            // can still reach both surfaces instead of this branch swallowing
+            // the sheet before RootView is created.
+            } else if flags.route == "full-settings" {
                 NavigationStack { FullSettingsScreen() }
             } else if flags.route == "privacy" {
                 NavigationStack { DataPrivacyScreen() }
