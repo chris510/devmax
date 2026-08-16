@@ -564,6 +564,23 @@ final class LessonWorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testAddingAnotherLessonStartsWithANewLessonDraft() {
+        let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
+        flow.draft.importPath = "lesson"
+        flow.draft.title = "Unsent lesson"
+        flow.draft.guideText = "Draft material"
+
+        flow.beginLesson(forceNew: true)
+
+        XCTAssertEqual(flow.step, .lesson)
+        XCTAssertTrue(flow.isLessonDraft)
+        XCTAssertEqual(flow.draft.intent, "already_studied")
+        XCTAssertEqual(flow.draft.sourceType, "article")
+        XCTAssertTrue(flow.draft.title.isEmpty)
+        XCTAssertTrue(flow.draft.guideText.isEmpty)
+    }
+
+    @MainActor
     func testLessonCannotPartiallyConfirmAndSilentlyDiscardConcepts() {
         let flow = PublicOnboardingState(api: MockAPI(), route: "welcome")
         let topics = [

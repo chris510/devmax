@@ -35,7 +35,7 @@ struct QuickAddSheet: View {
 
             if state.addError {
                 InlineNotice {
-                    Text("Couldn't save — the gap is still here. Try again.")
+                    Text("Couldn't save. The gap is still here. Try again.")
                         .font(TypeRole.secondaryAction)
                         .foregroundStyle(Theme.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

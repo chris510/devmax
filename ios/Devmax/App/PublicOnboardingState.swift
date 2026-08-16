@@ -169,8 +169,8 @@ final class PublicOnboardingState: ObservableObject {
     /// Opens the focused article/lesson path without creating a second ingestion
     /// state machine. An unsent lesson draft is resumed; a submitted or unrelated
     /// draft starts clean while the durable server import remains in Study material.
-    func beginLesson() {
-        if job != nil || !isLessonDraft || draft.sourceID != nil {
+    func beginLesson(forceNew: Bool = false) {
+        if forceNew || job != nil || !isLessonDraft || draft.sourceID != nil {
             draft = PublicSetupDraft()
             draft.importPath = "lesson"
             draft.intent = "already_studied"

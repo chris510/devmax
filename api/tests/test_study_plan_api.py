@@ -72,6 +72,10 @@ async def make_plan(client: AsyncClient, *, activate=True, **preview_overrides) 
     return created.json()
 
 
+def test_topic_normalizer_still_accepts_legacy_em_dash_input() -> None:
+    assert sp.normalize_topic("Read—your—writes") == "read your writes"
+
+
 async def test_item_resources_stretch_and_existing_recall_cards_are_actionable_read_only(
     client, stub_import, db
 ):

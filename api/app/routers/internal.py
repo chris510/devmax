@@ -55,7 +55,7 @@ def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
     The start instant is all the per-window guard needs; the window's identity is
     not returned because nothing consumes it.
 
-    On overlap the latest-starting window wins — taking the earlier one would let
+    On overlap the latest-starting window wins. Taking the earlier one would let
     a push already spent in it suppress the window the user is actually in.
 
     A malformed window is skipped rather than raised on, so one bad entry costs
@@ -101,8 +101,8 @@ async def _trigger_review_for_user(
     """Polled by the production API process; decides whether to push.
 
     The poller encodes no schedule beyond "often". Everything about *when* a push
-    goes out — the notification windows, the timezone they are read in, and the
-    daily budget — lives in the settings row, so changing a window in the app takes
+    goes out. The notification windows, the timezone they are read in, and the
+    daily budget live in the settings row, so changing a window in the app takes
     effect on the next poll with no commit or redeploy. The cron used to carry a
     hand-maintained UTC approximation of those windows, which drifted out of
     agreement with them for four months of every year; see docs/DEVIATIONS.md §1.
@@ -130,7 +130,7 @@ async def _trigger_review_for_user(
     window_start = window_start_local.astimezone(UTC)
 
     # Both guards below read the same fact, so they share one query. `window_start`
-    # is always >= `day_start` — a window begins on the day it belongs to — so the
+    # is always >= `day_start`. A window begins on the day it belongs to, so the
     # newest push today answers "has this window fired" and the count answers "is
     # the day spent". Aggregates rather than entities: a `select(Card)` here
     # hydrated every matching row, unbounded TEXT columns and all, to produce a
@@ -264,8 +264,9 @@ async def _trigger_review_for_user(
             )
         )
 
-    # Reporting sent=True when nothing was delivered — no registered device, or APNs
-    # credentials not configured — would stamp last_pushed_at, and check-missed would
+    # Reporting sent=True when nothing was delivered, either because there is no
+    # registered device or APNs credentials are not configured, would stamp
+    # last_pushed_at, and check-missed would
     # then increment missed_count four hours later for a push the user never received.
     # missed_count is the product's only compliance signal; don't corrupt it.
     if not delivery:
@@ -378,13 +379,13 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
     """Increment missed_count for pushes that went unanswered.
 
     Never touches ease_factor. Missing a review is a compliance signal, not a
-    retention signal — conflating them would let a busy week trash the ease
+    retention signal. Conflating them would let a busy week trash the ease
     factor on topics the user knows cold.
 
     Nor does it touch `last_pushed_at`. The push that was counted is recorded on
     `missed_counted_at` instead, because `trigger-review` reads `last_pushed_at`
     to answer both "how many pushes today" and "has this window already been
-    satisfied" — clearing it handed the day's budget back and would re-open a
+    satisfied". Clearing it handed the day's budget back and would re-open a
     spent window. A card becomes eligible again when a later push moves
     `last_pushed_at` past the stamp.
     """

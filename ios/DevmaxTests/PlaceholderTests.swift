@@ -12,8 +12,44 @@ final class ScoreStyleTests: XCTestCase {
         XCTAssertEqual(ScoreStyle.Band.of(nil), .unrated)
     }
 
-    func testMissingScoreRendersAsEmDash() {
-        XCTAssertEqual(ScoreStyle.label(for: nil), "—")
+    func testMissingScoreUsesLiteralState() {
+        XCTAssertEqual(ScoreStyle.label(for: nil), "unrated")
         XCTAssertEqual(ScoreStyle.label(for: 3), "3")
+    }
+
+    func testScoreLabelMatchesTheActivatedContract() {
+        XCTAssertEqual(result(contract: 1).scoreLabel, "SCORE")
+        XCTAssertEqual(result(contract: 2).scoreLabel, "RECALL")
+        XCTAssertEqual(result(contract: 99).scoreLabel, "SCORE")
+    }
+
+    @MainActor
+    func testFirstReviewOnlyCompletesAfterACommittedResult() {
+        let state = AppState(api: MockAPI())
+        var completionCount = 0
+        state.firstReviewCompletion = { completionCount += 1 }
+
+        state.finish()
+        XCTAssertEqual(completionCount, 0)
+        XCTAssertNotNil(state.firstReviewCompletion)
+
+        state.result = result(contract: 1)
+        state.finish()
+        XCTAssertEqual(completionCount, 1)
+        XCTAssertNil(state.firstReviewCompletion)
+    }
+
+    private func result(contract: Int) -> SessionResult {
+        SessionResult(
+            score: 3,
+            scoringContractVersion: contract,
+            feedback: "Clear enough to schedule.",
+            scheduleLine: "NEXT REVIEW · TOMORROW",
+            reattemptOffered: false,
+            reattemptPrompt: nil,
+            coachingOffered: false,
+            coachingFocus: nil,
+            coachingQuestion: nil
+        )
     }
 }

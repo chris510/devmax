@@ -88,12 +88,12 @@ class Settings(BaseSettings):
     question_model: str = "claude-haiku-4-5"
     # Sonnet 5 runs adaptive thinking by default; effort bounds it so a 1-3 minute
     # session doesn't stall on scoring. Haiku 4.5 rejects `effort` entirely, hence
-    # None — set this if you swap the question model to a 4.6+ model.
+    # None. Set this if you swap the question model to a 4.6+ model.
     #
     # "low" beat "medium" on both axes in a live sweep (scripts/effort_sweep.py,
     # 8 cases, 2026-07): 1460 vs 2353 output tokens, and 6/8 vs 3/8 exact score
     # matches. Against a rubric this crisp, more thinking produced *less*
-    # consistent grading — medium's errors were scattered where low's were not.
+    # consistent grading. Medium's errors were scattered where low's were not.
     # A source-grounded 18-case Week 1 sweep on 2026-08-07 confirmed the choice:
     # low had 13/18 exact composites at 4068 output tokens versus medium's 12/18
     # at 5029, with no false Accuracy passes or failures at either level.
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     # independent from API/auth credentials so it can rotate on its own.
     openai_safety_identifier_secret: str = ""
 
-    # Turn 3, the coached re-attempt. Mirrors the scoring model deliberately — it
+    # Turn 3, the coached re-attempt. Mirrors the scoring model deliberately: it
     # grades the same axis against the same transcript, so a weaker model would
     # write a mastery summary the scoring call then reads as peer evidence.
     #
@@ -147,7 +147,7 @@ class Settings(BaseSettings):
     reattempt_effort: str | None = "low"
 
     # Guide import. One call per plan creation, over a whole study guide, producing
-    # a hundred structured items with source offsets — the hardest extraction in
+    # a hundred structured items with source offsets, the hardest extraction in
     # the product and the one where a wrong answer is most expensive, because the
     # user reviews the result once and then lives inside it for twelve weeks.
     # Opus 5 at high effort; there is no latency budget here the way there is in a
@@ -156,7 +156,7 @@ class Settings(BaseSettings):
     studyplan_effort: str | None = "high"
 
     # Card proposals from a completed plan item. Mirrors the scoring model, which
-    # is what will grade the resulting cards — a stronger model here would write
+    # is what will grade the resulting cards. A stronger model here would write
     # questions the scoring model then marks against a different standard.
     card_proposal_model: str = "claude-sonnet-5"
     card_proposal_effort: str | None = "low"

@@ -441,8 +441,8 @@ async def test_fixture_follow_ups_are_probe_rows(db) -> None:
 
     probes = (await db.exec(select(SessionProbe))).all()
     assert {(p.idx, p.question) for p in probes} == {
-        (1, "One more — what are virtual nodes for?"),
-        (1, "One more — is that the only condition?"),
+        (1, "One more: what are virtual nodes for?"),
+        (1, "One more: is that the only condition?"),
     }
     assert all(p.answer for p in probes)
 

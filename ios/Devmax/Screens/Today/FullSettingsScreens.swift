@@ -3,55 +3,99 @@ import UIKit
 import UserNotifications
 
 struct FullSettingsScreen: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var flow: PublicOnboardingState
     @EnvironmentObject private var auth: AuthState
+    @AppStorage(Preferences.readAloudKey) private var readAloud = true
     @State private var notificationStatus = "CHECKING"
+    @State private var studyReminderCount: Int?
     @State private var showSignOut = false
 
     var body: some View {
         PublicSettingsPage(title: "Settings", back: { state.path.removeLast() }) {
-            settingsSection("STUDY MATERIAL") {
-                destination("Imported guides, topics, and plans") {
-                    flow.step = .studyMaterial
-                    state.path.append(.materialSetup)
-                    Task { await flow.loadStudyMaterial() }
+            settingsSection("STUDY") {
+                destination("Material", value: materialValue) {
+                    state.path.append(.library)
+                }
+                panelDivider
+                destination("Study plan", value: planValue) {
+                    if let id = state.planSummary?.planId {
+                        state.path.append(.planOverview(id))
+                    } else {
+                        state.path.append(.planBuild)
+                    }
                 }
             }
             settingsSection("REVIEWS") {
-                settingValue("Reviews per day", value: "\(state.settings.reviewsPerDay)")
-                settingValue("Default answer", value: "Voice or text")
-                settingValue("Read questions aloud", value: "This device")
-            }
-            settingsSection("NOTIFICATIONS") {
-                destination("iOS permission · \(notificationStatus)") {
-                    UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                settingValue("Answering", value: "Voice + text")
+                panelDivider
+                toggleValue("Read aloud", isOn: $readAloud)
+                panelDivider
+                destination(
+                    "Review reminders",
+                    value: SettingsValidation.reminderValue(for: state.settings)
+                ) {
+                    state.path.append(.reviewReminders)
                 }
             }
+            settingsSection("NOTIFICATIONS") {
+                destination("Permission", value: notificationStatus.capitalized) {
+                    handleNotificationPermission()
+                }
+                panelDivider
+                if let planID = state.planSummary?.planId {
+                    destination("Study reminders", value: studyReminderValue) {
+                        state.path.append(.planOverview(planID))
+                    }
+                } else {
+                    settingValue("Study reminders", value: "Not set")
+                }
+            }
+            settingsSection("PRIVACY") {
+                destination("AI processing", value: aiProcessingValue) {
+                    state.path.append(.privacy)
+                }
+                panelDivider
+                destination("Data & privacy") { state.path.append(.privacy) }
+            }
             settingsSection("ACCOUNT") {
-                settingValue(
-                    auth.profile?.displayName.isEmpty == false ? auth.profile!.displayName : "Apple account",
-                    value: auth.profile?.email ?? ""
-                )
-                destination("Sign out") { showSignOut = true }
+                settingValue("Signed in with Apple", value: accountValue)
+                panelDivider
+                action("Sign out") { showSignOut = true }
+                panelDivider
                 destination("Delete account") { state.path.append(.deleteAccount) }
             }
-            settingsSection("DATA & PRIVACY") {
-                destination("Export, processing, and deletion") { state.path.append(.privacy) }
-            }
             settingsSection("ABOUT") {
-                settingValue("Devmax", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                settingValue("Collections", value: "Versioned and reviewed")
+                settingValue(
+                    "Devmax",
+                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                )
             }
         }
         .task {
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            async let deviceSettings = UNUserNotificationCenter.current().notificationSettings()
+            async let cards: Void = state.loadLibrary()
+            async let collections = try? flow.api.materialCollections()
+            async let summary = try? state.api.activePlan()
+
+            let (settings, _, loadedCollections, loadedSummary) = await (
+                deviceSettings, cards, collections, summary
+            )
             notificationStatus = switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral: "ON"
             case .denied: "OFF"
             case .notDetermined: "NOT ASKED"
             @unknown default: "UNKNOWN"
             }
+            if let loadedCollections { flow.collections = loadedCollections }
+            if let loadedSummary { state.planSummary = loadedSummary }
+            if let id = state.planSummary?.planId {
+                studyReminderCount = await StudyReminderService.shared.pendingCount(planID: id)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshNotificationStatus() } }
         }
         .alert("Sign out on this device?", isPresented: $showSignOut) {
             Button("Cancel", role: .cancel) {}
@@ -64,32 +108,340 @@ struct FullSettingsScreen: View {
     private func settingsSection<Content: View>(
         _ label: String, @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             MetaText(text: label, font: WCFont.mono(10), tracking: 1.1, color: Theme.metaFaint)
-                .padding(.bottom, 4)
-            content()
+            QuietPanel { content() }
         }
     }
 
-    private func destination(_ title: String, action: @escaping () -> Void) -> some View {
+    private var panelDivider: some View { Hairline().padding(.horizontal, 1) }
+
+    private func destination(
+        _ title: String, value: String = "", action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            HStack {
-                Text(title).font(WCFont.sans(14.5)).foregroundStyle(Theme.text)
-                Spacer()
-                Text("→").font(WCFont.mono(11)).foregroundStyle(Theme.accent)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(title).font(WCFont.sans(15, weight: 500)).foregroundStyle(Theme.text)
+                Spacer(minLength: 8)
+                if !value.isEmpty {
+                    Text(value)
+                        .font(WCFont.mono(10.5))
+                        .foregroundStyle(Theme.metaAlt)
+                        .lineLimit(1)
+                }
+                Text("›").font(WCFont.sans(17)).foregroundStyle(Theme.metaFaint)
             }
-            .frame(minHeight: Metrics.minTapTarget)
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
     private func settingValue(_ title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(WCFont.sans(14.5)).foregroundStyle(Theme.text)
+            Text(title).font(WCFont.sans(15, weight: 500)).foregroundStyle(Theme.text)
             Spacer(minLength: 10)
-            Text(value).font(WCFont.sans(12.5)).foregroundStyle(Theme.metaAlt).lineLimit(1)
+            Text(value).font(WCFont.mono(10.5)).foregroundStyle(Theme.metaAlt).lineLimit(1)
         }
-        .frame(minHeight: Metrics.minTapTarget)
+        .frame(minHeight: 56)
+    }
+
+    private func toggleValue(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 12) {
+            Text(title).font(WCFont.sans(15, weight: 500)).foregroundStyle(Theme.text)
+            Spacer()
+            Text(isOn.wrappedValue ? "On" : "Off")
+                .font(WCFont.mono(10.5)).foregroundStyle(Theme.metaAlt)
+            Toggle34(isOn: isOn, accessibilityLabel: title)
+        }
+        .frame(minHeight: 56)
+    }
+
+    private func action(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(WCFont.sans(15, weight: 500))
+                .foregroundStyle(Theme.text)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var materialValue: String {
+        switch state.libraryLoad {
+        case .loading where state.library.isEmpty: "Checking"
+        case .error where state.library.isEmpty: "Unavailable"
+        default: "\(state.library.count) cards"
+        }
+    }
+
+    private var planValue: String {
+        guard let summary = state.planSummary, summary.active else { return "Not set" }
+        return summary.weekIndex.map { "Week \($0)" } ?? "Active"
+    }
+
+    private var studyReminderValue: String {
+        guard let studyReminderCount else { return "Checking" }
+        return studyReminderCount == 0 ? "Off" : "\(studyReminderCount) on"
+    }
+
+    private var aiProcessingValue: String {
+        auth.profile?.aiProcessingAllowed == true ? "Allowed" : "Not allowed"
+    }
+
+    private var accountValue: String {
+        if let email = auth.profile?.email, !email.isEmpty { return email }
+        if let name = auth.profile?.displayName, !name.isEmpty { return name }
+        return "Connected"
+    }
+
+    private func handleNotificationPermission() {
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let current = await center.notificationSettings()
+            if current.authorizationStatus == .notDetermined {
+                let granted = (try? await center.requestAuthorization(options: [.alert, .sound]))
+                    ?? false
+                if granted, !DebugFlags.shared.useMockAPI {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+                await refreshNotificationStatus()
+            } else if let url = URL(string: UIApplication.openSettingsURLString) {
+                await UIApplication.shared.open(url)
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshNotificationStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        notificationStatus = switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: "ON"
+        case .denied: "OFF"
+        case .notDetermined: "NOT ASKED"
+        @unknown default: "UNKNOWN"
+        }
+    }
+}
+
+struct ReviewRemindersScreen: View {
+    @EnvironmentObject private var state: AppState
+    @State private var draft: AppSettings = .placeholder
+    @State private var saving = false
+    @State private var errorText = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            StatusBar(rightText: "SETTINGS")
+            header
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("One reminder per enabled window when a review is due.")
+                        .font(WCFont.sans(14))
+                        .foregroundStyle(Theme.textMuted)
+                        .lineSpacing(3)
+
+                    QuietPanel {
+                        ForEach(Array(draft.windows.indices), id: \.self) { index in
+                            ReminderWindowEditor(
+                                window: $draft.windows[index],
+                                errorText: SettingsValidation.windowMessage(draft.windows[index])
+                            )
+                            if index < draft.windows.count - 1 { Hairline() }
+                        }
+                        if !draft.windows.isEmpty { Hairline() }
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Time zone")
+                                .font(WCFont.sans(15, weight: 500))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                            Text(timeZoneLabel)
+                                .font(WCFont.mono(10.5))
+                                .foregroundStyle(Theme.metaAlt)
+                        }
+                        .frame(minHeight: 56)
+                    }
+                    .disabled(saving)
+
+                    MetaText(
+                        text: reminderSummary,
+                        font: WCFont.mono(10), tracking: 0.5, color: Theme.metaFaint
+                    )
+
+                    if !errorText.isEmpty {
+                        InlineNotice {
+                            Text(errorText)
+                                .font(WCFont.sans(13))
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .wcFade(Motion.fadeFast)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Metrics.screenPadding)
+                .padding(.bottom, 18)
+            }
+
+            footer
+        }
+        .background(Theme.bg)
+        .navigationBarHidden(true)
+        .onAppear { draft = state.settings }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { dismissIfPresented() } label: {
+                Text(SettingsNavigation.reviewRemindersBackLabel(for: state.path))
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.metaAlt)
+            }
+            .buttonStyle(.plain)
+            .disabled(saving)
+            .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+
+            Text("Review reminders")
+                .font(TypeRole.screenTitle)
+                .tracking(-0.6)
+                .foregroundStyle(Theme.text)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Metrics.screenPadding)
+        .padding(.bottom, 12)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 14) {
+            Button("Cancel") { dismissIfPresented() }
+                .buttonStyle(.plain)
+                .font(WCFont.sans(14))
+                .foregroundStyle(Theme.textMuted)
+                .frame(minWidth: 82, minHeight: Metrics.minTapTarget)
+                .disabled(saving)
+
+            PrimaryButton(
+                title: saving ? "Saving…" : "Save changes",
+                enabled: normalizedDraft != state.settings && !saving
+                    && SettingsValidation.message(for: normalizedDraft) == nil
+            ) {
+                startSaving()
+            }
+        }
+        .padding(.horizontal, Metrics.screenPadding)
+        .padding(.top, 10)
+        .padding(.bottom, Metrics.bottomSafeArea)
+        .background(Theme.bg)
+    }
+
+    private var timeZoneLabel: String {
+        let part = draft.timezone.split(separator: "/").last.map(String.init) ?? draft.timezone
+        return part.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private var enabledWindowCount: Int { draft.windows.filter(\.on).count }
+
+    private var reminderSummary: String {
+        let value = SettingsValidation.reminderValue(for: draft)
+        return value == "Off" ? value : "\(value) daily"
+    }
+
+    /// The server field stays for wire compatibility. The UI offers one
+    /// reminder per enabled window, so the daily cap must match that promise.
+    private var normalizedDraft: AppSettings {
+        SettingsValidation.normalizedReminderSettings(draft)
+    }
+
+    private func startSaving() {
+        guard !saving else { return }
+        let value = normalizedDraft
+        if let validation = SettingsValidation.message(for: value) {
+            errorText = validation
+            return
+        }
+
+        saving = true
+        errorText = ""
+        Task { await persist(value) }
+    }
+
+    @MainActor
+    private func persist(_ value: AppSettings) async {
+        do {
+            state.settings = try await state.api.updateSettings(value)
+            saving = false
+            dismissIfPresented()
+        } catch {
+            saving = false
+            errorText = "Couldn't save changes. Your edits are still here."
+        }
+    }
+
+    @MainActor
+    private func dismissIfPresented() {
+        guard !saving else { return }
+        SettingsNavigation.popReviewRemindersIfPresented(from: &state.path)
+    }
+}
+
+private struct ReminderWindowEditor: View {
+    @Binding var window: NotificationWindow
+    let errorText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text(window.label)
+                    .font(WCFont.sans(15, weight: 500))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Toggle34(
+                    isOn: $window.on,
+                    accessibilityLabel: "\(window.label) reminder"
+                )
+            }
+
+            HStack(spacing: 10) {
+                timeField("START", value: $window.from)
+                timeField("END", value: $window.to)
+            }
+
+            if let errorText {
+                Text(errorText)
+                    .font(WCFont.sans(12.5))
+                    .foregroundStyle(Theme.scoreLow)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 14)
+    }
+
+    private func timeField(_ label: String, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            MetaText(
+                text: label, font: WCFont.mono(9.5), tracking: 0.7,
+                color: Theme.metaFaint
+            )
+            DatePicker(
+                label,
+                selection: SettingsValidation.dateBinding(for: value),
+                displayedComponents: .hourAndMinute
+            )
+            .labelsHidden()
+            .datePickerStyle(.compact)
+            .tint(Theme.textMuted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.inputFill, in: RoundedRectangle(cornerRadius: Metrics.inputRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Metrics.inputRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
     }
 }
 

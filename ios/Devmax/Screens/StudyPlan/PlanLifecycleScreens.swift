@@ -594,8 +594,8 @@ struct PlanAuditScreen: View {
         ),
         "deadline": (
             "Deadline",
-            "The plan would finish after the date you fixed. The deadline doesn't move "
-                + "— shorten the plan, raise the weekly capacity, or reduce scope."
+            "The plan would finish after the date you fixed. The deadline doesn't move. "
+                + "Choose a shorter plan, raise the weekly capacity, or reduce scope."
         ),
         "titles": (
             "Short titles",

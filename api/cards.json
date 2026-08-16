@@ -215,7 +215,7 @@
       "acceptable_alternative": "CDC, an outbox, checksums, or shadow reads are valid alternatives when they preserve incremental synchronization, observable parity, and a reversible cutover.",
       "trade_off": "The staged migration preserves uptime and rollback but temporarily doubles writes, adds database load, and requires repair and observability.",
       "failure_mode": "A one-shot backfill followed immediately by cutover misses concurrent writes; deleting the old path before confidence removes rollback.",
-      "misconception": "Dual writing alone does not prove consistency—historical backfill, comparison, discrepancy repair, and staged authority changes are still required."
+      "misconception": "Dual writing alone does not prove consistency. Historical backfill, comparison, discrepancy repair, and staged authority changes are still required."
     },
     "canonical_question": "You must move a live subscriptions representation into a new table without downtime. What sequence keeps old and new data consistent, proves the new reads before cutover, and preserves rollback until the migration is complete?"
   },
@@ -544,7 +544,7 @@
     "category": "System Design Pattern",
     "target_week": 4,
     "source_url": "https://www.infoq.com/presentations/Twitter-Timeline-Scalability/",
-    "source_section": "Timelines at Scale — home-timeline fan-out and high-fanout read-time merge",
+    "source_section": "Timelines at Scale: home-timeline fan-out and high-fanout read-time merge",
     "activation_prerequisite": "Watch Timelines at Scale and complete the historical Twitter home-timeline practice",
     "evidence": "primary_practitioner_talk",
     "grounding_status": "draft_review",

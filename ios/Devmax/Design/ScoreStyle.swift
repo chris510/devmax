@@ -14,7 +14,7 @@ enum ScoreStyle {
     }
 
     static func label(for score: Int?) -> String {
-        score.map(String.init) ?? "—"
+        score.map(String.init) ?? "unrated"
     }
 
     /// The Today mastery-distribution bands, derived client-side from each due
@@ -88,9 +88,10 @@ struct ScoreColumn: View {
     var body: some View {
         VStack(spacing: 5) {
             Text(ScoreStyle.label(for: score))
-                .font(TypeRole.scoreNumeral)
+                .font(score == nil ? WCFont.mono(10) : TypeRole.scoreNumeral)
                 .monospacedDigit()
                 .foregroundStyle(ScoreStyle.color(for: score))
+                .accessibilityLabel(score.map(String.init) ?? "Unrated")
             Circle()
                 .fill(ScoreStyle.color(for: score))
                 .frame(width: 6, height: 6)

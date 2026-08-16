@@ -77,7 +77,11 @@ struct AppEntryView: View {
 
     var body: some View {
         Group {
-            if flags.route == "settings" {
+            if flags.route == "library" {
+                NavigationStack { LibraryScreen() }
+            } else if flags.route == "review-reminders" {
+                NavigationStack { ReviewRemindersScreen() }
+            } else if flags.route == "settings" {
                 NavigationStack { FullSettingsScreen() }
             } else if flags.route == "privacy" {
                 NavigationStack { DataPrivacyScreen() }
@@ -175,6 +179,18 @@ struct RootView: View {
                         PlanRecapScreen(planID: id)
                     case .planAudit(let destination):
                         PlanAuditScreen(destination: destination)
+                    case .library:
+                        LibraryScreen()
+                    case .libraryCards:
+                        LibraryCardsScreen()
+                    case .libraryCaptures:
+                        CaptureFlowScreen(
+                            route: .inbox,
+                            inboxBackTitle: "← Library",
+                            close: { state.path.removeLast() }
+                        )
+                    case .reviewReminders:
+                        ReviewRemindersScreen()
                     case .materialSetup:
                         PublicOnboardingView()
                     case .fullSettings:

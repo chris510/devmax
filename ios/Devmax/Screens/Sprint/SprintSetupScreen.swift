@@ -205,7 +205,12 @@ struct SprintSetupScreen: View {
                      font: WCFont.mono(10.5), tracking: 0.63, color: Theme.metaFaint)
 
             if state.setupReady {
-                PrimaryButton(title: "Start — \(state.sprintSet.count) cards") {
+                MetaText(
+                    text: "\(state.sprintSet.count) CARDS",
+                    font: WCFont.mono(10), tracking: 1.0, color: Theme.metaFaint
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                PrimaryButton(title: "Start review") {
                     state.startSprint()
                 }
             }

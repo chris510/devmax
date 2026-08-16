@@ -40,7 +40,9 @@ struct CardHistoryScreen: View {
                 updated: { maintenance = $0 },
                 replaced: {
                     maintenance = nil
-                    state.path.removeLast()
+                    if state.path.last == .history(cardID) {
+                        state.path.removeLast()
+                    }
                     Task { await state.loadToday() }
                 }
             )
@@ -186,7 +188,7 @@ struct CardHistoryScreen: View {
                         }
                     }
                     if due {
-                        SecondaryButton(title: "Review now — I already know it") {
+                        SecondaryButton(title: "Review now. I know it") {
                             state.beginReviewFromHistory(cardID: cardID)
                         }
                     }
@@ -316,6 +318,7 @@ private struct CardMaintenanceSheet: View {
     private func replace() async {
         await perform("Couldn't create the replacement. This card is unchanged.") {
             _ = try await state.api.replaceCard(value.id, question: question, schedule: schedule)
+            await state.loadLibrary()
             replaced()
         }
     }

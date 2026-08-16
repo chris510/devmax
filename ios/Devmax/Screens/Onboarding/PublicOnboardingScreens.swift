@@ -26,6 +26,8 @@ struct PublicOnboardingView: View {
     @EnvironmentObject private var plan: StudyPlanState
     @EnvironmentObject private var auth: AuthState
     @State private var expandedTopics: Set<UUID> = []
+    @State private var savingReminderSettings = false
+    @State private var collectionsOpenedFromStudyMaterial = false
 
     var body: some View {
         Group {
@@ -143,7 +145,7 @@ struct PublicOnboardingView: View {
 
     private var welcome: some View {
         PublicPage(kicker: "DEVMAX", title: "Understand it.\nThen keep it.") {
-            Text("Bring the material you already trust. Devmax turns it into short, spoken retrieval practice and schedules what to revisit.")
+            Text("Bring material you trust. Devmax turns it into short voice or text retrieval practice and schedules what to revisit.")
                 .publicBody()
             PublicNote("No streaks. No invented curriculum. Your source remains the source.")
         } footer: {
@@ -156,15 +158,21 @@ struct PublicOnboardingView: View {
     }
 
     private var chooseMaterial: some View {
-        PublicPage(back: { flow.step = .welcome }, kicker: "SETUP · 1 OF 3", title: "What do you want to study?") {
+        PublicPage(back: {
+            if !app.path.isEmpty { app.path.removeLast() }
+            else { flow.step = .welcome }
+        }, kicker: "MATERIAL", title: "What are you studying?") {
             PublicChoice(
-                title: "Bring a guide", detail: "Paste text or choose a text-based PDF, TXT, or Markdown file.",
+                title: "Bring a guide", detail: "PDF, TXT, or Markdown",
                 badge: "RECOMMENDED"
             ) { flow.beginGuide() }
-            PublicChoice(title: "Add a few topics", detail: "Fast setup. Each topic needs a trusted answer anchor.") {
+            PublicChoice(title: "Add a lesson", detail: "Article, docs, book, or notes") {
+                flow.beginLesson()
+            }
+            PublicChoice(title: "Add topics", detail: "Type them yourself") {
                 flow.step = .manual
             }
-            PublicChoice(title: "Browse Devmax collections", detail: "Reviewed starter material where a collection is available.") {
+            PublicChoice(title: "Reviewed collection", detail: "Use prepared material") {
                 flow.step = .collections
                 Task { await flow.loadCollections() }
             }
@@ -387,7 +395,7 @@ struct PublicOnboardingView: View {
             PrimaryButton(title: flow.isLessonDraft ? "Review concepts" : "Review proposals") {
                 Task { await flow.openImportedResult(plan: plan) }
             }
-            Button("Later — keep it in Study material") { leaveToToday() }.publicSecondary()
+            Button("Keep for later") { leaveToToday() }.publicSecondary()
         }
     }
 
@@ -650,7 +658,7 @@ struct PublicOnboardingView: View {
     }
 
     private var collections: some View {
-        PublicPage(back: { flow.step = .material }, kicker: "REVIEWED MATERIAL", title: "Devmax collections") {
+        PublicPage(back: backFromCollections, kicker: "REVIEWED MATERIAL", title: "Devmax collections") {
             ForEach(flow.collections) { item in
                 PublicChoice(title: item.title, detail: item.subtitle, badge: "V\(item.version) · \(item.topicCount) TOPICS") {
                     Task { await flow.openCollection(item.id) }
@@ -723,7 +731,7 @@ struct PublicOnboardingView: View {
                 : "One number, three checks."
         ) {
             if app.usesRecallContract {
-                Text("Recall measures whether the essential account was correct. It is the only signal that schedules the topic. When useful, you can practice going deeper or testing a boundary — without turning those answers into mastery scores.").publicBody()
+                Text("Recall measures whether the essential account was correct. It is the only signal that schedules the topic. You can also practice depth or boundaries without turning those answers into mastery scores.").publicBody()
                 PublicMaterialCard(title: "Recall", meta: "DID YOU RETRIEVE THE ESSENTIAL IDEA?")
                 PublicMaterialCard(title: "Go deeper", meta: "OPTIONAL QUALITATIVE PRACTICE AFTER A PASS")
             } else {
@@ -734,27 +742,53 @@ struct PublicOnboardingView: View {
             }
             PublicNote("Your answer and relevant study material are sent for scoring. Devmax receives the transcript, not an audio recording.")
         } footer: {
-            PrimaryButton(title: "Set my review pace") { flow.step = .pace }
+            PrimaryButton(title: "Set review reminders") { flow.step = .pace }
         }
     }
 
     private var pace: some View {
-        PublicPage(kicker: "SETUP · 3 OF 3", title: "Choose a light daily pace") {
-            publicStepper(label: "REVIEWS PER DAY", value: "\(app.settings.reviewsPerDay)", min: 1, max: 6, binding: Binding(
-                get: { app.settings.reviewsPerDay },
-                set: { app.settings.reviewsPerDay = $0 }
-            ))
-            PublicMaterialCard(title: "Morning", meta: "\(app.settings.windows.first?.from ?? "08:00")–\(app.settings.windows.first?.to ?? "09:00") · REVIEW WINDOW")
-            PublicNote("This sets the scheduler's delivery window. iOS permission comes next, after you have chosen when reminders are useful.")
+        PublicPage(kicker: "REVIEW REMINDERS", title: "Choose when to be nudged") {
+            Text("One reminder per enabled window, only when a review is due.").publicBody()
+            QuietPanel {
+                ForEach(Array(app.settings.windows.indices), id: \.self) { index in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(app.settings.windows[index].label)
+                                .font(WCFont.sans(15, weight: 500))
+                                .foregroundStyle(Theme.text)
+                            MetaText(
+                                text: "\(app.settings.windows[index].from)–\(app.settings.windows[index].to)",
+                                font: WCFont.mono(10.5), tracking: 0.4,
+                                color: Theme.metaAlt
+                            )
+                        }
+                        Spacer()
+                        Toggle34(
+                            isOn: $app.settings.windows[index].on,
+                            accessibilityLabel: "\(app.settings.windows[index].label) reminder"
+                        )
+                    }
+                    .frame(minHeight: 62)
+                    if index < app.settings.windows.count - 1 { Hairline() }
+                }
+            }
+            PublicNote("Times use your local time zone. You can edit them later in Settings.")
+            if !flow.error.isEmpty { PublicError(flow.error) }
         } footer: {
-            PrimaryButton(title: "Continue") { app.saveSettings(app.settings); flow.step = .reminders }
+            PrimaryButton(
+                title: savingReminderSettings ? "Saving…" : "Continue",
+                enabled: !savingReminderSettings
+            ) {
+                saveReminderSettings()
+            }
         }
     }
 
     private var reminders: some View {
-        PublicPage(kicker: flow.step == .remindersDenied ? "REMINDERS OFF" : "OPTIONAL REMINDERS", title: flow.step == .remindersDenied ? "You're all set." : "Review when it fits.") {
-            Text(flow.step == .remindersDenied ? "You declined notifications. Devmax still works normally whenever you open it." : "Allow one short prompt inside the review windows you just chose. No streak warnings or engagement nudges.").publicBody()
+        PublicPage(kicker: flow.step == .remindersDenied ? "REMINDERS OFF" : "OPTIONAL REMINDERS", title: flow.step == .remindersDenied ? "You're all set." : "Allow notifications?") {
+            Text(reminderPermissionBody).publicBody()
             PublicNote("You can change this later in Settings. Declining does not block setup.")
+            if !flow.error.isEmpty { PublicError(flow.error) }
         } footer: {
             if flow.step == .remindersDenied {
                 PrimaryButton(title: "Go to Today") { Task { await completeOnboarding() } }
@@ -765,11 +799,56 @@ struct PublicOnboardingView: View {
         }
     }
 
+    private var enabledReminderWindows: Int {
+        app.settings.windows.filter(\.on).count
+    }
+
+    private var reminderPermissionBody: String {
+        if flow.step != .remindersDenied {
+            return "iOS permission lets Devmax send the reminders you chose."
+        }
+        if enabledReminderWindows == 0 {
+            return "You chose no reminder windows. Devmax still works whenever you open it."
+        }
+        return "Notifications are off. Devmax still works whenever you open it."
+    }
+
+    private func saveReminderSettings() {
+        guard !savingReminderSettings else { return }
+        var value = app.settings
+        value.reviewsPerDay = max(1, value.windows.filter(\.on).count)
+        if let validation = SettingsValidation.message(for: value) {
+            flow.error = validation
+            return
+        }
+
+        savingReminderSettings = true
+        flow.error = ""
+        Task {
+            do {
+                app.settings = try await app.api.updateSettings(value)
+                savingReminderSettings = false
+                flow.step = enabledReminderWindows == 0 ? .remindersDenied : .reminders
+            } catch {
+                savingReminderSettings = false
+                flow.error = "Couldn't save reminder times. Your choices are still here."
+            }
+        }
+    }
+
     private var learnBranch: some View {
         PublicPage(kicker: "WEEK 1 READY", title: "Learn first. Retrieve second.") {
             Text("Your plan is ready. Complete the first study item before Devmax offers its review topic, so the first score measures recall rather than a cold guess.").publicBody()
+            if !flow.error.isEmpty { PublicError(flow.error) }
         } footer: {
-            PrimaryButton(title: "Open Week 1") { Task { await completeOnboarding() } }
+            PrimaryButton(title: "Open Week 1") {
+                Task {
+                    guard await completeOnboarding() else { return }
+                    if let id = plan.overview?.id ?? app.planSummary?.planId {
+                        app.path = [.planOverview(id), .planWeek(id, 1)]
+                    }
+                }
+            }
         }
     }
 
@@ -831,9 +910,14 @@ struct PublicOnboardingView: View {
             PublicChoice(title: "Add another guide", detail: "Paste text or choose a supported text-based file.") {
                 flow.beginGuide(forceNew: true)
             }
+            PublicChoice(title: "Add another lesson", detail: "Article, docs, book, or notes") {
+                flow.beginLesson(forceNew: true)
+            }
             PublicChoice(title: "Add manual topics", detail: "Create grounded review topics without a guide.") { flow.step = .manual }
             PublicChoice(title: "Browse collections", detail: "See reviewed, versioned starter material.") {
-                flow.step = .collections; Task { await flow.loadCollections() }
+                collectionsOpenedFromStudyMaterial = true
+                flow.step = .collections
+                Task { await flow.loadCollections() }
             }
             if !flow.error.isEmpty { PublicError(flow.error) }
         }
@@ -870,6 +954,19 @@ struct PublicOnboardingView: View {
     private func backFromSourceEntry() {
         if flow.isLessonDraft, !app.path.isEmpty {
             app.path.removeLast()
+        } else {
+            flow.step = .material
+        }
+    }
+
+    private func backFromCollections() {
+        if collectionsOpenedFromStudyMaterial {
+            collectionsOpenedFromStudyMaterial = false
+            flow.step = .studyMaterial
+        } else if app.path.dropLast().last == .library {
+            app.path.removeLast()
+        } else if !app.path.isEmpty {
+            flow.step = .studyMaterial
         } else {
             flow.step = .material
         }
@@ -932,11 +1029,16 @@ struct PublicOnboardingView: View {
         }
     }
 
-    private func completeOnboarding() async {
+    @discardableResult
+    private func completeOnboarding() async -> Bool {
+        guard await auth.markOnboardingComplete() else {
+            flow.error = "Couldn't finish setup. Your choices are still here."
+            return false
+        }
         flow.draft = PublicSetupDraft()
         PublicSetupStore.clear()
-        await auth.markOnboardingComplete()
         await app.loadToday()
+        return true
     }
 }
 

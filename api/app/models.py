@@ -11,7 +11,7 @@ JSON_TYPE = JSONB().with_variant(JSON(), "sqlite")
 
 # Every timestamp column is `timestamptz` in migration 0001 and every value written
 # is tz-aware (`_now()` below). A bare `datetime` annotation would map to a naive
-# DateTime, and the asyncpg dialect casts bind parameters from the *model* type — so
+# DateTime, and the asyncpg dialect casts bind parameters from the *model* type, so
 # it would emit `$n::TIMESTAMP WITHOUT TIME ZONE` and asyncpg would reject the aware
 # value with a DataError on every insert. SQLite silently drops tzinfo instead, which
 # is why this only ever surfaces against Postgres.
@@ -238,7 +238,7 @@ class Card(SQLModel, table=True):
     delivery_mode: str = DELIVERY_CONVERSATIONAL
 
     # Generated once, then reused for every session on this card. Repeating the same
-    # retrieval is the point — a fresh question each time puts every review in the
+    # retrieval is the point. A fresh question each time puts every review in the
     # weak-transfer regime. Null until the first session generates one.
     canonical_question: str | None = None
     # Trusted grounding supplied by an imported guide, reviewed collection, or
@@ -288,7 +288,7 @@ class Card(SQLModel, table=True):
     last_score_contract_version: int | None = None
     last_reviewed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     mastery_summary: str = ""
-    # Compliance signal only — never feeds SM-2.
+    # Compliance signal only. It never feeds SM-2.
     missed_count: int = 0
     last_pushed_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     # Opening the explicit Learn surface exposes trusted answer authority. The
@@ -297,7 +297,7 @@ class Card(SQLModel, table=True):
     # masquerade as unaided recall. Neither field is part of SM-2.
     last_learning_exposure_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     recall_not_before_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
-    # The `last_pushed_at` value check-missed has already counted — a push instant,
+    # The `last_pushed_at` value check-missed has already counted: a push instant,
     # not a counting instant. Equal means counted; NULL or older means this push is
     # still uncounted. Replaces clearing `last_pushed_at`, which destroyed the
     # evidence both the daily cap and the per-window guard read.
@@ -375,14 +375,14 @@ class Session(SQLModel, table=True):
     question_asked: str
     # Frozen legacy, both of them: the single probe a session could once carry.
     # Migration 0015 moved probes to `session_probes` and left these holding the
-    # history they already had. Nothing reads or writes them — see DEVIATIONS §30.
+    # history they already had. Nothing reads or writes them; see DEVIATIONS §30.
     follow_up_question: str | None = None
     answer_text: str = ""
     follow_up_answer: str = ""
     # In-progress, unsubmitted. Losing this is the worst failure mode in the product.
     draft_text: str = ""
 
-    # Composite, derived in code from the three axes below — never model-produced.
+    # Composite, derived in code from the three axes below and never model-produced.
     # Null on rows written before the decomposition shipped; those keep their
     # original blended score for history display.
     score: int | None = None
@@ -412,11 +412,11 @@ class Session(SQLModel, table=True):
 
     # Turn 3: a coached re-attempt, offered only after the correction has been
     # stated and only when the mechanism was wrong. Scored on one axis, written to
-    # the mastery summary, and barred from SM-2 and from `score` — it measures
+    # the mastery summary, and barred from SM-2 and from `score`. It measures
     # coached performance, not recall. See docs/multi-turn-coaching-design.md §4.
     reattempt_answer: str = ""
     reattempt_accuracy: int | None = None
-    # Guards replay, and named to mirror `follow_up_used` — the other structural cap
+    # Guards replay, and named to mirror `follow_up_used`, the other structural cap
     # in this table. "Used", not "offered": the session completes either way, so
     # nothing here distinguishes an offer declined from one never made.
     reattempt_used: bool = False
@@ -433,7 +433,7 @@ class SessionProbe(SQLModel, table=True):
     """One scored follow-up probe, in the order it was asked.
 
     Rows here are scored and pre-correction by definition, which is what keeps the
-    coached re-attempt and the coaching turn on `Session` as scalars — those happen
+    coached re-attempt and the coaching turn on `Session` as scalars. Those happen
     after the correction has been stated and never reach SM-2. See migration 0015
     and docs/multi-turn-coaching-design.md §5.1.
     """
@@ -447,7 +447,7 @@ class SessionProbe(SQLModel, table=True):
     # cap stays one decision; the schema only knows that order starts at 1.
     idx: int
     question: str
-    # "" until this probe is answered — a row is written when the question is issued.
+    # "" until this probe is answered. A row is written when the question is issued.
     answer: str = ""
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
@@ -477,7 +477,7 @@ class Settings(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Public study material — proposals first, cards only after confirmation.
+# Public study material: proposals first, cards only after confirmation.
 # ---------------------------------------------------------------------------
 
 SOURCE_DRAFT = "draft"
@@ -838,7 +838,7 @@ class LLMUsage(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Study Plan — see docs/STUDY-PLAN-SPEC.md
+# Study Plan; see docs/STUDY-PLAN-SPEC.md
 #
 # Nothing below writes to `cards` or `sessions`. The only link between the two
 # halves of the schema is `study_plan_card_links`, and it is only ever written
@@ -947,7 +947,7 @@ class StudyPlan(SQLModel, table=True):
     title: str
     subject: str
     # Normalised subject key. Card proposals require this to be in the technical
-    # allowlist AND the importer to have said the subject is supported — either
+    # allowlist AND the importer to have said the subject is supported. Either
     # alone is not enough. See services/study_plan.subject_supports_cards.
     subject_slug: str
     # Stored verbatim. Source offsets on items index into this exact string, so
@@ -993,7 +993,7 @@ class StudyPlanPhase(SQLModel, table=True):
     # reaches scheduling, dependency, duplicate, card, or scoring logic, and the
     # accessible name always uses full_title.
     overview_title: str = ""
-    # Surfaced at plan creation and in supporting detail — deliberately not on the
+    # Surfaced at plan creation and in supporting detail, deliberately not on the
     # overview, which V3.5 stripped of curriculum paragraphs.
     description: str = ""
 
@@ -1009,7 +1009,7 @@ class StudyPlanWeek(SQLModel, table=True):
 
     full_title: str
     overview_title: str = ""
-    # One-week override. Null means the plan default applies — storing the default
+    # One-week override. Null means the plan default applies. Storing the default
     # here instead would silently pin the week when the plan default later moves.
     override_capacity_minutes: int | None = None
     advanced_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
@@ -1164,7 +1164,7 @@ class StudyPlanGuideDraft(SQLModel, table=True):
     Persisted so a failed preview can be retried server-side without re-uploading
     the guide, and so the user's duration, capacity, mode, deadline, edits, and
     review choices survive a client crash. Creating a plan from a draft does not
-    delete it — the provenance is what `plan.guide_text` is checked against.
+    delete it. The provenance is what `plan.guide_text` is checked against.
     """
 
     __tablename__ = "study_plan_guide_drafts"
@@ -1280,7 +1280,7 @@ class StudyPlanCardProposal(SQLModel, table=True):
     )
     disposition: str = DISPOSITION_SUGGESTED
     # normalize_topic(topic) at proposal time. Recomputed and rechecked inside the
-    # acceptance transaction — this column is a cache, never the authority.
+    # acceptance transaction. This column is a cache, never the authority.
     normalized_topic: str
 
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
@@ -1305,7 +1305,7 @@ class StudyPlanCardProposalAcceptance(SQLModel, table=True):
     proposal_id: uuid.UUID = Field(foreign_key="study_plan_card_proposals.id", ondelete="CASCADE")
     idempotency_key: str
     # Hash of selected ids + edits. Same key with a different hash is a conflict,
-    # not a replay — that combination means the client changed its mind mid-retry.
+    # not a replay. That combination means the client changed its mind mid-retry.
     request_hash: str
     proposal_revision: int
     status: str = ACCEPTANCE_PROCESSING

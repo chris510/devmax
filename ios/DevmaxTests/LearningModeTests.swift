@@ -10,14 +10,16 @@ final class LearningModeTests: XCTestCase {
     )
 
     private static func summary(
-        id: UUID = id, recallNotBeforeAt: String? = nil
+        id: UUID = id,
+        nextReviewAt: String = "2026-08-11",
+        recallNotBeforeAt: String? = nil
     ) -> CardSummary {
         CardSummary(
             id: id, topic: "Consistent hashing", category: "Core Concept",
             deliveryMode: "conversational", masterySummary: "No signal yet.",
             lastScore: nil, lastAccuracy: nil, lastDepth: nil, lastBoundaries: nil,
             easeFactor: 2.5, intervalDays: 1, repetitions: 0,
-            nextReviewAt: "2026-08-11", dueLabel: "due today",
+            nextReviewAt: nextReviewAt, dueLabel: "due today",
             daysSinceReview: nil, missedCount: 0,
             recallNotBeforeAt: recallNotBeforeAt
         )
@@ -88,6 +90,35 @@ final class LearningModeTests: XCTestCase {
         XCTAssertNotNil(RecallGate.label(future, at: now))
         XCTAssertTrue(Self.summary(recallNotBeforeAt: past).recallIsAvailable(at: now))
         XCTAssertFalse(Self.summary(recallNotBeforeAt: "not-a-date").recallIsAvailable(at: now))
+    }
+
+    func testEmptyTodayUsesTheLaterScheduleOrLearningBoundary() throws {
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let learningBoundary = "2026-08-12T19:00:00Z"
+        let delayed = Self.summary(
+            nextReviewAt: "2026-08-11", recallNotBeforeAt: learningBoundary
+        )
+
+        XCTAssertEqual(
+            ReviewAvailability.effectiveDate(for: delayed, timeZone: timeZone),
+            WireDate.parse(learningBoundary)
+        )
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let scheduledLater = Self.summary(
+            nextReviewAt: "2026-08-13", recallNotBeforeAt: learningBoundary
+        )
+        XCTAssertEqual(
+            ReviewAvailability.effectiveDate(for: scheduledLater, timeZone: timeZone),
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 13))
+        )
+        XCTAssertNil(
+            ReviewAvailability.effectiveDate(
+                for: Self.summary(recallNotBeforeAt: "not-a-date"),
+                timeZone: timeZone
+            )
+        )
     }
 
     @MainActor

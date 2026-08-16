@@ -261,7 +261,7 @@ def test_parser_preserves_initial_provisional_recall_and_validates_follow_up() -
 
     assert result.recall == 2
     assert result.flow == "follow_up"
-    assert result.follow_up_question.startswith("One more —")
+    assert result.follow_up_question.startswith("One more:")
     assert result.decision == "follow_up"
     assert result.usage.input_tokens == 100
 

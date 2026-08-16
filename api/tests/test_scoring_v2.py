@@ -103,6 +103,7 @@ async def test_v2_completion_writes_recall_only_and_preserves_scheduler_mapping(
     assert body["scoring_contract_version"] == 2
     assert body["coaching_offered"] is True
     assert body["coaching_focus"] == "depth"
+    assert body["coaching_question"].startswith("One level deeper: ")
     assert body["reattempt_offered"] is False
     assert calls[0]["scoring_contract_version"] == 2
 
@@ -190,7 +191,7 @@ async def test_v2_exact_initial_answer_replay_is_not_scored_as_the_follow_up(
 ):
     calls = await install_v2(
         monkeypatch,
-        v2_result(2, status="follow_up", probe="One more — name the missing link?"),
+        v2_result(2, status="follow_up", probe="One more: name the missing link?"),
     )
     card = make_card(canonical_question="What is the essential account?")
     db.add(card)
@@ -204,7 +205,7 @@ async def test_v2_exact_initial_answer_replay_is_not_scored_as_the_follow_up(
 
     assert first.json() == replay.json() == {
         "status": "follow_up",
-        "question": "One more — name the missing link?",
+        "question": "One more: name the missing link?",
         "turn_index": 1,
     }
     assert len(calls) == 1
@@ -223,8 +224,8 @@ async def test_v2_second_probe_is_committed_and_only_the_final_turn_scores(
     """V2's insufficiency probe, end to end: two probe rows, one SM-2 application."""
     calls = await install_v2(
         monkeypatch,
-        v2_result(2, status="follow_up", probe="One more — name the missing link?"),
-        v2_result(2, status="follow_up", probe="Last one — what does that imply?"),
+        v2_result(2, status="follow_up", probe="One more: name the missing link?"),
+        v2_result(2, status="follow_up", probe="Last one: what does that imply?"),
         v2_result(4),
     )
     card = make_card(
@@ -244,7 +245,7 @@ async def test_v2_second_probe_is_committed_and_only_the_final_turn_scores(
     second = await client.post(endpoint, headers=API_HEADERS, json={"text": "still ambiguous"})
     assert second.json() == {
         "status": "follow_up",
-        "question": "Last one — what does that imply?",
+        "question": "Last one: what does that imply?",
         "turn_index": 2,
     }
 
@@ -254,8 +255,8 @@ async def test_v2_second_probe_is_committed_and_only_the_final_turn_scores(
     assert session.status == "awaiting_follow_up"
     assert session.score is None
     assert [(p.idx, p.question, p.answer) for p in await probes_of(db, session_id)] == [
-        (1, "One more — name the missing link?", "still ambiguous"),
-        (2, "Last one — what does that imply?", ""),
+        (1, "One more: name the missing link?", "still ambiguous"),
+        (2, "Last one: what does that imply?", ""),
     ]
     assert (card.ease_factor, card.interval_days, card.repetitions) == schedule_before
 
@@ -269,10 +270,10 @@ async def test_v2_second_probe_is_committed_and_only_the_final_turn_scores(
 
     assert [call["probes"] for call in calls] == [
         [],
-        [("One more — name the missing link?", "still ambiguous")],
+        [("One more: name the missing link?", "still ambiguous")],
         [
-            ("One more — name the missing link?", "still ambiguous"),
-            ("Last one — what does that imply?", "the missing link"),
+            ("One more: name the missing link?", "still ambiguous"),
+            ("Last one: what does that imply?", "the missing link"),
         ],
     ]
     await db.refresh(card)

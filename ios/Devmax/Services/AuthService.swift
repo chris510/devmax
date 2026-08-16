@@ -468,8 +468,15 @@ final class AuthState: ObservableObject {
         await clearLocalAccountState()
     }
 
-    func markOnboardingComplete() async {
-        profile = try? await api.completeOnboarding()
+    func markOnboardingComplete() async -> Bool {
+        do {
+            profile = try await api.completeOnboarding()
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = "Couldn't finish setup. Nothing was cleared."
+            return false
+        }
     }
 
     func refreshProfile() async {

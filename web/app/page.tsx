@@ -52,7 +52,7 @@ function TodayProof({ compact = false }: { compact?: boolean }) {
           </div>
         ))}
       </div>
-      <button className="product-button" type="button">Start — 3 cards</button>
+      <button className="product-button" type="button">Start · 3 cards</button>
     </div>
   );
 }
@@ -170,7 +170,7 @@ export default function Home() {
           </div>
           <div className="loop-cards">
             <article className="loop-card voice-card"><span>01 / ANSWER</span><strong>Say it out loud.</strong><p>Voice is closer to the room. Text is always equal.</p><div className="voice-mark"><i /><i /><i /><i /><i /></div></article>
-            <article className="loop-card probe-card"><span>02 / CLARIFY</span><strong>One probe. Max.</strong><p>If the explanation is shaky, Unprompted asks once—then stops.</p><div className="probe-line">WHAT BREAKS FIRST? <b>↗</b></div></article>
+            <article className="loop-card probe-card"><span>02 / CLARIFY</span><strong>Up to two probes.</strong><p>Only when another answer would make the score more honest.</p><div className="probe-line">WHAT BREAKS FIRST? <b>↗</b></div></article>
             <article className="loop-card schedule-card"><span>03 / SCHEDULE</span><strong>Bring it back later.</strong><p>Weak mechanism means sooner. Strong recall earns distance.</p><div className="schedule-track"><i /><i /><i /><i /></div></article>
           </div>
         </div>

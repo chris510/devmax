@@ -116,7 +116,7 @@ async def send_push(
     if not tokens:
         return PushDelivery(sent=0, attempted=0)
     if not settings.apns_private_key:
-        log.warning("apns not configured — skipping push for card=%s", card_id)
+        log.warning("apns not configured: skipping push for card=%s", card_id)
         return PushDelivery(sent=0, attempted=0)
 
     apns = _get_apns_client()

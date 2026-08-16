@@ -1,41 +1,48 @@
 import SwiftUI
 
-/// Reachable only from Today — not a destination.
+/// Reachable only from Today, not a destination.
 struct SettingsSheet: View {
     @EnvironmentObject private var state: AppState
     @State private var draft: AppSettings = .placeholder
-    // Device-local, so it stays out of `AppSettings` and off the server: which
-    // phone reads questions aloud is not something the scheduler needs to know.
     @AppStorage(Preferences.readAloudKey) private var readAloud = true
+    @State private var draftReadAloud = true
 
     var body: some View {
-        SheetChrome(title: "Settings", height: 472) {
-            VStack(alignment: .leading, spacing: 22) {
-                reviewsPerDay
-                readAloudRow
-                windows
-                Button {
-                    state.sheet = nil
-                    state.path.append(.fullSettings)
-                } label: {
-                    HStack {
-                        Text("More settings").font(TypeRole.secondaryAction)
-                        Spacer()
-                        Text("→").font(WCFont.mono(11)).foregroundStyle(Theme.accent)
-                    }
-                    .foregroundStyle(Theme.meta)
-                    .frame(minHeight: Metrics.minTapTarget)
+        SheetChrome(title: "Settings", height: 392) {
+            VStack(alignment: .leading, spacing: 14) {
+                QuietPanel {
+                    readAloudRow
+                    Hairline()
+                    destinationRow(
+                        "Review reminders",
+                        value: SettingsValidation.reminderValue(for: draft),
+                        screen: .reviewReminders
+                    )
                 }
-                .buttonStyle(.plain)
+
+                PrimaryButton(
+                    title: "Save changes",
+                    enabled: isDirty
+                ) {
+                    save()
+                }
+
+                destinationRow("More settings", value: "", screen: .fullSettings)
             }
         }
-        .onAppear { draft = state.settings }
-        .onDisappear { state.saveSettings(draft) }
+        .onAppear {
+            draft = state.settings
+            draftReadAloud = readAloud
+        }
+        .interactiveDismissDisabled(isDirty)
     }
 
     private var readAloudRow: some View {
         HStack(spacing: 12) {
-            Toggle34(isOn: $readAloud)
+            Toggle34(
+                isOn: $draftReadAloud,
+                accessibilityLabel: "Read questions aloud"
+            )
             VStack(alignment: .leading, spacing: 4) {
                 Text("Read questions aloud")
                     .font(TypeRole.body)
@@ -46,64 +53,136 @@ struct SettingsSheet: View {
             }
             Spacer()
         }
+        .frame(minHeight: 62)
     }
 
-    private var reviewsPerDay: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Reviews per day")
-                    .font(TypeRole.body)
+    private var isDirty: Bool {
+        draftReadAloud != readAloud
+    }
+
+    private func destinationRow(_ title: String, value: String, screen: AppState.Screen) -> some View {
+        Button { open(screen) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(title)
+                    .font(WCFont.sans(14.5, weight: 500))
                     .foregroundStyle(Theme.text)
-                Text(subline)
-                    .font(TypeRole.secondaryAction)
-                    .foregroundStyle(Theme.metaAlt)
-            }
-            Spacer()
-            StepperControl(
-                value: draft.reviewsPerDay,
-                decrement: { draft.reviewsPerDay = max(1, draft.reviewsPerDay - 1) },
-                increment: { draft.reviewsPerDay = min(6, draft.reviewsPerDay + 1) }
-            )
-        }
-    }
-
-    private var subline: String {
-        let enabled = draft.windows.filter(\.on).count
-        let pushes = draft.reviewsPerDay == 1 ? "1 push" : "\(draft.reviewsPerDay) pushes"
-        return enabled > 1 ? "\(pushes), spread across windows" : "\(pushes), in one window"
-    }
-
-    private var windows: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            MetaText(text: "NOTIFICATION WINDOWS", font: TypeRole.metaBody, tracking: 1.2, color: Theme.metaFaint)
-
-            ForEach($draft.windows) { $window in
-                HStack(spacing: 12) {
-                    Toggle34(isOn: $window.on)
-                    Text(window.label)
-                        .font(TypeRole.body)
-                        .foregroundStyle(Theme.text)
-                    Spacer()
-                    TimeChip(time: $window.from)
-                    Text("–")
-                        .font(TypeRole.metaBody)
-                        .foregroundStyle(Theme.metaDim)
-                    TimeChip(time: $window.to)
+                Spacer(minLength: 8)
+                if !value.isEmpty {
+                    Text(value)
+                        .font(WCFont.mono(10.5))
+                        .foregroundStyle(Theme.metaAlt)
                 }
+                Text("›")
+                    .font(WCFont.sans(17))
+                    .foregroundStyle(Theme.metaFaint)
             }
-
-            Text("Tap a time to shift the window. Reviews are pushed inside these ranges only.")
-                .font(TypeRole.secondaryAction)
-                .foregroundStyle(Theme.metaAlt)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+    }
+
+    private func open(_ screen: AppState.Screen) {
+        state.sheet = nil
+        state.path.append(screen)
+    }
+
+    private func save() {
+        readAloud = draftReadAloud
+        state.sheet = nil
     }
 }
 
-/// 34×20 track — accent fill and knob when on, `#4A5257` knob when off.
+enum SettingsValidation {
+    static let minimumWindowMinutes = 30
+
+    static func message(for settings: AppSettings) -> String? {
+        guard (1...6).contains(settings.reviewsPerDay) else {
+            return "Reviews per day must be between 1 and 6."
+        }
+        for window in settings.windows {
+            if let issue = windowMessage(window) { return "\(window.label): \(issue)" }
+        }
+        return nil
+    }
+
+    static func windowMessage(_ window: NotificationWindow) -> String? {
+        guard let start = minutes(window.from), let end = minutes(window.to) else {
+            return "Choose a valid start and end time."
+        }
+        guard end - start >= minimumWindowMinutes else {
+            return "End must be at least 30 minutes after start."
+        }
+        return nil
+    }
+
+    static func normalizedReminderSettings(_ settings: AppSettings) -> AppSettings {
+        var value = settings
+        value.reviewsPerDay = max(1, settings.windows.filter(\.on).count)
+        return value
+    }
+
+    static func reminderValue(for settings: AppSettings) -> String {
+        switch settings.windows.filter(\.on).count {
+        case 0: "Off"
+        case 1: "Up to 1"
+        case let count: "Up to \(count)"
+        }
+    }
+
+    static func dateBinding(for value: Binding<String>) -> Binding<Date> {
+        Binding(
+            get: { date(from: value.wrappedValue) },
+            set: { value.wrappedValue = string(from: $0) }
+        )
+    }
+
+    private static func minutes(_ text: String) -> Int? {
+        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0...23).contains(hour), (0...59).contains(minute)
+        else { return nil }
+        return hour * 60 + minute
+    }
+
+    private static func date(from text: String) -> Date {
+        let total = minutes(text) ?? 8 * 60
+        let start = Calendar.current.startOfDay(for: Date())
+        return Calendar.current.date(byAdding: .minute, value: total, to: start) ?? start
+    }
+
+    private static func string(from date: Date) -> String {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+    }
+}
+
+enum SettingsNavigation {
+    static func reviewRemindersBackLabel(for path: [AppState.Screen]) -> String {
+        guard path.count > 1, path[path.count - 2] == .fullSettings else {
+            return "← Today"
+        }
+        return "← Settings"
+    }
+
+    @discardableResult
+    static func popReviewRemindersIfPresented(from path: inout [AppState.Screen]) -> Bool {
+        guard path.last == .reviewReminders else { return false }
+        path.removeLast()
+        return true
+    }
+}
+
+/// 34×20 track with accent fill and knob when on, `#4A5257` knob when off.
 struct Toggle34: View {
     @Binding var isOn: Bool
+    let accessibilityLabel: String
+
+    init(isOn: Binding<Bool>, accessibilityLabel: String = "Toggle") {
+        _isOn = isOn
+        self.accessibilityLabel = accessibilityLabel
+    }
 
     var body: some View {
         Button { isOn.toggle() } label: {
@@ -119,30 +198,14 @@ struct Toggle34: View {
         }
         .buttonStyle(.plain)
         .frame(minWidth: Metrics.minTapTarget, minHeight: Metrics.minTapTarget, alignment: .leading)
-    }
-}
-
-/// Tapping advances through the allowed times; there is no picker.
-struct TimeChip: View {
-    @Binding var time: String
-
-    var body: some View {
-        Button {
-            let times = AppSettings.allowedTimes
-            let index = times.firstIndex(of: time) ?? 0
-            time = times[(index + 1) % times.count]
-        } label: {
-            Text(time)
-                .font(TypeRole.metaBody)
-                .tracking(0.6)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.borderStrong, lineWidth: 1)
-                )
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+        .accessibilityRepresentation {
+            Toggle(isOn: $isOn) {
+                Text(accessibilityLabel)
+            }
+            .accessibilityValue(Text(isOn ? "On" : "Off"))
         }
-        .buttonStyle(.plain)
     }
 }
 
@@ -151,7 +214,7 @@ struct TimeChip: View {
 struct SheetChrome<Content: View>: View {
     let title: String
     var serifTitle: Bool = false
-    /// Overrides the designed height. Settings needs it — the read-aloud toggle
+    /// Overrides the designed height. Settings needs it because the read-aloud toggle
     /// is a control the handoff never drew, and at the designed 340 the extra
     /// row pushed the title and Close out through the top of the sheet.
     var height: CGFloat? = nil

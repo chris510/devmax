@@ -449,7 +449,7 @@ struct LessonCheckScreen: View {
             pilotNote("DELAYED RECALL · ORDINARY DUE FLOW")
             title("Recall is ready in Today.")
             Text(
-                "Open it from the ordinary queue. That closed-book response—not formation—can establish Recall and move the schedule."
+                "Open it from the ordinary queue. That closed-book response, not formation, can establish Recall and move the schedule."
             )
             .lessonBody()
             notice("This screen does not start a Session or reveal the question again.")

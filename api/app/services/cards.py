@@ -95,7 +95,7 @@ def days_since_review(card: Card, today: date, tz: tzinfo) -> int | None:
     """None until the card has been answered once.
 
     `last_reviewed_at` is stored in UTC and `today` is a local calendar day, so
-    the timestamp is converted before its date is taken — otherwise a card
+    the timestamp is converted before its date is taken. Otherwise a card
     reviewed this evening reads as reviewed tomorrow.
     """
     if card.last_reviewed_at is None:
@@ -104,7 +104,7 @@ def days_since_review(card: Card, today: date, tz: tzinfo) -> int | None:
 
 
 def classify_tier(card: Card, today: date) -> str:
-    """Derived, never stored. Evaluation order matters — see spec.md §/cards/overview.
+    """Derived, never stored. Evaluation order matters; see spec.md §/cards/overview.
 
     `cold` is checked first because it overrides `solid`: "never learned it" and
     "knew it cold three weeks ago and let it lapse" are different problems, and
@@ -127,10 +127,10 @@ def classify_tier(card: Card, today: date) -> str:
 
 
 def build_turns(session: Session, probes: Sequence[SessionProbe]) -> list[Turn]:
-    """Assemble transcript ordering server-side — the client must not do this.
+    """Assemble transcript ordering server-side. The client must not do this.
 
     `probes` is this session's scored follow-ups in `idx` order, and each one
-    contributes the pair the transcript already had — so a two-probe session reads
+    contributes the pair the transcript already had. A two-probe session reads
     question, answer, follow-up, answer, follow-up, answer, score. The caller
     passes them in because loading them per session would be an N+1 on a card with
     a long history.
@@ -143,5 +143,5 @@ def build_turns(session: Session, probes: Sequence[SessionProbe]) -> list[Turn]:
         if probe.answer:
             turns.append(Turn(role="answer", text=probe.answer))
     if session.score is not None:
-        turns.append(Turn(role="score", text=f"{session.score} — {session.feedback}"))
+        turns.append(Turn(role="score", text=f"{session.score} · {session.feedback}"))
     return turns

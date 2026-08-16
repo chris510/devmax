@@ -10,7 +10,7 @@ to become a plan. Two rules govern everything here:
    estimates.
 2. **Model output never creates an active plan.** `validate_import` produces a
    *preview* plus a list of checks. Creation is a separate, confirmed request,
-   and it reads the preview — never the raw response.
+   and it reads the preview, never the raw response.
 
 Pure functions over plain dicts, so the whole gate is unit-testable without a
 database or a network.
@@ -57,7 +57,7 @@ HARD_MAX_WEEKS = 52
 ESTIMATE_INCREMENT = 30
 
 OVERVIEW_MAX_WORDS = 5
-# V3.5 §4 rule 2 says "2-5 words", but its own worked examples are single words —
+# V3.5 §4 rule 2 says "2-5 words", but its own worked examples are single words:
 # "Databases", "Coordination", "Filtration", "Acid-base". A one-word label that
 # names the subject is exactly what the rule is after, so the enforced floor is
 # "not empty" and the real constraint is rule 7: no vague fragments.
@@ -101,7 +101,7 @@ class Check:
     """One row on the Review plan screen.
 
     `destination` is what gives a row its disclosure arrow. Resolved rows are a
-    single status line with nowhere to go — only exceptions are tappable.
+    single status line with nowhere to go. Only exceptions are tappable.
     """
 
     key: str
@@ -223,7 +223,7 @@ def _normalise_offsets(
 ) -> tuple[int | None, int | None, bool]:
     """Resolve a source span against the verbatim guide. Returns (start, end, ok).
 
-    Offsets are **recomputed, not trusted** — the same rule the rest of this
+    Offsets are **recomputed, not trusted**, following the same rule the rest of this
     module applies to arithmetic. Counting characters over a ten-thousand-character
     document is the one part of the task a language model is genuinely bad at: in a
     live run against `docs/CURRICULUM.md`, 31 of 72 items came back with offsets
@@ -232,7 +232,7 @@ def _normalise_offsets(
     So the excerpt is the source of truth. If the model's offsets happen to frame
     it, they are kept; otherwise the excerpt is located in the guide and the real
     offsets are substituted. Only an excerpt that appears nowhere in the guide is
-    a genuine provenance failure — that one means the item was invented, which is
+    a genuine provenance failure. That one means the item was invented, which is
     worth blocking on.
 
     A missing span with no excerpt is honest and allowed; the rubric asks for null
@@ -275,9 +275,9 @@ def validate_import(
 ) -> ImportResult:
     """Recompute everything the model claimed, and report what needs a decision.
 
-    `resolutions` carries the user's answers from a previous pass — reviewed
+    `resolutions` carries the user's answers from a previous pass: reviewed
     estimates, acknowledged omissions, approved generated retrieval, confirmed
-    dependencies — so re-validating after an edit closes the checks it resolved
+    dependencies. Re-validating after an edit closes the checks it resolved
     without discarding the rest of the preview.
     """
     resolutions = dict(resolutions or {})
@@ -422,7 +422,7 @@ def _read_weeks(
     if [w["index"] for w in weeks] != list(range(1, len(weeks) + 1)):
         raise ImportError_("week indexes are not 1..N without gaps")
 
-    # Phases must own contiguous, ordered spans — the overview renders a week
+    # Phases must own contiguous, ordered spans. The overview renders a week
     # range per phase, and an interleaved phase has no range to render.
     seen: list[int] = []
     for week in weeks:
@@ -476,7 +476,7 @@ def _read_items(
         )
         # Once located, the excerpt is re-read from the guide rather than kept as
         # the model wrote it. The audit screens quote this string and offer to
-        # jump to it, so the text and the offsets have to be the same span — a
+        # jump to it, so the text and the offsets have to be the same span. A
         # reflowed or re-punctuated quote would send the user somewhere that does
         # not look like what they were shown.
         if start is not None and end is not None:
@@ -798,7 +798,7 @@ def _retrieval_check(items, resolutions) -> Check:
 def _dependency_check(dependencies, resolutions) -> Check:
     """Strong imported ordering is accepted automatically and never shown.
 
-    Only uncertain, contradictory, or schedule-changing links reach the audit —
+    Only uncertain, contradictory, or schedule-changing links reach the audit.
     putting 31 obvious prerequisites in front of the user teaches them to tap
     through the one that mattered.
     """
@@ -888,7 +888,7 @@ def build_plan_rows(preview: Mapping[str, Any], *, start_date: date) -> dict[str
     """Turn a validated, resolved preview into ORM rows. No model output involved.
 
     Generated retrieval that the user did not approve is dropped here, which is
-    the enforcement point for "must be approved during Preview" — an unapproved
+    the enforcement point for "must be approved during Preview". An unapproved
     activity has no row to be created from.
     """
     resolutions = dict(preview.get("resolutions", {}))

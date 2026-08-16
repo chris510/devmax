@@ -86,7 +86,7 @@ app.add_middleware(AuthMiddleware)
 # is pushes that never arrive.
 if not _settings.apns_private_key:
     logging.getLogger(__name__).warning(
-        "APNS_PRIVATE_KEY is unset — /internal/trigger-review will report "
+        "APNS_PRIVATE_KEY is unset: /internal/trigger-review will report "
         "sent=false reason=no_devices and no push will be delivered."
     )
 
@@ -107,8 +107,8 @@ async def llm_unavailable(_request: Request, exc: LLMError) -> JSONResponse:
     """Scoring failed, so nothing was written.
 
     503 rather than 500 so the client can distinguish "retry this exact payload"
-    from a genuine bug — the answer is still held client-side and the inline
-    "Couldn't submit — your answer is saved" retry re-posts it unchanged.
+    from a genuine bug. The answer is still held client-side and the inline
+    "Couldn't submit. Your answer is saved" retry re-posts it unchanged.
     """
     # Provider errors can contain model output or user-derived prompt fragments.
     # Keep production logs useful without copying that material into a second

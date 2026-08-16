@@ -901,7 +901,7 @@ def _quiz_grade(row: QuizResult) -> str:
     if row.coached:
         label += " · coached"
     if row.feedback and row.feedback != row.evidence:
-        label += f" — {row.feedback}"
+        label += f" · {row.feedback}"
     return f"{row.evidence}<br>_{label}_"
 
 
@@ -945,7 +945,7 @@ def render_learning_note(
     source = value.source_url or value.source_title
     source_line = f"> Source: {_inline(value.source_title)}"
     if value.source_url:
-        source_line += f" — <{value.source_url}>"
+        source_line += f": <{value.source_url}>"
 
     lines = [
         "---",
@@ -1006,7 +1006,7 @@ def render_learning_note(
 
     markdown = "\n".join(lines)
     export_id = hashlib.sha256(markdown.encode("utf-8")).hexdigest()[:20]
-    index_entry = f"- [[{slug}]] — graded learning note on {_inline(value.concept)}"
+    index_entry = f"- [[{slug}]]: graded learning note on {_inline(value.concept)}"
     return RenderedLearningNote(
         filename=f"{slug}.md",
         markdown=markdown,
@@ -1047,7 +1047,7 @@ def _validate_rendered_note(note: RenderedLearningNote) -> None:
         raise LearningNoteError(
             "rendered filename must be one kebab-case .md basename"
         )
-    expected_prefix = f"- [[{Path(note.filename).stem}]] — "
+    expected_prefix = f"- [[{Path(note.filename).stem}]]: "
     if "\n" in note.index_entry or not note.index_entry.startswith(expected_prefix):
         raise LearningNoteError("rendered index entry does not match its filename")
     if note.confidence not in {"shaky", "solid", "teachable"}:

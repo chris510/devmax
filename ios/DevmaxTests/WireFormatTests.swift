@@ -91,11 +91,11 @@ final class WireFormatTests: XCTestCase {
          "feedback":"Clear on lookups; didn't mention replication.",
          "turns":[{"role":"question","text":"How does a client find the owner?"},
                   {"role":"answer","text":"Hash it, walk clockwise."},
-                  {"role":"follow_up","text":"One more — what about during a join?"},
+                  {"role":"follow_up","text":"One more: what about during a join?"},
                   {"role":"answer","text":"Some keys point at the new node."},
-                  {"role":"follow_up","text":"Last one — who serves them meanwhile?"},
+                  {"role":"follow_up","text":"Last one: who serves them meanwhile?"},
                   {"role":"answer","text":"Whichever one has the data."},
-                  {"role":"score","text":"3 — Correct lookup path."}]}
+                  {"role":"score","text":"3 · Correct lookup path."}]}
         """#.utf8)
 
         let session = try LiveAPI.decoder.decode(SessionHistory.self, from: json)
@@ -244,7 +244,7 @@ final class WireFormatTests: XCTestCase {
         let json = Data(#"""
         {"status":"complete","score":1,"feedback":"The mechanism is arc ownership.",
          "next_review_at":"2026-07-29","interval_days":1,"practice":false,
-         "reattempt_offered":true,"reattempt_prompt":"In your words — What moves?"}
+         "reattempt_offered":true,"reattempt_prompt":"In your words: What moves?"}
         """#.utf8)
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
@@ -258,7 +258,7 @@ final class WireFormatTests: XCTestCase {
         XCTAssertTrue(reattempt)
         // The server composes the prompt: on a resumed follow-up session the client
         // cannot reconstruct it, because its only `.question` entry is the probe.
-        XCTAssertEqual(prompt, "In your words — What moves?")
+        XCTAssertEqual(prompt, "In your words: What moves?")
     }
 
     func testAV2OutcomeCarriesRecallAndQualitativeCoaching() throws {
@@ -267,7 +267,7 @@ final class WireFormatTests: XCTestCase {
          "scoring_contract_version":2,"feedback":"Essential idea recalled.",
          "next_review_at":"2026-07-30","interval_days":6,"practice":false,
          "coaching_offered":true,"coaching_focus":"depth",
-         "coaching_question":"One level deeper — why does it work?"}
+         "coaching_question":"One level deeper: why does it work?"}
         """#.utf8)
 
         let outcome = try LiveAPI.decoder.decode(AnswerOutcome.self, from: json)
@@ -280,7 +280,7 @@ final class WireFormatTests: XCTestCase {
         XCTAssertEqual(version, 2)
         XCTAssertTrue(offered)
         XCTAssertEqual(focus, "depth")
-        XCTAssertEqual(question, "One level deeper — why does it work?")
+        XCTAssertEqual(question, "One level deeper: why does it work?")
     }
 
     // MARK: - Coverage's tier vocabulary

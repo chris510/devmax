@@ -379,7 +379,7 @@ async def overview(
     mode: Literal["conversational", "desk", "all"] = "all",
     db: AsyncSession = Depends(get_session),
 ) -> Overview:
-    """Mastery classification across all cards — the desk-hour view."""
+    """Mastery classification across all cards: the desk-hour view."""
     today = await local_today(db)
     statement = (
         select(Card)

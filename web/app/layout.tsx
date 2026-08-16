@@ -29,18 +29,18 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: baseUrl,
-    title: "Unprompted — Remember the hard parts",
+    title: "Unprompted · Remember the hard parts",
     description: "A private voice-first coach for honest recall and spaced retrieval practice.",
     icons: { icon: "/unprompted-icon.png", shortcut: "/unprompted-icon.png" },
     openGraph: {
-      title: "Unprompted — Remember the hard parts",
+      title: "Unprompted · Remember the hard parts",
       description: "One honest question at a time. Voice-first retrieval practice in two minutes.",
       type: "website",
-      images: [{ url: imageUrl, width: 1635, height: 962, alt: "Unprompted — Remember the hard parts" }],
+      images: [{ url: imageUrl, width: 1635, height: 962, alt: "Unprompted · Remember the hard parts" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Unprompted — Remember the hard parts",
+      title: "Unprompted · Remember the hard parts",
       description: "Two honest minutes at a time.",
       images: [imageUrl],
     },

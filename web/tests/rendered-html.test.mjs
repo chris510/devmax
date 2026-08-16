@@ -28,12 +28,14 @@ test("server-renders the Unprompted landing page", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Unprompted — Remember the hard parts<\/title>/i);
+  assert.match(html, /<title>Unprompted · Remember the hard parts<\/title>/i);
   assert.match(html, /VOICE-FIRST · RETRIEVAL PRACTICE/);
   assert.match(html, />Remember<\/span>/);
   assert.match(html, />the hard parts\.<\/em>/);
   assert.match(html, /Recognition feels fluent\./);
   assert.match(html, /Two honest minutes\./);
+  assert.match(html, /Up to two probes\./);
+  assert.doesNotMatch(html, /One probe\. Max\.|asks once/);
   assert.match(html, /A map you can read/);
   assert.match(html, /Same honesty\./);
   assert.match(html, /NO STREAKS/);
@@ -45,7 +47,7 @@ test("server-renders the public privacy policy", async () => {
   const response = await render("/privacy");
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Privacy — Unprompted/);
+  assert.match(html, /Privacy · Unprompted/);
   assert.match(html, /Third-party AI processing/);
   assert.match(html, /Anthropic or OpenAI/);
   assert.match(html, /store: false/);

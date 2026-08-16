@@ -3,9 +3,17 @@ import SwiftUI
 struct CaptureFlowScreen: View {
     @EnvironmentObject private var state: AppState
     @State private var route: AppState.CaptureRoute
+    private let inboxBackTitle: String
+    private let closeAction: (() -> Void)?
 
-    init(route: AppState.CaptureRoute) {
+    init(
+        route: AppState.CaptureRoute,
+        inboxBackTitle: String = "← Today",
+        close: (() -> Void)? = nil
+    ) {
         _route = State(initialValue: route)
+        self.inboxBackTitle = inboxBackTitle
+        closeAction = close
     }
 
     var body: some View {
@@ -14,13 +22,14 @@ struct CaptureFlowScreen: View {
             case .inbox:
                 CaptureInboxScreen(
                     open: { route = .review($0) },
-                    close: state.closeCaptureFlow
+                    backTitle: inboxBackTitle,
+                    close: closeAction ?? state.closeCaptureFlow
                 )
             case .review(let id):
                 CaptureReviewScreen(
                     captureID: id,
                     back: { route = .inbox },
-                    close: state.closeCaptureFlow
+                    close: closeAction ?? state.closeCaptureFlow
                 )
             }
         }
@@ -31,12 +40,13 @@ struct CaptureFlowScreen: View {
 private struct CaptureInboxScreen: View {
     @EnvironmentObject private var state: AppState
     let open: (UUID) -> Void
+    let backTitle: String
     let close: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             StatusBar()
-            captureHeader("Card inbox", backTitle: "← Today", back: close)
+            captureHeader("Card inbox", backTitle: backTitle, back: close)
 
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -308,7 +318,7 @@ private struct CaptureReviewScreen: View {
     }
 
     private func saveSource() async {
-        await perform("Couldn't save the source — your edits are still here.") {
+        await perform("Couldn't save the source. Your edits are still here.") {
             let saved = try await state.api.updateCapture(captureID, update: update)
             adopt(saved)
             step = .rubric
@@ -316,7 +326,7 @@ private struct CaptureReviewScreen: View {
     }
 
     private func prepareQuestion() async {
-        await perform("Couldn't prepare the question — your rubric is still here.") {
+        await perform("Couldn't prepare the question. Your rubric is still here.") {
             let saved = try await state.api.updateCapture(captureID, update: update)
             adopt(saved)
             let prepared = try await state.api.prepareCaptureQuestion(captureID, regenerate: false)
@@ -326,10 +336,15 @@ private struct CaptureReviewScreen: View {
     }
 
     private func activate() async {
-        await perform("Couldn't add the card — the grounded capture is still in your inbox.") {
+        await perform("Couldn't add the card. The grounded capture is still in your inbox.") {
             let saved = try await state.api.updateCapture(captureID, update: update)
             adopt(saved)
-            _ = try await state.api.activateCapture(captureID, schedule: schedule)
+            let activated = try await state.api.activateCapture(captureID, schedule: schedule)
+            if state.libraryLoad == .ready {
+                state.library.removeAll { $0.id == activated.id }
+                state.library.append(activated)
+                state.library.sort { $0.nextReviewAt < $1.nextReviewAt }
+            }
             async let refreshed = try? state.api.captures()
             async let due = try? state.api.due()
             if let value = await refreshed { state.captures = value }

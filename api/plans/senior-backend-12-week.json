@@ -365,7 +365,7 @@
           "title": "Model prompts, conversations, and eval evidence from access patterns",
           "minutes": 90,
           "why": "A model has a context window, not durable application memory; prompt versions, turns, outputs, provenance, permissions, and eval labels need a schema derived from the product's reads and writes.",
-          "done_when": "For five queries—resume a conversation, reproduce a score, compare prompt versions, audit answer authority, and inspect an eval result—derive entities, relationships, read paths, write paths, and one justified denormalization; label model weights, request context, durable application state, and code-owned policy separately.",
+          "done_when": "For five queries (resume a conversation, reproduce a score, compare prompt versions, audit answer authority, and inspect an eval result), derive entities, relationships, read paths, write paths, and one justified denormalization; label model weights, request context, durable application state, and code-owned policy separately.",
           "resources": [
             {
               "kind": "lesson",

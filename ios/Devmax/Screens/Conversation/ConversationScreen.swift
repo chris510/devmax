@@ -362,7 +362,7 @@ struct ConversationScreen: View {
         Group {
             InlineNotice {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("You were mid-answer here 14 hours ago. Your partial answer was saved.")
+                    Text("You were mid-answer here. Your partial answer is saved.")
                         .font(TypeRole.secondaryAction)
                         .foregroundStyle(Theme.textSecondary)
                         .lineSpacing(3)
@@ -398,19 +398,30 @@ struct ConversationScreen: View {
         VStack(alignment: .leading, spacing: 16) {
             Hairline().padding(.top, 10)
 
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(result.score)")
-                    .font(TypeRole.bigScoreNumeral)
-                    .monospacedDigit()
-                    .foregroundStyle(ScoreStyle.color(for: result.score))
-                MetaText(text: "/ 5 RECALL", font: TypeRole.metaBody, tracking: 1.2, color: Theme.metaAlt)
-            }
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("\(result.score)")
+                        .font(TypeRole.bigScoreNumeral)
+                        .monospacedDigit()
+                        .foregroundStyle(ScoreStyle.color(for: result.score))
+                    MetaText(
+                        text: "/ 5 \(result.scoreLabel)", font: TypeRole.metaBody,
+                        tracking: 1.2, color: Theme.metaAlt
+                    )
+                }
 
-            Text(result.feedback)
-                .font(TypeRole.scoreFeedback)
-                .lineSpacing(18.5 * 1.5 - 18.5 * 1.2)
-                .foregroundStyle(Theme.textSerif)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(result.feedback)
+                    .font(TypeRole.scoreFeedback)
+                    .lineSpacing(18.5 * 1.5 - 18.5 * 1.2)
+                    .foregroundStyle(Theme.textSerif)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Metrics.inlineRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
 
             MetaText(text: result.scheduleLine, font: TypeRole.metaBody, tracking: 1.0, color: Theme.metaFaint)
         }
@@ -506,7 +517,7 @@ struct ConversationScreen: View {
     private var submitFailureStrip: some View {
         InlineNotice {
             HStack(spacing: 12) {
-                Text("Couldn't submit — your answer is saved.")
+                Text("Couldn't submit. Your answer is saved.")
                     .font(TypeRole.secondaryAction)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer(minLength: 0)
@@ -577,7 +588,7 @@ struct ConversationScreen: View {
     }
 
     private var micLabel: String {
-        if isRecording { return "LISTENING — TAP TO STOP" }
+        if isRecording { return "LISTENING · TAP TO STOP" }
         // A stored partial counts: the mic continues that answer rather than
         // starting a new one.
         if !state.draft.isEmpty || state.resumeAvailable { return "TAP TO KEEP GOING" }
@@ -792,9 +803,9 @@ struct ConversationScreen: View {
         case .recordingFollowUp:
             return "Each physical node gets many positions on the ring, so a new node picks up lots of small slices instead of one big one, which spreads the transfer across all the existing nodes."
         case .recordingReattempt:
-            return "Right — so it's the arc, not the node name. Each node owns the stretch of hash space that ends at its own position, so a new node only takes over the part of its neighbour's stretch that now falls behind it."
+            return "Right. It's the arc, not the node name. Each node owns the stretch of hash space that ends at its own position, so a new node only takes over the part of its neighbour's stretch that now falls behind it."
         default:
-            return "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
+            return "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move. Everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
         }
     }
 }

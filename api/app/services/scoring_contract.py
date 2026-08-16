@@ -32,11 +32,11 @@ def next_coaching_focus(completed_turns: int) -> CoachingFocus:
 def coaching_question(focus: CoachingFocus) -> str:
     if focus == "depth":
         return (
-            "One level deeper — what reasoning, causal link, application, "
+            "One level deeper: what reasoning, causal link, application, "
             "or trade-off matters here?"
         )
     return (
-        "One level deeper — what condition, exception, limitation, "
+        "One level deeper: what condition, exception, limitation, "
         "or failure case matters here?"
     )
 

@@ -52,13 +52,13 @@ def _ssl_argument(sslmode: str | None, url: str) -> ssl.SSLContext | None:
     """The asyncpg `ssl` value, following libpq's own sslmode semantics.
 
     The distinction that matters: `require` means *encrypt*, it does not mean
-    *verify* — only `verify-ca` and `verify-full` ask for certificate validation.
+    *verify*. Only `verify-ca` and `verify-full` ask for certificate validation.
     Treating `require` as verifying is stricter than the URL asked for, and it
     breaks any provider fronting Postgres with a self-signed certificate, which is
     what Railway's TCP proxy does.
 
     With no sslmode given, a trusted network gets plaintext and anything else gets
-    full verification — the safe default for a hosted database reached over the
+    full verification, the safe default for a hosted database reached over the
     public internet.
     """
     if sslmode in {"disable", "allow"}:
@@ -78,7 +78,7 @@ def _ssl_argument(sslmode: str | None, url: str) -> ssl.SSLContext | None:
 def engine_kwargs(url: str) -> tuple[str, dict]:
     """Normalise a database URL and derive the engine arguments that go with it.
 
-    Shared by the app engine below and by alembic/env.py — migrations run against
+    Shared by the app engine below and by alembic/env.py. Migrations run against
     the same URL through Railway's preDeployCommand, so they need the same treatment
     or `alembic upgrade head` fails where the app would have connected.
     """
@@ -90,7 +90,7 @@ def engine_kwargs(url: str) -> tuple[str, dict]:
     sslmode = next((v for k, v in pairs if k == "sslmode"), None)
 
     kept = [(k, v) for k, v in pairs if k not in _LIBPQ_ONLY_PARAMS]
-    # SQLAlchemy's own prepared-statement cache — a separate knob from asyncpg's
+    # SQLAlchemy's own prepared-statement cache, a separate knob from asyncpg's
     # statement_cache_size below, and one the dialect only reads off the URL.
     kept.append(("prepared_statement_cache_size", "0"))
     url = urlunsplit(parts._replace(query=urlencode(kept)))

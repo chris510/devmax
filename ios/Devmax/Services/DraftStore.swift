@@ -185,11 +185,9 @@ enum DraftStore {
 /// show a real `LAST SYNCED 06:12 · 3 CARDS CACHED` line rather than a guess.
 enum DueCache {
     private static let timestampKey = "wc.due.syncedAt"
-    private static let countKey = "wc.due.count"
 
-    static func record(count: Int) {
+    static func record(count _: Int) {
         UserDefaults.standard.set(Date(), forKey: timestampKey)
-        UserDefaults.standard.set(count, forKey: countKey)
     }
 
     /// `nil` when the queue has never loaded — the offline state then omits the note.
@@ -197,9 +195,8 @@ enum DueCache {
         guard let synced = UserDefaults.standard.object(forKey: timestampKey) as? Date else {
             return nil
         }
-        let count = UserDefaults.standard.integer(forKey: countKey)
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        return "LAST SYNCED \(formatter.string(from: synced)) · \(count) CARDS CACHED"
+        return "LAST SYNCED \(formatter.string(from: synced)) · QUEUE UNAVAILABLE"
     }
 }
