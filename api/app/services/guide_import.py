@@ -112,7 +112,15 @@ async def run_plan_draft(
             resolutions=dict((draft.preview or {}).get("resolutions", {})),
             before_provider_call=before_provider_call,
         )
-    except (llm.LLMError, study_plan_import.ImportError_) as exc:
+    except llm.LLMError:
+        draft.status = DRAFT_FAILED
+        # Provider/parser exceptions can embed raw model output. The original
+        # guide is already retained on the draft; do not create a second,
+        # operationally exposed copy inside an error string.
+        draft.error = "AI import unavailable. Retry to continue."
+        draft.updated_at = _now()
+        return
+    except study_plan_import.ImportError_ as exc:
         draft.status = DRAFT_FAILED
         draft.error = str(exc)
         draft.updated_at = _now()

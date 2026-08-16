@@ -1,14 +1,17 @@
+import asyncio
+import hashlib
 import logging
 import uuid
 from datetime import UTC, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import load_only
-from sqlmodel import col, or_, select
+from sqlmodel import col, delete, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.db import get_session
+from app.db import get_session, sibling_session_factory
 from app.models import (
     DELIVERY_CONVERSATIONAL,
     LIVE_STATUSES,
@@ -28,6 +31,22 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 
 # A card counts as missed if it was pushed this long ago with nothing started since.
 MISSED_AFTER = timedelta(hours=4)
+REVIEW_ACCOUNT_CONCURRENCY = 4
+
+
+def _unresolved_push_filters(cutoff: datetime):
+    return (
+        col(Card.last_pushed_at).is_not(None),
+        col(Card.last_pushed_at) <= cutoff,
+        or_(
+            col(Card.missed_counted_at).is_(None),
+            col(Card.missed_counted_at) < col(Card.last_pushed_at),
+        ),
+        or_(
+            col(Card.push_resolved_at).is_(None),
+            col(Card.push_resolved_at) < col(Card.last_pushed_at),
+        ),
+    )
 
 
 def _active_window_start(settings: Settings, at: datetime) -> datetime | None:
@@ -231,20 +250,28 @@ async def _trigger_review_for_user(
         t.token
         for t in (await db.exec(select(DeviceToken).where(DeviceToken.user_id == user_id))).all()
     ]
-    delivered = await send_push(
+    delivery = await send_push(
         tokens=tokens,
         title=f"{due_count} due",
         body=top.topic,
         card_id=top.id,
     )
+    if delivery.invalid_tokens:
+        await db.exec(
+            delete(DeviceToken).where(
+                DeviceToken.user_id == user_id,
+                col(DeviceToken.token).in_(delivery.invalid_tokens),
+            )
+        )
 
     # Reporting sent=True when nothing was delivered — no registered device, or APNs
     # credentials not configured — would stamp last_pushed_at, and check-missed would
     # then increment missed_count four hours later for a push the user never received.
     # missed_count is the product's only compliance signal; don't corrupt it.
-    if not delivered:
+    if not delivery:
         await db.commit()  # no stamp, but release the candidate lock promptly
-        return TriggerResult(sent=False, reason="no_devices", due_count=due_count)
+        reason = "delivery_failed" if delivery.attempted else "no_devices"
+        return TriggerResult(sent=False, reason=reason, due_count=due_count)
 
     # From the injected clock, not `datetime.now(UTC)`: the stamp has to land inside
     # the window that was just matched, and a direct clock read is unpatchable, so
@@ -254,6 +281,51 @@ async def _trigger_review_for_user(
     await db.commit()
 
     return TriggerResult(sent=True, card_id=top.id, due_count=due_count)
+
+
+async def _evaluate_review_target(
+    user_id: uuid.UUID,
+    settings_row: Settings,
+    factory: async_sessionmaker[AsyncSession],
+) -> TriggerResult | None:
+    """Evaluate one account in an isolated transaction."""
+    async with factory() as account_db:
+        try:
+            result = await _trigger_review_for_user(
+                settings_row, user_id, account_db
+            )
+            # Several normal early returns are read-only. End their transaction
+            # before releasing the worker slot so a later failure cannot affect it.
+            await account_db.commit()
+            return result
+        except Exception as exc:
+            await account_db.rollback()
+            fingerprint = hashlib.sha256(str(user_id).encode()).hexdigest()[:12]
+            logger.error(
+                "review evaluation failed user_fingerprint=%s type=%s",
+                fingerprint,
+                type(exc).__name__,
+            )
+            return None
+
+
+async def _evaluate_review_targets(
+    targets: list[tuple[uuid.UUID, Settings]],
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    concurrency: int,
+) -> list[TriggerResult | None]:
+    """Evaluate an arbitrary account set with a fixed number of workers."""
+    target_iterator = iter(targets)
+
+    async def worker() -> list[TriggerResult | None]:
+        return [
+            await _evaluate_review_target(user_id, settings_row, factory)
+            for user_id, settings_row in target_iterator
+        ]
+
+    worker_outcomes = await asyncio.gather(*(worker() for _ in range(concurrency)))
+    return [result for batch in worker_outcomes for result in batch]
 
 
 @router.post("/trigger-review", response_model=TriggerResult | TriggerBatchResult)
@@ -270,14 +342,34 @@ async def trigger_review(
     if not rows:
         return TriggerResult(sent=False, reason="outside_window")
 
-    results = [await _trigger_review_for_user(row, row.user_id, db) for row in rows]
-    if len(results) == 1:
-        return results[0]
+    if len(rows) == 1:
+        return await _trigger_review_for_user(rows[0], rows[0].user_id, db)
+
+    # Snapshot settings before ending the discovery transaction. Each account
+    # then gets an independent session, so an eight-second APNs timeout for one
+    # account cannot serially consume the poller's entire 60-second deadline.
+    targets = [(row.user_id, row.model_copy(deep=True)) for row in rows]
+    await db.rollback()
+    factory, concurrency = sibling_session_factory(
+        db, max_concurrency=REVIEW_ACCOUNT_CONCURRENCY
+    )
+    outcomes = await _evaluate_review_targets(
+        targets, factory, concurrency=concurrency
+    )
+    results = [result for result in outcomes if result is not None]
+    failed_count = len(outcomes) - len(results)
+
     sent_count = sum(1 for result in results if result.sent)
+    reasons: dict[str, int] = {}
+    for result in results:
+        reason = result.reason or "sent"
+        reasons[reason] = reasons.get(reason, 0) + 1
     return TriggerBatchResult(
         sent=sent_count > 0,
-        processed_users=len(results),
+        processed_users=len(rows),
         sent_count=sent_count,
+        failed_count=failed_count,
+        reasons=reasons,
     )
 
 
@@ -301,12 +393,7 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
         await db.exec(
             select(Card.id).where(
                 active_card_filter(),
-                col(Card.last_pushed_at).is_not(None),
-                col(Card.last_pushed_at) <= cutoff,
-                or_(
-                    col(Card.missed_counted_at).is_(None),
-                    col(Card.missed_counted_at) < col(Card.last_pushed_at),
-                ),
+                *_unresolved_push_filters(cutoff),
             )
         )
     ).all()
@@ -323,12 +410,7 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
                 .where(
                     Card.id == card_id,
                     active_card_filter(),
-                    col(Card.last_pushed_at).is_not(None),
-                    col(Card.last_pushed_at) <= cutoff,
-                    or_(
-                        col(Card.missed_counted_at).is_(None),
-                        col(Card.missed_counted_at) < col(Card.last_pushed_at),
-                    ),
+                    *_unresolved_push_filters(cutoff),
                 )
                 .with_for_update()
                 .execution_options(populate_existing=True)
@@ -345,6 +427,8 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
             card.last_learning_exposure_at is not None
             and as_utc(card.last_learning_exposure_at) >= as_utc(card.last_pushed_at)
         ):
+            card.push_resolved_at = card.last_pushed_at
+            db.add(card)
             await db.commit()
             continue
         started_since = (
@@ -356,6 +440,8 @@ async def check_missed(db: AsyncSession = Depends(get_session)) -> dict[str, int
             )
         ).first()
         if started_since is not None:
+            card.push_resolved_at = card.last_pushed_at
+            db.add(card)
             await db.commit()
             continue
         card.missed_count += 1

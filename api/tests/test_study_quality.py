@@ -4,8 +4,9 @@ from datetime import timedelta
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import auth
@@ -23,7 +24,7 @@ from app.models import (
 from app.routers import captures as captures_router
 from app.routers import cards as cards_router
 from app.routers import sessions as sessions_router
-from app.schemas import CardGroundingUpdate, ReplaceCard
+from app.schemas import CaptureActivate, CardGroundingUpdate, ReplaceCard
 from app.services import llm
 from tests.conftest import (
     API_HEADERS,
@@ -40,6 +41,27 @@ RUBRIC = {
     "failure_mode": "A minority partition cannot commit new entries.",
     "misconception": "A local append alone does not make an entry committed.",
 }
+
+
+@pytest.fixture
+async def postgres_session_factory(db):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("row-lock concurrency requires Postgres")
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        yield factory
+    finally:
+        await engine.dispose()
+
+
+async def _as_founder(call):
+    token = auth._current_user_id.set(FOUNDER_USER_ID)
+    try:
+        return await call
+    finally:
+        auth._current_user_id.reset(token)
 
 
 @pytest.fixture
@@ -93,8 +115,11 @@ async def test_capture_is_durable_but_never_a_card(client, db):
 
 
 async def test_capture_rejects_empty_topic(client):
-    response = await client.post("/captures", headers=API_HEADERS, json={"topic": ""})
-    assert response.status_code == 422
+    for topic in ("", "   "):
+        response = await client.post(
+            "/captures", headers=API_HEADERS, json={"topic": topic}
+        )
+        assert response.status_code == 422
 
 
 async def test_activation_fails_closed_and_names_missing_grounding(client, db):
@@ -226,6 +251,77 @@ async def test_activation_is_atomic_and_replays_the_same_card(client, db, stub_q
     assert stored.status == "activated"
     assert str(stored.activated_card_id) == first.json()["id"]
     assert (await client.get("/captures", headers=API_HEADERS)).json() == []
+
+
+async def test_postgres_concurrent_activation_replays_exactly_one_card(
+    client, db, stub_question, postgres_session_factory
+):
+    capture = await _capture(client)
+    await _ground(client, capture["id"])
+    await client.post(f"/captures/{capture['id']}/question", headers=API_HEADERS)
+    await db.rollback()
+    capture_id = uuid.UUID(capture["id"])
+
+    async def activate():
+        async with postgres_session_factory() as request_db:
+            return await _as_founder(
+                captures_router.activate_capture(
+                    capture_id,
+                    CaptureActivate(schedule="next"),
+                    request_db,
+                )
+            )
+
+    first, second = await asyncio.gather(activate(), activate())
+    assert first.id == second.id
+    async with postgres_session_factory() as verify_db:
+        cards = (await verify_db.exec(select(Card))).all()
+        stored = await verify_db.get(PendingCapture, capture_id)
+        assert len(cards) == 1
+        assert stored is not None
+        assert stored.activated_card_id == cards[0].id
+
+
+async def test_postgres_normalized_topic_creation_is_serialized_across_captures(
+    client, db, stub_question, postgres_session_factory
+):
+    first = await _capture(client, "Raft / Commit")
+    second = await _capture(client, "  raft-commit  ")
+    for capture in (first, second):
+        await _ground(client, capture["id"])
+        await client.post(f"/captures/{capture['id']}/question", headers=API_HEADERS)
+    await db.rollback()
+
+    async def activate(capture_id: str):
+        async with postgres_session_factory() as request_db:
+            return await _as_founder(
+                captures_router.activate_capture(
+                    uuid.UUID(capture_id),
+                    CaptureActivate(schedule="next"),
+                    request_db,
+                )
+            )
+
+    results = await asyncio.gather(
+        activate(first["id"]), activate(second["id"]), return_exceptions=True
+    )
+    successes = [result for result in results if not isinstance(result, Exception)]
+    conflicts = [result for result in results if isinstance(result, HTTPException)]
+    assert len(successes) == len(conflicts) == 1
+    assert conflicts[0].status_code == 409
+    assert conflicts[0].detail["code"] == "duplicate_card"
+    async with postgres_session_factory() as verify_db:
+        assert len((await verify_db.exec(select(Card))).all()) == 1
+
+
+async def test_database_rejects_a_second_live_session_for_one_card(db):
+    card = _grounded_card()
+    db.add(card)
+    db.add(Session(card_id=card.id, question_asked="first", status="open"))
+    db.add(Session(card_id=card.id, question_asked="second", status="open"))
+    with pytest.raises(IntegrityError):
+        await db.commit()
+    await db.rollback()
 
 
 async def test_discard_removes_only_the_pending_capture(client, db):
@@ -601,6 +697,66 @@ async def test_legacy_question_with_history_must_be_replaced_not_rewritten(clien
     assert card.canonical_question == "When is a Raft log entry committed?"
 
 
+async def test_postgres_grounding_and_session_start_share_the_card_lock(
+    db, monkeypatch, postgres_session_factory
+):
+    card = _grounded_card()
+    db.add(card)
+    await db.commit()
+    await db.rollback()
+    grounding_has_lock = asyncio.Event()
+    release_grounding = asyncio.Event()
+    original_owned_card = cards_router.owned_card
+
+    async def paused_owned_card(request_db, card_id, *, for_update=False):
+        value = await original_owned_card(request_db, card_id, for_update=for_update)
+        if for_update:
+            grounding_has_lock.set()
+            await release_grounding.wait()
+        return value
+
+    monkeypatch.setattr(cards_router, "owned_card", paused_owned_card)
+
+    async def ground():
+        async with postgres_session_factory() as request_db:
+            return await _as_founder(
+                cards_router.update_card_grounding(
+                    card.id,
+                    CardGroundingUpdate(
+                        canonical_question="What makes a replicated entry committed?"
+                    ),
+                    request_db,
+                )
+            )
+
+    async def start():
+        async with postgres_session_factory() as request_db:
+            return await _as_founder(
+                sessions_router.start_session(card.id, False, request_db)
+            )
+
+    grounding_task = asyncio.create_task(ground())
+    start_task = None
+    try:
+        await asyncio.wait_for(grounding_has_lock.wait(), timeout=3)
+        start_task = asyncio.create_task(start())
+        await asyncio.sleep(0.1)
+        assert not start_task.done()
+    finally:
+        release_grounding.set()
+
+    await asyncio.wait_for(grounding_task, timeout=3)
+    started = await asyncio.wait_for(start_task, timeout=3)
+    assert started.question == "What makes a replicated entry committed?"
+    async with postgres_session_factory() as verify_db:
+        stored = await verify_db.get(Card, card.id)
+        session = (
+            await verify_db.exec(select(Session).where(Session.card_id == card.id))
+        ).one()
+        assert stored is not None
+        assert session.question_asked == stored.canonical_question
+
+
 async def test_replacement_preserves_old_history_and_starts_blank(client, db):
     card = _grounded_card(
         ease_factor=2.1,
@@ -645,6 +801,55 @@ async def test_replacement_preserves_old_history_and_starts_blank(client, db):
         await db.exec(select(Session).where(Session.card_id == replacement.id))
     ).all() == []
     assert len((await db.exec(select(Session).where(Session.card_id == card.id))).all()) == 1
+
+
+async def test_postgres_concurrent_replacement_creates_one_successor(
+    db, postgres_session_factory
+):
+    card = _grounded_card()
+    db.add(card)
+    await db.commit()
+    await db.rollback()
+
+    async def replace(question: str):
+        async with postgres_session_factory() as request_db:
+            return await _as_founder(
+                cards_router.replace_card(
+                    card.id,
+                    ReplaceCard(canonical_question=question, schedule="now"),
+                    request_db,
+                )
+            )
+
+    results = await asyncio.gather(
+        replace("When may a leader acknowledge a committed write?"),
+        replace("What proves a replicated entry is committed?"),
+        return_exceptions=True,
+    )
+    successes = [result for result in results if not isinstance(result, Exception)]
+    conflicts = [result for result in results if isinstance(result, HTTPException)]
+    assert len(successes) == len(conflicts) == 1
+    assert conflicts[0].status_code == 409
+    async with postgres_session_factory() as verify_db:
+        predecessor = await verify_db.get(Card, card.id)
+        successors = (
+            await verify_db.exec(select(Card).where(Card.replaces_card_id == card.id))
+        ).all()
+        assert predecessor is not None
+        assert predecessor.lifecycle_status == CARD_ARCHIVED
+        assert len(successors) == 1
+        assert predecessor.replaced_by_card_id == successors[0].id
+
+
+async def test_database_rejects_a_forked_replacement_lineage(db):
+    predecessor = _grounded_card()
+    db.add(predecessor)
+    await db.flush()
+    db.add(_grounded_card(topic="successor one", replaces_card_id=predecessor.id))
+    db.add(_grounded_card(topic="successor two", replaces_card_id=predecessor.id))
+    with pytest.raises(IntegrityError):
+        await db.commit()
+    await db.rollback()
 
 
 async def test_old_card_cannot_restore_while_its_replacement_is_active(client, db):
@@ -764,7 +969,7 @@ async def test_concurrent_restores_choose_one_active_lineage_member(db, monkeypa
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     root_locked = asyncio.Event()
     release_root = asyncio.Event()
-    original_owned_card = cards_router._owned_card
+    original_owned_card = cards_router.owned_card
     paused = False
 
     async def pause_first_root_lock(request_db, card_id, *, for_update=False):
@@ -784,7 +989,7 @@ async def test_concurrent_restores_choose_one_active_lineage_member(db, monkeypa
         finally:
             auth._current_user_id.reset(token)
 
-    monkeypatch.setattr(cards_router, "_owned_card", pause_first_root_lock)
+    monkeypatch.setattr(cards_router, "owned_card", pause_first_root_lock)
     first_restore = asyncio.create_task(run_restore(second.id))
     second_restore = None
     try:
@@ -819,7 +1024,7 @@ async def test_restore_waits_for_replacement_and_sees_its_new_successor(db, monk
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     root_locked = asyncio.Event()
     release_root = asyncio.Event()
-    original_owned_card = cards_router._owned_card
+    original_owned_card = cards_router.owned_card
     paused = False
 
     async def pause_first_root_lock(request_db, card_id, *, for_update=False):
@@ -854,7 +1059,7 @@ async def test_restore_waits_for_replacement_and_sees_its_new_successor(db, monk
         finally:
             auth._current_user_id.reset(token)
 
-    monkeypatch.setattr(cards_router, "_owned_card", pause_first_root_lock)
+    monkeypatch.setattr(cards_router, "owned_card", pause_first_root_lock)
     replacement_task = asyncio.create_task(run_replace())
     restore_task = None
     try:
@@ -880,3 +1085,41 @@ async def test_restore_waits_for_replacement_and_sees_its_new_successor(db, monk
         assert stored_second.replaced_by_card_id == replacement.id
         assert stored_replacement.replaces_card_id == second.id
     await engine.dispose()
+
+
+async def test_postgres_concurrent_related_restores_activate_only_one_side(
+    db, postgres_session_factory
+):
+    predecessor = _grounded_card(lifecycle_status=CARD_ARCHIVED)
+    db.add(predecessor)
+    await db.flush()
+    replacement = _grounded_card(
+        topic="replacement",
+        lifecycle_status=CARD_ARCHIVED,
+        replaces_card_id=predecessor.id,
+    )
+    db.add(replacement)
+    await db.flush()
+    predecessor.replaced_by_card_id = replacement.id
+    db.add(predecessor)
+    await db.commit()
+    await db.rollback()
+
+    async def restore(card_id: uuid.UUID):
+        async with postgres_session_factory() as request_db:
+            return await _as_founder(cards_router.restore_card(card_id, request_db))
+
+    results = await asyncio.gather(
+        restore(predecessor.id), restore(replacement.id), return_exceptions=True
+    )
+    assert len([result for result in results if not isinstance(result, Exception)]) == 1
+    conflicts = [result for result in results if isinstance(result, HTTPException)]
+    assert len(conflicts) == 1
+    assert conflicts[0].status_code == 409
+    async with postgres_session_factory() as verify_db:
+        cards = (
+            await verify_db.exec(
+                select(Card).where(col(Card.id).in_((predecessor.id, replacement.id)))
+            )
+        ).all()
+        assert [card.lifecycle_status for card in cards].count(CARD_ACTIVE) == 1

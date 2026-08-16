@@ -1,7 +1,8 @@
 import asyncio
+import hashlib
 import json
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -17,7 +18,10 @@ from app.models import (
     LESSON_PROMPT_APPLICATION,
     LESSON_PROMPT_CANONICAL,
     PROPOSAL_AUDIT_APPROVED,
+    AIConsentEvent,
     AppleIdentity,
+    AppleNotificationReceipt,
+    AuthNonce,
     AuthSession,
     Card,
     DeviceToken,
@@ -28,6 +32,7 @@ from app.models import (
     MaterialTopicProposal,
     PendingCapture,
     Session,
+    SessionProbe,
     Settings,
     StudyPilotAssignment,
     StudyPilotEnrollment,
@@ -162,6 +167,260 @@ async def _pilot_records(
     db.add(assignment)
     await db.commit()
     return source, proposal, check, audit, enrollment, assignment
+
+
+async def _complete_export_graph(db, *, user_id, card: Card, prefix: str) -> dict:
+    """Create one owned row in every exportable child data family."""
+
+    now = datetime.now(UTC)
+    identity = AppleIdentity(
+        user_id=user_id,
+        subject=f"{prefix}-apple-subject",
+        email=f"{prefix}@example.com",
+        display_name=f"{prefix} person",
+        apple_refresh_token=f"encrypted-apple-refresh-{prefix}",
+        last_apple_authorized_at=now,
+    )
+    db.add(identity)
+    await db.flush()
+    receipt = AppleNotificationReceipt(
+        identity_id=identity.id,
+        jti=f"{prefix}-apple-notification-jti",
+        event_type="email-enabled",
+        occurred_at=now,
+        applied=True,
+    )
+    auth_session = AuthSession(
+        user_id=user_id,
+        access_token_hash=authentication.token_hash(f"{prefix}-access-secret"),
+        refresh_token_hash=authentication.token_hash(f"{prefix}-refresh-secret"),
+        access_expires_at=now + timedelta(minutes=15),
+        refresh_expires_at=now + timedelta(days=30),
+    )
+    device = DeviceToken(
+        user_id=user_id,
+        token=f"raw-{prefix}-apns-token-never-export",
+        kind="apns",
+    )
+    draft = StudyPlanGuideDraft(
+        user_id=user_id,
+        guide_text=f"{prefix} guide text",
+        requested_weeks=2,
+        weekly_capacity_minutes=120,
+        start_date=date.today(),
+        status="ready",
+    )
+    db.add(receipt)
+    db.add(auth_session)
+    db.add(device)
+    db.add(draft)
+    await db.flush()
+
+    source = MaterialSource(
+        user_id=user_id,
+        title=f"{prefix} source",
+        source_text=f"{prefix} exact source text",
+        plan_draft_id=draft.id,
+        status="confirmed",
+    )
+    db.add(source)
+    await db.flush()
+    card.source_id = source.id
+    db.add(card)
+    material_proposal = MaterialTopicProposal(
+        source_id=source.id,
+        position=1,
+        topic=f"{prefix} material topic",
+        answer_anchor=f"{prefix} answer authority",
+        card_id=card.id,
+    )
+    capture = PendingCapture(
+        user_id=user_id,
+        topic=f"{prefix} captured gap",
+        status="activated",
+        activated_card_id=card.id,
+    )
+    review_session = Session(
+        card_id=card.id,
+        question_asked=f"{prefix} review question",
+        answer_text=f"{prefix} review answer",
+        score=4,
+        status="complete",
+        ended_at=now,
+    )
+    db.add(material_proposal)
+    db.add(capture)
+    db.add(review_session)
+    await db.flush()
+    probe = SessionProbe(
+        session_id=review_session.id,
+        idx=1,
+        question=f"{prefix} probe question",
+        answer=f"{prefix} probe answer",
+    )
+
+    plan = StudyPlan(
+        user_id=user_id,
+        title=f"{prefix} plan",
+        subject="System design",
+        subject_slug="system-design",
+        guide_text=f"{prefix} plan guide",
+        status="active",
+        start_date=date.today(),
+        default_weekly_capacity_minutes=120,
+        forecast_end_plan_week=2,
+    )
+    duplicated_plan = StudyPlan(
+        user_id=user_id,
+        title=f"{prefix} plan copy",
+        subject="System design",
+        subject_slug="system-design",
+        guide_text=f"{prefix} plan guide copy",
+        status="paused",
+        start_date=date.today(),
+        default_weekly_capacity_minutes=120,
+        forecast_end_plan_week=2,
+    )
+    db.add(probe)
+    db.add(plan)
+    db.add(duplicated_plan)
+    await db.flush()
+    phase = StudyPlanPhase(
+        plan_id=plan.id,
+        index=1,
+        full_title=f"{prefix} phase",
+    )
+    db.add(phase)
+    await db.flush()
+    week = StudyPlanWeek(
+        plan_id=plan.id,
+        phase_id=phase.id,
+        index=1,
+        full_title=f"{prefix} week",
+    )
+    db.add(week)
+    await db.flush()
+    learn_item = StudyPlanItem(
+        plan_id=plan.id,
+        phase_id=phase.id,
+        week_id=week.id,
+        guide_order=1,
+        type="learn",
+        priority="core",
+        full_title=f"{prefix} learn",
+        estimate_minutes=60,
+    )
+    practice_item = StudyPlanItem(
+        plan_id=plan.id,
+        phase_id=phase.id,
+        week_id=week.id,
+        guide_order=2,
+        type="practice",
+        priority="core",
+        full_title=f"{prefix} practice",
+        estimate_minutes=60,
+        status="complete",
+        completed_at=now,
+    )
+    db.add(learn_item)
+    db.add(practice_item)
+    await db.flush()
+    dependency = StudyPlanItemDependency(
+        plan_id=plan.id,
+        prerequisite_item_id=learn_item.id,
+        dependent_item_id=practice_item.id,
+        rationale=f"{prefix} dependency",
+    )
+    revision = StudyPlanRevision(
+        plan_id=plan.id,
+        kind="created",
+        base_plan_revision=0,
+        after={"prefix": prefix},
+        summary=f"{prefix} created",
+    )
+    debrief = StudyPlanPracticeDebrief(
+        plan_id=plan.id,
+        plan_item_id=practice_item.id,
+        text=f"{prefix} immutable debrief",
+        submitted_at=now,
+    )
+    card_proposal = StudyPlanCardProposal(
+        plan_id=plan.id,
+        source_plan_item_id=learn_item.id,
+        topic=f"{prefix} proposed card",
+        canonical_question=f"Explain {prefix}.",
+        normalized_topic=f"{prefix} proposed card",
+    )
+    db.add(dependency)
+    db.add(revision)
+    db.add(debrief)
+    db.add(card_proposal)
+    await db.flush()
+    acceptance = StudyPlanCardProposalAcceptance(
+        plan_id=plan.id,
+        proposal_id=card_proposal.id,
+        idempotency_key=f"{prefix}-acceptance-key",
+        request_hash=f"{prefix}-request-hash",
+        proposal_revision=1,
+        status="committed",
+        created_card_ids=[str(card.id)],
+        committed_at=now,
+    )
+    db.add(acceptance)
+    await db.flush()
+    link = StudyPlanCardLink(
+        plan_id=plan.id,
+        plan_item_id=learn_item.id,
+        card_id=card.id,
+        acceptance_id=acceptance.id,
+    )
+    duplication = StudyPlanDuplication(
+        source_plan_id=plan.id,
+        duplicated_plan_id=duplicated_plan.id,
+    )
+    consent = AIConsentEvent(
+        user_id=user_id,
+        provider="anthropic",
+        policy_version="anthropic-only-v1",
+        action="grant",
+    )
+    model_usage = LLMUsage(
+        user_id=user_id,
+        operation=f"{prefix}_score",
+        details={"provider": "anthropic", "outcome": "success"},
+    )
+    db.add(link)
+    db.add(duplication)
+    db.add(consent)
+    db.add(model_usage)
+    await db.commit()
+    return {
+        "identity": identity,
+        "receipt": receipt,
+        "auth_session": auth_session,
+        "device": device,
+        "draft": draft,
+        "source": source,
+        "material_proposal": material_proposal,
+        "capture": capture,
+        "session": review_session,
+        "probe": probe,
+        "plan": plan,
+        "duplicated_plan": duplicated_plan,
+        "phase": phase,
+        "week": week,
+        "learn_item": learn_item,
+        "practice_item": practice_item,
+        "dependency": dependency,
+        "revision": revision,
+        "debrief": debrief,
+        "card_proposal": card_proposal,
+        "acceptance": acceptance,
+        "link": link,
+        "duplication": duplication,
+        "consent": consent,
+        "model_usage": model_usage,
+    }
 
 
 def _canonical_rows(rows) -> str:
@@ -604,6 +863,8 @@ async def test_nonce_is_public_and_single_use(client, db, monkeypatch):
     assert identity.subject == "apple-subject-1"
     assert identity.email == "relay@example.com"
     assert identity.display_name == "Casey"
+    assert identity.last_apple_authorized_at is not None
+    assert identity.last_apple_event_at is None
     assert (await db.exec(select(Settings).where(Settings.user_id == identity.user_id))).one()
 
     replay = await client.post("/auth/apple", json=body)
@@ -803,6 +1064,7 @@ async def test_founder_claim_links_identity_without_touching_existing_study_data
     db.add(card_proposal)
     await db.flush()
     acceptance = StudyPlanCardProposalAcceptance(
+        plan_id=plan.id,
         proposal_id=card_proposal.id,
         idempotency_key="historical-acceptance",
         request_hash="historical-hash",
@@ -1272,6 +1534,108 @@ def test_apple_receives_a_sha256_nonce_while_devmax_keeps_the_raw_value():
     assert authentication.apple_nonce(raw) != raw
 
 
+async def test_auth_cleanup_is_bounded_and_preserves_live_replay_evidence(db):
+    now = datetime.now(UTC)
+    for index in range(3):
+        db.add(
+            AuthNonce(
+                nonce_hash=authentication.token_hash(f"expired-nonce-{index}"),
+                expires_at=now - timedelta(minutes=index + 1),
+            )
+        )
+    recent_used_nonce = AuthNonce(
+        nonce_hash=authentication.token_hash("recent-used-nonce"),
+        expires_at=now + timedelta(minutes=5),
+        used_at=now - timedelta(minutes=1),
+    )
+    old_used_nonce = AuthNonce(
+        nonce_hash=authentication.token_hash("old-used-nonce"),
+        expires_at=now + timedelta(minutes=5),
+        used_at=now - authentication.USED_NONCE_RETENTION - timedelta(seconds=1),
+    )
+    db.add(recent_used_nonce)
+    db.add(old_used_nonce)
+
+    expired_sessions = []
+    for index in range(3):
+        row = AuthSession(
+            user_id=FOUNDER_USER_ID,
+            access_token_hash=authentication.token_hash(f"expired-access-{index}"),
+            refresh_token_hash=authentication.token_hash(f"expired-refresh-{index}"),
+            access_expires_at=now - timedelta(days=2),
+            refresh_expires_at=now - timedelta(days=index + 1),
+            revoked_at=now - timedelta(days=3) if index else None,
+        )
+        expired_sessions.append(row)
+        db.add(row)
+    rotated_but_replay_relevant = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("revoked-live-access"),
+        refresh_token_hash=authentication.token_hash("revoked-live-refresh"),
+        access_expires_at=now - timedelta(minutes=1),
+        refresh_expires_at=now + timedelta(days=3),
+        revoked_at=now - timedelta(minutes=1),
+    )
+    unusual_live_access = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("unusual-live-access"),
+        refresh_token_hash=authentication.token_hash("unusual-expired-refresh"),
+        access_expires_at=now + timedelta(minutes=1),
+        refresh_expires_at=now - timedelta(minutes=1),
+        revoked_at=now - timedelta(minutes=1),
+    )
+    db.add(rotated_but_replay_relevant)
+    db.add(unusual_live_access)
+    await db.commit()
+
+    assert await authentication.cleanup_auth_rows(db, now=now, batch_size=2) == (2, 2)
+    await db.commit()
+    remaining_nonce_hashes = {
+        row.nonce_hash for row in (await db.exec(select(AuthNonce))).all()
+    }
+    assert recent_used_nonce.nonce_hash in remaining_nonce_hashes
+    assert len(remaining_nonce_hashes) == 3
+    remaining_session_ids = {
+        row.id for row in (await db.exec(select(AuthSession))).all()
+    }
+    assert rotated_but_replay_relevant.id in remaining_session_ids
+    assert unusual_live_access.id in remaining_session_ids
+    assert len(remaining_session_ids) == 3
+
+    assert await authentication.cleanup_auth_rows(db, now=now, batch_size=2) == (2, 1)
+    await db.commit()
+    assert [row.id for row in (await db.exec(select(AuthNonce))).all()] == [
+        recent_used_nonce.id
+    ]
+    assert {
+        row.id for row in (await db.exec(select(AuthSession))).all()
+    } == {rotated_but_replay_relevant.id, unusual_live_access.id}
+
+
+async def test_nonce_issuance_opportunistically_prunes_expired_auth_rows(db):
+    now = datetime.now(UTC)
+    expired_nonce = AuthNonce(
+        nonce_hash=authentication.token_hash("opportunistic-expired-nonce"),
+        expires_at=now - timedelta(minutes=1),
+    )
+    expired_session = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("opportunistic-expired-access"),
+        refresh_token_hash=authentication.token_hash("opportunistic-expired-refresh"),
+        access_expires_at=now - timedelta(days=2),
+        refresh_expires_at=now - timedelta(days=1),
+        revoked_at=now - timedelta(days=2),
+    )
+    db.add(expired_nonce)
+    db.add(expired_session)
+    await db.commit()
+
+    issued = await authentication.issue_nonce(db)
+    assert issued
+    assert await db.get(AuthNonce, expired_nonce.id) is None
+    assert await db.get(AuthSession, expired_session.id) is None
+
+
 async def test_refresh_rotates_and_replay_revokes_the_family(client, db):
     user = User()
     db.add(user)
@@ -1460,6 +1824,225 @@ async def test_onboarding_completion_and_export_are_account_scoped(client, db):
     assert opened_row["prompt_text_snapshot"] == unopened_transfer_prompt
 
 
+async def test_account_export_is_complete_versioned_scoped_and_credential_safe(
+    client, db
+):
+    user, headers, card = await _account(db, topic="Owned export card")
+    foreign_card = Card(
+        user_id=FOUNDER_USER_ID,
+        topic="Foreign export card",
+        category="Private",
+        next_review_at=date.today(),
+    )
+    db.add(foreign_card)
+    await db.commit()
+    owned = await _complete_export_graph(
+        db, user_id=user.id, card=card, prefix="owned-export"
+    )
+    foreign = await _complete_export_graph(
+        db,
+        user_id=FOUNDER_USER_ID,
+        card=foreign_card,
+        prefix="foreign-private-sentinel",
+    )
+    # Free the foreign card's globally unique proposal edge before deliberately
+    # pointing the owned proposal at it below.
+    foreign["material_proposal"].card_id = None
+    db.add(foreign["material_proposal"])
+    await db.commit()
+
+    # Simulate cross-owner references that the database's scalar FKs cannot
+    # express as same-owner constraints. The export must fail closed rather than
+    # leak even opaque IDs from the other account.
+    owned["auth_session"].rotated_from_id = foreign["auth_session"].id
+    owned["source"].previous_version_id = foreign["source"].id
+    owned["source"].plan_draft_id = foreign["draft"].id
+    owned["material_proposal"].card_id = foreign_card.id
+    card.source_id = foreign["source"].id
+    card.replaces_card_id = foreign_card.id
+    owned["capture"].activated_card_id = foreign_card.id
+    owned["card_proposal"].duplicate_card_id = foreign_card.id
+    owned["acceptance"].created_card_ids = [str(card.id), str(foreign_card.id)]
+    for row in (
+        owned["auth_session"],
+        owned["source"],
+        owned["material_proposal"],
+        card,
+        owned["capture"],
+        owned["card_proposal"],
+        owned["acceptance"],
+    ):
+        db.add(row)
+
+    cross_owner_dependency = StudyPlanItemDependency(
+        plan_id=owned["plan"].id,
+        prerequisite_item_id=foreign["learn_item"].id,
+        dependent_item_id=owned["practice_item"].id,
+        rationale="must not export",
+    )
+    cross_owner_debrief = StudyPlanPracticeDebrief(
+        plan_id=owned["plan"].id,
+        plan_item_id=foreign["learn_item"].id,
+        text="must not export",
+        submitted_at=datetime.now(UTC),
+    )
+    cross_owner_proposal = StudyPlanCardProposal(
+        plan_id=owned["plan"].id,
+        source_plan_item_id=foreign["learn_item"].id,
+        topic="must not export",
+        canonical_question="must not export",
+        normalized_topic="must not export",
+    )
+    db.add(cross_owner_dependency)
+    db.add(cross_owner_debrief)
+    db.add(cross_owner_proposal)
+    await db.flush()
+    cross_owner_acceptance = StudyPlanCardProposalAcceptance(
+        plan_id=owned["plan"].id,
+        proposal_id=foreign["card_proposal"].id,
+        idempotency_key="must-not-export",
+        request_hash="must-not-export",
+        proposal_revision=1,
+    )
+    cross_owner_link = StudyPlanCardLink(
+        plan_id=owned["plan"].id,
+        plan_item_id=owned["learn_item"].id,
+        card_id=foreign_card.id,
+        acceptance_id=owned["acceptance"].id,
+    )
+    cross_owner_duplication = StudyPlanDuplication(
+        source_plan_id=owned["plan"].id,
+        duplicated_plan_id=foreign["plan"].id,
+    )
+    db.add(cross_owner_acceptance)
+    db.add(cross_owner_link)
+    db.add(cross_owner_duplication)
+    await db.commit()
+
+    response = await client.get("/auth/export", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema_version"] == 2
+    assert set(body) == {
+        "schema_version",
+        "exported_at",
+        "account",
+        "settings",
+        "apple_identity",
+        "apple_notification_receipts",
+        "auth_sessions",
+        "devices",
+        "sources",
+        "material_topic_proposals",
+        "lesson_checks",
+        "lesson_proposal_audits",
+        "study_pilot_enrollments",
+        "study_pilot_assignments",
+        "cards",
+        "pending_captures",
+        "sessions",
+        "session_probes",
+        "study_plans",
+        "study_plan_phases",
+        "study_plan_weeks",
+        "study_plan_items",
+        "study_plan_item_dependencies",
+        "study_plan_revisions",
+        "study_plan_guide_drafts",
+        "study_plan_practice_debriefs",
+        "study_plan_card_proposals",
+        "study_plan_card_proposal_acceptances",
+        "study_plan_card_links",
+        "study_plan_duplications",
+        "ai_consent_events",
+        "llm_usage",
+    }
+    assert body["account"]["id"] == str(user.id)
+    assert body["settings"]["user_id"] == str(user.id)
+    assert body["apple_identity"]["id"] == str(owned["identity"].id)
+    assert [row["id"] for row in body["apple_notification_receipts"]] == [
+        str(owned["receipt"].id)
+    ]
+
+    expected_ids = {
+        "sources": {owned["source"].id},
+        "material_topic_proposals": {owned["material_proposal"].id},
+        "cards": {card.id},
+        "pending_captures": {owned["capture"].id},
+        "sessions": {owned["session"].id},
+        "session_probes": {owned["probe"].id},
+        "study_plans": {owned["plan"].id, owned["duplicated_plan"].id},
+        "study_plan_phases": {owned["phase"].id},
+        "study_plan_weeks": {owned["week"].id},
+        "study_plan_items": {
+            owned["learn_item"].id,
+            owned["practice_item"].id,
+        },
+        "study_plan_item_dependencies": {owned["dependency"].id},
+        "study_plan_revisions": {owned["revision"].id},
+        "study_plan_guide_drafts": {owned["draft"].id},
+        "study_plan_practice_debriefs": {owned["debrief"].id},
+        "study_plan_card_proposals": {owned["card_proposal"].id},
+        "study_plan_card_proposal_acceptances": {owned["acceptance"].id},
+        "study_plan_card_links": {owned["link"].id},
+        "study_plan_duplications": {owned["duplication"].id},
+        "ai_consent_events": {owned["consent"].id},
+        "llm_usage": {owned["model_usage"].id},
+    }
+    for family, ids in expected_ids.items():
+        assert {row["id"] for row in body[family]} == {str(row_id) for row_id in ids}
+
+    # Optional foreign keys are sanitized, and child rows with a foreign parent
+    # are absent entirely.
+    assert body["sources"][0]["previous_version_id"] is None
+    assert body["sources"][0]["plan_draft_id"] is None
+    assert body["material_topic_proposals"][0]["card_id"] is None
+    assert body["cards"][0]["source_id"] is None
+    assert body["cards"][0]["replaces_card_id"] is None
+    assert body["pending_captures"][0]["activated_card_id"] is None
+    assert body["study_plan_card_proposals"][0]["duplicate_card_id"] is None
+    assert body["study_plan_card_proposal_acceptances"][0][
+        "created_card_ids"
+    ] == [str(card.id)]
+
+    serialized = json.dumps(body, sort_keys=True)
+    assert "foreign-private-sentinel" not in serialized
+    for row in foreign.values():
+        if hasattr(row, "id"):
+            assert str(row.id) not in serialized
+    assert str(foreign_card.id) not in serialized
+
+    # Exported authentication state is useful for an audit but cannot authorize
+    # a request or send a push.
+    assert "apple_refresh_token" not in body["apple_identity"]
+    assert "encrypted-apple-refresh-owned-export" not in serialized
+    assert headers["Authorization"].removeprefix("Bearer ") not in serialized
+    exported_auth_ids = {row["id"] for row in body["auth_sessions"]}
+    owned_auth_rows = (
+        await db.exec(select(AuthSession).where(AuthSession.user_id == user.id))
+    ).all()
+    assert exported_auth_ids == {str(row.id) for row in owned_auth_rows}
+    for row in body["auth_sessions"]:
+        assert "access_token_hash" not in row
+        assert "refresh_token_hash" not in row
+    for row in owned_auth_rows:
+        assert row.access_token_hash not in serialized
+        assert row.refresh_token_hash not in serialized
+    assert body["devices"] == [
+        {
+            "user_id": str(user.id),
+            "kind": "apns",
+            "token_fingerprint": "sha256:"
+            + hashlib.sha256(
+                b"raw-owned-export-apns-token-never-export"
+            ).hexdigest()[:24],
+            "created_at": body["devices"][0]["created_at"],
+        }
+    ]
+    assert "token" not in body["devices"][0]
+    assert "raw-owned-export-apns-token-never-export" not in serialized
+
+
 async def test_account_deletion_revokes_apple_before_cascading(client, db, monkeypatch):
     if db.bind.dialect.name == "sqlite":
         await db.exec(text("PRAGMA foreign_keys=ON"))
@@ -1475,11 +2058,21 @@ async def test_account_deletion_revokes_apple_before_cascading(client, db, monke
         "enrollment": enrollment.id,
         "assignment": assignment.id,
     }
+    identity = AppleIdentity(
+        user_id=user.id,
+        subject="delete-subject",
+        apple_refresh_token="encrypted-refresh",
+    )
+    db.add(identity)
+    await db.flush()
+    identity_id = identity.id
     db.add(
-        AppleIdentity(
-            user_id=user.id,
-            subject="delete-subject",
-            apple_refresh_token="encrypted-refresh",
+        AppleNotificationReceipt(
+            identity_id=identity.id,
+            jti="deleted-account-receipt",
+            event_type="email-disabled",
+            occurred_at=datetime.now(UTC),
+            applied=True,
         )
     )
     await db.commit()
@@ -1503,6 +2096,13 @@ async def test_account_deletion_revokes_apple_before_cascading(client, db, monke
     assert await db.get(LessonProposalAudit, pilot_ids["audit"]) is None
     assert await db.get(StudyPilotEnrollment, pilot_ids["enrollment"]) is None
     assert await db.get(StudyPilotAssignment, pilot_ids["assignment"]) is None
+    assert not (
+        await db.exec(
+            select(AppleNotificationReceipt).where(
+                AppleNotificationReceipt.identity_id == identity_id
+            )
+        )
+    ).all()
 
 
 async def test_invalid_bearer_token_is_rejected(client):

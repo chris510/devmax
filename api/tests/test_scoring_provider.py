@@ -17,8 +17,9 @@ from app.services import scoring_provider
 
 GOOD = {
     "database_url": "postgresql+asyncpg://u:p@host/db",
-    "api_key": "realA",
-    "cron_secret": "realB",
+    "api_key": "api-key-0000000000000000000000000000",
+    "cron_secret": "cron-secret-00000000000000000000000000",
+    "ai_consent_enforcement_enabled": False,
 }
 USER_A = uuid.UUID("11111111-1111-4111-8111-111111111111")
 USER_B = uuid.UUID("22222222-2222-4222-8222-222222222222")

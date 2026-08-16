@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -25,6 +26,7 @@ from app.services.card_lifecycle import (
     build_grounded_card,
     clean_rubric,
     grounding_from_capture,
+    lock_topic_creation,
     refresh_capture_status,
     storage_rubric,
 )
@@ -60,15 +62,16 @@ def _summary(
     )
 
 
-async def _capture(db: AsyncSession, capture_id: uuid.UUID) -> PendingCapture:
-    capture = (
-        await db.exec(
-            select(PendingCapture).where(
-                PendingCapture.id == capture_id,
-                PendingCapture.user_id == current_user_id(),
-            )
-        )
-    ).first()
+async def _capture(
+    db: AsyncSession, capture_id: uuid.UUID, *, for_update: bool = False
+) -> PendingCapture:
+    statement = select(PendingCapture).where(
+        PendingCapture.id == capture_id,
+        PendingCapture.user_id == current_user_id(),
+    )
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    capture = (await db.exec(statement)).first()
     if capture is None:
         raise HTTPException(status_code=404, detail="capture not found")
     return capture
@@ -80,7 +83,7 @@ async def create_capture(
 ) -> CaptureOut:
     capture = PendingCapture(
         user_id=current_user_id(),
-        topic=body.topic.strip(),
+        topic=body.topic,
         context=body.context.strip(),
     )
     db.add(capture)
@@ -209,7 +212,13 @@ async def activate_capture(
     body: CaptureActivate,
     db: AsyncSession = Depends(get_session),
 ) -> CardSummary:
-    capture = await _capture(db, capture_id)
+    capture = await _capture(db, capture_id, for_update=True)
+    user_id = current_user_id()
+    # The lock covers the authoritative normalized duplicate re-check and the
+    # card/capture commit. Every other public card-creation path takes the same
+    # per-account boundary.
+    await lock_topic_creation(db, user_id)
+    await db.refresh(capture)
     today, tz = await local_calendar(db)
 
     if capture.activated_card_id is not None:
@@ -217,7 +226,7 @@ async def activate_capture(
             await db.exec(
                 select(Card).where(
                     Card.id == capture.activated_card_id,
-                    Card.user_id == current_user_id(),
+                    Card.user_id == user_id,
                 )
             )
         ).first()
@@ -227,7 +236,7 @@ async def activate_capture(
 
     try:
         card = build_grounded_card(
-            user_id=current_user_id(),
+            user_id=user_id,
             topic=capture.topic,
             category="Unsorted",
             grounding=grounding_from_capture(capture),
@@ -240,7 +249,7 @@ async def activate_capture(
             detail={"code": "missing_grounding", "missing": exc.missing},
         ) from exc
 
-    duplicate = (await normalized_card_index(db, current_user_id())).get(
+    duplicate = (await normalized_card_index(db, user_id)).get(
         normalize_topic(card.topic)
     )
     if duplicate is not None:
@@ -251,10 +260,38 @@ async def activate_capture(
 
     db.add(card)
     await db.flush()
-    capture.activated_card_id = card.id
-    capture.status = CAPTURE_ACTIVATED
-    capture.updated_at = datetime.now(UTC)
-    db.add(capture)
+    claim = await db.exec(
+        update(PendingCapture)
+        .where(
+            PendingCapture.id == capture.id,
+            PendingCapture.user_id == user_id,
+            col(PendingCapture.activated_card_id).is_(None),
+        )
+        .values(
+            activated_card_id=card.id,
+            status=CAPTURE_ACTIVATED,
+            updated_at=datetime.now(UTC),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if claim.rowcount != 1:
+        # A portable compare-and-swap backstop: roll back this request's fresh
+        # card before returning the winner selected by another transaction.
+        await db.rollback()
+        winner_capture = await _capture(db, capture_id)
+        if winner_capture.activated_card_id is None:  # pragma: no cover
+            raise HTTPException(status_code=409, detail="capture activation changed")
+        winner = (
+            await db.exec(
+                select(Card).where(
+                    Card.id == winner_capture.activated_card_id,
+                    Card.user_id == user_id,
+                )
+            )
+        ).first()
+        if winner is None:  # pragma: no cover
+            raise HTTPException(status_code=409, detail="activated card no longer exists")
+        return card_summary(winner, today, tz)
     await db.commit()
     await db.refresh(card)
     return card_summary(card, today, tz)

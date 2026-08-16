@@ -7,6 +7,7 @@ network call is fake. No test here reaches Anthropic.
 
 import asyncio
 import uuid
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -35,8 +36,10 @@ from app.models import (
     User,
 )
 from app.routers import study_plan as study_plan_router
+from app.schemas import ApplyReplan, CardAcceptIn, PracticeDebriefSubmitIn
 from app.seed_study_plan import load_first_party_plan
 from app.services import llm
+from app.services import study_plan as sp
 from tests.conftest import (
     API_HEADERS,
     GUIDE,
@@ -232,7 +235,8 @@ async def test_a_failed_import_keeps_the_guide_and_every_setting(
     assert response.status_code == 201
     body = response.json()
     assert body["status"] == "failed"
-    assert "unreachable" in body["error"]
+    assert body["error"] == "AI import unavailable. Retry to continue."
+    assert "unreachable" not in body["error"]
     assert not body["can_create"]
 
     draft = (await db.exec(select(StudyPlanGuideDraft))).one()
@@ -670,6 +674,53 @@ async def test_editing_an_estimate_in_the_preview_survives_revalidation(client, 
         headers=API_HEADERS,
     )
     assert again.json()["total_minutes"] == 330
+
+
+async def test_preview_edits_reject_unknown_domains_without_growing_stored_json(
+    client, stub_import, db
+):
+    preview = await client.post(
+        "/study-plans/preview",
+        json={
+            "guide_text": GUIDE,
+            "requested_weeks": 4,
+            "weekly_capacity_minutes": 720,
+            "mode": "flexible",
+        },
+        headers=API_HEADERS,
+    )
+    assert preview.status_code == 201
+    draft_id = uuid.UUID(preview.json()["draft_id"])
+    draft = await db.get(StudyPlanGuideDraft, draft_id)
+    assert draft is not None
+    original_raw_response = deepcopy(draft.raw_response)
+    original_preview = deepcopy(draft.preview)
+
+    invalid_edits = [
+        ({"estimates_reviewed": ["unknown-item"]}, "estimates_reviewed"),
+        ({"retrieval_approved": ["unknown-retrieval"]}, "retrieval_approved"),
+        ({"retrieval_rejected": ["unknown-retrieval"]}, "retrieval_rejected"),
+        (
+            {"dependencies_confirmed": ["unknown-source->unknown-target"]},
+            "dependencies_confirmed",
+        ),
+        ({"item_estimates": {"unknown-item": 60}}, "item_estimates"),
+        ({"overview_titles": {"phase-999": "Injected phase"}}, "overview_titles"),
+    ]
+    for body, field in invalid_edits:
+        response = await client.patch(
+            f"/study-plans/preview/{draft_id}", json=body, headers=API_HEADERS
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == {
+            "code": "invalid_preview_edit",
+            "field": field,
+        }
+        await db.refresh(draft)
+        assert draft.raw_response == original_raw_response
+        assert draft.preview == original_preview
+
+    assert len((await db.exec(select(StudyPlanGuideDraft))).all()) == 1
 
 
 async def test_an_import_failure_leaves_no_partial_plan(client, stub_import, db):
@@ -1147,7 +1198,9 @@ async def test_applying_an_invalid_proposal_is_refused(client, stub_import):
     assert "validate" in response.json()["detail"]
 
 
-async def test_a_confirmed_replan_moves_work_and_bumps_the_revision(client, stub_import):
+async def test_a_confirmed_replan_moves_work_and_bumps_the_revision(
+    client, stub_import, db
+):
     plan = await make_plan(client)
     applied = await client.post(
         f"/study-plans/{plan['id']}/replans/apply",
@@ -1171,6 +1224,103 @@ async def test_a_confirmed_replan_moves_work_and_bumps_the_revision(client, stub
         await client.get(f"/study-plans/{plan['id']}/revisions", headers=API_HEADERS)
     ).json()
     assert revisions[0]["kind"] == "replan"
+
+    ledger = (
+        await db.exec(
+            select(StudyPlanRevision).where(
+                StudyPlanRevision.plan_id == uuid.UUID(plan["id"]),
+                StudyPlanRevision.kind == "replan",
+            )
+        )
+    ).one()
+    assert ledger.base_plan_revision == plan["revision"]
+    assert ledger.before["revision"] == plan["revision"]
+    stored_plan = await db.get(StudyPlan, uuid.UUID(plan["id"]))
+    assert stored_plan is not None
+    assert stored_plan.revision == plan["revision"] + 1
+
+
+async def test_revision_claim_rejects_a_stale_database_snapshot(client, stub_import, db):
+    """The revision CAS is effective on SQLite as well as Postgres row locks."""
+    plan = await make_plan(client)
+    plan_id = uuid.UUID(plan["id"])
+    stale = await db.get(StudyPlan, plan_id)
+    assert stale is not None
+    base_revision = stale.revision
+
+    await db.exec(
+        update(StudyPlan)
+        .where(StudyPlan.id == plan_id)
+        .values(revision=base_revision + 1)
+        .execution_options(synchronize_session=False)
+    )
+
+    assert (
+        await sp.claim_plan_revision(
+            db,
+            stale,
+            expected_revision=base_revision,
+        )
+        is None
+    )
+    await db.rollback()
+
+
+async def test_postgres_concurrent_replans_commit_exactly_one_revision(
+    client, db, stub_import
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("plan-row serialization requires Postgres")
+
+    plan = await make_plan(client)
+    plan_id = uuid.UUID(plan["id"])
+    body = ApplyReplan(
+        base_plan_revision=plan["revision"],
+        capacity_overrides={1: 30},
+        default_capacity_minutes=720,
+        deferred_item_ids=[],
+        extra_weeks=1,
+        insert_after_phase=1,
+    )
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def apply_once():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await study_plan_router.apply_replan(plan_id, body, request_db)
+        finally:
+            auth._current_user_id.reset(token)
+
+    try:
+        results = await asyncio.gather(
+            apply_once(),
+            apply_once(),
+            return_exceptions=True,
+        )
+        successes = [result for result in results if not isinstance(result, Exception)]
+        conflicts = [result for result in results if isinstance(result, HTTPException)]
+        assert len(successes) == len(conflicts) == 1
+        assert conflicts[0].status_code == 409
+
+        async with factory() as verify_db:
+            stored = await verify_db.get(StudyPlan, plan_id)
+            revisions = (
+                await verify_db.exec(
+                    select(StudyPlanRevision).where(
+                        StudyPlanRevision.plan_id == plan_id,
+                        StudyPlanRevision.kind == "replan",
+                    )
+                )
+            ).all()
+            assert stored is not None
+            assert stored.revision == plan["revision"] + 1
+            assert len(revisions) == 1
+            assert revisions[0].base_plan_revision == plan["revision"]
+    finally:
+        await engine.dispose()
 
 
 async def test_a_proposal_states_what_stays_the_same(client, stub_import):
@@ -1463,6 +1613,104 @@ async def test_practice_debrief_draft_is_idempotent_and_submit_is_immutable(
     assert item["practice_debrief"]["summary"] == text
 
 
+async def test_postgres_concurrent_first_debrief_submissions_replay_one_row(
+    client, db, stub_import
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("debrief insert-conflict recovery requires Postgres")
+
+    plan = await make_plan(client)
+    plan_id = uuid.UUID(plan["id"])
+    item_id = uuid.UUID(await _complete_practice_item(client, plan))
+    text = "I put the retry loop outside the timeout boundary."
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def submit_once():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await study_plan_router.submit_practice_debrief(
+                    plan_id,
+                    item_id,
+                    PracticeDebriefSubmitIn(text=text),
+                    request_db,
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    try:
+        first, second = await asyncio.gather(submit_once(), submit_once())
+        assert first.id == second.id
+        assert first.text == second.text == text
+        async with factory() as verify_db:
+            rows = (
+                await verify_db.exec(
+                    select(StudyPlanPracticeDebrief).where(
+                        StudyPlanPracticeDebrief.plan_item_id == item_id
+                    )
+                )
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].text == text
+    finally:
+        await engine.dispose()
+
+
+async def test_postgres_concurrent_debrief_updates_cannot_replace_submitted_text(
+    client, db, stub_import
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("debrief conditional-update serialization requires Postgres")
+
+    plan = await make_plan(client)
+    plan_id = uuid.UUID(plan["id"])
+    item_id = uuid.UUID(await _complete_practice_item(client, plan))
+    path = f"/study-plans/{plan['id']}/items/{item_id}/practice-debrief/draft"
+    draft = await client.patch(path, json={"text": "Initial draft"}, headers=API_HEADERS)
+    assert draft.status_code == 200
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def submit_once(text: str):
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await study_plan_router.submit_practice_debrief(
+                    plan_id,
+                    item_id,
+                    PracticeDebriefSubmitIn(text=text),
+                    request_db,
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    try:
+        results = await asyncio.gather(
+            submit_once("First immutable account"),
+            submit_once("Second incompatible account"),
+            return_exceptions=True,
+        )
+        successes = [result for result in results if not isinstance(result, Exception)]
+        conflicts = [result for result in results if isinstance(result, HTTPException)]
+        assert len(successes) == len(conflicts) == 1
+        assert conflicts[0].status_code == 409
+        async with factory() as verify_db:
+            stored = (
+                await verify_db.exec(
+                    select(StudyPlanPracticeDebrief).where(
+                        StudyPlanPracticeDebrief.plan_item_id == item_id
+                    )
+                )
+            ).one()
+            assert stored.text == successes[0].text
+            assert stored.submitted_at is not None
+    finally:
+        await engine.dispose()
+
+
 async def test_practice_proposals_use_the_gap_but_keep_the_source_as_authority(
     client, stub_import, stub_cards
 ):
@@ -1742,14 +1990,15 @@ async def test_v2_card_proposals_select_and_describe_weak_recall(
 # --- acceptance -------------------------------------------------------------
 
 
-async def _one_suggested(client, stub_cards, plan) -> dict:
+async def _one_suggested(
+    client, stub_cards, plan, *, topic: str = "Postgres write path"
+) -> dict:
     stub_cards.candidates = [
         {
-            "topic": "Postgres write path",
+            "topic": topic,
             "category": "Databases",
             "canonical_question": (
-                "Walk the write path for a single row update, from WAL append to "
-                "checkpoint. Where can it stall under load?"
+                f"Explain {topic}, including its main boundary and failure mode."
             ),
             "reason": "The mechanism behind most write-throughput answers.",
             "gate": gate(),
@@ -1762,6 +2011,48 @@ async def _one_suggested(client, stub_cards, plan) -> dict:
         )
     ).json()
     return next(p for p in body["proposals"] if p["disposition"] == "suggested")
+
+
+async def test_acceptance_idempotency_keys_are_scoped_to_the_plan(
+    client, stub_import, stub_cards, db
+):
+    first_plan = await make_plan(client, activate=False)
+    first_proposal = await _one_suggested(
+        client, stub_cards, first_plan, topic="Postgres write path"
+    )
+    second_plan = await make_plan(client, activate=False)
+    second_proposal = await _one_suggested(
+        client, stub_cards, second_plan, topic="Redis write path"
+    )
+    shared_key = "key-shared-across-plans"
+
+    for plan, proposal in (
+        (first_plan, first_proposal),
+        (second_plan, second_proposal),
+    ):
+        response = await client.post(
+            f"/study-plans/{plan['id']}/card-proposals/accept",
+            json={
+                "selected_proposal_ids": [proposal["id"]],
+                "idempotency_key": shared_key,
+                "proposal_revision": proposal["revision"],
+            },
+            headers=API_HEADERS,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["replayed"] is False
+
+    acceptances = (
+        await db.exec(
+            select(StudyPlanCardProposalAcceptance).where(
+                StudyPlanCardProposalAcceptance.idempotency_key == shared_key
+            )
+        )
+    ).all()
+    assert {row.plan_id for row in acceptances} == {
+        uuid.UUID(first_plan["id"]),
+        uuid.UUID(second_plan["id"]),
+    }
 
 
 async def test_accepting_a_proposal_creates_the_card_and_keeps_its_question(
@@ -1796,6 +2087,116 @@ async def test_accepting_a_proposal_creates_the_card_and_keeps_its_question(
     assert card.repetitions == 0
 
 
+async def test_acceptance_rejects_duplicate_selected_proposal_ids(
+    client, stub_import, stub_cards, db
+):
+    plan = await make_plan(client)
+    proposal = await _one_suggested(client, stub_cards, plan)
+
+    response = await client.post(
+        f"/study-plans/{plan['id']}/card-proposals/accept",
+        json={
+            "selected_proposal_ids": [proposal["id"], proposal["id"]],
+            "idempotency_key": "key-duplicate-selection",
+            "proposal_revision": proposal["revision"],
+        },
+        headers=API_HEADERS,
+    )
+
+    assert response.status_code == 422
+    assert not (await db.exec(select(Card))).all()
+    assert not (await db.exec(select(StudyPlanCardProposalAcceptance))).all()
+
+
+async def test_acceptance_rejects_oversized_and_malformed_edits(
+    client, stub_import, stub_cards, db
+):
+    plan = await make_plan(client)
+    proposal = await _one_suggested(client, stub_cards, plan)
+    endpoint = f"/study-plans/{plan['id']}/card-proposals/accept"
+    base = {
+        "selected_proposal_ids": [proposal["id"]],
+        "idempotency_key": "key-invalid-edits",
+        "proposal_revision": proposal["revision"],
+    }
+    invalid_edits = [
+        {proposal["id"]: {"topic": "x" * 201}},
+        {proposal["id"]: {"canonical_question": "x" * 4001}},
+        {"not-a-proposal-id": {"topic": "Still invalid"}},
+        {proposal["id"]: {"category": "Injected category"}},
+        {
+            str(uuid.uuid4()): {"topic": "One"},
+            str(uuid.uuid4()): {"topic": "Two"},
+            str(uuid.uuid4()): {"topic": "Three"},
+            str(uuid.uuid4()): {"topic": "Four"},
+        },
+    ]
+
+    for edits in invalid_edits:
+        response = await client.post(
+            endpoint, json={**base, "edits": edits}, headers=API_HEADERS
+        )
+        assert response.status_code == 422, response.text
+
+    assert not (await db.exec(select(Card))).all()
+    assert not (await db.exec(select(StudyPlanCardProposalAcceptance))).all()
+
+
+async def test_acceptance_rejects_two_edits_that_normalize_to_the_same_topic(
+    client, stub_import, stub_cards, db
+):
+    stub_cards.candidates = [
+        {
+            "topic": "Read-your-writes",
+            "category": "Databases",
+            "canonical_question": "What guarantee does read-your-writes provide?",
+            "reason": "A client consistency boundary.",
+            "gate": gate(),
+        },
+        {
+            "topic": "Monotonic reads",
+            "category": "Databases",
+            "canonical_question": "What guarantee do monotonic reads provide?",
+            "reason": "A distinct client consistency boundary.",
+            "gate": gate(),
+        },
+    ]
+    plan = await make_plan(client)
+    item_id = await _complete_first_item(client, plan)
+    proposed = await client.post(
+        f"/study-plans/{plan['id']}/items/{item_id}/card-proposals",
+        headers=API_HEADERS,
+    )
+    assert proposed.status_code == 200
+    proposals = [
+        proposal
+        for proposal in proposed.json()["proposals"]
+        if proposal["disposition"] == "suggested"
+    ]
+    assert len(proposals) == 2
+
+    response = await client.post(
+        f"/study-plans/{plan['id']}/card-proposals/accept",
+        json={
+            "selected_proposal_ids": [proposal["id"] for proposal in proposals],
+            "idempotency_key": "key-normalized-batch-duplicate",
+            "proposal_revision": proposals[0]["revision"],
+            "edits": {
+                proposals[0]["id"]: {"topic": "Read-your-writes"},
+                proposals[1]["id"]: {"topic": "read / your / writes"},
+            },
+        },
+        headers=API_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "selected proposals must resolve to distinct non-empty topics"
+    )
+    assert not (await db.exec(select(Card))).all()
+    assert not (await db.exec(select(StudyPlanCardProposalAcceptance))).all()
+
+
 async def test_a_retry_after_commit_returns_the_original_response(
     client, stub_import, stub_cards, db
 ):
@@ -1818,6 +2219,56 @@ async def test_a_retry_after_commit_returns_the_original_response(
     assert second.json()["created_card_ids"] == first.json()["created_card_ids"]
     assert second.json()["replayed"] is True
     assert len((await db.exec(select(Card))).all()) == 1
+
+
+async def test_postgres_concurrent_acceptance_retries_replay_one_card(
+    client, db, stub_import, stub_cards
+):
+    if not TEST_DATABASE_URL.startswith("postgresql"):
+        pytest.skip("acceptance idempotency serialization requires Postgres")
+
+    plan = await make_plan(client)
+    proposal = await _one_suggested(client, stub_cards, plan)
+    plan_id = uuid.UUID(plan["id"])
+    body = CardAcceptIn(
+        selected_proposal_ids=[uuid.UUID(proposal["id"])],
+        idempotency_key="key-concurrent-replay",
+        proposal_revision=proposal["revision"],
+    )
+    await db.rollback()
+    engine = create_async_engine(TEST_DATABASE_URL)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def accept_once():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await study_plan_router.accept_card_proposals(
+                    plan_id,
+                    body,
+                    request_db,
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    try:
+        first, second = await asyncio.gather(accept_once(), accept_once())
+        assert first.created_card_ids == second.created_card_ids
+        assert {first.replayed, second.replayed} == {False, True}
+        async with factory() as verify_db:
+            assert len((await verify_db.exec(select(Card))).all()) == 1
+            rows = (
+                await verify_db.exec(
+                    select(StudyPlanCardProposalAcceptance).where(
+                        StudyPlanCardProposalAcceptance.plan_id == plan_id,
+                        StudyPlanCardProposalAcceptance.idempotency_key
+                        == body.idempotency_key,
+                    )
+                )
+            ).all()
+            assert len(rows) == 1
+    finally:
+        await engine.dispose()
 
 
 async def test_the_same_key_with_a_different_request_is_a_conflict(client, stub_import, stub_cards):
@@ -1858,11 +2309,10 @@ async def test_a_retry_after_a_rollback_may_safely_run_again(client, stub_import
         "proposal_revision": proposal["revision"],
     }
     stranded = StudyPlanCardProposalAcceptance(
+        plan_id=uuid.UUID(plan["id"]),
         proposal_id=uuid.UUID(proposal["id"]),
         idempotency_key=payload["idempotency_key"],
-        request_hash=__import__("app.services.study_plan", fromlist=["x"]).request_hash(
-            [uuid.UUID(proposal["id"])], {}
-        ),
+        request_hash=sp.request_hash([uuid.UUID(proposal["id"])], {}),
         proposal_revision=proposal["revision"],
         status="processing",
     )

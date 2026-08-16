@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -17,6 +18,7 @@ from app.models import (
     FOUNDER_USER_ID,
     AIConsentEvent,
     AppleIdentity,
+    AppleNotificationReceipt,
     AuthSession,
     LLMUsage,
     User,
@@ -496,7 +498,7 @@ async def test_apple_revocation_notification_invalidates_sessions_but_preserves_
         user_id=FOUNDER_USER_ID,
         subject="apple-revoked-subject",
         apple_refresh_token="encrypted-refresh",
-        last_apple_event_at=datetime.now(UTC) - timedelta(minutes=10),
+        last_apple_authorized_at=datetime.now(UTC) - timedelta(minutes=10),
     )
     now = datetime.now(UTC)
     session = AuthSession(
@@ -514,6 +516,7 @@ async def test_apple_revocation_notification_invalidates_sessions_but_preserves_
 
     async def verified(_payload, _config):
         return authentication.AppleAccountEvent(
+            jti="revocation-jti",
             event_type="consent-revoked",
             subject=identity.subject,
             occurred_at=occurred_at,
@@ -532,50 +535,88 @@ async def test_apple_revocation_notification_invalidates_sessions_but_preserves_
     assert _as_utc(identity.last_apple_event_at) == occurred_at
     assert session.revoked_at is not None
     assert await db.get(User, FOUNDER_USER_ID) is not None
+    receipt = (await db.exec(select(AppleNotificationReceipt))).one()
+    assert receipt.jti == "revocation-jti"
+    assert receipt.applied is True
 
 
-async def test_an_old_apple_notification_cannot_revoke_a_new_authorization(
+async def test_a_stale_apple_notification_cannot_revoke_a_new_authorization(
     client, db, monkeypatch
 ):
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(microsecond=0)
     identity = AppleIdentity(
         user_id=FOUNDER_USER_ID,
         subject="apple-current-subject",
-        apple_refresh_token="fresh-encrypted-refresh",
-        last_apple_event_at=now,
-    )
-    session = AuthSession(
-        user_id=FOUNDER_USER_ID,
-        access_token_hash=authentication.token_hash("current-access"),
-        refresh_token_hash=authentication.token_hash("current-refresh"),
-        access_expires_at=now + timedelta(minutes=15),
-        refresh_expires_at=now + timedelta(days=30),
+        apple_refresh_token=None,
+        authorization_revoked_at=now - timedelta(minutes=10),
+        last_apple_authorized_at=now - timedelta(minutes=20),
     )
     db.add(identity)
-    db.add(session)
     await db.commit()
 
-    async def verified(_payload, _config):
-        return authentication.AppleAccountEvent(
-            event_type="consent-revoked",
-            subject=identity.subject,
-            occurred_at=now - timedelta(minutes=1),
+    async def verified_identity(_identity_token, _nonce, _config):
+        return authentication.AppleClaims(subject=identity.subject, email=None)
+
+    async def exchanged(_code, _nonce, _config):
+        return authentication.AppleCodeExchange(
+            subject=identity.subject, refresh_token="fresh-apple-refresh"
         )
 
-    monkeypatch.setattr(authentication, "verify_apple_server_notification", verified)
+    monkeypatch.setattr(
+        authentication, "verify_apple_identity_token", verified_identity
+    )
+    monkeypatch.setattr(authentication, "exchange_apple_code", exchanged)
+    monkeypatch.setattr(
+        authentication,
+        "_encrypt_apple_token",
+        lambda token, _config: f"encrypted:{token}",
+    )
+    nonce = (await client.post("/auth/nonce")).json()["nonce"]
+    signed_in = await client.post(
+        "/auth/apple",
+        json={
+            "identity_token": "fresh-identity-token",
+            "authorization_code": "fresh-authorization-code",
+            "nonce": nonce,
+        },
+    )
+    assert signed_in.status_code == 200
+    access_token = signed_in.json()["access_token"]
+    await db.refresh(identity)
+    assert identity.last_apple_authorized_at is not None
+    authorized_at = _as_utc(identity.last_apple_authorized_at)
+    assert authorized_at >= now
+    assert identity.authorization_revoked_at is None
+
+    async def verified_notification(_payload, _config):
+        return authentication.AppleAccountEvent(
+            jti="stale-after-reauthorization-jti",
+            event_type="consent-revoked",
+            subject=identity.subject,
+            occurred_at=authorized_at - timedelta(minutes=1),
+        )
+
+    monkeypatch.setattr(
+        authentication, "verify_apple_server_notification", verified_notification
+    )
     response = await client.post(
         "/auth/apple/notifications", json={"payload": "delayed-apple-retry"}
     )
     assert response.status_code == 204
 
     await db.refresh(identity)
-    await db.refresh(session)
-    assert identity.apple_refresh_token == "fresh-encrypted-refresh"
+    assert identity.apple_refresh_token == "encrypted:fresh-apple-refresh"
     assert identity.authorization_revoked_at is None
-    assert session.revoked_at is None
+    still_authenticated = await client.get(
+        "/auth/me", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    assert still_authenticated.status_code == 200
+    receipt = (await db.exec(select(AppleNotificationReceipt))).one()
+    assert receipt.jti == "stale-after-reauthorization-jti"
+    assert receipt.applied is False
 
 
-async def test_apple_notifications_apply_only_the_newest_signed_event(
+async def test_an_out_of_order_email_event_cannot_suppress_a_revocation(
     client, db, monkeypatch
 ):
     now = datetime.now(UTC)
@@ -584,7 +625,7 @@ async def test_apple_notifications_apply_only_the_newest_signed_event(
         subject="apple-out-of-order-subject",
         email="private-relay@example.com",
         apple_refresh_token="fresh-encrypted-refresh",
-        last_apple_event_at=now - timedelta(minutes=20),
+        last_apple_authorized_at=now - timedelta(minutes=20),
     )
     session = AuthSession(
         user_id=FOUNDER_USER_ID,
@@ -600,11 +641,13 @@ async def test_apple_notifications_apply_only_the_newest_signed_event(
     events = iter(
         [
             authentication.AppleAccountEvent(
+                jti="newer-email-jti",
                 event_type="email-disabled",
                 subject=identity.subject,
                 occurred_at=now - timedelta(minutes=5),
             ),
             authentication.AppleAccountEvent(
+                jti="older-revocation-jti",
                 event_type="consent-revoked",
                 subject=identity.subject,
                 occurred_at=now - timedelta(minutes=10),
@@ -628,10 +671,149 @@ async def test_apple_notifications_apply_only_the_newest_signed_event(
     await db.refresh(identity)
     await db.refresh(session)
     assert identity.email is None
-    assert identity.apple_refresh_token == "fresh-encrypted-refresh"
-    assert identity.authorization_revoked_at is None
+    assert identity.apple_refresh_token is None
+    assert _as_utc(identity.authorization_revoked_at) == now - timedelta(minutes=10)
     assert _as_utc(identity.last_apple_event_at) == now - timedelta(minutes=5)
-    assert session.revoked_at is None
+    assert session.revoked_at is not None
+    receipts = (await db.exec(select(AppleNotificationReceipt))).all()
+    assert {row.jti: row.applied for row in receipts} == {
+        "newer-email-jti": True,
+        "older-revocation-jti": True,
+    }
+
+
+async def test_an_exact_apple_notification_replay_is_not_applied_twice(
+    client, db, monkeypatch
+):
+    now = datetime.now(UTC).replace(microsecond=0)
+    identity = AppleIdentity(
+        user_id=FOUNDER_USER_ID,
+        subject="apple-replay-subject",
+        apple_refresh_token="encrypted-refresh",
+        last_apple_authorized_at=now - timedelta(minutes=10),
+    )
+    first_session = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("replay-first-access"),
+        refresh_token_hash=authentication.token_hash("replay-first-refresh"),
+        access_expires_at=now + timedelta(minutes=15),
+        refresh_expires_at=now + timedelta(days=30),
+    )
+    db.add(identity)
+    db.add(first_session)
+    await db.commit()
+    event = authentication.AppleAccountEvent(
+        jti="exact-replay-jti",
+        event_type="consent-revoked",
+        subject=identity.subject,
+        occurred_at=now - timedelta(minutes=5),
+    )
+
+    async def verified(_payload, _config):
+        return event
+
+    monkeypatch.setattr(authentication, "verify_apple_server_notification", verified)
+    first = await client.post(
+        "/auth/apple/notifications", json={"payload": "first-delivery"}
+    )
+    assert first.status_code == 204
+    second_session = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("replay-second-access"),
+        refresh_token_hash=authentication.token_hash("replay-second-refresh"),
+        access_expires_at=now + timedelta(minutes=15),
+        refresh_expires_at=now + timedelta(days=30),
+    )
+    db.add(second_session)
+    await db.commit()
+
+    replay = await client.post(
+        "/auth/apple/notifications", json={"payload": "provider-retry"}
+    )
+    assert replay.status_code == 204
+    await db.refresh(second_session)
+    assert second_session.revoked_at is None
+    assert len((await db.exec(select(AppleNotificationReceipt))).all()) == 1
+    db.add(
+        AppleNotificationReceipt(
+            identity_id=identity.id,
+            jti=event.jti,
+            event_type=event.event_type,
+            occurred_at=event.occurred_at,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await db.commit()
+    await db.rollback()
+
+
+async def test_same_second_distinct_revocations_are_each_applied(
+    client, db, monkeypatch
+):
+    now = datetime.now(UTC).replace(microsecond=0)
+    identity = AppleIdentity(
+        user_id=FOUNDER_USER_ID,
+        subject="apple-same-second-subject",
+        apple_refresh_token="encrypted-refresh",
+        last_apple_authorized_at=now - timedelta(minutes=10),
+    )
+    first_session = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("same-second-first-access"),
+        refresh_token_hash=authentication.token_hash("same-second-first-refresh"),
+        access_expires_at=now + timedelta(minutes=15),
+        refresh_expires_at=now + timedelta(days=30),
+    )
+    db.add(identity)
+    db.add(first_session)
+    await db.commit()
+    events = iter(
+        [
+            authentication.AppleAccountEvent(
+                jti="same-second-revocation-1",
+                event_type="consent-revoked",
+                subject=identity.subject,
+                occurred_at=now,
+            ),
+            authentication.AppleAccountEvent(
+                jti="same-second-revocation-2",
+                event_type="account-deleted",
+                subject=identity.subject,
+                occurred_at=now,
+            ),
+        ]
+    )
+
+    async def verified(_payload, _config):
+        return next(events)
+
+    monkeypatch.setattr(authentication, "verify_apple_server_notification", verified)
+    first = await client.post(
+        "/auth/apple/notifications", json={"payload": "first-distinct-event"}
+    )
+    assert first.status_code == 204
+    second_session = AuthSession(
+        user_id=FOUNDER_USER_ID,
+        access_token_hash=authentication.token_hash("same-second-second-access"),
+        refresh_token_hash=authentication.token_hash("same-second-second-refresh"),
+        access_expires_at=now + timedelta(minutes=15),
+        refresh_expires_at=now + timedelta(days=30),
+    )
+    db.add(second_session)
+    await db.commit()
+
+    second = await client.post(
+        "/auth/apple/notifications", json={"payload": "second-distinct-event"}
+    )
+    assert second.status_code == 204
+    await db.refresh(second_session)
+    assert second_session.revoked_at is not None
+    receipts = (await db.exec(select(AppleNotificationReceipt))).all()
+    assert {row.jti for row in receipts} == {
+        "same-second-revocation-1",
+        "same-second-revocation-2",
+    }
+    assert all(row.applied for row in receipts)
 
 
 async def test_apple_notification_requires_a_valid_apple_signature(client, monkeypatch):
@@ -645,7 +827,7 @@ async def test_apple_notification_requires_a_valid_apple_signature(client, monke
     assert response.status_code == 401
 
 
-async def test_apple_notification_verifier_requires_the_signed_event_timestamp(
+async def test_apple_notification_verifier_requires_the_signed_jti_and_event_timestamp(
     monkeypatch,
 ):
     config = get_settings().model_copy(
@@ -671,6 +853,7 @@ async def test_apple_notification_verifier_requires_the_signed_event_timestamp(
     def decoded(_payload, key, **kwargs):
         captured.update(key=key, **kwargs)
         return {
+            "jti": "verified-notification-jti",
             "events": {
                 "type": "consent-revoked",
                 "sub": "apple-subject",
@@ -681,6 +864,7 @@ async def test_apple_notification_verifier_requires_the_signed_event_timestamp(
     monkeypatch.setattr(authentication.jwt, "decode", decoded)
     event = await authentication.verify_apple_server_notification("signed", config)
     assert event.event_type == "consent-revoked"
+    assert event.jti == "verified-notification-jti"
     assert event.subject == "apple-subject"
     assert event.occurred_at == datetime.fromtimestamp(1_786_553_600, UTC)
     assert captured["key"] == "apple-public-key"
@@ -689,8 +873,24 @@ async def test_apple_notification_verifier_requires_the_signed_event_timestamp(
     assert captured["issuer"] == authentication.APPLE_ISSUER
 
     def missing_time(*_args, **_kwargs):
-        return {"events": {"type": "consent-revoked", "sub": "apple-subject"}}
+        return {
+            "jti": "missing-time-jti",
+            "events": {"type": "consent-revoked", "sub": "apple-subject"},
+        }
 
     monkeypatch.setattr(authentication.jwt, "decode", missing_time)
+    with pytest.raises(authentication.AuthenticationError):
+        await authentication.verify_apple_server_notification("signed", config)
+
+    def missing_jti(*_args, **_kwargs):
+        return {
+            "events": {
+                "type": "consent-revoked",
+                "sub": "apple-subject",
+                "event_time": 1_786_553_600,
+            }
+        }
+
+    monkeypatch.setattr(authentication.jwt, "decode", missing_jti)
     with pytest.raises(authentication.AuthenticationError):
         await authentication.verify_apple_server_notification("signed", config)

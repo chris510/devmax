@@ -118,6 +118,20 @@ async def _table_exists(url: URL, table: str) -> bool:
     return bool(row["present"])
 
 
+async def _index_exists(url: URL, index: str) -> bool:
+    row = await _fetch_one(
+        url,
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = :index
+        ) AS present
+        """,
+        {"index": index},
+    )
+    return bool(row["present"])
+
+
 @asynccontextmanager
 async def _temporary_database(server_url: URL) -> AsyncIterator[URL]:
     database_name = f"devmax_migration_{uuid.uuid4().hex}"
@@ -145,8 +159,8 @@ def _run_alembic(database_url: URL, command: str, revision: str) -> None:
     environment.update(
         {
             "DATABASE_URL": _render_url(database_url),
-            "API_KEY": "migration-round-trip-api-key",
-            "CRON_SECRET": "migration-round-trip-cron-secret",
+            "API_KEY": "migration-round-trip-api-key-000000000000",
+            "CRON_SECRET": "migration-round-trip-cron-secret-00000000",
             "FOUNDER_CLAIM_TOKEN": "",
             "OPENAI_V2_SCORING_MODE": "off",
             "SCORING_CONTRACT_VERSION": "1",
@@ -857,6 +871,113 @@ async def _exercise_round_trips() -> None:
             "enrollments": 1,
             "assignments": 1,
         }
+        # 0021 separates successful authorization from notification ordering.
+        # The overloaded historical event timestamp is deliberately not trusted
+        # as an authorization boundary during the upgrade.
+        identity_id = uuid.uuid4()
+        await _execute(
+            database_url,
+            """
+            INSERT INTO apple_identities (
+                id, user_id, subject, last_apple_event_at, created_at, updated_at
+            ) VALUES (
+                :identity_id, :user_id, 'migration-apple-subject',
+                TIMESTAMPTZ '2026-08-15 12:00:00+00', now(), now()
+            )
+            """,
+            {"identity_id": identity_id, "user_id": FOUNDER_USER_ID},
+        )
+        _run_alembic(database_url, "upgrade", "0021")
+        await _assert_revision(database_url, "0021")
+        for index_name in (
+            "uq_apple_notification_receipts_jti",
+            "ix_apple_notification_receipts_identity_created",
+            "ix_apple_notification_receipts_created",
+            "ix_auth_nonces_expires",
+            "ix_auth_nonces_used",
+            "ix_auth_sessions_refresh_expires",
+        ):
+            assert await _index_exists(database_url, index_name)
+        boundary = await _fetch_one(
+            database_url,
+            """
+            SELECT last_apple_event_at, last_apple_authorized_at
+            FROM apple_identities WHERE id = :identity_id
+            """,
+            {"identity_id": identity_id},
+        )
+        assert boundary["last_apple_event_at"] is not None
+        assert boundary["last_apple_authorized_at"] is None
+        receipt_id = uuid.uuid4()
+        await _execute(
+            database_url,
+            """
+            INSERT INTO apple_notification_receipts (
+                id, identity_id, jti, event_type, occurred_at, applied, created_at
+            ) VALUES (
+                :receipt_id, :identity_id, 'migration-notification-jti',
+                'consent-revoked', now(), true, now()
+            )
+            """,
+            {"receipt_id": receipt_id, "identity_id": identity_id},
+        )
+        receipt = await _fetch_one(
+            database_url,
+            """
+            SELECT jti, event_type, applied
+            FROM apple_notification_receipts WHERE id = :receipt_id
+            """,
+            {"receipt_id": receipt_id},
+        )
+        assert receipt == {
+            "jti": "migration-notification-jti",
+            "event_type": "consent-revoked",
+            "applied": True,
+        }
+
+        # 0022 repairs any historical duplicate-live race before installing the
+        # portable live-session and one-to-one lineage backstops.
+        live_session_ids = (uuid.uuid4(), uuid.uuid4())
+        await _execute(
+            database_url,
+            """
+            INSERT INTO sessions (id, card_id, question_asked, status, started_at)
+            VALUES
+                (:first_id, :card_id, 'Older inaccessible live row', 'open', now()),
+                (:second_id, :card_id, 'Newest resumable live row', 'open', now())
+            """,
+            {
+                "first_id": live_session_ids[0],
+                "second_id": live_session_ids[1],
+                "card_id": card_id,
+            },
+        )
+        _run_alembic(database_url, "upgrade", "0022")
+        await _assert_revision(database_url, "0022")
+        for index_name in (
+            "uq_sessions_live_card",
+            "uq_cards_replaces_card",
+            "uq_cards_replaced_by_card",
+        ):
+            assert await _index_exists(database_url, index_name)
+        repaired = await _fetch_one(
+            database_url,
+            """
+            SELECT count(*) FILTER (WHERE status = 'open') AS live_count,
+                   count(*) FILTER (WHERE status = 'abandoned') AS abandoned_count
+            FROM sessions WHERE id IN (:first_id, :second_id)
+            """,
+            {
+                "first_id": live_session_ids[0],
+                "second_id": live_session_ids[1],
+            },
+        )
+        assert repaired == {"live_count": 1, "abandoned_count": 1}
+        _run_alembic(database_url, "downgrade", "0021")
+        await _assert_revision(database_url, "0021")
+        assert not await _index_exists(database_url, "uq_sessions_live_card")
+        _run_alembic(database_url, "upgrade", "0022")
+        await _assert_revision(database_url, "0022")
         assert await _numeric_snapshot(database_url, card_id, session_id) == original
 
         _run_alembic(database_url, "downgrade", "0019")
@@ -877,10 +998,20 @@ async def _exercise_round_trips() -> None:
             "last_learning_exposure_at",
         )
         assert await _material_snapshot(database_url, source_id) == material
+        assert not await _table_exists(database_url, "apple_notification_receipts")
+        assert not await _column_exists(
+            database_url, "apple_identities", "last_apple_authorized_at"
+        )
+        for index_name in (
+            "ix_auth_nonces_expires",
+            "ix_auth_nonces_used",
+            "ix_auth_sessions_refresh_expires",
+        ):
+            assert not await _index_exists(database_url, index_name)
         assert await _numeric_snapshot(database_url, card_id, session_id) == original
 
-        _run_alembic(database_url, "upgrade", "0020")
-        await _assert_revision(database_url, "0020")
+        _run_alembic(database_url, "upgrade", "0022")
+        await _assert_revision(database_url, "0022")
         reset_pilot = await _fetch_one(
             database_url,
             """
@@ -893,6 +1024,10 @@ async def _exercise_round_trips() -> None:
             {"source_id": source_id, "proposal_id": proposal_id},
         )
         assert reset_pilot == pilot_defaults
+        assert await _table_exists(database_url, "apple_notification_receipts")
+        assert await _column_exists(
+            database_url, "apple_identities", "last_apple_authorized_at"
+        )
         assert await _numeric_snapshot(database_url, card_id, session_id) == original
         await _execute(
             database_url,

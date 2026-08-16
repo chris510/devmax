@@ -5,36 +5,134 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  API_KEY: test-api-key-000000000000000000000000
+  CRON_SECRET: test-cron-secret-000000000000000000000
+  AI_CONSENT_ENFORCEMENT_ENABLED: "false"
+
 jobs:
-  api:
+  api-sqlite:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
 
       - run: uv sync --frozen
 
-      # `.`, not `app tests` — the narrower command the docs used to give skipped
-      # alembic/ entirely, which is how three lint errors sat there unnoticed.
+      # `.`, not `app tests` — migrations and operational scripts are code too.
       - name: Lint
         run: uv run ruff check .
 
-      # Anthropic and APNs are mocked in the suite; no live API calls (spec.md §Testing).
-      - name: Test
+      - name: Dependency vulnerability audit
+        run: uv run pip-audit --local --progress-spinner=off
+
+      # Anthropic and APNs are mocked; CI never transmits live learner data.
+      - name: SQLite test suite
         run: uv run pytest -q
 
-  # An RGBA marketing icon builds, installs, and runs fine — it fails only at
-  # App Store upload, long after the re-export that caused it. Stdlib only, so
-  # no setup step. See docs/DEVIATIONS.md §Icon.
+  api-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: devmax_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d devmax_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/devmax_test
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/devmax_test
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Apply migrations from an empty Postgres 17 database
+        run: uv run alembic upgrade head
+      - name: Postgres test suite (including race tests)
+        run: uv run pytest -q
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build the exact production container
+        run: docker build --tag devmax-api:audit api
+      - name: Boot the production command as the non-root runtime user
+        run: |
+          container_id=$(docker run --detach \
+            --publish 127.0.0.1:18080:8080 \
+            --env DATABASE_URL=postgresql+asyncpg://audit:audit@127.0.0.1:9/audit \
+            --env API_KEY --env CRON_SECRET --env AI_CONSENT_ENFORCEMENT_ENABLED \
+            devmax-api:audit)
+          cleanup() { docker rm --force "$container_id" >/dev/null; }
+          trap cleanup EXIT
+          test "$(docker exec "$container_id" id -u)" = "10001"
+          curl --silent --show-error --fail \
+            --retry 10 --retry-all-errors --retry-delay 1 --max-time 2 \
+            http://127.0.0.1:18080/live \
+            | jq --exit-status '.status == "alive"'
+      - name: Record every high and critical finding
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: devmax-api:audit
+          scanners: vuln,secret
+          format: json
+          output: trivy-high-critical.json
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: devmax-api:audit
+          format: cyclonedx
+          output: sbom.cdx.json
+      - name: Scan application and OS packages
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: devmax-api:audit
+          scanners: vuln,secret
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Retain vulnerability inventory and SBOM
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: devmax-api-security-artifacts
+          path: |
+            trivy-high-critical.json
+            sbom.cdx.json
+          if-no-files-found: error
+
+  # An RGBA marketing icon fails only at App Store upload.
   icons:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check app-icon alpha rules
         run: python3 scripts/check_icon_alpha.py

@@ -102,9 +102,44 @@ class AppleIdentity(SQLModel, table=True):
     # Sign in with Apple when the account is deleted.
     apple_refresh_token: str | None = None
     authorization_revoked_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    # Successful Apple authorization is a separate ordering boundary from
+    # server notifications. Email-delivery events must never advance it and
+    # thereby suppress a delayed security event.
+    last_apple_authorized_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     last_apple_event_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
+
+
+class AppleNotificationReceipt(SQLModel, table=True):
+    """A durable receipt for one verified Apple server notification.
+
+    Apple's signed ``jti`` is the idempotency key. Receipts belong to the
+    identity rather than merely copying its subject, so account deletion
+    cascades the security metadata and cannot leave unowned personal data.
+    ``created_at`` is indexed to support a future bounded retention sweep.
+    """
+
+    __tablename__ = "apple_notification_receipts"
+    __table_args__ = (
+        Index("uq_apple_notification_receipts_jti", "jti", unique=True),
+        Index(
+            "ix_apple_notification_receipts_identity_created",
+            "identity_id",
+            "created_at",
+        ),
+        Index("ix_apple_notification_receipts_created", "created_at"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    identity_id: uuid.UUID = Field(
+        foreign_key="apple_identities.id", ondelete="CASCADE"
+    )
+    jti: str
+    event_type: str
+    occurred_at: datetime = Field(sa_type=TZ_DATETIME)
+    applied: bool = False
+    created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
 
 
 class AuthSession(SQLModel, table=True):
@@ -114,6 +149,7 @@ class AuthSession(SQLModel, table=True):
         Index("uq_auth_sessions_refresh_hash", "refresh_token_hash", unique=True),
         Index("ix_auth_sessions_user", "user_id"),
         Index("ix_auth_sessions_family", "family_id"),
+        Index("ix_auth_sessions_refresh_expires", "refresh_expires_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -131,7 +167,11 @@ class AuthSession(SQLModel, table=True):
 
 class AuthNonce(SQLModel, table=True):
     __tablename__ = "auth_nonces"
-    __table_args__ = (Index("uq_auth_nonces_hash", "nonce_hash", unique=True),)
+    __table_args__ = (
+        Index("uq_auth_nonces_hash", "nonce_hash", unique=True),
+        Index("ix_auth_nonces_expires", "expires_at"),
+        Index("ix_auth_nonces_used", "used_at"),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     nonce_hash: str
@@ -145,6 +185,19 @@ class Card(SQLModel, table=True):
     __table_args__ = (
         Index("ix_cards_next_review_at", "next_review_at"),
         Index("ix_cards_user_next_review", "user_id", "next_review_at"),
+        # Per-account daily push cap and the global unresolved-push sweep have
+        # different leading predicates, so each gets the narrow index it uses.
+        Index("ix_cards_user_last_pushed", "user_id", "last_pushed_at"),
+        Index(
+            "ix_cards_active_last_pushed",
+            "last_pushed_at",
+            postgresql_where=text(
+                "lifecycle_status = 'active' AND last_pushed_at IS NOT NULL"
+            ),
+            sqlite_where=text(
+                "lifecycle_status = 'active' AND last_pushed_at IS NOT NULL"
+            ),
+        ),
         # The hot query: due conversational cards. Desk cards never enter the push loop.
         Index(
             "ix_cards_active_due_conversational",
@@ -155,6 +208,23 @@ class Card(SQLModel, table=True):
             sqlite_where=text(
                 "delivery_mode = 'conversational' AND lifecycle_status = 'active'"
             ),
+        ),
+        # A predecessor and successor form a one-to-one lineage. Without these
+        # portable backstops, two concurrent replacements can both flush before
+        # either request updates the predecessor's scalar pointer.
+        Index(
+            "uq_cards_replaces_card",
+            "replaces_card_id",
+            unique=True,
+            postgresql_where=text("replaces_card_id IS NOT NULL"),
+            sqlite_where=text("replaces_card_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_cards_replaced_by_card",
+            "replaced_by_card_id",
+            unique=True,
+            postgresql_where=text("replaced_by_card_id IS NOT NULL"),
+            sqlite_where=text("replaced_by_card_id IS NOT NULL"),
         ),
     )
 
@@ -232,6 +302,11 @@ class Card(SQLModel, table=True):
     # still uncounted. Replaces clearing `last_pushed_at`, which destroyed the
     # evidence both the daily cap and the per-window guard read.
     missed_counted_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
+    # The last push proven engaged by a session or explicit learning exposure.
+    # Keeping this separate preserves missed_count as a truthful compliance
+    # signal while preventing every future sweep from rediscovering the same
+    # already-resolved notification.
+    push_resolved_at: datetime | None = Field(default=None, sa_type=TZ_DATETIME)
 
     created_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
     updated_at: datetime = Field(default_factory=_now, sa_type=TZ_DATETIME)
@@ -280,7 +355,19 @@ class PendingCapture(SQLModel, table=True):
 
 class Session(SQLModel, table=True):
     __tablename__ = "sessions"
-    __table_args__ = (Index("ix_sessions_card_started", "card_id", text("started_at DESC")),)
+    __table_args__ = (
+        Index("ix_sessions_card_started", "card_id", text("started_at DESC")),
+        # The card row lock is the primary serialization boundary in Postgres.
+        # This partial unique index is the portable last line of defense and
+        # prevents a future start path from silently creating a second live turn.
+        Index(
+            "uq_sessions_live_card",
+            "card_id",
+            unique=True,
+            postgresql_where=text("status IN ('open', 'awaiting_follow_up')"),
+            sqlite_where=text("status IN ('open', 'awaiting_follow_up')"),
+        ),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     card_id: uuid.UUID = Field(foreign_key="cards.id", ondelete="CASCADE")
@@ -446,6 +533,13 @@ class MaterialSource(SQLModel, table=True):
     __tablename__ = "material_sources"
     __table_args__ = (
         Index("ix_material_sources_user_status", "user_id", "status"),
+        Index(
+            "ix_material_sources_recovery",
+            "status",
+            "processing_heartbeat_at",
+            postgresql_where=text("status IN ('pending', 'processing')"),
+            sqlite_where=text("status IN ('pending', 'processing')"),
+        ),
         Index(
             "uq_material_sources_version",
             "user_id",
@@ -1197,9 +1291,17 @@ class StudyPlanCardProposalAcceptance(SQLModel, table=True):
     """One atomic, idempotent attempt to turn selected proposals into cards."""
 
     __tablename__ = "study_plan_card_proposal_acceptances"
-    __table_args__ = (Index("uq_study_plan_acceptance_key", "idempotency_key", unique=True),)
+    __table_args__ = (
+        Index(
+            "uq_study_plan_acceptance_plan_key",
+            "plan_id",
+            "idempotency_key",
+            unique=True,
+        ),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plan_id: uuid.UUID = Field(foreign_key="study_plans.id", ondelete="CASCADE")
     proposal_id: uuid.UUID = Field(foreign_key="study_plan_card_proposals.id", ondelete="CASCADE")
     idempotency_key: str
     # Hash of selected ids + edits. Same key with a different hash is a conflict,

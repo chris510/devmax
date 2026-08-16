@@ -4,8 +4,11 @@ from collections.abc import AsyncIterator
 from datetime import date, datetime
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("API_KEY", "test-api-key")
-os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+TEST_API_KEY = "test-api-key-000000000000000000000000"
+TEST_CRON_SECRET = "test-cron-secret-000000000000000000000"
+os.environ.setdefault("API_KEY", TEST_API_KEY)
+os.environ.setdefault("CRON_SECRET", TEST_CRON_SECRET)
+os.environ.setdefault("AI_CONSENT_ENFORCEMENT_ENABLED", "false")
 os.environ.setdefault(
     "FOUNDER_CLAIM_TOKEN", "test-founder-claim-token-00000000000000000000"
 )
@@ -26,11 +29,19 @@ from app.routers import study_plan as study_plan_router  # noqa: E402
 from app.routers.deps import now_in  # noqa: E402
 from app.services import llm  # noqa: E402
 
-API_HEADERS = {"X-API-Key": "test-api-key"}
-CRON_HEADERS = {"X-Cron-Secret": "test-cron-secret"}
+API_HEADERS = {"X-API-Key": TEST_API_KEY}
+CRON_HEADERS = {"X-Cron-Secret": TEST_CRON_SECRET}
 FOUNDER_CLAIM_HEADERS = {
     "X-Founder-Claim-Token": "test-founder-claim-token-00000000000000000000"
 }
+
+
+@pytest.fixture(autouse=True)
+def reset_app_middleware_stack():
+    """Give each test fresh process-local abuse-protection state."""
+    app.middleware_stack = None
+    yield
+    app.middleware_stack = None
 
 
 def local_today() -> date:
@@ -86,7 +97,8 @@ async def db() -> AsyncIterator[AsyncSession]:
                     "study_pilot_assignments, study_pilot_enrollments, "
                     "material_topic_proposals, material_sources, llm_usage, "
                     "ai_consent_events, "
-                    "auth_nonces, auth_sessions, apple_identities, users "
+                    "auth_nonces, auth_sessions, apple_notification_receipts, "
+                    "apple_identities, users "
                     "RESTART IDENTITY CASCADE"
                 )
             )

@@ -11,12 +11,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import get_settings
 from app.db import get_session
 from app.models import FOUNDER_USER_ID
+from app.services.abuse import is_provider_request, provider_slot
 from app.services.authentication import user_for_access_token
 
 # These routes establish authentication rather than consuming it. The founder
 # claim is handled separately below because it has its own temporary credential.
 PUBLIC_PATHS = {
+    "/live",
     "/health",
+    "/ready",
     "/auth/nonce",
     "/auth/apple",
     "/auth/refresh",
@@ -92,10 +95,17 @@ async def require_user(
     if user_id is None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
+    # Paid-work admission happens only after bearer resolution. The outer abuse
+    # middleware still bounds slow body uploads, but an arbitrary Bearer-shaped
+    # value can never reserve a scarce model slot.
     request.state.user_id = user_id
     reset = _current_user_id.set(user_id)
     try:
-        yield
+        if is_provider_request(request.method, request.url.path):
+            async with provider_slot(user_id):
+                yield
+        else:
+            yield
     finally:
         _current_user_id.reset(reset)
 

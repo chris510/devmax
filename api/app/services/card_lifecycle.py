@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlmodel import col, or_
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_settings
+from app.db import acquire_advisory_xact_lock
 from app.models import (
     CAPTURE_ACTIVATED,
     CAPTURE_PENDING_SOURCE,
@@ -20,6 +23,7 @@ from app.models import (
     CARD_ARCHIVED,
     Card,
     PendingCapture,
+    User,
 )
 
 RUBRIC_FIELDS = (
@@ -46,6 +50,27 @@ class GroundingError(ValueError):
     def __init__(self, missing: list[str]) -> None:
         self.missing = missing
         super().__init__(f"grounding is incomplete: {', '.join(missing)}")
+
+
+async def lock_topic_creation(db: AsyncSession, user_id: UUID) -> None:
+    """Serialize normalized-topic duplicate-check + creation per account.
+
+    Topic normalization is intentionally richer than a portable SQL expression,
+    so a read-then-insert check needs a transaction boundary shared by Capture,
+    material confirmation, and Study Plan acceptance. PostgreSQL uses a namespaced
+    advisory lock. SQLite takes its database write lock through a no-op account
+    update; the later capture CAS/lineage unique indexes remain the backstops.
+    """
+    if await acquire_advisory_xact_lock(db, user_id, namespace=b"devmax-card"):
+        return
+    result = await db.exec(
+        update(User)
+        .where(User.id == user_id)
+        .values(updated_at=User.updated_at)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:  # pragma: no cover - authenticated users always exist
+        raise RuntimeError("card owner no longer exists")
 
 
 def _clean(value: str | None) -> str:
@@ -170,10 +195,13 @@ def build_grounded_card(
     schedule: str,
     replaces_card_id=None,
 ) -> Card:
+    topic = topic.strip()
+    if not topic:
+        raise GroundingError(["topic"])
     value = grounding.require_complete()
     return Card(
         user_id=user_id,
-        topic=topic.strip(),
+        topic=topic,
         category=category,
         canonical_question=value.canonical_question,
         source_url=value.source_url,

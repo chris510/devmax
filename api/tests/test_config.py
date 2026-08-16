@@ -19,10 +19,11 @@ from app.db import engine_kwargs
 
 GOOD = dict(
     database_url="postgresql+asyncpg://u:p@host/db",
-    api_key="realA",
-    cron_secret="realB",
+    api_key="api-key-0000000000000000000000000000",
+    cron_secret="cron-secret-00000000000000000000000000",
     founder_claim_token="",
     legacy_api_key_auth_enabled=False,
+    ai_consent_enforcement_enabled=False,
 )
 
 
@@ -32,7 +33,7 @@ def build(**overrides) -> Settings:
 
 
 def test_a_full_config_boots() -> None:
-    assert build().api_key == "realA"
+    assert build().api_key == GOOD["api_key"]
 
 
 def test_scoring_v2_is_dark_by_default_and_only_known_versions_are_valid() -> None:
@@ -61,8 +62,11 @@ def test_scoring_contract_version_rejects_invalid_environment_values(
         Settings(_env_file=None, **GOOD)
 
 
-@pytest.mark.parametrize("missing", ["database_url", "api_key", "cron_secret"])
-def test_the_three_required_settings_have_no_default(
+@pytest.mark.parametrize(
+    "missing",
+    ["database_url", "api_key", "cron_secret", "ai_consent_enforcement_enabled"],
+)
+def test_security_boundary_settings_have_no_default(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
     """A default here means a deploy that forgets to set them boots healthy."""
@@ -75,12 +79,12 @@ def test_the_three_required_settings_have_no_default(
 @pytest.mark.parametrize(
     ("api_key", "cron_secret"),
     [
-        ("dev-api-key", "realB"),  # the config.py defaults this replaced
-        ("realA", "dev-cron-secret"),
-        ("change-me", "realB"),  # .env.example, copied verbatim
-        ("realA", "change-me-too"),
-        ("", "realB"),
-        ("realA", ""),
+        ("dev-api-key", GOOD["cron_secret"]),  # the old config.py default
+        (GOOD["api_key"], "dev-cron-secret"),
+        ("change-me", GOOD["cron_secret"]),  # .env.example, copied verbatim
+        (GOOD["api_key"], "change-me-too"),
+        ("", GOOD["cron_secret"]),
+        (GOOD["api_key"], ""),
     ],
 )
 def test_placeholder_secrets_are_refused(api_key: str, cron_secret: str) -> None:
@@ -94,8 +98,9 @@ def test_the_two_secrets_must_differ() -> None:
     Collapsing them ships the cron secret inside the iOS binary along with the
     API key.
     """
+    shared = "same-secret-000000000000000000000"
     with pytest.raises(ValidationError):
-        build(api_key="same", cron_secret="same")
+        build(api_key=shared, cron_secret=shared)
 
 
 def test_the_founder_claim_is_disabled_by_default() -> None:
@@ -103,8 +108,16 @@ def test_the_founder_claim_is_disabled_by_default() -> None:
     assert build().legacy_api_key_auth_enabled is False
 
 
-def test_ai_consent_enforcement_is_staged_off_by_default() -> None:
+def test_ai_consent_enforcement_can_be_explicitly_staged_off() -> None:
     assert build().ai_consent_enforcement_enabled is False
+
+
+@pytest.mark.parametrize("field", ["api_key", "cron_secret"])
+def test_shared_secrets_require_at_least_32_non_whitespace_characters(field: str) -> None:
+    with pytest.raises(ValidationError, match="at least 32 non-whitespace"):
+        build(**{field: "x" * 31})
+    with pytest.raises(ValidationError, match="at least 32 non-whitespace"):
+        build(**{field: "x" * 31 + " "})
 
 
 def test_ai_consent_policy_activation_is_explicit_and_starts_legacy_compatible() -> None:
