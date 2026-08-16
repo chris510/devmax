@@ -40,15 +40,19 @@ final class FollowUpBudgetTests: XCTestCase {
         let api = mock()
         let session = try await startedSession(api)
 
-        let first = try await api.submitAnswer(sessionID: session, text: "the ring answer")
-        guard case .followUp(let probe) = first else {
+        let first = try await api.submitAnswer(
+            sessionID: session, text: "the ring answer", turnIndex: 0
+        )
+        guard case .followUp(let probe, _) = first else {
             return XCTFail("a daily review's first answer draws a probe, got \(first)")
         }
         XCTAssertTrue(
             probe.hasPrefix("One more — "), "the first probe keeps its own preface: \(probe)"
         )
 
-        let second = try await api.submitAnswer(sessionID: session, text: "the probe answer")
+        let second = try await api.submitAnswer(
+            sessionID: session, text: "the probe answer", turnIndex: 1
+        )
         guard case .complete = second else {
             return XCTFail("the one probe is spent, so this answer scores, got \(second)")
         }
@@ -59,11 +63,17 @@ final class FollowUpBudgetTests: XCTestCase {
     func testASecondSessionGetsItsOwnBudget() async throws {
         let api = mock()
         let first = try await startedSession(api)
-        _ = try await api.submitAnswer(sessionID: first, text: "the ring answer")
-        _ = try await api.submitAnswer(sessionID: first, text: "the probe answer")
+        _ = try await api.submitAnswer(
+            sessionID: first, text: "the ring answer", turnIndex: 0
+        )
+        _ = try await api.submitAnswer(
+            sessionID: first, text: "the probe answer", turnIndex: 1
+        )
 
         let second = try await startedSession(api)
-        let outcome = try await api.submitAnswer(sessionID: second, text: "the next card's answer")
+        let outcome = try await api.submitAnswer(
+            sessionID: second, text: "the next card's answer", turnIndex: 0
+        )
 
         guard case .followUp = outcome else {
             return XCTFail("the previous session's spent probe is not this one's, got \(outcome)")
@@ -79,14 +89,18 @@ final class FollowUpBudgetTests: XCTestCase {
         let api = mock()
         let session = try await startedSession(api)
 
-        let first = try await api.submitAnswer(sessionID: session, text: "the ring answer")
-        guard case .followUp(let firstProbe) = first else {
+        let first = try await api.submitAnswer(
+            sessionID: session, text: "the ring answer", turnIndex: 0
+        )
+        guard case .followUp(let firstProbe, _) = first else {
             return XCTFail("expected the band-rule probe, got \(first)")
         }
         XCTAssertTrue(firstProbe.hasPrefix("One more — "))
 
-        let second = try await api.submitAnswer(sessionID: session, text: "the first probe answer")
-        guard case .followUp(let secondProbe) = second else {
+        let second = try await api.submitAnswer(
+            sessionID: session, text: "the first probe answer", turnIndex: 1
+        )
+        guard case .followUp(let secondProbe, _) = second else {
             return XCTFail("expected the granted second probe, got \(second)")
         }
         // The preface is the only thing telling the user the session cannot keep
@@ -97,7 +111,9 @@ final class FollowUpBudgetTests: XCTestCase {
         )
         XCTAssertNotEqual(secondProbe, firstProbe)
 
-        let third = try await api.submitAnswer(sessionID: session, text: "the second probe answer")
+        let third = try await api.submitAnswer(
+            sessionID: session, text: "the second probe answer", turnIndex: 2
+        )
         guard case .complete = third else {
             return XCTFail("the cap is two, so the third answer scores, got \(third)")
         }
@@ -110,8 +126,12 @@ final class FollowUpBudgetTests: XCTestCase {
         let session = try await startedSession(api)
         await MainActor.run { DebugFlags.shared.secondProbe = true }
 
-        _ = try await api.submitAnswer(sessionID: session, text: "the ring answer")
-        let second = try await api.submitAnswer(sessionID: session, text: "the probe answer")
+        _ = try await api.submitAnswer(
+            sessionID: session, text: "the ring answer", turnIndex: 0
+        )
+        let second = try await api.submitAnswer(
+            sessionID: session, text: "the probe answer", turnIndex: 1
+        )
 
         guard case .complete = second else {
             return XCTFail("a session cannot be granted a probe halfway through, got \(second)")
@@ -128,7 +148,9 @@ final class FollowUpBudgetTests: XCTestCase {
         let api = mock()
         let session = try await startedSession(api, practice: true)
 
-        let outcome = try await api.submitAnswer(sessionID: session, text: "a fixture answer")
+        let outcome = try await api.submitAnswer(
+            sessionID: session, text: "a fixture answer", turnIndex: 0
+        )
 
         guard case .complete(_, _, _, _, _, _, let practice, _, _, _, _, _) = outcome else {
             return XCTFail("a practice session is never probed, got \(outcome)")

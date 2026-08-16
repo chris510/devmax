@@ -220,21 +220,36 @@ class SessionStart(BaseModel):
     session_id: uuid.UUID
     question: str
     is_follow_up: bool
+    # 0 for the opening answer; a pending probe's 1-based `idx` thereafter.
+    # The client echoes this with the answer so repeated text on adjacent turns
+    # cannot be mistaken for a retry.
+    turn_index: int = Field(ge=0)
     draft_text: str
     resumed: bool
 
 
 class DraftUpdate(BaseModel):
     draft_text: str = ""
+    # Same turn coordinate as `ScoredAnswerIn`. A stale upload is acknowledged
+    # but ignored after the session advances, so it cannot resurrect turn N's
+    # transcript under turn N+1.
+    turn_index: int | None = Field(default=None, ge=0)
 
 
 class AnswerIn(BaseModel):
     text: str = ""
 
 
+class ScoredAnswerIn(AnswerIn):
+    # Optional only for compatibility with clients shipped before turn-aware
+    # idempotency. A terminal response can be replayed only when this is present.
+    turn_index: int | None = Field(default=None, ge=0)
+
+
 class FollowUpOut(BaseModel):
     status: Literal["follow_up"] = "follow_up"
     question: str
+    turn_index: int = Field(ge=1)
 
 
 class CompleteOut(BaseModel):

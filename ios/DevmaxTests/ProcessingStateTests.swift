@@ -72,6 +72,12 @@ final class ProcessingStateTests: XCTestCase {
      "next_review_at":"2026-07-30","interval_days":3,"practice":false}
     """
 
+    private static let card = DueCard(
+        id: UUID(), topic: "Consistent hashing", category: "Core Concept",
+        masterySummary: "", lastScore: nil, dueLabel: "due today",
+        resumable: false, missedCount: 0
+    )
+
     /// Yields until the state under test settles, bounded so a broken expectation
     /// fails the test rather than hanging the suite.
     @MainActor
@@ -182,12 +188,19 @@ final class ProcessingStateTests: XCTestCase {
         ProcessingURLProtocolStub.handler = { [self] request in
             // Blocks the loading thread, never the main actor — so the in-flight
             // state stays observable for exactly as long as the assertions need.
-            release.wait()
-            return response(for: request, status: 200, json: Self.completedAnswer)
+            if request.url?.path.contains("/answers") == true {
+                release.wait()
+                return response(for: request, status: 200, json: Self.completedAnswer)
+            }
+            // A previous lifecycle test may still be completing its intentionally
+            // detached Today refresh. Never let that unrelated request consume
+            // this answer test's semaphore.
+            return response(for: request, status: 503, json: #"{"detail":"offline"}"#)
         }
         defer { release.signal() }
 
         let state = AppState(api: api())
+        state.sessionCards = [Self.card]
         state.sessionID = UUID()
         state.stage = .idle
         state.draft = "the answer as spoken"
@@ -215,6 +228,7 @@ final class ProcessingStateTests: XCTestCase {
         }
 
         let state = AppState(api: api())
+        state.sessionCards = [Self.card]
         state.sessionID = UUID()
         state.stage = .recordingFollowUp
         state.draft = "  a partly spoken answer  "
@@ -225,5 +239,45 @@ final class ProcessingStateTests: XCTestCase {
         XCTAssertEqual(state.stage, .followUp, "rewound to the turn the answer belonged to")
         XCTAssertTrue(state.submitError)
         XCTAssertTrue(state.thread.isEmpty, "the optimistic answer is taken back")
+    }
+
+    @MainActor
+    func testClosingDuringScoringDefersTodayReloadUntilTheWriteSettles() async {
+        let release = DispatchSemaphore(value: 0)
+        ProcessingURLProtocolStub.handler = { [self] request in
+            if request.url?.path.contains("/answers") == true {
+                release.wait()
+                return response(for: request, status: 200, json: Self.completedAnswer)
+            }
+            return response(for: request, status: 503, json: #"{"detail":"offline"}"#)
+        }
+        defer { release.signal(); DraftStore.clear(for: Self.card.id) }
+
+        let state = AppState(api: api())
+        state.sessionCards = [Self.card]
+        state.sessionID = UUID()
+        state.stage = .idle
+        state.load = .ready
+        state.draft = "answer in flight"
+
+        let submit = Task { await state.submit("answer in flight") }
+        await settle("the submit never reached scoring") { state.stage == .processing }
+        state.finish()
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertTrue(state.path.isEmpty)
+        XCTAssertNil(state.sessionID)
+        XCTAssertEqual(state.load, .ready, "a pre-commit reload can show the stale due card")
+        XCTAssertFalse(
+            state.beginSession(cards: [Self.card]),
+            "the stale Today row must not reopen while its answer is committing"
+        )
+        XCTAssertTrue(state.path.isEmpty)
+        XCTAssertNil(state.sessionID)
+        XCTAssertEqual(state.stage, .processing, "a rejected reopen must not reset conversation state")
+
+        release.signal()
+        await submit.value
+        await settle("Today was not refreshed after the write settled") { state.load == .error }
     }
 }

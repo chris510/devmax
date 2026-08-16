@@ -262,16 +262,23 @@ throughout, and the write touches only the three `reattempt_*` columns and
 This is the property that makes the whole feature cheap: a failed or abandoned
 turn 3 loses nothing. The score is already banked, the schedule already applied.
 
+Turn 3 does not reopen the completed session and therefore has no server-draft
+resume path. Its in-progress text remains in the client's contextual local draft
+store; `PATCH /sessions/{id}/draft` is deliberately a 204 no-op after completion
+rather than retaining server state no endpoint can safely rehydrate.
+
 Three guards, not one. `reattempt_used` guards replay; empty text is rejected
 outright (it would otherwise spend the single re-attempt and rewrite mastery on a 0);
 and the offer **expires once the card is reviewed again** — without that, an old
 session's coaching could overwrite a newer review's mastery summary, which is the one
 indirect route by which turn 3 could reach a future scheduling decision.
 
-A second POST to the same session is a 409,
-matching how `submit_answer` handles an already-complete session. Eligibility is a
-single shared predicate (`_reattempt_eligible`) rather than a condition written once
-to compute the offer and again, inverted, to honour it — an offer the endpoint would
+The structural cap still permits only one re-attempt. An exact retransmission of
+its already-committed answer returns the stored result so a lost HTTP response does
+not trap the client; different text is a 409. That replay is allowed only until a
+newer review supersedes the card-side mastery summary. Eligibility is a single
+shared predicate (`_reattempt_eligible`) rather than a condition written once to
+compute the offer and again, inverted, to honour it — an offer the endpoint would
 409 has to be unrepresentable, and DEVIATIONS §15 shows this band does move.
 
 ### 5.4 iOS
@@ -412,9 +419,9 @@ Backend first; every step is independently shippable and inert until the last.
 2. The turn-3 scoring call and its rubric — including the reconstruct-don't-parrot
    instruction — with an `effort_sweep.py` run to pick its effort rather than
    guessing it.
-3. `POST /sessions/{id}/reattempt`, with the 409-on-replay guard and the
-   assertion that it cannot touch the four SM-2 fields. This is the highest-value
-   test surface in the change.
+3. `POST /sessions/{id}/reattempt`, with exact committed-retry reconciliation,
+   a 409 for changed content, and the assertion that it cannot touch the four
+   SM-2 fields. This is the highest-value test surface in the change.
 4. iOS: two new thread roles, the second secondary link, and the `<= 2` gate.
 5. Documentation: the §5.5 invariant rewrites in `AGENTS.md` and `spec.md`, plus
    a `DEVIATIONS.md` entry recording §1.1 as the extension of §15 that it is.

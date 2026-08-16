@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Combine
 import SwiftUI
 import UIKit
 
@@ -22,9 +23,16 @@ struct DevmaxApp: App {
                 .environmentObject(flags)
                 .preferredColorScheme(.dark)  // light mode is not designed or supported
                 .task {
-                    delegate.state = state
+                    delegate.attach(state)
                     await auth.bootstrap()
                     await auth.checkAppleCredentialState()
+                    delegate.setRoutingAuthenticated(auth.isAuthenticated)
+                }
+                .onChange(of: auth.isAuthenticated) { _, authenticated in
+                    // Bootstrap may finish signed out, then Apple sign-in can
+                    // succeed without recreating the app delegate. Retained push
+                    // work drains only after that authenticated transition.
+                    delegate.setRoutingAuthenticated(authenticated)
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Backgrounding mid-answer must not lose the transcript, and the
@@ -35,7 +43,12 @@ struct DevmaxApp: App {
                         publicFlow.persist()
                         plan.flushPracticeDebriefDraft()
                     } else {
-                        Task { await auth.checkAppleCredentialState() }
+                        Task {
+                            await auth.checkAppleCredentialState()
+                            // Also provides a bounded retry for a retained token
+                            // or push after a transient network failure.
+                            delegate.setRoutingAuthenticated(auth.isAuthenticated)
+                        }
                     }
                 }
                 .onReceive(
@@ -43,7 +56,10 @@ struct DevmaxApp: App {
                         for: ASAuthorizationAppleIDProvider.credentialRevokedNotification
                     )
                 ) { _ in
-                    Task { await auth.checkAppleCredentialState() }
+                    Task {
+                        await auth.checkAppleCredentialState()
+                        delegate.setRoutingAuthenticated(auth.isAuthenticated)
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .aiConsentRequired)) { _ in
                     auth.markAIConsentRequired()
@@ -178,6 +194,170 @@ struct RootView: View {
 /// tap lands directly in that card's Conversation, from cold start or background.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var state: AppState?
+    /// A notification response may arrive before SwiftUI's root task attaches
+    /// AppState on a cold launch. Retain the card identity until both halves of
+    /// that race exist instead of dropping the user's tap.
+    private var pendingCardID: UUID?
+    private var routingPendingCard = false
+    private var pendingDeviceToken: String?
+    private var uploadingDeviceToken = false
+    private var queueReadiness: AnyCancellable?
+    private var navigationReadiness: AnyCancellable?
+    /// AppState attaches before authentication bootstrap completes. Push work
+    /// waits for this gate so neither the due-card load nor token registration
+    /// runs while signed out or races the credential restore it depends on.
+    private var routingActive = false
+    /// Separates otherwise-identical authenticated states across a sign-out.
+    /// An APNs registration started for the old account must not consume the
+    /// token that the next account still needs to register.
+    private var routingGeneration = 0
+    /// AppState's queue has no account provenance of its own. Once auth changes,
+    /// a pending route may not trust any card already in memory until a Today
+    /// load succeeds under one stable, active generation.
+    private var pendingRouteRequiresReload = false
+
+    @MainActor
+    func attach(_ state: AppState) {
+        self.state = state
+        queueReadiness = state.$load.removeDuplicates().sink { [weak self] load in
+            guard load == .ready else { return }
+            Task { @MainActor [weak self] in self?.routePendingCardIfPossible() }
+        }
+        navigationReadiness = state.$path.removeDuplicates().sink { [weak self, weak state] _ in
+            Task { @MainActor [weak self, weak state] in
+                guard let state, !state.hasConversationInPath else { return }
+                self?.routePendingCardIfPossible()
+            }
+        }
+        drainPendingPushWork()
+    }
+
+    @MainActor
+    func setRoutingAuthenticated(_ authenticated: Bool) {
+        if routingActive != authenticated {
+            routingGeneration += 1
+            pendingRouteRequiresReload = true
+        }
+        routingActive = authenticated
+        guard authenticated else { return }
+        drainPendingPushWork()
+    }
+
+    @MainActor
+    private func drainPendingPushWork() {
+        routePendingCardIfPossible()
+        uploadPendingDeviceTokenIfPossible()
+    }
+
+    @MainActor
+    func receiveNotificationCard(_ id: UUID) {
+        pendingCardID = id
+        routePendingCardIfPossible()
+    }
+
+    @MainActor
+    private func routePendingCardIfPossible() {
+        guard routingActive, !routingPendingCard, let state,
+              !state.hasConversationInPath, state.canBeginSession,
+              let id = pendingCardID
+        else { return }
+        let routeGeneration = routingGeneration
+        routingPendingCard = true
+        Task { @MainActor [weak self, weak state] in
+            guard let self, let state else { return }
+            var observedGeneration = routeGeneration
+            while self.routingActive {
+                if self.routingGeneration != observedGeneration {
+                    self.pendingRouteRequiresReload = true
+                    observedGeneration = self.routingGeneration
+                }
+                let cardIsMissing = state.queue.first(where: { $0.id == id }) == nil
+                guard self.pendingRouteRequiresReload || cardIsMissing else { break }
+
+                // Mark first, then load. If auth changes or the request fails,
+                // the flag survives this task and forces the next activation to
+                // replace the possibly stale queue before inspecting it.
+                self.pendingRouteRequiresReload = true
+                let loadGeneration = self.routingGeneration
+                await state.loadToday()
+                guard self.routingActive else { break }
+                guard self.routingGeneration == loadGeneration else {
+                    observedGeneration = self.routingGeneration
+                    continue
+                }
+                guard state.load == .ready else { break }
+                self.pendingRouteRequiresReload = false
+                observedGeneration = loadGeneration
+                break
+            }
+            if !self.routingActive {
+                // Authentication can be revoked while Today is loading. Keep
+                // the tap for a later successful sign-in instead of routing or
+                // declaring it stale with credentials no longer available.
+            } else if self.pendingRouteRequiresReload {
+                // The current account still has no successfully loaded queue.
+                // Retain the tap; a later activation or successful load retries.
+            } else if state.hasConversationInPath {
+                // The route may have changed while Today was loading. Leave the
+                // tap pending; `$path` drains it after the owning Conversation
+                // and any child History screen have both left the stack.
+            } else if self.pendingCardID == id,
+               let card = state.queue.first(where: { $0.id == id }) {
+                // An answer may still be committing after Conversation closed.
+                // Keep the tap pending until AppState can own a new session.
+                if state.beginSession(cards: [card]) {
+                    self.pendingCardID = nil
+                }
+            } else if self.pendingCardID == id, state.load == .ready {
+                // A current queue that does not contain the card means the push
+                // is stale or the review is no longer available.
+                self.pendingCardID = nil
+            }
+            self.routingPendingCard = false
+            // If another tap arrived while this load was in flight, latest wins
+            // and is routed in a fresh pass.
+            if let pending = self.pendingCardID, pending != id {
+                self.routePendingCardIfPossible()
+            }
+        }
+    }
+
+    @MainActor
+    func receiveDeviceToken(_ token: String) {
+        pendingDeviceToken = token
+        uploadPendingDeviceTokenIfPossible()
+    }
+
+    @MainActor
+    private func uploadPendingDeviceTokenIfPossible() {
+        guard routingActive, !uploadingDeviceToken, let state,
+              let token = pendingDeviceToken
+        else { return }
+        let generation = routingGeneration
+        uploadingDeviceToken = true
+        Task { @MainActor [weak self, weak state] in
+            guard let self, let state else { return }
+            var retryForCurrentAccount = false
+            do {
+                try await state.api.registerDeviceToken(token)
+                if self.routingActive, self.routingGeneration == generation {
+                    if self.pendingDeviceToken == token { self.pendingDeviceToken = nil }
+                } else {
+                    // The request belonged to an account that signed out while
+                    // it was in flight. Keep the token for the next account.
+                    retryForCurrentAccount = self.routingActive
+                }
+            } catch {
+                // Retain for the next activation/registration callback rather
+                // than silently dropping a token delivered during cold start.
+                NSLog("devmax: uploading the APNs token failed: \(error)")
+            }
+            self.uploadingDeviceToken = false
+            if self.pendingDeviceToken != token || retryForCurrentAccount {
+                self.uploadPendingDeviceTokenIfPossible()
+            }
+        }
+    }
 
     func application(
         _ application: UIApplication,
@@ -204,16 +384,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        Task { @MainActor [state] in
-            do {
-                try await state?.api.registerDeviceToken(token)
-            } catch {
-                // Without this the push loop just never starts, with no clue why.
-                // The server side of the same symptom is trigger-review reporting
-                // reason=no_devices.
-                NSLog("devmax: uploading the APNs token failed: \(error)")
-            }
-        }
+        Task { @MainActor [weak self] in self?.receiveDeviceToken(token) }
     }
 
     func application(
@@ -231,20 +402,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) async {
         let info = response.notification.request.content.userInfo
         guard let raw = info["card_id"] as? String, let id = UUID(uuidString: raw) else { return }
-        await MainActor.run { [state] in
-            guard let state else { return }
-            if let card = state.queue.first(where: { $0.id == id }) {
-                state.beginSession(cards: [card])
-            } else {
-                // The queue may not have loaded yet on a cold start.
-                Task {
-                    await state.loadToday()
-                    if let card = state.queue.first(where: { $0.id == id }) {
-                        state.beginSession(cards: [card])
-                    }
-                }
-            }
-        }
+        receiveNotificationCard(id)
     }
 
     func userNotificationCenter(

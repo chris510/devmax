@@ -226,17 +226,25 @@ pass/fail label, scheduler result, or mastery-summary update.
 
 ### Qualitative write boundary
 
-At most one qualitative practice turn is allowed per session. Its endpoint may
-write only:
+At most one qualitative practice turn is allowed per session. The V2 completion
+transaction freezes the offered prompt in:
 
 - `sessions.coaching_focus` (`depth` or `boundaries`);
 - `sessions.coaching_question`;
+
+The later qualitative endpoint reads that exact stored offer and may write only:
+
 - `sessions.coaching_answer`; and
 - `sessions.coaching_feedback`.
 
 It must not change `sessions.score`, `sessions.accuracy`, any legacy axis,
-`cards.last_*`, `cards.mastery_summary`, or any SM-2 field. Duplicate submission
-returns a conflict and never makes a second model call.
+`cards.last_*`, `cards.mastery_summary`, or any SM-2 field. An exact
+retransmission of the committed submission returns those four stored fields and
+never makes a second model call; changed content returns a conflict. This
+preserves the one-turn cap while recovering a lost terminal HTTP response.
+Because the scored session is already complete and has no qualitative reopen
+path, in-progress coaching text is local-only; completed-session draft PATCHes
+are acknowledged no-ops.
 
 Card History may show the completed turn in an expanded row as **Depth practice**
 or **Boundary practice**, followed by the question, learner answer, and coaching
@@ -567,8 +575,11 @@ into one release.
   closed. A surplus candidate or insufficiency claim on a completing turn is
   ignored, never shown, and cannot alter Recall or create another call.
 - A session cannot accept more than `MAX_SCORED_FOLLOW_UPS` scored follow-ups,
-  including replay and concurrent-submission cases. Replay of the last answered
-  turn returns the pending probe at every probe, not only the first.
+  including replay and concurrent-submission cases. Session id plus the client's
+  `turn_index` identifies a turn; stored-text equality prevents key reuse with
+  changed content. A committed retry returns the pending probe at every probe,
+  not only the first, while the same text with the next index remains valid new
+  evidence.
 - A valid V2 completion writes `score == accuracy == recall_score`, null legacy
   secondary axes, and contract version 2.
 - An LLM failure leaves session, card, mastery summary, and schedule untouched.
@@ -582,9 +593,11 @@ into one release.
 - Failed Recall offers re-attempt, not qualitative practice.
 - Focus begins at Depth and alternates only after completed turns.
 - Dismissal does not advance focus.
-- One session permits one qualitative turn and no retry after a valid response.
-- The endpoint's before/after snapshot differs only in its four allowed session
-  fields.
+- One session permits one qualitative turn. An exact retransmission after a
+  valid response returns the stored result; changed content is rejected.
+- The completion transaction stores only the offered focus/question in addition
+  to the normal score write; the qualitative endpoint's before/after snapshot
+  differs only in answer/feedback.
 - Qualitative text never changes a score, average, tier, mastery summary, card
   proposal rank, or schedule.
 

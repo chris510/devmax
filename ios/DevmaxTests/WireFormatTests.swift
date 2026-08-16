@@ -164,6 +164,38 @@ final class WireFormatTests: XCTestCase {
 
     // MARK: - The answer outcome
 
+    func testSessionStartDecodesTurnOwnershipWithLegacyOpeningFallback() throws {
+        let indexed = Data(#"""
+        {"session_id":"00000000-0000-0000-0000-0000000000a1",
+         "question":"One more — what moves?","is_follow_up":true,
+         "draft_text":"partial probe","resumed":true,"turn_index":2}
+        """#.utf8)
+        let legacy = Data(#"""
+        {"session_id":"00000000-0000-0000-0000-0000000000a2",
+         "question":"What moves?","is_follow_up":false,
+         "draft_text":"","resumed":false}
+        """#.utf8)
+
+        XCTAssertEqual(try LiveAPI.decoder.decode(SessionStart.self, from: indexed).turnIndex, 2)
+        XCTAssertEqual(try LiveAPI.decoder.decode(SessionStart.self, from: legacy).turnIndex, 0)
+    }
+
+    func testFollowUpOutcomeDecodesItsNextTurnWithLegacyFallback() throws {
+        let indexed = Data(
+            #"{"status":"follow_up","question":"Why?","turn_index":1}"#.utf8
+        )
+        let legacy = Data(#"{"status":"follow_up","question":"Why?"}"#.utf8)
+
+        guard case .followUp(_, let turnIndex) = try LiveAPI.decoder.decode(
+            AnswerOutcome.self, from: indexed
+        ) else { return XCTFail("expected an indexed follow-up") }
+        guard case .followUp(_, let legacyTurnIndex) = try LiveAPI.decoder.decode(
+            AnswerOutcome.self, from: legacy
+        ) else { return XCTFail("expected a legacy follow-up") }
+        XCTAssertEqual(turnIndex, 1)
+        XCTAssertNil(legacyTurnIndex)
+    }
+
     func testACompletedAnswerCarriesThePracticeFlag() throws {
         let json = Data(#"""
         {"status":"complete","score":4,"feedback":"Solid.",

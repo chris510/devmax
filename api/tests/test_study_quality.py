@@ -3,22 +3,35 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app import auth
+from app.db import engine_kwargs
 from app.models import (
     CARD_ACTIVE,
     CARD_ARCHIVED,
     FOUNDER_USER_ID,
+    STATUS_OPEN,
     Card,
     PendingCapture,
     Session,
+    Settings,
 )
 from app.routers import captures as captures_router
+from app.routers import cards as cards_router
+from app.routers import sessions as sessions_router
+from app.schemas import CardGroundingUpdate, ReplaceCard
 from app.services import llm
-from tests.conftest import API_HEADERS, TEST_DATABASE_URL, local_today, make_card
+from tests.conftest import (
+    API_HEADERS,
+    TEST_DATABASE_URL,
+    TEST_ON_POSTGRES,
+    local_today,
+    make_card,
+)
 
 RUBRIC = {
     "mechanism": "A leader appends the entry locally before replication.",
@@ -236,6 +249,241 @@ def _grounded_card(**overrides) -> Card:
     )
 
 
+async def _replacement_chain(db, *statuses: str) -> list[Card]:
+    cards = [_grounded_card(lifecycle_status=status) for status in statuses]
+    for index, card in enumerate(cards):
+        db.add(card)
+        await db.flush()
+        if index:
+            predecessor = cards[index - 1]
+            card.replaces_card_id = predecessor.id
+            predecessor.replaced_by_card_id = card.id
+            db.add(card)
+            db.add(predecessor)
+            await db.flush()
+    await db.commit()
+    return cards
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "payload"),
+    [
+        ("POST", "archive", None),
+        (
+            "POST",
+            "replace",
+            {
+                "canonical_question": "A leader receives a write. When can it acknowledge?",
+                "schedule": "now",
+            },
+        ),
+        ("PATCH", "grounding", {"answer_basis": "A changed authority."}),
+    ],
+)
+async def test_card_maintenance_rejects_an_existing_live_session(
+    client, db, method, endpoint, payload
+):
+    """The maintenance/live-answer exclusion remains covered on SQLite too."""
+    card = _grounded_card()
+    db.add(card)
+    db.add(
+        Session(
+            card_id=card.id,
+            question_asked=card.canonical_question or "",
+            status=STATUS_OPEN,
+        )
+    )
+    await db.commit()
+
+    response = await client.request(
+        method,
+        f"/cards/{card.id}/{endpoint}",
+        headers=API_HEADERS,
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"].startswith("finish or abandon")
+    await db.refresh(card)
+    assert card.lifecycle_status == CARD_ACTIVE
+    assert len((await db.exec(select(Card))).all()) == 1
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+@pytest.mark.parametrize("maintenance_action", ["archive", "replace", "grounding"])
+async def test_card_maintenance_serializes_with_concurrent_session_start(
+    db, monkeypatch, maintenance_action
+):
+    """A checked-then-paused maintenance request owns the card before session start.
+
+    This is the exact former race: without the shared row lock, both eligibility
+    checks pass and maintenance can change lifecycle, question, or authority under
+    a live answer. With the lock, the starter waits; it then either sees the
+    committed archive or starts against the fully committed grounding update.
+    """
+    card = _grounded_card()
+    db.add(card)
+    await db.commit()
+    if maintenance_action == "replace":
+        # Exercise the compatibility branch that creates and commits a missing
+        # settings row. That commit must happen before, never underneath, the
+        # card's maintenance/session lock.
+        settings = (await db.exec(select(Settings))).one()
+        await db.delete(settings)
+        await db.commit()
+
+    url, kwargs = engine_kwargs(TEST_DATABASE_URL)
+    engine = create_async_engine(url, **kwargs)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    maintenance_checked = asyncio.Event()
+    release_maintenance = asyncio.Event()
+    original_check = cards_router._require_no_live_session
+
+    async def paused_after_live_check(request_db, checked_card):
+        await original_check(request_db, checked_card)
+        maintenance_checked.set()
+        await release_maintenance.wait()
+
+    monkeypatch.setattr(cards_router, "_require_no_live_session", paused_after_live_check)
+
+    async def run_maintenance():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                if maintenance_action == "archive":
+                    return await cards_router.archive_card(card.id, request_db)
+                if maintenance_action == "replace":
+                    return await cards_router.replace_card(
+                        card.id,
+                        ReplaceCard(
+                            canonical_question=(
+                                "A leader receives a write. When can it acknowledge?"
+                            ),
+                            schedule="now",
+                        ),
+                        request_db,
+                    )
+                return await cards_router.update_card_grounding(
+                    card.id,
+                    CardGroundingUpdate(answer_basis="A changed authority."),
+                    request_db,
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    async def run_start():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await sessions_router.start_session(card.id, False, request_db)
+        finally:
+            auth._current_user_id.reset(token)
+
+    maintenance_task = asyncio.create_task(run_maintenance())
+    start_task = None
+    try:
+        await asyncio.wait_for(maintenance_checked.wait(), timeout=3)
+        start_task = asyncio.create_task(run_start())
+        await asyncio.sleep(0.1)
+        assert not start_task.done()
+    finally:
+        release_maintenance.set()
+
+    try:
+        await asyncio.wait_for(maintenance_task, timeout=3)
+        if maintenance_action == "grounding":
+            started = await asyncio.wait_for(start_task, timeout=3)
+            assert started.turn_index == 0
+        else:
+            with pytest.raises(HTTPException) as exc_info:
+                await asyncio.wait_for(start_task, timeout=3)
+            assert exc_info.value.status_code == 409
+            assert exc_info.value.detail == "card is archived"
+
+        async with factory() as verify_db:
+            stored = await verify_db.get(Card, card.id)
+            assert stored is not None
+            assert stored.lifecycle_status == (
+                CARD_ACTIVE if maintenance_action == "grounding" else CARD_ARCHIVED
+            )
+            if maintenance_action == "grounding":
+                assert stored.answer_basis == "A changed authority."
+            sessions = (
+                await verify_db.exec(select(Session).where(Session.card_id == card.id))
+            ).all()
+            assert len(sessions) == (1 if maintenance_action == "grounding" else 0)
+            cards = (await verify_db.exec(select(Card))).all()
+            assert len(cards) == (2 if maintenance_action == "replace" else 1)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_question_generation_discards_stale_grounding_inputs(db, monkeypatch):
+    card = _grounded_card()
+    card.canonical_question = None
+    card.answer_basis = "Old authority."
+    db.add(card)
+    await db.commit()
+    await db.rollback()
+    url, kwargs = engine_kwargs(TEST_DATABASE_URL)
+    engine = create_async_engine(url, **kwargs)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+    seen_bases: list[str] = []
+
+    async def generated_question(**kwargs):
+        basis = kwargs["answer_basis"]
+        seen_bases.append(basis)
+        if len(seen_bases) == 1:
+            generation_started.set()
+            await release_generation.wait()
+        return f"Question grounded in: {basis}"
+
+    async def run_start():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await sessions_router.start_session(card.id, False, request_db)
+        finally:
+            auth._current_user_id.reset(token)
+
+    async def run_grounding_update():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await cards_router.update_card_grounding(
+                    card.id,
+                    CardGroundingUpdate(answer_basis="New authority."),
+                    request_db,
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    monkeypatch.setattr(llm, "generate_question", generated_question)
+    start_task = asyncio.create_task(run_start())
+    try:
+        await asyncio.wait_for(generation_started.wait(), timeout=3)
+        await asyncio.wait_for(run_grounding_update(), timeout=3)
+    finally:
+        release_generation.set()
+
+    started = await asyncio.wait_for(start_task, timeout=3)
+    assert seen_bases == ["Old authority.", "New authority."]
+    assert started.question == "Question grounded in: New authority."
+    async with factory() as verify_db:
+        stored = await verify_db.get(Card, card.id)
+        assert stored is not None
+        assert stored.answer_basis == "New authority."
+        assert stored.canonical_question == started.question
+        sessions = (
+            await verify_db.exec(select(Session).where(Session.card_id == card.id))
+        ).all()
+        assert [session.question_asked for session in sessions] == [started.question]
+    await engine.dispose()
+
+
 async def test_archive_keeps_history_and_removes_card_from_active_selection(client, db):
     card = _grounded_card(last_score=4, repetitions=3)
     session = Session(
@@ -414,3 +662,221 @@ async def test_old_card_cannot_restore_while_its_replacement_is_active(client, d
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "replacement_is_active"
+
+
+async def test_replacement_cannot_restore_over_an_active_predecessor(client, db):
+    old = _grounded_card()
+    db.add(old)
+    await db.commit()
+    replaced = await client.post(
+        f"/cards/{old.id}/replace",
+        headers=API_HEADERS,
+        json={
+            "canonical_question": "When may a leader acknowledge a write?",
+            "schedule": "now",
+        },
+    )
+    replacement_id = uuid.UUID(replaced.json()["id"])
+    assert (
+        await client.post(
+            f"/cards/{replacement_id}/archive", headers=API_HEADERS
+        )
+    ).status_code == 200
+    assert (
+        await client.post(f"/cards/{old.id}/restore", headers=API_HEADERS)
+    ).status_code == 200
+
+    response = await client.post(
+        f"/cards/{replacement_id}/restore", headers=API_HEADERS
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "replacement_is_active",
+        "card_id": str(old.id),
+    }
+    cards = (await db.exec(select(Card))).all()
+    assert [card.id for card in cards if card.lifecycle_status == CARD_ACTIVE] == [
+        old.id
+    ]
+
+
+async def test_restore_checks_the_full_replacement_lineage(client, db):
+    first, second, third, fourth = await _replacement_chain(
+        db,
+        CARD_ARCHIVED,
+        CARD_ARCHIVED,
+        CARD_ARCHIVED,
+        CARD_ARCHIVED,
+    )
+    assert (
+        await client.post(f"/cards/{second.id}/restore", headers=API_HEADERS)
+    ).status_code == 200
+
+    response = await client.post(f"/cards/{fourth.id}/restore", headers=API_HEADERS)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "replacement_is_active",
+        "card_id": str(second.id),
+    }
+    for card in (first, second, third, fourth):
+        await db.refresh(card)
+    assert [
+        card.id
+        for card in (first, second, third, fourth)
+        if card.lifecycle_status == CARD_ACTIVE
+    ] == [second.id]
+
+
+async def test_restored_historical_card_cannot_fork_its_lineage(client, db):
+    first, second = await _replacement_chain(db, CARD_ACTIVE, CARD_ARCHIVED)
+
+    response = await client.post(
+        f"/cards/{first.id}/replace",
+        headers=API_HEADERS,
+        json={
+            "canonical_question": "A newer question",
+            "schedule": "now",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "newer_replacement_exists",
+        "card_id": str(second.id),
+    }
+    await db.refresh(first)
+    await db.refresh(second)
+    assert first.replaced_by_card_id == second.id
+    assert second.replaces_card_id == first.id
+    assert len((await db.exec(select(Card))).all()) == 2
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_concurrent_restores_choose_one_active_lineage_member(db, monkeypatch):
+    first, second, third = await _replacement_chain(
+        db, CARD_ARCHIVED, CARD_ARCHIVED, CARD_ARCHIVED
+    )
+    await db.rollback()
+    url, kwargs = engine_kwargs(TEST_DATABASE_URL)
+    engine = create_async_engine(url, **kwargs)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    root_locked = asyncio.Event()
+    release_root = asyncio.Event()
+    original_owned_card = cards_router._owned_card
+    paused = False
+
+    async def pause_first_root_lock(request_db, card_id, *, for_update=False):
+        nonlocal paused
+        card = await original_owned_card(request_db, card_id, for_update=for_update)
+        if for_update and card_id == first.id and not paused:
+            paused = True
+            root_locked.set()
+            await release_root.wait()
+        return card
+
+    async def run_restore(card_id):
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await cards_router.restore_card(card_id, request_db)
+        finally:
+            auth._current_user_id.reset(token)
+
+    monkeypatch.setattr(cards_router, "_owned_card", pause_first_root_lock)
+    first_restore = asyncio.create_task(run_restore(second.id))
+    second_restore = None
+    try:
+        await asyncio.wait_for(root_locked.wait(), timeout=3)
+        second_restore = asyncio.create_task(run_restore(third.id))
+        await asyncio.sleep(0.1)
+        assert not second_restore.done()
+    finally:
+        release_root.set()
+
+    await asyncio.wait_for(first_restore, timeout=3)
+    with pytest.raises(HTTPException) as exc_info:
+        await asyncio.wait_for(second_restore, timeout=3)
+    assert exc_info.value.status_code == 409
+    async with factory() as verify_db:
+        lineage = (
+            await verify_db.exec(
+                select(Card).where(Card.id.in_([first.id, second.id, third.id]))
+            )
+        ).all()
+        active = [card.id for card in lineage if card.lifecycle_status == CARD_ACTIVE]
+        assert active == [second.id]
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not TEST_ON_POSTGRES, reason="row-lock concurrency requires Postgres")
+async def test_restore_waits_for_replacement_and_sees_its_new_successor(db, monkeypatch):
+    first, second = await _replacement_chain(db, CARD_ARCHIVED, CARD_ACTIVE)
+    await db.rollback()
+    url, kwargs = engine_kwargs(TEST_DATABASE_URL)
+    engine = create_async_engine(url, **kwargs)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    root_locked = asyncio.Event()
+    release_root = asyncio.Event()
+    original_owned_card = cards_router._owned_card
+    paused = False
+
+    async def pause_first_root_lock(request_db, card_id, *, for_update=False):
+        nonlocal paused
+        card = await original_owned_card(request_db, card_id, for_update=for_update)
+        if for_update and card_id == first.id and not paused:
+            paused = True
+            root_locked.set()
+            await release_root.wait()
+        return card
+
+    async def run_replace():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await cards_router.replace_card(
+                    second.id,
+                    ReplaceCard(
+                        canonical_question="What makes this version current?",
+                        schedule="now",
+                    ),
+                    request_db,
+                )
+        finally:
+            auth._current_user_id.reset(token)
+
+    async def run_restore():
+        token = auth._current_user_id.set(FOUNDER_USER_ID)
+        try:
+            async with factory() as request_db:
+                return await cards_router.restore_card(first.id, request_db)
+        finally:
+            auth._current_user_id.reset(token)
+
+    monkeypatch.setattr(cards_router, "_owned_card", pause_first_root_lock)
+    replacement_task = asyncio.create_task(run_replace())
+    restore_task = None
+    try:
+        await asyncio.wait_for(root_locked.wait(), timeout=3)
+        restore_task = asyncio.create_task(run_restore())
+        await asyncio.sleep(0.1)
+        assert not restore_task.done()
+    finally:
+        release_root.set()
+
+    replacement = await asyncio.wait_for(replacement_task, timeout=3)
+    with pytest.raises(HTTPException) as exc_info:
+        await asyncio.wait_for(restore_task, timeout=3)
+    assert exc_info.value.status_code == 409
+    async with factory() as verify_db:
+        lineage = (await verify_db.exec(select(Card))).all()
+        active = [card for card in lineage if card.lifecycle_status == CARD_ACTIVE]
+        assert [card.id for card in active] == [replacement.id]
+        stored_second = await verify_db.get(Card, second.id)
+        stored_replacement = await verify_db.get(Card, replacement.id)
+        assert stored_second is not None
+        assert stored_replacement is not None
+        assert stored_second.replaced_by_card_id == replacement.id
+        assert stored_replacement.replaces_card_id == second.id
+    await engine.dispose()

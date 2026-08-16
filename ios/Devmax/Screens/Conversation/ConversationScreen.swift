@@ -4,8 +4,7 @@ import SwiftUI
 struct ConversationScreen: View {
     private struct RecordingContext {
         let generation: Int
-        let sessionID: UUID?
-        let cardID: UUID?
+        let identity: AppState.ConversationIdentity
         let fallbackDraft: String
     }
 
@@ -20,6 +19,10 @@ struct ConversationScreen: View {
     /// tap would submit the same answer twice.
     @State private var finalizing = false
     @State private var recordingGeneration = 0
+    /// The close action changes navigation synchronously, then `onDisappear`
+    /// runs for the same screen. Persisting twice could cancel the server upload
+    /// made by the first pass after `finish()` clears session ownership.
+    @State private var stoppedForExit = false
 
     /// Answer bubbles and the live transcript cap at 84% — of the thread's content
     /// width, not the screen's.
@@ -33,10 +36,10 @@ struct ConversationScreen: View {
             chrome
             progressRail
             thread
-            // Which footer, asked of the stage. `.hidden` is a stage with no session:
-            // the control is absent rather than merely disabled, because a live mic
-            // over a session that was never created records an answer the app has
-            // nowhere to send.
+            // Which footer, asked of the stage. Loading/failure have no session,
+            // while processing owns a closed turn; none may expose an answer
+            // control. In particular, a live mic over a session that was never
+            // created records an answer the app has nowhere to send.
             switch state.stage.footer {
             case .answer: inputArea
             case .result: resultActions
@@ -73,10 +76,18 @@ struct ConversationScreen: View {
             guard captureState == .needsReview else { return }
             moveUncertainSpeechToText()
         }
+        // Navigation to History can preserve this view instance. Returning must
+        // arm persistence for the next disappearance/new capture.
+        .onAppear { stoppedForExit = false }
         .onDisappear {
-            recordingGeneration += 1
-            speech.stop()
-            speaker.stop()
+            preserveAnswerAndStop()
+            Task { @MainActor in
+                // Let NavigationStack commit its destination first. An empty
+                // path then means an interactive pop to Today, while History,
+                // recap, and next-card replacement remain distinguishable.
+                await Task.yield()
+                state.finishConversationAfterNavigationPopIfNeeded()
+            }
         }
     }
 
@@ -85,9 +96,7 @@ struct ConversationScreen: View {
     private var chrome: some View {
         HStack {
             Button {
-                recordingGeneration += 1
-                speech.stop()
-                speaker.stop()
+                preserveAnswerAndStop()
                 state.finish()
             } label: {
                 Text("✕")
@@ -367,7 +376,7 @@ struct ConversationScreen: View {
                                 .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10))
                         }
                         .buttonStyle(.plain)
-                        Button { state.startOver() } label: {
+                        Button { Task { await state.startOver() } } label: {
                             Text("Start over")
                                 .font(TypeRole.secondaryAction)
                                 .foregroundStyle(Theme.textMuted)
@@ -469,7 +478,12 @@ struct ConversationScreen: View {
 
     private var isRecording: Bool { speech.isRecording }
     private var canAnswer: Bool { state.stage.acceptsAnswer }
-    private var micEnabled: Bool { canAnswer && !finalizing && !speech.isPreparing }
+    private var answerMutationBlocked: Bool {
+        state.submissionPending || state.draftResetPending
+    }
+    private var micEnabled: Bool {
+        canAnswer && !finalizing && !speech.isPreparing && !answerMutationBlocked
+    }
 
     @ViewBuilder
     private var inputArea: some View {
@@ -502,6 +516,7 @@ struct ConversationScreen: View {
                         .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
+                .disabled(answerMutationBlocked)
             }
         }
         .wcFade(Motion.fadeFast)
@@ -542,27 +557,20 @@ struct ConversationScreen: View {
                 // Reading the transcript straight after stop() dropped whatever
                 // was still in flight. On a turn with no live capture `finishResult()`
                 // returns nothing, so `state.draft` is the value — not a fallback.
-                guard !finalizing else { return }
-                finalizing = true
-                let context = recordingContext()
-                Task {
-                    let result = await speech.finishResult()
-                    let text = result.text.isEmpty ? context.fallbackDraft : result.text
-                    guard owns(context) else {
-                        preserve(text, from: context)
-                        return
-                    }
-                    finalizing = false
-                    enterTextMode(with: text)
-                }
+                finalizeIntoTextMode()
             } label: {
                 Text("Type instead")
                     .font(TypeRole.secondaryAction)
                     .foregroundStyle(Theme.meta)
             }
             .buttonStyle(.plain)
-            .disabled(finalizing || speech.isPreparing)
-            .opacity(finalizing || speech.isPreparing ? 0.4 : 1)
+            .disabled(
+                !canAnswer || finalizing || speech.isPreparing || answerMutationBlocked
+            )
+            .opacity(
+                canAnswer && !finalizing && !speech.isPreparing && !answerMutationBlocked
+                    ? 1 : 0.4
+            )
             .frame(minHeight: Metrics.minTapTarget)
             .accessibilityIdentifier("conversation-type-instead")
         }
@@ -577,14 +585,17 @@ struct ConversationScreen: View {
     }
 
     private func toggleRecording() {
-        guard !finalizing else { return }
+        guard !finalizing, !answerMutationBlocked else { return }
         speaker.stop()
         if isRecording {
             // The stage must stay the recording one until `submit` reads it:
             // it carries which turn this answer belongs to, and `sendAnswer`
             // rewinds to it if the submit fails.
             finalizing = true
-            let context = recordingContext()
+            guard let context = recordingContext() else {
+                finalizing = false
+                return
+            }
             Task {
                 // finishResult(), not stop(): the recognizer's last corrected result
                 // arrives after the audio ends, and reading the transcript
@@ -595,25 +606,16 @@ struct ConversationScreen: View {
                 // Final recognition can outlive this screen. Preserve the answer
                 // under the card that captured it, but never let a late callback
                 // write or submit against a session opened in the meantime.
-                guard owns(context) else {
-                    preserve(text, from: context)
-                    return
-                }
+                guard acceptFinalizedDraft(text, from: context) else { return }
                 guard result.isSafeToSubmit else {
                     // Error/timeout/no-capture results may be incomplete. Keep
                     // the exact partial and require an editable text submission
                     // instead of letting it alter Recall and the schedule.
-                    enterTextMode(with: text)
-                    finalizing = false
+                    state.stage = state.stage.answeringTwin
+                    state.inputMode = .text
                     return
                 }
-                state.updateDraft(text)
-                // Submitting is the other moment a pending debounce can't be waited out.
-                await state.flushDraftForSubmission()
-                guard owns(context) else { return }
-                await state.submit(result.text)
-                guard context.generation == recordingGeneration else { return }
-                finalizing = false
+                await state.submit(text)
             }
         } else {
             recordingGeneration += 1
@@ -631,30 +633,54 @@ struct ConversationScreen: View {
         }
     }
 
-    private func recordingContext() -> RecordingContext {
-        RecordingContext(
+    private func recordingContext() -> RecordingContext? {
+        guard let identity = state.conversationIdentity else { return nil }
+        return RecordingContext(
             generation: recordingGeneration,
-            sessionID: state.sessionID,
-            cardID: state.currentCard?.id,
+            identity: identity,
             fallbackDraft: state.draft
         )
     }
 
-    private func owns(_ context: RecordingContext) -> Bool {
-        context.generation == recordingGeneration
-            && context.sessionID == state.sessionID
-            && context.cardID == state.currentCard?.id
+    private func acceptFinalizedDraft(
+        _ text: String, from context: RecordingContext
+    ) -> Bool {
+        guard context.generation == recordingGeneration else {
+            preserve(text, from: context)
+            return false
+        }
+        finalizing = false
+        return state.acceptFinalizedDraft(text, from: context.identity)
     }
 
     private func preserve(_ text: String, from context: RecordingContext) {
-        guard let cardID = context.cardID, !text.isEmpty else { return }
-        DraftStore.save(text, for: cardID)
+        guard !text.isEmpty else { return }
+        DraftStore.preserveIfCurrentOrEmpty(
+            text,
+            for: context.identity.cardID,
+            sessionID: context.identity.sessionID,
+            turnIndex: context.identity.turnIndex
+        )
     }
 
     private func moveUncertainSpeechToText() {
         let text = speech.transcript.isEmpty ? state.draft : speech.transcript
         enterTextMode(with: text)
         speech.stop()
+    }
+
+    private func finalizeIntoTextMode() {
+        guard canAnswer, !finalizing, !answerMutationBlocked,
+              let context = recordingContext()
+        else { return }
+        finalizing = true
+        Task {
+            let result = await speech.finishResult()
+            let text = result.text.isEmpty ? context.fallbackDraft : result.text
+            guard acceptFinalizedDraft(text, from: context) else { return }
+            state.stage = state.stage.answeringTwin
+            state.inputMode = .text
+        }
     }
 
     private func enterTextMode(with text: String) {
@@ -694,10 +720,12 @@ struct ConversationScreen: View {
                 // visible text box with no keyboard.
                 .onAppear { focusDraftAfterMount() }
                 .accessibilityIdentifier("conversation-answer-editor")
+                .disabled(answerMutationBlocked)
 
             PrimaryButton(
                 title: "Submit answer",
-                enabled: canAnswer && !state.draft.trimmingCharacters(in: .whitespaces).isEmpty
+                enabled: canAnswer && !answerMutationBlocked
+                    && !state.draft.trimmingCharacters(in: .whitespaces).isEmpty
             ) {
                 state.submitError = false
                 Task { await state.submit(state.draft) }
@@ -709,6 +737,8 @@ struct ConversationScreen: View {
                 state.inputMode = .voice
                 draftFocused = false
             }
+            .disabled(answerMutationBlocked)
+            .opacity(answerMutationBlocked ? 0.55 : 1)
         }
     }
 
@@ -718,9 +748,28 @@ struct ConversationScreen: View {
             // become first responder. This also makes submit-failure recovery put
             // the keyboard back without another tap.
             await Task.yield()
-            guard state.inputMode == .text, canAnswer else { return }
+            guard state.inputMode == .text, canAnswer, !answerMutationBlocked
+            else { return }
             draftFocused = true
         }
+    }
+
+    /// Snapshot before stopping: `SpeechService.stop()` deliberately clears its
+    /// transcript, while the latest partial may be newer than AppState's
+    /// debounced copy. During processing the empty draft is presentation state,
+    /// so it must not overwrite the crash-recovery copy on disk.
+    private func preserveAnswerAndStop() {
+        guard !stoppedForExit else { return }
+        stoppedForExit = true
+        recordingGeneration += 1
+        finalizing = false
+        if state.stage.acceptsAnswer {
+            let latest = speech.transcript
+            if !latest.isEmpty, latest != state.draft { state.updateDraft(latest) }
+            state.flushDraft()
+        }
+        speech.stop()
+        speaker.stop()
     }
 
     // MARK: - TTS

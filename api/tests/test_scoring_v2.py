@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from app.config import get_settings
 from app.models import Card, PendingCapture, Session, SessionProbe
+from app.routers import sessions as sessions_router
 from app.services import llm
 from app.services.llm import CoachingResult, ScoreResult
 from app.services.scoring_provider import ProviderCallTrace, ScoringTrace
@@ -111,12 +112,55 @@ async def test_v2_completion_writes_recall_only_and_preserves_scheduler_mapping(
     assert session.depth is None
     assert session.boundaries is None
     assert session.scoring_contract_version == 2
+    assert session.coaching_focus == "depth"
+    assert session.coaching_question == body["coaching_question"]
     assert card.last_score == card.last_accuracy == 4
     assert card.last_depth is None
     assert card.last_boundaries is None
     assert card.last_score_contract_version == 2
     # Same `good` bucket the V1 Accuracy 4 path uses.
     assert (card.repetitions, card.interval_days) == (2, 6)
+
+
+async def test_v2_terminal_replay_uses_the_persisted_coaching_offer(
+    client, db, monkeypatch
+):
+    await install_v2(monkeypatch, v2_result(4))
+    card = make_card(canonical_question="What is the essential account?")
+    db.add(card)
+    await db.commit()
+    started, completed = await complete(client, card.id, text="the terminal answer")
+    session = await db.get(Session, uuid.UUID(started["session_id"]))
+    assert session.coaching_focus == "depth"
+    assert session.coaching_question == completed.json()["coaching_question"]
+
+    # Later history would change a dynamically derived alternation count. The
+    # committed response must remain independent of it and of helper behavior.
+    db.add(
+        Session(
+            card_id=card.id,
+            question_asked="Historical question",
+            status="complete",
+            coaching_focus="depth",
+            coaching_question="Historical depth question",
+            coaching_answer="Historical answer",
+            coaching_feedback="Historical feedback",
+        )
+    )
+    await db.commit()
+
+    def derivation_must_not_run(_completed):
+        raise AssertionError("a committed coaching offer must not be re-derived")
+
+    monkeypatch.setattr(sessions_router, "next_coaching_focus", derivation_must_not_run)
+    replay = await client.post(
+        f"/sessions/{session.id}/answers",
+        headers=API_HEADERS,
+        json={"text": "the terminal answer", "turn_index": 0},
+    )
+
+    assert replay.status_code == 200
+    assert replay.json() == completed.json()
 
 
 async def test_v2_failed_recall_offers_reattempt_not_qualitative_coaching(
@@ -161,6 +205,7 @@ async def test_v2_exact_initial_answer_replay_is_not_scored_as_the_follow_up(
     assert first.json() == replay.json() == {
         "status": "follow_up",
         "question": "One more — name the missing link?",
+        "turn_index": 1,
     }
     assert len(calls) == 1
     assert calls[0]["probes"] == []
@@ -200,6 +245,7 @@ async def test_v2_second_probe_is_committed_and_only_the_final_turn_scores(
     assert second.json() == {
         "status": "follow_up",
         "question": "Last one — what does that imply?",
+        "turn_index": 2,
     }
 
     session = await db.get(Session, session_id)
@@ -272,19 +318,22 @@ async def test_qualitative_coaching_changes_only_its_four_session_fields(
         for key, before in session_before.items()
         if getattr(session, key) != before
     }
-    assert changed == {
-        "coaching_focus",
-        "coaching_question",
-        "coaching_answer",
-        "coaching_feedback",
-    }
+    assert changed == {"coaching_answer", "coaching_feedback"}
 
     replay = await client.post(
         f"/sessions/{session_id}/coaching",
         headers=API_HEADERS,
-        json={"text": "again"},
+        json={"text": "It explains the causal link."},
     )
-    assert replay.status_code == 409
+    assert replay.status_code == 200
+    assert replay.json() == response.json()
+
+    different = await client.post(
+        f"/sessions/{session_id}/coaching",
+        headers=API_HEADERS,
+        json={"text": "different coaching evidence"},
+    )
+    assert different.status_code == 409
     assert calls == 1
 
 

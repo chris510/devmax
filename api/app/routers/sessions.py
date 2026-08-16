@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func
+from sqlalchemy import exists, func, update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -28,6 +28,7 @@ from app.schemas import (
     DraftUpdate,
     FollowUpOut,
     ReattemptOut,
+    ScoredAnswerIn,
     SessionStart,
 )
 from app.services import ai_consent, llm, usage
@@ -243,28 +244,123 @@ def _pending_probe(session: Session, probes: Sequence[SessionProbe]) -> SessionP
 
 
 def _replayed_answer(
-    session: Session, probes: Sequence[SessionProbe], submitted_text: str
+    session: Session,
+    probes: Sequence[SessionProbe],
+    submitted_text: str,
+    submitted_turn_index: int | None,
 ) -> FollowUpOut | None:
-    """Return the already-committed probe for an exact replay of the last turn.
+    """Return the probe produced by an exact replay of any committed past turn.
 
     The client deliberately retries a failed submission with the same saved text.
     If the server committed a follow-up but its response was lost, the session is
     already awaiting the next turn when that retry arrives. Treating the duplicate
-    text as the *next* answer would let one piece of recall evidence occupy two
-    scored turns. Returning the stored probe is both idempotent and free of another
-    model call; a genuine new answer must differ from the turn it follows.
+    request as the *next* answer would let one piece of recall evidence occupy two
+    scored turns. `turn_index` distinguishes that retry from a genuine next answer
+    even when the learner uses the same words twice.
 
-    The comparison is against the last *answered* turn — the initial answer while
-    only probe 1 is outstanding, the previous probe's answer after that — so the
-    guard covers every probe, not just the first.
+    A turn-aware request is addressable across the whole stored transcript: turn
+    0's answer is on the session, turn N's is probe N, and the response produced
+    by either is probe N+1. This remains reconstructible after later probes or
+    completion. Only the pre-index compatibility path is limited to the
+    immediately preceding turn.
     """
+    if submitted_turn_index is not None:
+        response_probe = next(
+            (probe for probe in probes if probe.idx == submitted_turn_index + 1),
+            None,
+        )
+        if response_probe is None:
+            return None
+        if submitted_turn_index == 0:
+            answered = session.answer_text
+        else:
+            answered_probe = next(
+                (probe for probe in probes if probe.idx == submitted_turn_index),
+                None,
+            )
+            if answered_probe is None:  # pragma: no cover - probe order cannot gap
+                return None
+            answered = answered_probe.answer
+        if answered != submitted_text:
+            raise HTTPException(
+                status_code=409,
+                detail="answer turn was already committed with different text",
+            )
+        return FollowUpOut(
+            question=response_probe.question, turn_index=response_probe.idx
+        )
+    # Compatibility for clients that shipped before `turn_index`. It preserves
+    # their lost-follow-up recovery but cannot distinguish the same words spoken
+    # again on the next probe; turn-aware clients never enter this branch.
     pending = _pending_probe(session, probes)
     if pending is None or not pending.question:
         return None
     answered = probes[-2].answer if len(probes) >= 2 else session.answer_text
     if answered == submitted_text:
-        return FollowUpOut(question=pending.question)
+        return FollowUpOut(question=pending.question, turn_index=pending.idx)
     return None
+
+
+def _is_completed_answer_replay(
+    session: Session,
+    probes: Sequence[SessionProbe],
+    submitted_text: str,
+    submitted_turn_index: int | None,
+) -> bool:
+    """Whether this is the exact scored turn that completed the session.
+
+    A terminal response can disappear after its transaction commits. The client
+    then retries the same disk-backed text. The final answer is already durable —
+    either on the session or on its last probe. Session id plus `turn_index` names
+    the turn; equality verifies that the key was not reused with different text.
+    A pre-index client still gets 409 here rather than an ambiguous text-only replay.
+    """
+    if session.status != STATUS_COMPLETE or submitted_turn_index is None:
+        return False
+    answered = probes[-1].answer if probes else session.answer_text
+    answered_turn_index = probes[-1].idx if probes else 0
+    if submitted_turn_index != answered_turn_index:
+        return False
+    if answered != submitted_text:
+        raise HTTPException(
+            status_code=409,
+            detail="answer turn was already committed with different text",
+        )
+    return True
+
+
+def _card_was_reviewed_since(card: Card, session: Session) -> bool:
+    """Whether a later review superseded this session's card-side result."""
+    return (
+        card.last_reviewed_at is not None
+        and session.ended_at is not None
+        and as_utc(card.last_reviewed_at) > as_utc(session.ended_at)
+    )
+
+
+def _card_still_has_session_result(card: Card, session: Session) -> bool:
+    """Whether current schedule fields still reconstruct this completion."""
+    return (
+        card.last_reviewed_at is not None
+        and session.ended_at is not None
+        and as_utc(card.last_reviewed_at) == as_utc(session.ended_at)
+    )
+
+
+def _replayed_coaching(session: Session, submitted_text: str) -> CoachingOut | None:
+    """Rebuild a committed qualitative turn from its immutable stored fields."""
+    if (
+        session.coaching_answer != submitted_text
+        or session.coaching_focus is None
+        or session.coaching_question is None
+        or session.coaching_feedback is None
+    ):
+        return None
+    return CoachingOut(
+        focus=session.coaching_focus,
+        question=session.coaching_question,
+        feedback=session.coaching_feedback,
+    )
 
 
 async def _resumed(db: AsyncSession, existing: Session) -> SessionStart:
@@ -276,13 +372,16 @@ async def _resumed(db: AsyncSession, existing: Session) -> SessionStart:
     """
     is_follow_up = existing.status == STATUS_AWAITING_FOLLOW_UP
     question = existing.question_asked
+    turn_index = 0
     if is_follow_up:
         pending = _pending_probe(existing, await _session_probes(db, existing.id))
         question = pending.question if pending else ""
+        turn_index = pending.idx if pending else 0
     return SessionStart(
         session_id=existing.id,
         question=question,
         is_follow_up=is_follow_up,
+        turn_index=turn_index,
         draft_text=existing.draft_text,
         resumed=True,
     )
@@ -298,6 +397,38 @@ async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
     ).first()
 
 
+async def _recent_questions(db: AsyncSession, card_id: uuid.UUID) -> list[str]:
+    return list(
+        (
+            await db.exec(
+                select(Session.question_asked)
+                .where(Session.card_id == card_id)
+                .order_by(col(Session.started_at).desc())
+                .limit(RECENT_QUESTION_LIMIT)
+            )
+        ).all()
+    )
+
+
+def _question_generation_snapshot(
+    card: Card, recent_questions: list[str]
+) -> tuple[object, ...]:
+    """Every durable input that can influence the one canonical question."""
+    return (
+        card.topic,
+        card.category,
+        card.pattern,
+        card.source_company,
+        card.mastery_summary,
+        card.last_score,
+        tuple(recent_questions),
+        card.answer_anchor,
+        card.source_excerpt,
+        card.answer_basis,
+        tuple(sorted(card.answer_rubric.items())),
+    )
+
+
 async def _owned_card(
     db: AsyncSession, card_id: uuid.UUID, *, for_update: bool = False
 ) -> Card | None:
@@ -307,14 +438,55 @@ async def _owned_card(
     return (await db.exec(statement)).first()
 
 
-async def _owned_session(db: AsyncSession, session_id: uuid.UUID) -> Session | None:
-    return (
-        await db.exec(
-            select(Session)
-            .join(Card, Card.id == Session.card_id)
-            .where(Session.id == session_id, Card.user_id == current_user_id())
+async def _owned_session(
+    db: AsyncSession, session_id: uuid.UUID, *, for_update: bool = False
+) -> Session | None:
+    owned = exists().where(
+        Card.id == Session.card_id,
+        Card.user_id == current_user_id(),
+    )
+    statement = select(Session).where(Session.id == session_id, owned)
+    if for_update:
+        # Draft/answer synchronization owns only the session row. In particular,
+        # PATCH /draft never waits on the card lock held across provider work.
+        statement = statement.with_for_update(of=Session).execution_options(
+            populate_existing=True
         )
-    ).first()
+    return (await db.exec(statement)).first()
+
+
+def _complete_response(session: Session, card: Card) -> CompleteOut:
+    """Build the terminal wire result from the fields committed atomically.
+
+    This is shared by the first response and an exact retry, so the replay cannot
+    drift from the ordinary completion contract. Schedule fields are read from the
+    card only while this session remains its latest review.
+    """
+    eligible = _reattempt_eligible(session)
+    coaching_offered = (
+        session.scoring_contract_version == SCORING_CONTRACT_V2
+        and session.accuracy is not None
+        and session.accuracy >= 3
+    )
+    # V2 freezes these beside the score. A historical/incomplete row with no
+    # stored offer fails closed rather than deriving one from later card history.
+    focus = session.coaching_focus if coaching_offered else None
+    question = session.coaching_question if coaching_offered else None
+    coaching_offered = coaching_offered and focus is not None and question is not None
+    return CompleteOut(
+        score=session.score or 0,
+        recall_score=session.accuracy or 0,
+        scoring_contract_version=session.scoring_contract_version,
+        feedback=session.feedback,
+        next_review_at=card.next_review_at,
+        interval_days=card.interval_days,
+        practice=session.practice,
+        reattempt_offered=eligible,
+        reattempt_prompt=REATTEMPT_PREFACE + session.question_asked if eligible else None,
+        coaching_offered=coaching_offered,
+        coaching_focus=focus if coaching_offered else None,
+        coaching_question=question if coaching_offered else None,
+    )
 
 
 def _require_recall_available(card: Card) -> None:
@@ -344,86 +516,105 @@ async def start_session(
     most once per card — after the first session the question is reused verbatim,
     so each review is the same retrieval rather than a fresh one.
     """
-    card = await _owned_card(db, card_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="card not found")
-    if card.lifecycle_status != CARD_ACTIVE:
-        raise HTTPException(status_code=409, detail="card is archived")
-    _require_recall_available(card)
-
-    existing = await _live_session(db, card_id)
-    if existing is not None:
-        # Returning the live session instead of creating a new one is what makes
-        # resume work.
-        return await _resumed(db, existing)
-
-    question = card.canonical_question
-    generated_question: str | None = None
-    if not question:
-        recent = (
-            await db.exec(
-                select(Session.question_asked)
-                .where(Session.card_id == card_id)
-                .order_by(col(Session.started_at).desc())
-                .limit(RECENT_QUESTION_LIMIT)
-            )
-        ).all()
-
-        await usage.ensure_available(db, current_user_id(), "question", get_settings())
-        # Concurrent first-opens serialize at the account/provider boundary
-        # above. Refresh after that possible wait: the winner may already have
-        # committed both the canonical question and its live session.
-        await db.refresh(card)
+    stale_generations = 0
+    while True:
+        card = await _owned_card(db, card_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="card not found")
         if card.lifecycle_status != CARD_ACTIVE:
             raise HTTPException(status_code=409, detail="card is archived")
         _require_recall_available(card)
+
         existing = await _live_session(db, card_id)
         if existing is not None:
-            resumed = await _resumed(db, existing)
-            await db.rollback()
-            return resumed
+            # Returning the live session instead of creating a new one is what
+            # makes resume work.
+            return await _resumed(db, existing)
 
         question = card.canonical_question
+        generated_question: str | None = None
+        generation_snapshot: tuple[object, ...] | None = None
         if not question:
-            generated_question = await llm.generate_question(
-                topic=card.topic,
-                category=card.category,
-                pattern=card.pattern,
-                source_company=card.source_company,
-                mastery_summary=card.mastery_summary,
-                last_score=card.last_score,
-                recent_questions=list(recent),
-                answer_anchor=card.answer_anchor,
-                source_excerpt=card.source_excerpt,
-                answer_basis=card.answer_basis,
-                answer_rubric=card.answer_rubric,
+            await usage.ensure_available(
+                db, current_user_id(), "question", get_settings()
             )
-            usage.record(db, current_user_id(), "question")
+            # Concurrent first-opens serialize at the account/provider boundary
+            # above. Refresh after that possible wait: the winner may already
+            # have committed both the canonical question and its live session.
+            await db.refresh(card)
+            if card.lifecycle_status != CARD_ACTIVE:
+                raise HTTPException(status_code=409, detail="card is archived")
+            _require_recall_available(card)
+            existing = await _live_session(db, card_id)
+            if existing is not None:
+                resumed = await _resumed(db, existing)
+                await db.rollback()
+                return resumed
 
-    # Serialize the final eligibility check with Learn. Question generation above
-    # intentionally happens outside the lock; after any wait this populate-existing
-    # read sees a learning exposure that landed while the provider was running.
-    card = await _owned_card(db, card_id, for_update=True)
-    if card is None:  # pragma: no cover - the initial owned read found it
-        raise HTTPException(status_code=404, detail="card not found")
-    if card.lifecycle_status != CARD_ACTIVE:
-        raise HTTPException(status_code=409, detail="card is archived")
-    _require_recall_available(card)
+            question = card.canonical_question
+            if not question:
+                recent = await _recent_questions(db, card_id)
+                generation_snapshot = _question_generation_snapshot(card, recent)
+                generated_question = await llm.generate_question(
+                    topic=card.topic,
+                    category=card.category,
+                    pattern=card.pattern,
+                    source_company=card.source_company,
+                    mastery_summary=card.mastery_summary,
+                    last_score=card.last_score,
+                    recent_questions=recent,
+                    answer_anchor=card.answer_anchor,
+                    source_excerpt=card.source_excerpt,
+                    answer_basis=card.answer_basis,
+                    answer_rubric=card.answer_rubric,
+                )
+                usage.record(db, current_user_id(), "question")
 
-    # A concurrent starter may have committed while this request generated a
-    # question. Resume its session rather than creating a second one.
-    existing = await _live_session(db, card_id)
-    if existing is not None:
-        return await _resumed(db, existing)
+        # Serialize the final eligibility check with Learn and maintenance.
+        # Provider work stays outside the card lock; if any generation input
+        # changed meanwhile, its result is accounted for but discarded.
+        card = await _owned_card(db, card_id, for_update=True)
+        if card is None:  # pragma: no cover - the initial owned read found it
+            raise HTTPException(status_code=404, detail="card not found")
+        if card.lifecycle_status != CARD_ACTIVE:
+            raise HTTPException(status_code=409, detail="card is archived")
+        _require_recall_available(card)
 
-    question = card.canonical_question or generated_question
-    if not question:  # pragma: no cover - generation rejects an empty question
-        raise llm.LLMError("question generation returned an empty question")
-    if not card.canonical_question:
-        # Persisted before it is returned, so the same question comes back next
-        # time. Clearing this column by hand is the way to re-roll a bad one.
-        card.canonical_question = question
-        db.add(card)
+        # A concurrent starter may have committed while this request generated a
+        # question. Resume its session rather than creating a second one.
+        existing = await _live_session(db, card_id)
+        if existing is not None:
+            return await _resumed(db, existing)
+
+        if (
+            not card.canonical_question
+            and generated_question is not None
+            and generation_snapshot is not None
+        ):
+            current_recent = await _recent_questions(db, card_id)
+            if generation_snapshot != _question_generation_snapshot(
+                card, current_recent
+            ):
+                # This commit records the physical call and releases the account
+                # and card locks before a bounded retry against fresh authority.
+                await db.commit()
+                stale_generations += 1
+                if stale_generations >= 2:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "question_inputs_changed"},
+                    )
+                continue
+
+        question = card.canonical_question or generated_question
+        if not question:  # pragma: no cover - generation rejects an empty question
+            raise llm.LLMError("question generation returned an empty question")
+        if not card.canonical_question:
+            # Persisted before it is returned, so the same question comes back
+            # next time. Clearing this column by hand is the way to re-roll one.
+            card.canonical_question = question
+            db.add(card)
+        break
 
     scoring_contract_version = active_scoring_contract_version()
     frozen_scoring_route = route_for_session(
@@ -447,6 +638,7 @@ async def start_session(
         session_id=session.id,
         question=question,
         is_follow_up=False,
+        turn_index=0,
         draft_text="",
         resumed=False,
     )
@@ -458,23 +650,50 @@ async def save_draft(
 ) -> Response:
     """Cheap, idempotent, never blocked behind anything slow.
 
-    Losing a spoken answer is the worst failure mode in the product, so this is
-    deliberately a single indexed UPDATE with no LLM call and no validation
-    beyond existence.
+    Losing a spoken answer is the worst failure mode in the product. The short
+    session-row barrier orders this write after any answer commit, then a fresh
+    statement snapshot decides whether the indexed turn is still current. It
+    never takes the card lock held across provider work.
     """
-    session = await _owned_session(db, session_id)
+    session = await _owned_session(db, session_id, for_update=True)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
-    session.draft_text = body.draft_text
-    db.add(session)
+
+    statement = update(Session).where(Session.id == session.id)
+    if body.turn_index is None:
+        # Compatibility for pre-index clients. Refuse completed sessions at
+        # least; only an index can distinguish a late turn-N upload from the
+        # current turn while the session remains live.
+        statement = statement.where(col(Session.status).in_(LIVE_STATUSES))
+    elif body.turn_index == 0:
+        statement = statement.where(Session.status == STATUS_OPEN)
+    else:
+        statement = statement.where(
+            Session.status == STATUS_AWAITING_FOLLOW_UP,
+            exists().where(
+                SessionProbe.session_id == Session.id,
+                SessionProbe.idx == body.turn_index,
+                SessionProbe.answer == "",
+            ),
+        )
+    await db.exec(
+        statement.values(draft_text=body.draft_text).execution_options(
+            synchronize_session=False
+        )
+    )
     await db.commit()
     return Response(status_code=204)
 
 
 @router.post("/sessions/{session_id}/answers", response_model=FollowUpOut | CompleteOut)
 async def submit_answer(
-    session_id: uuid.UUID, body: AnswerIn, db: AsyncSession = Depends(get_session)
+    session_id: uuid.UUID, body: ScoredAnswerIn, db: AsyncSession = Depends(get_session)
 ) -> FollowUpOut | CompleteOut:
+    # Empty string is the durable "unanswered probe" sentinel used by both
+    # pending-turn lookup and indexed draft CAS. Never let user input commit the
+    # same representation, and do not spend a provider call on no evidence.
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="answer text is empty")
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -482,9 +701,32 @@ async def submit_answer(
     # remain available after consent is withdrawn. Re-check under the card lock
     # below for the concurrent case where another submit has not committed yet.
     prelock_probes = await _session_probes(db, session.id)
-    prelock_replay = _replayed_answer(session, prelock_probes, body.text)
+    prelock_replay = _replayed_answer(
+        session, prelock_probes, body.text, body.turn_index
+    )
     if prelock_replay is not None:
         return prelock_replay
+    if _is_completed_answer_replay(
+        session, prelock_probes, body.text, body.turn_index
+    ):
+        # Reconstruct only while this is still the card's latest review. A later
+        # review changes the schedule fields carried by `CompleteOut`, so replaying
+        # the old turn after that point could not return the committed response.
+        card = await _owned_card(db, session.card_id, for_update=True)
+        if card is None:  # pragma: no cover — FK guarantees this
+            raise HTTPException(status_code=404, detail="card not found")
+        await db.refresh(session)
+        probes = await _session_probes(db, session.id)
+        if _is_completed_answer_replay(
+            session, probes, body.text, body.turn_index
+        ):
+            if not _card_still_has_session_result(card, session):
+                raise HTTPException(
+                    status_code=409, detail="session result has been superseded"
+                )
+            return _complete_response(session, card)
+    if session.status == STATUS_COMPLETE:
+        raise HTTPException(status_code=409, detail="session already complete")
     user_id = current_user_id()
     settings = get_settings()
     # Provider work and account deletion share an account -> card lock order.
@@ -502,7 +744,18 @@ async def submit_answer(
     # waiting on it; in both cases return that same probe without scoring again.
     await db.refresh(session)
     probes = await _session_probes(db, session.id)
-    replay = _replayed_answer(session, probes, body.text)
+    if _is_completed_answer_replay(session, probes, body.text, body.turn_index):
+        if not _card_still_has_session_result(card, session):
+            raise HTTPException(
+                status_code=409, detail="session result has been superseded"
+            )
+        return _complete_response(session, card)
+    if card.lifecycle_status != CARD_ACTIVE:
+        # Maintenance shares this lock, so a valid live session cannot normally
+        # reach here on an archived card. Keep the answer write fail-closed if a
+        # historical race or hand-edited row violates that structural invariant.
+        raise HTTPException(status_code=409, detail="card is archived")
+    replay = _replayed_answer(session, probes, body.text, body.turn_index)
     if replay is not None:
         return replay
     if session.status != observed_status:
@@ -515,6 +768,9 @@ async def submit_answer(
         # The status is only ever written beside an unanswered probe row, in the
         # same transaction. Refuse rather than score this answer as the initial one.
         raise HTTPException(status_code=409, detail="session has no pending probe")
+    expected_turn_index = pending.idx if pending is not None else 0
+    if body.turn_index is not None and body.turn_index != expected_turn_index:
+        raise HTTPException(status_code=409, detail="answer turn does not match session")
 
     # The scored transcript so far, plus the answer being submitted now. Built
     # without touching the ORM objects: nothing is written until the score lands.
@@ -691,6 +947,16 @@ async def submit_answer(
         # cap has to hold anyway: a prompt alone can never extend a session.
         raise llm.LLMError("scorer asked for a follow-up past the structural cap")
 
+    # Take the same short session-row barrier used by PATCH /draft only after all
+    # provider and audit work is finished. Probe 1 -> probe 2 can update/insert
+    # only SessionProbe rows while every Session value (including an already-empty
+    # draft) remains unchanged, so relying on an incidental ORM UPDATE would leave
+    # a late turn-1 draft unordered with this transcript commit.
+    locked_session = await _owned_session(db, session.id, for_update=True)
+    if locked_session is None:  # pragma: no cover - the initial owned read found it
+        raise HTTPException(status_code=404, detail="session not found")
+    session = locked_session
+
     # Only now does the transcript move onto the ORM objects. If the provider or
     # contract validation failed above, the request leaves no dirty session state
     # for a later transaction to commit accidentally.
@@ -702,10 +968,11 @@ async def submit_answer(
     session.draft_text = ""
 
     if result.status == "follow_up":
+        next_turn_index = len(probes) + 1
         db.add(
             SessionProbe(
                 session_id=session.id,
-                idx=len(probes) + 1,
+                idx=next_turn_index,
                 question=result.follow_up_question or "",
             )
         )
@@ -715,7 +982,9 @@ async def submit_answer(
         session.status = STATUS_AWAITING_FOLLOW_UP
         db.add(session)
         await db.commit()
-        return FollowUpOut(question=result.follow_up_question or "")
+        return FollowUpOut(
+            question=result.follow_up_question or "", turn_index=next_turn_index
+        )
 
     now = datetime.now(UTC)
     session.score = result.score
@@ -738,10 +1007,9 @@ async def submit_answer(
         card.mastery_summary = result.mastery_summary
     card.updated_at = now
 
-    next_review, interval = card.next_review_at, card.interval_days
     if not session.practice:
         today = await local_today(db)
-        ease, interval, repetitions, next_review = apply_sm2(
+        ease, interval_days, repetitions, next_review_at = apply_sm2(
             card.ease_factor,
             card.interval_days,
             card.repetitions,
@@ -751,26 +1019,20 @@ async def submit_answer(
             today,
         )
         card.ease_factor = ease
-        card.interval_days = interval
+        card.interval_days = interval_days
         card.repetitions = repetitions
-        card.next_review_at = next_review
+        card.next_review_at = next_review_at
 
-    db.add(session)
-    db.add(card)
-    # Session and card land in a single transaction. A partial write here — answer
-    # saved, SM-2 not applied — would leave the card permanently stuck.
-    await db.commit()
-
-    eligible = _reattempt_eligible(session)
-    coaching_offered = (
+    if (
         session.scoring_contract_version == SCORING_CONTRACT_V2
         and session.accuracy is not None
         and session.accuracy >= 3
-    )
-    focus = None
-    question = None
-    if coaching_offered:
-        completed = (
+    ):
+        # Freeze the optional qualitative prompt beside the score and schedule.
+        # Reconstructing it after commit from a later history count makes a lost
+        # terminal response non-idempotent and can show a question different from
+        # the one `/coaching` grades.
+        completed_coaching = (
             await db.exec(
                 select(func.count(Session.id)).where(
                     Session.card_id == session.card_id,
@@ -778,22 +1040,15 @@ async def submit_answer(
                 )
             )
         ).one()
-        focus = next_coaching_focus(completed)
-        question = coaching_question(focus)
-    return CompleteOut(
-        score=result.score or 0,
-        recall_score=result.accuracy or 0,
-        scoring_contract_version=session.scoring_contract_version,
-        feedback=result.feedback,
-        next_review_at=next_review,
-        interval_days=interval,
-        practice=session.practice,
-        reattempt_offered=eligible,
-        reattempt_prompt=REATTEMPT_PREFACE + session.question_asked if eligible else None,
-        coaching_offered=coaching_offered,
-        coaching_focus=focus,
-        coaching_question=question,
-    )
+        session.coaching_focus = next_coaching_focus(completed_coaching)
+        session.coaching_question = coaching_question(session.coaching_focus)
+
+    db.add(session)
+    db.add(card)
+    # Session and card land in a single transaction. A partial write here — answer
+    # saved, SM-2 not applied — would leave the card permanently stuck.
+    await db.commit()
+    return _complete_response(session, card)
 
 
 @router.post("/sessions/{session_id}/reattempt", response_model=ReattemptOut)
@@ -815,6 +1070,27 @@ async def submit_reattempt(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    if (
+        session.status == STATUS_COMPLETE
+        and session.reattempt_used
+        and session.reattempt_answer == body.text
+    ):
+        # A committed turn needs no provider or consent check. Lock the card only
+        # to prove its mastery summary has not since been replaced by a new review.
+        card = await _owned_card(db, session.card_id, for_update=True)
+        if card is None:  # pragma: no cover — FK guarantees this
+            raise HTTPException(status_code=404, detail="card not found")
+        await db.refresh(session)
+        if (
+            session.status == STATUS_COMPLETE
+            and session.reattempt_used
+            and session.reattempt_answer == body.text
+        ):
+            if _card_was_reviewed_since(card, session):
+                raise HTTPException(status_code=409, detail="card has been reviewed since")
+            return ReattemptOut(mastery_summary=card.mastery_summary)
+    if session.reattempt_used:
+        raise HTTPException(status_code=409, detail="re-attempt already used")
     user_id = current_user_id()
     settings = get_settings()
     await ai_consent.require_ai_processing(db, user_id, settings)
@@ -826,6 +1102,10 @@ async def submit_reattempt(
     # means turn 2 never landed, so there is no correction to re-attempt.
     if session.status != STATUS_COMPLETE:
         raise HTTPException(status_code=409, detail="session is not complete")
+    if session.reattempt_used and session.reattempt_answer == body.text:
+        if _card_was_reviewed_since(card, session):
+            raise HTTPException(status_code=409, detail="card has been reviewed since")
+        return ReattemptOut(mastery_summary=card.mastery_summary)
     if session.reattempt_used:
         raise HTTPException(status_code=409, detail="re-attempt already used")
     if not _reattempt_eligible(session):
@@ -841,9 +1121,8 @@ async def submit_reattempt(
     # re-attempt against a stale session would let an old, already-superseded
     # session's coaching overwrite a newer review's assessment, and that is the one
     # indirect route by which turn 3 could reach a future scheduling decision.
-    if card.last_reviewed_at is not None and session.ended_at is not None:
-        if as_utc(card.last_reviewed_at) > as_utc(session.ended_at):
-            raise HTTPException(status_code=409, detail="card has been reviewed since")
+    if _card_was_reviewed_since(card, session):
+        raise HTTPException(status_code=409, detail="card has been reviewed since")
 
     # Scored before anything is written, matching `submit_answer` — a failed call
     # leaves the row untouched and the client can retry. Unlike `submit_answer`,
@@ -894,6 +1173,11 @@ async def submit_coaching(
     session = await _owned_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
+    replay = _replayed_coaching(session, body.text)
+    if replay is not None:
+        return replay
+    if session.coaching_answer is not None:
+        raise HTTPException(status_code=409, detail="qualitative coaching already used")
     user_id = current_user_id()
     settings = get_settings()
     await ai_consent.require_ai_processing(db, user_id, settings)
@@ -905,6 +1189,9 @@ async def submit_coaching(
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     await db.refresh(session)
+    replay = _replayed_coaching(session, body.text)
+    if replay is not None:
+        return replay
     if session.status != STATUS_COMPLETE:
         raise HTTPException(status_code=409, detail="session is not complete")
     if session.scoring_contract_version != SCORING_CONTRACT_V2:
@@ -916,20 +1203,13 @@ async def submit_coaching(
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="coaching text is empty")
 
-    if card.last_reviewed_at is not None and session.ended_at is not None:
-        if as_utc(card.last_reviewed_at) > as_utc(session.ended_at):
-            raise HTTPException(status_code=409, detail="card has been reviewed since")
+    if _card_was_reviewed_since(card, session):
+        raise HTTPException(status_code=409, detail="card has been reviewed since")
 
-    completed = (
-        await db.exec(
-            select(func.count(Session.id)).where(
-                Session.card_id == session.card_id,
-                col(Session.coaching_answer).is_not(None),
-            )
-        )
-    ).one()
-    focus = next_coaching_focus(completed)
-    question = coaching_question(focus)
+    focus = session.coaching_focus
+    question = session.coaching_question
+    if focus is None or question is None:
+        raise HTTPException(status_code=409, detail="qualitative coaching offer unavailable")
 
     await usage.ensure_available(
         db,
@@ -948,11 +1228,8 @@ async def submit_coaching(
     )
     usage.record(db, user_id, "coaching")
 
-    session.coaching_focus = focus
-    session.coaching_question = question
     session.coaching_answer = body.text
     session.coaching_feedback = result.feedback
     db.add(session)
     await db.commit()
-
     return CoachingOut(focus=focus, question=question, feedback=result.feedback)

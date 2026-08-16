@@ -12,7 +12,7 @@ from app.models import (
     SessionProbe,
 )
 from app.routers import internal
-from app.services import llm
+from app.services import ai_consent, llm
 from app.services.llm import LLMError, ReattemptResult, ScoreResult
 from tests.conftest import (
     API_HEADERS,
@@ -156,7 +156,11 @@ async def test_score_of_two_returns_a_follow_up(client, db, stub_llm):
         json={"text": "a partial answer"},
     )
 
-    assert resp.json() == {"status": "follow_up", "question": "One more — why?"}
+    assert resp.json() == {
+        "status": "follow_up",
+        "question": "One more — why?",
+        "turn_index": 1,
+    }
     session = await db.get(Session, uuid.UUID(start["session_id"]))
     await db.refresh(session)
     assert session.status == STATUS_AWAITING_FOLLOW_UP
@@ -164,6 +168,77 @@ async def test_score_of_two_returns_a_follow_up(client, db, stub_llm):
     # The probe is a row, written unanswered the moment its question is issued.
     probes = await probe_rows(db, session.id)
     assert [(p.idx, p.question, p.answer) for p in probes] == [(1, "One more — why?", "")]
+
+
+@pytest.mark.parametrize("empty_text", ["", "   \n\t"])
+async def test_opening_answer_rejects_empty_text_without_scoring(
+    client, db, stub_llm, empty_text, monkeypatch
+):
+    _score, calls = stub_llm
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+
+    async def consent_must_not_run(*_args, **_kwargs):
+        raise AssertionError("empty evidence must fail before provider authorization")
+
+    monkeypatch.setattr(ai_consent, "require_ai_processing", consent_must_not_run)
+
+    response = await client.post(
+        f"/sessions/{started['session_id']}/answers",
+        headers=API_HEADERS,
+        json={"text": empty_text, "turn_index": 0},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "answer text is empty"
+    assert calls == []
+    session = await db.get(Session, uuid.UUID(started["session_id"]))
+    await db.refresh(session)
+    assert session.status == "open"
+    assert session.answer_text == ""
+    assert await probe_rows(db, session.id) == []
+
+
+async def test_probe_answer_rejects_empty_text_without_advancing(
+    client, db, stub_llm, monkeypatch
+):
+    score, calls = stub_llm
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{started['session_id']}/answers"
+    assert (
+        await client.post(
+            endpoint,
+            headers=API_HEADERS,
+            json={"text": "initial evidence", "turn_index": 0},
+        )
+    ).status_code == 200
+
+    async def consent_must_not_run(*_args, **_kwargs):
+        raise AssertionError("empty evidence must fail before provider authorization")
+
+    monkeypatch.setattr(ai_consent, "require_ai_processing", consent_must_not_run)
+
+    response = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": " \n ", "turn_index": 1},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "answer text is empty"
+    assert len(calls) == 1
+    session = await db.get(Session, uuid.UUID(started["session_id"]))
+    await db.refresh(session)
+    assert session.status == STATUS_AWAITING_FOLLOW_UP
+    assert session.answer_text == "initial evidence"
+    probes = await probe_rows(db, session.id)
+    assert [(probe.idx, probe.answer) for probe in probes] == [(1, "")]
 
 
 async def test_exact_initial_answer_replay_returns_the_committed_probe_without_rescoring(
@@ -186,6 +261,7 @@ async def test_exact_initial_answer_replay_returns_the_committed_probe_without_r
     assert first.json() == replay.json() == {
         "status": "follow_up",
         "question": "One more — why?",
+        "turn_index": 1,
     }
     assert len(calls) == 1
     assert calls[0]["probes"] == []
@@ -206,6 +282,135 @@ async def test_exact_initial_answer_replay_returns_the_committed_probe_without_r
     assert completed_response.json()["status"] == "complete"
     assert len(calls) == 2
     assert calls[1]["probes"] == [("One more — why?", "the missing causal link")]
+
+
+async def test_turn_index_disambiguates_the_same_text_on_adjacent_turns(
+    client, db, stub_llm
+):
+    """Repeated words can be new evidence; the question turn, not text, decides."""
+    score, calls = stub_llm
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{started['session_id']}/answers"
+    repeated_text = "I would still answer it this way"
+
+    future = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": repeated_text, "turn_index": 1},
+    )
+    assert future.status_code == 409
+    assert calls == []
+
+    first = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": repeated_text, "turn_index": 0},
+    )
+    assert first.json()["turn_index"] == 1
+
+    past_replay = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": repeated_text, "turn_index": 0},
+    )
+    assert past_replay.json() == first.json()
+    assert len(calls) == 1
+
+    reused_index = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": "changed after the commit", "turn_index": 0},
+    )
+    assert reused_index.status_code == 409
+    assert len(calls) == 1
+
+    future = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": repeated_text, "turn_index": 2},
+    )
+    assert future.status_code == 409
+    assert len(calls) == 1
+
+    score.result = completed(4, mastery_summary="made the link on the probe")
+    second = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": repeated_text, "turn_index": 1},
+    )
+
+    assert second.json()["status"] == "complete"
+    assert len(calls) == 2
+    assert calls[1]["probes"] == [("One more — why?", repeated_text)]
+
+
+async def test_exact_terminal_answer_replay_returns_the_committed_result_without_rescoring(
+    client, db, stub_llm, monkeypatch
+):
+    """A lost complete response is recoverable without a second schedule write."""
+    score, calls = stub_llm
+    score.result = completed(4, 3, mastery_summary="solid causal account")
+    card = make_card(repetitions=1, interval_days=6, ease_factor=2.36)
+    db.add(card)
+    await db.commit()
+
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    endpoint = f"/sessions/{started['session_id']}/answers"
+    payload = {"text": "the exact terminal answer saved on disk", "turn_index": 0}
+    first = await client.post(endpoint, headers=API_HEADERS, json=payload)
+    await db.refresh(card)
+    schedule_after_first = schedule_of(card)
+
+    async def consent_must_not_run(*_args, **_kwargs):
+        raise AssertionError("an already-committed replay must not re-authorize AI")
+
+    monkeypatch.setattr(ai_consent, "require_ai_processing", consent_must_not_run)
+    replay = await client.post(endpoint, headers=API_HEADERS, json=payload)
+
+    assert first.status_code == replay.status_code == 200
+    assert replay.json() == first.json()
+    assert len(calls) == 1
+    await db.refresh(card)
+    assert schedule_of(card) == schedule_after_first
+
+
+async def test_terminal_answer_replay_expires_after_a_later_review(
+    client, db, stub_llm
+):
+    score, calls = stub_llm
+    score.result = completed(4, mastery_summary="first review")
+    card = make_card()
+    db.add(card)
+    await db.commit()
+
+    first = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    first_endpoint = f"/sessions/{first['session_id']}/answers"
+    first_payload = {"text": "first answer", "turn_index": 0}
+    assert (
+        await client.post(first_endpoint, headers=API_HEADERS, json=first_payload)
+    ).status_code == 200
+
+    score.result = completed(5, mastery_summary="newer review")
+    second = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    assert (
+        await client.post(
+            f"/sessions/{second['session_id']}/answers",
+            headers=API_HEADERS,
+            json={"text": "newer answer", "turn_index": 0},
+        )
+    ).status_code == 200
+
+    stale_replay = await client.post(
+        first_endpoint, headers=API_HEADERS, json=first_payload
+    )
+
+    assert stale_replay.status_code == 409
+    assert stale_replay.json()["detail"] == "session result has been superseded"
+    assert len(calls) == 2
 
 
 async def test_replaying_the_first_probe_answer_returns_the_second_probe_unscored(
@@ -235,8 +440,28 @@ async def test_replaying_the_first_probe_answer_returns_the_second_probe_unscore
     assert first.json() == replay.json() == {
         "status": "follow_up",
         "question": "Last one — how?",
+        "turn_index": 2,
     }
     assert len(calls) == 2
+
+    oldest_replay = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": "a partial answer", "turn_index": 0},
+    )
+    assert oldest_replay.json() == {
+        "status": "follow_up",
+        "question": "One more — why?",
+        "turn_index": 1,
+    }
+    changed_oldest = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": "changed initial evidence", "turn_index": 0},
+    )
+    assert changed_oldest.status_code == 409
+    assert len(calls) == 2
+
     session = await db.get(Session, uuid.UUID(start["session_id"]))
     await db.refresh(session)
     await db.refresh(card)
@@ -273,6 +498,32 @@ async def test_two_scored_follow_ups_are_the_cap_and_the_third_turn_completes(
     final = await client.post(endpoint, headers=API_HEADERS, json={"text": "the missing link"})
     assert final.json()["status"] == "complete"
 
+    exact_replay = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": "the missing link", "turn_index": 2},
+    )
+    assert exact_replay.status_code == 200
+    assert exact_replay.json() == final.json()
+    first_turn_replay = await client.post(
+        endpoint, headers=API_HEADERS, json={"text": "partial", "turn_index": 0}
+    )
+    second_turn_replay = await client.post(
+        endpoint,
+        headers=API_HEADERS,
+        json={"text": "still partial", "turn_index": 1},
+    )
+    assert first_turn_replay.json() == {
+        "status": "follow_up",
+        "question": "One more — why?",
+        "turn_index": 1,
+    }
+    assert second_turn_replay.json() == {
+        "status": "follow_up",
+        "question": "Last one — how?",
+        "turn_index": 2,
+    }
+
     assert llm.MAX_SCORED_FOLLOW_UPS == 2
     assert [call["probes"] for call in calls] == [
         [],
@@ -283,7 +534,8 @@ async def test_two_scored_follow_ups_are_the_cap_and_the_third_turn_completes(
         ],
     ]
 
-    # There is no fourth turn to take: the session is already complete.
+    # Exact retransmission recovers the terminal response, but there is no fourth
+    # turn to take with genuinely new evidence.
     fourth = await client.post(endpoint, headers=API_HEADERS, json={"text": "one more thought"})
     assert fourth.status_code == 409
     assert len(calls) == 3
@@ -354,7 +606,11 @@ async def test_an_insufficiency_probe_defers_sm2_until_the_final_turn(client, db
 
     score.result = ScoreResult(status="follow_up", follow_up_question="Last one — how?")
     second = await client.post(endpoint, headers=API_HEADERS, json={"text": "still thin"})
-    assert second.json() == {"status": "follow_up", "question": "Last one — how?"}
+    assert second.json() == {
+        "status": "follow_up",
+        "question": "Last one — how?",
+        "turn_index": 2,
+    }
 
     session = await db.get(Session, session_id)
     await db.refresh(session)
@@ -712,6 +968,35 @@ async def test_answering_a_complete_session_returns_409(client, db, stub_llm):
     assert resp.status_code == 409
 
 
+async def test_answer_fails_closed_if_a_live_session_points_at_an_archived_card(
+    client, db, stub_llm
+):
+    """Defense in depth for a row created by an older maintenance/start race."""
+    _, calls = stub_llm
+    card = make_card(lifecycle_status="archived")
+    session = Session(
+        card_id=card.id,
+        question_asked="What moves?",
+        status="open",
+    )
+    db.add(card)
+    db.add(session)
+    await db.commit()
+
+    response = await client.post(
+        f"/sessions/{session.id}/answers",
+        headers=API_HEADERS,
+        json={"text": "an answer", "turn_index": 0},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "card is archived"
+    assert calls == []
+    await db.refresh(session)
+    assert session.status == "open"
+    assert session.answer_text == ""
+
+
 # --- transaction integrity --------------------------------------------------
 
 
@@ -765,6 +1050,87 @@ async def test_starting_a_session_twice_resumes_the_live_one(client, db, stub_ll
     assert second["session_id"] == first["session_id"]
     assert second["resumed"] is True
     assert second["draft_text"] == "half an answer"
+
+
+async def test_turn_aware_draft_ignores_past_and_future_uploads(
+    client, db, stub_llm
+):
+    score, _ = stub_llm
+    score.result = ScoreResult(status="follow_up", follow_up_question="One more — why?")
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    session_id = uuid.UUID(started["session_id"])
+    draft_endpoint = f"/sessions/{session_id}/draft"
+
+    current = await client.patch(
+        draft_endpoint,
+        headers=API_HEADERS,
+        json={"draft_text": "opening partial", "turn_index": 0},
+    )
+    assert current.status_code == 204
+    db.expire_all()
+    assert (await db.get(Session, session_id)).draft_text == "opening partial"
+
+    await client.post(
+        f"/sessions/{session_id}/answers",
+        headers=API_HEADERS,
+        json={"text": "opening answer", "turn_index": 0},
+    )
+    stale = await client.patch(
+        draft_endpoint,
+        headers=API_HEADERS,
+        json={"draft_text": "late opening partial", "turn_index": 0},
+    )
+    future = await client.patch(
+        draft_endpoint,
+        headers=API_HEADERS,
+        json={"draft_text": "future partial", "turn_index": 2},
+    )
+    assert stale.status_code == future.status_code == 204
+    db.expire_all()
+    assert (await db.get(Session, session_id)).draft_text == ""
+
+    current = await client.patch(
+        draft_endpoint,
+        headers=API_HEADERS,
+        json={"draft_text": "probe partial", "turn_index": 1},
+    )
+    assert current.status_code == 204
+    db.expire_all()
+    assert (await db.get(Session, session_id)).draft_text == "probe partial"
+
+
+async def test_completed_session_draft_is_acknowledged_without_storage(
+    client, db, stub_llm
+):
+    """Post-result turns are local-only because no server reopen path exists."""
+    card = make_card()
+    db.add(card)
+    await db.commit()
+    started = (await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)).json()
+    session_id = uuid.UUID(started["session_id"])
+    await client.post(
+        f"/sessions/{session_id}/answers",
+        headers=API_HEADERS,
+        json={"text": "completed answer", "turn_index": 0},
+    )
+
+    indexed = await client.patch(
+        f"/sessions/{session_id}/draft",
+        headers=API_HEADERS,
+        json={"draft_text": "post-result partial", "turn_index": 0},
+    )
+    legacy = await client.patch(
+        f"/sessions/{session_id}/draft",
+        headers=API_HEADERS,
+        json={"draft_text": "legacy post-result partial"},
+    )
+
+    assert indexed.status_code == legacy.status_code == 204
+    db.expire_all()
+    assert (await db.get(Session, session_id)).draft_text == ""
 
 
 # --- cron -------------------------------------------------------------------
@@ -1388,16 +1754,26 @@ async def test_reattempt_writes_mastery_and_the_transcript(client, db, stub_llm,
     assert calls[0]["unaided_accuracy"] == 1
 
 
-async def test_reattempt_cannot_be_replayed(client, db, stub_llm, stub_reattempt):
+async def test_exact_reattempt_replay_returns_the_committed_result_without_rescoring(
+    client, db, stub_llm, stub_reattempt
+):
     score, _ = stub_llm
+    _, calls = stub_reattempt
     _, session_id, _ = await _failed_session(client, db, score)
 
     body = {"text": "the arc, not the name"}
     first = await client.post(f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json=body)
     second = await client.post(f"/sessions/{session_id}/reattempt", headers=API_HEADERS, json=body)
+    different = await client.post(
+        f"/sessions/{session_id}/reattempt",
+        headers=API_HEADERS,
+        json={"text": "different coached evidence"},
+    )
 
-    assert first.status_code == 200
-    assert second.status_code == 409
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+    assert different.status_code == 409
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("mechanism", [3, 4, 5])

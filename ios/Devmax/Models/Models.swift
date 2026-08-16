@@ -165,12 +165,41 @@ struct SessionStart: Codable, Equatable {
     let isFollowUp: Bool
     let draftText: String
     let resumed: Bool
+    let turnIndex: Int
+
+    init(
+        sessionId: UUID, question: String, isFollowUp: Bool, draftText: String,
+        resumed: Bool, turnIndex: Int = 0
+    ) {
+        self.sessionId = sessionId
+        self.question = question
+        self.isFollowUp = isFollowUp
+        self.draftText = draftText
+        self.resumed = resumed
+        self.turnIndex = turnIndex
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId, question, isFollowUp, draftText, resumed, turnIndex
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try container.decode(UUID.self, forKey: .sessionId)
+        question = try container.decode(String.self, forKey: .question)
+        isFollowUp = try container.decode(Bool.self, forKey: .isFollowUp)
+        draftText = try container.decode(String.self, forKey: .draftText)
+        resumed = try container.decode(Bool.self, forKey: .resumed)
+        // Rolling compatibility with the pre-index server. It cannot replay a
+        // completed turn, but the opening turn remains unambiguously zero.
+        turnIndex = try container.decodeIfPresent(Int.self, forKey: .turnIndex) ?? 0
+    }
 }
 
 /// The `POST /sessions/{id}/answers` response is a discriminated union — the
 /// server owns the follow-up decision, the client only reacts to it.
 enum AnswerOutcome: Equatable {
-    case followUp(question: String)
+    case followUp(question: String, turnIndex: Int?)
     case complete(
         score: Int, recallScore: Int, scoringContractVersion: Int,
         feedback: String, nextReviewAt: String, intervalDays: Int, practice: Bool,
@@ -182,39 +211,51 @@ enum AnswerOutcome: Equatable {
 extension AnswerOutcome: Decodable {
     private enum CodingKeys: String, CodingKey {
         case status, question, score, feedback, nextReviewAt, intervalDays, practice
+        case turnIndex
         case reattemptOffered, reattemptPrompt
         case recallScore, scoringContractVersion
         case coachingOffered, coachingFocus, coachingQuestion
     }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        switch try c.decode(String.self, forKey: .status) {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .status) {
         case "follow_up":
-            self = .followUp(question: try c.decode(String.self, forKey: .question))
+            self = .followUp(
+                question: try container.decode(String.self, forKey: .question),
+                turnIndex: try container.decodeIfPresent(Int.self, forKey: .turnIndex)
+            )
         default:
             self = .complete(
-                score: try c.decode(Int.self, forKey: .score),
-                recallScore: try c.decodeIfPresent(Int.self, forKey: .recallScore)
-                    ?? c.decode(Int.self, forKey: .score),
-                scoringContractVersion: try c.decodeIfPresent(
+                score: try container.decode(Int.self, forKey: .score),
+                recallScore: try container.decodeIfPresent(Int.self, forKey: .recallScore)
+                    ?? container.decode(Int.self, forKey: .score),
+                scoringContractVersion: try container.decodeIfPresent(
                     Int.self, forKey: .scoringContractVersion
                 ) ?? 1,
-                feedback: try c.decode(String.self, forKey: .feedback),
-                nextReviewAt: try c.decode(String.self, forKey: .nextReviewAt),
-                intervalDays: try c.decode(Int.self, forKey: .intervalDays),
+                feedback: try container.decode(String.self, forKey: .feedback),
+                nextReviewAt: try container.decode(String.self, forKey: .nextReviewAt),
+                intervalDays: try container.decode(Int.self, forKey: .intervalDays),
                 // Absent on a server that predates practice mode; a daily review.
-                practice: try c.decodeIfPresent(Bool.self, forKey: .practice) ?? false,
+                practice: try container.decodeIfPresent(Bool.self, forKey: .practice) ?? false,
                 // Absent on a server that predates the coached re-attempt. Defaulting
                 // to false hides the affordance rather than offering a turn the
                 // server would 409 — the safe direction for an optional extra turn.
-                reattemptOffered: try c.decodeIfPresent(Bool.self, forKey: .reattemptOffered)
-                    ?? false,
-                reattemptPrompt: try c.decodeIfPresent(String.self, forKey: .reattemptPrompt),
-                coachingOffered: try c.decodeIfPresent(Bool.self, forKey: .coachingOffered)
-                    ?? false,
-                coachingFocus: try c.decodeIfPresent(String.self, forKey: .coachingFocus),
-                coachingQuestion: try c.decodeIfPresent(String.self, forKey: .coachingQuestion)
+                reattemptOffered: try container.decodeIfPresent(
+                    Bool.self, forKey: .reattemptOffered
+                ) ?? false,
+                reattemptPrompt: try container.decodeIfPresent(
+                    String.self, forKey: .reattemptPrompt
+                ),
+                coachingOffered: try container.decodeIfPresent(
+                    Bool.self, forKey: .coachingOffered
+                ) ?? false,
+                coachingFocus: try container.decodeIfPresent(
+                    String.self, forKey: .coachingFocus
+                ),
+                coachingQuestion: try container.decodeIfPresent(
+                    String.self, forKey: .coachingQuestion
+                )
             )
         }
     }
@@ -334,28 +375,37 @@ enum Stage: Equatable {
     /// the bug this case exists to make impossible.
     var recordingTwin: Stage {
         switch self {
+        case .idle, .recording: return .recording
         case .followUp, .recordingFollowUp: return .recordingFollowUp
         case .reattempt, .recordingReattempt: return .recordingReattempt
         case .coaching, .recordingCoaching: return .recordingCoaching
-        case .questionFailed: return self
-        default: return .recording
+        case .loadingQuestion, .processing, .result, .questionFailed: return self
         }
     }
 
     /// The stage to rewind to when a submit fails — the turn the answer belonged to.
     var answeringTwin: Stage {
         switch self {
+        case .idle, .recording: return .idle
         case .followUp, .recordingFollowUp: return .followUp
         case .reattempt, .recordingReattempt: return .reattempt
         case .coaching, .recordingCoaching: return .coaching
-        case .questionFailed: return self
-        default: return .idle
+        case .loadingQuestion, .processing, .result, .questionFailed: return self
         }
     }
 
     /// Turn 3 goes to a different endpoint than turns 1 and 2.
     var isReattempt: Bool { self == .reattempt || self == .recordingReattempt }
     var isCoaching: Bool { self == .coaching || self == .recordingCoaching }
+
+    /// Only an incomplete scored turn is resumable from `startSession`, so only
+    /// those stages have a meaningful server draft coordinate. Post-result
+    /// re-attempt/coaching drafts remain local for backgrounding and inline retry;
+    /// navigating away intentionally ends those optional turns.
+    var supportsServerDraft: Bool {
+        self == .idle || self == .recording || self == .followUp
+            || self == .recordingFollowUp
+    }
 
     /// `hidden`, not `none` — a case named `none` reads as `Optional.none` at every
     /// call site, and Swift will happily infer the wrong one.
@@ -366,13 +416,14 @@ enum Stage: Equatable {
     /// cannot forget the case where there is nothing to answer.
     var footer: Footer {
         switch self {
-        case .questionFailed: return .hidden
+        case .idle, .recording, .followUp, .recordingFollowUp,
+             .reattempt, .recordingReattempt, .coaching, .recordingCoaching:
+            return .answer
         // The turn is closed: the answer is sent and the scoring indicator owns
         // the screen. A mic still on screen reading `TAP TO KEEP GOING` offers to
         // continue an answer that is already being scored.
-        case .processing: return .hidden
+        case .loadingQuestion, .processing, .questionFailed: return .hidden
         case .result: return .result
-        default: return .answer
         }
     }
 }

@@ -101,8 +101,10 @@ protocol DevmaxAPI {
     /// `practice` marks a Review Sprint run: scored and written to the card's
     /// history exactly like a normal session, with SM-2 left untouched.
     func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart
-    func saveDraft(sessionID: UUID, text: String) async throws
-    func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome
+    func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws
+    func submitAnswer(
+        sessionID: UUID, text: String, turnIndex: Int
+    ) async throws -> AnswerOutcome
     /// Turn 3, after the session is already complete and scored. Returns nothing:
     /// the server rewrites the card's mastery summary and there is no second score,
     /// so the client has nothing to display and nothing to store.
@@ -467,13 +469,17 @@ struct LiveAPI: DevmaxAPI {
         return try Self.decoder.decode(SessionStart.self, from: data)
     }
 
-    func saveDraft(sessionID: UUID, text: String) async throws {
-        let body = try Self.encoder.encode(["draft_text": text])
+    func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws {
+        struct Body: Encodable { let draftText: String; let turnIndex: Int }
+        let body = try Self.encoder.encode(Body(draftText: text, turnIndex: turnIndex))
         _ = try await request("PATCH", "sessions/\(sessionID)/draft", body: body)
     }
 
-    func submitAnswer(sessionID: UUID, text: String) async throws -> AnswerOutcome {
-        let body = try Self.encoder.encode(["text": text])
+    func submitAnswer(
+        sessionID: UUID, text: String, turnIndex: Int
+    ) async throws -> AnswerOutcome {
+        struct Body: Encodable { let text: String; let turnIndex: Int }
+        let body = try Self.encoder.encode(Body(text: text, turnIndex: turnIndex))
         let data = try await request("POST", "sessions/\(sessionID)/answers", body: body)
         return try Self.decoder.decode(AnswerOutcome.self, from: data)
     }

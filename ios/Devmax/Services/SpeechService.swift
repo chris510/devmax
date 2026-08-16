@@ -242,7 +242,7 @@ private final class SpeechRecognitionCallbackGate: @unchecked Sendable {
     }
 }
 
-/// On-device streaming transcription.
+/// Streaming transcription, kept on device whenever Apple's recognizer supports it.
 ///
 /// `SFSpeechRecognizer` emits partial results as you speak, which is exactly
 /// what the design's live transcript with a trailing caret depicts. Every
@@ -335,12 +335,12 @@ final class SpeechService: ObservableObject {
         // A previous permission request may still be returning after the screen
         // moved on. Invalidate it before this capture gets its own generation.
         rememberCurrentCapture()
-        permissionTask?.cancel()
-        permissionTask = nil
         // If a caller starts again while an earlier finish is still awaiting its
         // last callback, hand that finish its own snapshot before replacing any
         // capture state. Its generation guard below prevents it ending this one.
         completeFinalization(status: .failed)
+        permissionTask?.cancel()
+        permissionTask = nil
         task?.cancel()
         teardown()
         generation += 1
@@ -390,14 +390,14 @@ final class SpeechService: ObservableObject {
     ///
     /// Nothing recording means nothing to hand back — see `endCapture`.
     func finishResult() async -> Finalization {
+        let finishingGeneration = generation
         if let result = consumeNeedsReviewResult() { return result }
         if captureState == .preparing {
             let text = transcript
-            endCapture()
+            endCapture(ifGeneration: finishingGeneration)
             return Finalization(text: text, status: .noCapture)
         }
         guard isRecording else { return Finalization(text: "", status: .noCapture) }
-        let finishingGeneration = generation
         let finishingText = transcript
         let simulatedCapture = audioRouter == nil
 
@@ -412,6 +412,10 @@ final class SpeechService: ObservableObject {
         if !simulatedCapture {
             stopEngine()
             await settlePendingAudioHandoff(capture: finishingGeneration)
+            if generation != finishingGeneration,
+               let endedText = endedCaptureTexts[finishingGeneration] {
+                return Finalization(text: endedText, status: .failed)
+            }
             if let result = consumeNeedsReviewResult() { return result }
             guard generation == finishingGeneration, isRecording else {
                 return Finalization(
@@ -452,7 +456,10 @@ final class SpeechService: ObservableObject {
                 : recognized
         }
 
-        if generation == finishingGeneration { endCapture() }
+        // `start()` or `stop()` may have superseded this capture while the
+        // recognizer was flushing. Never let the old waiter tear down the new
+        // generation after it resumes.
+        endCapture(ifGeneration: finishingGeneration)
         return result
     }
 
@@ -584,7 +591,8 @@ final class SpeechService: ObservableObject {
     /// Separate from `teardown()`, which owns AV resources only. Folding the two
     /// together made the read-before-clear ordering in `finish()` and `stop()`
     /// load-bearing but invisible.
-    private func endCapture() {
+    private func endCapture(ifGeneration expectedGeneration: Int? = nil) {
+        if let expectedGeneration, generation != expectedGeneration { return }
         rememberCurrentCapture()
         generation += 1
         permissionTask?.cancel()
@@ -656,7 +664,9 @@ final class SpeechService: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
-        // Keeps audio on device — this is a private, single-user app.
+        // Require local recognition where this language/device supports it.
+        // Apple may otherwise use its speech-recognition service, while Devmax
+        // itself still receives and uploads only the resulting text transcript.
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         // Biases every post-pause task toward the same curriculum vocabulary.
         request.contextualStrings = vocabulary
