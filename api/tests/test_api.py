@@ -14,6 +14,7 @@ from app.models import (
 from app.routers import internal
 from app.services import ai_consent, llm
 from app.services.llm import LLMError, ReattemptResult, ScoreResult
+from app.services.push import PushDelivery
 from tests.conftest import (
     API_HEADERS,
     CRON_HEADERS,
@@ -923,6 +924,90 @@ async def test_a_practice_session_is_not_the_default(client, db, stub_llm):
     assert card.interval_days == 6
 
 
+@pytest.mark.parametrize("existing_practice", [False, True])
+async def test_live_session_resume_rejects_the_opposite_mode(
+    client, db, stub_llm, existing_practice
+):
+    card = make_card(canonical_question="How does the ring move keys?")
+    db.add(card)
+    await db.commit()
+
+    suffix = "?practice=true" if existing_practice else ""
+    first = await client.post(f"/cards/{card.id}/sessions{suffix}", headers=API_HEADERS)
+    assert first.status_code == 200
+    assert first.json()["practice"] is existing_practice
+
+    opposite_suffix = "" if existing_practice else "?practice=true"
+    conflict = await client.post(
+        f"/cards/{card.id}/sessions{opposite_suffix}", headers=API_HEADERS
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "session_mode_conflict",
+        "session_id": first.json()["session_id"],
+        "practice": existing_practice,
+    }
+
+    resumed = await client.post(f"/cards/{card.id}/sessions{suffix}", headers=API_HEADERS)
+    assert resumed.status_code == 200
+    assert resumed.json()["session_id"] == first.json()["session_id"]
+    assert resumed.json()["resumed"] is True
+    assert resumed.json()["practice"] is existing_practice
+
+
+async def test_abandon_is_idempotent_preserves_draft_and_never_moves_schedule(
+    client, db, stub_llm
+):
+    due = local_today() + timedelta(days=5)
+    card = make_card(
+        canonical_question="How does the ring move keys?",
+        repetitions=3,
+        interval_days=9,
+        next_review_at=due,
+    )
+    db.add(card)
+    await db.commit()
+    start = (
+        await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)
+    ).json()
+    await client.patch(
+        f"/sessions/{start['session_id']}/draft",
+        headers=API_HEADERS,
+        json={"draft_text": "unfinished but durable"},
+    )
+
+    first = await client.post(
+        f"/sessions/{start['session_id']}/abandon", headers=API_HEADERS
+    )
+    replay = await client.post(
+        f"/sessions/{start['session_id']}/abandon", headers=API_HEADERS
+    )
+    assert first.status_code == replay.status_code == 204
+
+    await db.refresh(card)
+    abandoned = await db.get(Session, uuid.UUID(start["session_id"]))
+    assert abandoned is not None
+    assert abandoned.status == "abandoned"
+    assert abandoned.ended_at is not None
+    assert abandoned.draft_text == "unfinished but durable"
+    assert (card.repetitions, card.interval_days, card.next_review_at) == (3, 9, due)
+
+    stale_submit = await client.post(
+        f"/sessions/{start['session_id']}/answers",
+        headers=API_HEADERS,
+        json={"text": "this must not be scored"},
+    )
+    assert stale_submit.status_code == 409
+    assert stale_submit.json()["detail"] == "session is abandoned"
+
+    practice = await client.post(
+        f"/cards/{card.id}/sessions?practice=true", headers=API_HEADERS
+    )
+    assert practice.status_code == 200
+    assert practice.json()["session_id"] != start["session_id"]
+    assert practice.json()["practice"] is True
+
+
 # --- the card library -------------------------------------------------------
 # Review Sprint Setup and Coverage both read GET /cards, so the fields they need
 # are computed server-side rather than re-derived on the client.
@@ -1133,6 +1218,32 @@ async def test_completed_session_draft_is_acknowledged_without_storage(
     assert (await db.get(Session, session_id)).draft_text == ""
 
 
+async def test_draft_and_answer_transcripts_are_bounded_and_answers_are_nonblank(
+    client, db, stub_llm
+):
+    card = make_card(canonical_question="What moves on the ring?")
+    db.add(card)
+    await db.commit()
+    start = (
+        await client.post(f"/cards/{card.id}/sessions", headers=API_HEADERS)
+    ).json()
+
+    oversized_draft = await client.patch(
+        f"/sessions/{start['session_id']}/draft",
+        headers=API_HEADERS,
+        json={"draft_text": "x" * 20_001},
+    )
+    assert oversized_draft.status_code == 422
+
+    for text in ("   ", "x" * 20_001):
+        response = await client.post(
+            f"/sessions/{start['session_id']}/answers",
+            headers=API_HEADERS,
+            json={"text": text},
+        )
+        assert response.status_code == 422
+
+
 # --- cron -------------------------------------------------------------------
 
 
@@ -1143,7 +1254,7 @@ def capture_push(monkeypatch):
 
     async def _push(**kwargs):
         sent.append(kwargs)
-        return 1
+        return PushDelivery(sent=1, attempted=1)
 
     monkeypatch.setattr(internal, "send_push", _push)
     return sent
@@ -1369,7 +1480,7 @@ async def test_undelivered_push_does_not_mark_the_card_as_pushed(
     """
 
     async def _push_reaching_nobody(**_kwargs):
-        return 0
+        return PushDelivery(sent=0, attempted=0)
 
     monkeypatch.setattr(internal, "send_push", _push_reaching_nobody)
 
@@ -1551,6 +1662,53 @@ async def test_settings_rejects_out_of_range_reviews_per_day(client):
     assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
 
 
+@pytest.mark.parametrize("timezone", ["attacker/not-a-zone", "", "x" * 101])
+async def test_settings_rejects_unknown_or_unbounded_timezones(client, timezone):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    payload["timezone"] = timezone
+
+    response = await client.put("/settings", headers=API_HEADERS, json=payload)
+    assert response.status_code == 422
+
+
+async def test_settings_bounds_window_count_and_write_fields(client):
+    payload = (await client.get("/settings", headers=API_HEADERS)).json()
+    window = {"label": "Morning", "on": True, "from": "07:10", "to": "08:30"}
+
+    payload["windows"] = [window] * 9
+    assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
+
+    payload["windows"] = [{**window, "label": "x" * 65}]
+    assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
+
+    payload["windows"] = [{**window, "label": "   "}]
+    assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
+
+    payload["windows"] = [{**window, "from": "07:10:00"}]
+    assert (await client.put("/settings", headers=API_HEADERS, json=payload)).status_code == 422
+
+
+async def test_lazy_settings_default_never_commits_unrelated_dirty_state(db):
+    """A scheduler timezone lookup must stay inside its caller's transaction."""
+    from sqlalchemy import delete
+
+    from app.models import FOUNDER_USER_ID, Card, Settings
+    from app.routers.deps import get_settings_row
+
+    await db.exec(delete(Settings))
+    await db.commit()
+    card = make_card(topic="must roll back")
+    db.add(card)
+    await db.flush()
+
+    default = await get_settings_row(db, FOUNDER_USER_ID)
+    assert default.timezone == "America/Los_Angeles"
+    await db.rollback()
+
+    assert await db.get(Card, card.id) is None
+    assert (await db.exec(select(Settings))).all() == []
+
+
 @pytest.mark.parametrize(
     "from_,to,why",
     [
@@ -1630,6 +1788,51 @@ async def test_device_token_reregistration_updates_kind(client, db):
     assert row.created_at == created  # first-seen, not last-seen
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"token": "   ", "kind": "apns"},
+        {"token": "x" * 257, "kind": "apns"},
+        {"token": "abc123", "kind": "fcm"},
+    ],
+)
+async def test_device_token_registration_bounds_the_wire_contract(client, payload):
+    response = await client.post("/device-tokens", headers=API_HEADERS, json=payload)
+    assert response.status_code == 422
+
+
+async def test_device_token_registration_enforces_a_per_account_cap(client, db):
+    from app.routers.devices import MAX_DEVICE_TOKENS_PER_USER
+
+    for index in range(MAX_DEVICE_TOKENS_PER_USER):
+        response = await client.post(
+            "/device-tokens",
+            headers=API_HEADERS,
+            json={"token": f"token-{index}", "kind": "apns"},
+        )
+        assert response.status_code == 204
+
+    # Re-registering an owned token remains idempotent at the limit.
+    replay = await client.post(
+        "/device-tokens",
+        headers=API_HEADERS,
+        json={"token": "token-0", "kind": "apns-sandbox"},
+    )
+    assert replay.status_code == 204
+
+    overflow = await client.post(
+        "/device-tokens",
+        headers=API_HEADERS,
+        json={"token": "one-too-many", "kind": "apns"},
+    )
+    assert overflow.status_code == 409
+    assert overflow.json()["detail"] == {
+        "code": "device_token_limit",
+        "limit": MAX_DEVICE_TOKENS_PER_USER,
+    }
+    assert len((await db.exec(select(DeviceToken))).all()) == MAX_DEVICE_TOKENS_PER_USER
+
+
 # --- capture boundary -------------------------------------------------------
 
 
@@ -1660,6 +1863,7 @@ async def test_health_needs_no_api_key_and_checks_the_database(client):
             "anthropic-openai-2026-08-13-v2"
         ),
         "ai_consent_minimum_ios_build": 7,
+        "ai_consent_enforcement_enabled": False,
     }
 
 

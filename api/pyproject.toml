@@ -14,6 +14,9 @@ dependencies = [
     "aioapns>=3.2",
     "httpx>=0.28",
     "pyjwt[crypto]>=2.13",
+    # Security floors for transitive crypto and APNs HTTP/2 dependencies.
+    "cryptography>=50.0.0",
+    "h2>=4.4.1",
 ]
 
 [dependency-groups]
@@ -23,6 +26,7 @@ dev = [
     "aiosqlite>=0.20",
     "ruff>=0.8",
     "greenlet>=3.5.4",
+    "pip-audit>=2.9",
 ]
 
 [tool.pytest.ini_options]

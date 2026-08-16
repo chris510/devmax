@@ -18,6 +18,7 @@ from dataclasses import asdict
 from datetime import UTC, date, datetime
 from typing import Any
 
+from sqlalchemy import update
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -511,7 +512,7 @@ def record_revision(
     revision = StudyPlanRevision(
         plan_id=graph.plan.id,
         kind=kind,
-        base_plan_revision=graph.plan.revision,
+        base_plan_revision=int(before["revision"]),
         before=before,
         after=after,
         summary=summary,
@@ -521,11 +522,51 @@ def record_revision(
     return revision
 
 
+async def claim_plan_revision(
+    db: AsyncSession,
+    plan: StudyPlan,
+    *,
+    expected_revision: int | None = None,
+) -> int | None:
+    """Atomically claim one material plan mutation.
+
+    ``SELECT FOR UPDATE`` serializes the router paths on Postgres, but SQLite
+    intentionally ignores it. This revision compare-and-swap is the portable
+    backstop: exactly one writer may advance the snapshot it loaded. The caller
+    must validate/recompute its mutation before claiming and must roll back when
+    ``None`` is returned.
+
+    Returns the pre-change revision for the durable revision ledger.
+    """
+    base_revision = plan.revision
+    if expected_revision is not None and base_revision != expected_revision:
+        return None
+
+    now = _now()
+    result = await db.exec(
+        update(StudyPlan)
+        .where(
+            StudyPlan.id == plan.id,
+            StudyPlan.revision == base_revision,
+        )
+        .values(revision=base_revision + 1, updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        return None
+
+    # Keep the graph's identity-map instance aligned without marking it dirty and
+    # emitting an unconditional ORM UPDATE at commit.
+    await db.refresh(plan, attribute_names=["revision", "updated_at"])
+    return base_revision
+
+
 def apply_proposal(
     db: AsyncSession,
     graph: PlanGraph,
     proposal: sched.Proposal,
     *,
+    base_plan_revision: int,
     kind: str,
     summary: str = "",
     capacity_overrides: Mapping[int, int | None] | None = None,
@@ -534,10 +575,12 @@ def apply_proposal(
 ) -> StudyPlanRevision:
     """Persist a validated proposal. The caller owns the transaction.
 
-    Bumps `plan.revision`, so any other proposal computed against the old value
-    is now stale and its Apply is a 409 rather than a silent overwrite.
+    The caller has already claimed ``base_plan_revision -> +1`` atomically, so
+    any competing proposal computed against the old value loses before this
+    function stages a schedule write.
     """
     before = plan_snapshot(graph)
+    before["revision"] = base_plan_revision
     plan = graph.plan
     now = _now()
 
@@ -563,7 +606,6 @@ def apply_proposal(
             db.add(item)
 
     plan.forecast_end_plan_week = proposal.forecast_end_plan_week
-    plan.revision += 1
     plan.updated_at = now
     db.add(plan)
 
@@ -591,7 +633,12 @@ async def active_plan(db: AsyncSession, user_id: uuid.UUID = FOUNDER_USER_ID) ->
 
 
 async def make_active(
-    db: AsyncSession, graph: PlanGraph, *, kind: str, summary: str
+    db: AsyncSession,
+    graph: PlanGraph,
+    *,
+    base_plan_revision: int,
+    kind: str,
+    summary: str,
 ) -> StudyPlanRevision:
     """Make this the active plan, pausing whichever one currently is.
 
@@ -602,6 +649,7 @@ async def make_active(
     more than an invariant should have.
     """
     before = plan_snapshot(graph)
+    before["revision"] = base_plan_revision
     now = _now()
 
     current = await active_plan(db, graph.plan.user_id)
@@ -615,7 +663,6 @@ async def make_active(
     graph.plan.status = PLAN_ACTIVE
     graph.plan.paused_at = None
     graph.plan.archived_at = None
-    graph.plan.revision += 1
     graph.plan.updated_at = now
     db.add(graph.plan)
     return record_revision(
@@ -656,7 +703,11 @@ def complete(db: AsyncSession, graph: PlanGraph) -> StudyPlanRevision:
     plan.updated_at = plan.completed_at
     db.add(plan)
     return record_revision(
-        db, graph, kind="complete", before=before, after={"status": PLAN_COMPLETED}
+        db,
+        graph,
+        kind="complete",
+        before=before,
+        after={"status": PLAN_COMPLETED},
     )
 
 
@@ -669,7 +720,11 @@ def archive(db: AsyncSession, graph: PlanGraph) -> StudyPlanRevision:
     plan.updated_at = plan.archived_at
     db.add(plan)
     return record_revision(
-        db, graph, kind="archive", before=before, after={"status": PLAN_ARCHIVED}
+        db,
+        graph,
+        kind="archive",
+        before=before,
+        after={"status": PLAN_ARCHIVED},
     )
 
 

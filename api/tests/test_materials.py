@@ -2216,7 +2216,7 @@ async def test_pre_gate_grounding_recovery_survives_a_failed_worker_and_retries(
     assert failed.status_code == 200
     assert failed.json()["status"] == SOURCE_FAILED
     assert failed.json()["lesson_grounding_required"] is True
-    assert failed.json()["error"] == "grounding provider unavailable"
+    assert failed.json()["error"] == "AI import unavailable. Retry to continue."
     assert [topic["id"] for topic in failed.json()["topics"]] == [str(proposal.id)]
 
     retried = await client.post(
@@ -3236,12 +3236,17 @@ async def test_attention_proposal_cannot_be_confirmed(client, db, stub_import):
 
 
 async def test_manual_topic_requires_and_stores_a_trusted_answer_anchor(client, db):
-    missing = await client.post(
-        "/materials/manual",
-        headers=API_HEADERS,
-        json={"title": "Law", "topics": [{"topic": "Consideration", "answer_anchor": ""}]},
+    invalid_bodies = (
+        {"title": "Law", "topics": [{"topic": "Consideration", "answer_anchor": ""}]},
+        {"title": "Law", "topics": [{"topic": "Consideration", "answer_anchor": "   "}]},
+        {"title": "Law", "topics": [{"topic": "   ", "answer_anchor": "Authority"}]},
+        {"title": "   ", "topics": [{"topic": "Consideration", "answer_anchor": "Authority"}]},
     )
-    assert missing.status_code == 422
+    for body in invalid_bodies:
+        missing = await client.post(
+            "/materials/manual", headers=API_HEADERS, json=body
+        )
+        assert missing.status_code == 422
 
     created = await client.post(
         "/materials/manual",

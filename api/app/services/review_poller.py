@@ -114,7 +114,16 @@ async def run_review_poller(
         except Exception:
             logger.exception("trigger-review poll failed")
         else:
-            if result.get("reason") == "no_devices":
+            if result.get("failed_count", 0):
+                logger.error(
+                    "trigger-review batch had failures processed_users=%s "
+                    "sent_count=%s failed_count=%s reasons=%s",
+                    result.get("processed_users"),
+                    result.get("sent_count"),
+                    result.get("failed_count"),
+                    result.get("reasons"),
+                )
+            elif result.get("reason") in {"no_devices", "delivery_failed"}:
                 logger.error("trigger-review poll found no registered device or APNs credentials")
             else:
                 logger.info(

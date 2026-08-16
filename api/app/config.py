@@ -20,6 +20,7 @@ PLACEHOLDER_SECRETS = frozenset(
     {"dev-api-key", "dev-cron-secret", "change-me", "change-me-too", ""}
 )
 MIN_FOUNDER_CLAIM_TOKEN_CHARS = 43
+MIN_SHARED_SECRET_CHARS = 32
 OPENAI_V2_LUNA_MODEL = "gpt-5.6-luna"
 QUALIFICATION_MAX_AGE_DAYS = 30
 _STRICT_UTC_TIMESTAMP = re.compile(
@@ -64,7 +65,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # No defaults on the three that gate access to the database and the API. A default
+    # No defaults on settings that gate access or provider-data disclosure. A default
     # here means a deploy that forgets to set them boots healthy on a public
     # hostname, authenticated by a string published in this repo.
     database_url: str
@@ -185,8 +186,9 @@ class Settings(BaseSettings):
 
     # Deploy the consent schema before turning this on. This controls whether a
     # missing grant blocks provider work; policy-version activation is the
-    # separate setting below.
-    ai_consent_enforcement_enabled: bool = False
+    # separate setting below. It is required so a missing Railway variable
+    # cannot silently turn enforcement off during a fresh deployment.
+    ai_consent_enforcement_enabled: bool
     # Code may understand a newer disclosure before production requires it. Keep
     # this on the already-shipped client's policy during that compatibility
     # window, then activate the newer policy explicitly after its minimum iOS
@@ -228,10 +230,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _reject_placeholder_secrets(self) -> "Settings":
         for name in ("api_key", "cron_secret"):
-            if getattr(self, name) in PLACEHOLDER_SECRETS:
+            secret = getattr(self, name)
+            if secret in PLACEHOLDER_SECRETS:
                 raise ValueError(
                     f"{name.upper()} is unset or still a placeholder. Generate one with "
                     "`openssl rand -base64 32`."
+                )
+            if len(secret) < MIN_SHARED_SECRET_CHARS or any(
+                character.isspace() for character in secret
+            ):
+                raise ValueError(
+                    f"{name.upper()} must contain at least "
+                    f"{MIN_SHARED_SECRET_CHARS} non-whitespace characters."
                 )
         # spec.md §Auth: two *independent* shared secrets. Collapsing them into one
         # means the cron secret ships inside the iOS binary along with the API key.

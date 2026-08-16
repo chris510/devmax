@@ -1,6 +1,7 @@
 """Durable public guide imports and reviewed topic proposals."""
 
 import asyncio
+import logging
 import uuid
 from contextlib import suppress
 from copy import deepcopy
@@ -10,7 +11,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import and_, delete, or_, update
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import col, select
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_settings
@@ -36,9 +37,16 @@ from app.models import (
     StudyPlanGuideDraft,
 )
 from app.pilot_contract import pilot_consent_is_valid
-from app.services import guide_import, llm, study_plan_import, usage
+from app.services import guide_import, llm, storage, study_plan_import, usage
 from app.services import study_plan as study_plan_service
+from app.services.abuse import provider_slot
 from app.services.card_lifecycle import Grounding, GroundingError, clean_rubric
+
+logger = logging.getLogger(__name__)
+
+IMPORT_CONCURRENCY = 2
+IMPORT_SWEEP_SECONDS = 60
+_import_slots = asyncio.Semaphore(IMPORT_CONCURRENCY)
 
 
 def _now() -> datetime:
@@ -200,6 +208,19 @@ def _guide_authorizer(
     )
 
 
+def _recoverable_import_filter(stale_before: datetime):
+    return or_(
+        MaterialSource.status == SOURCE_PENDING,
+        and_(
+            MaterialSource.status == SOURCE_PROCESSING,
+            or_(
+                MaterialSource.processing_heartbeat_at.is_(None),
+                MaterialSource.processing_heartbeat_at <= stale_before,
+            ),
+        ),
+    )
+
+
 async def _claim_import(
     db: AsyncSession, source_id: uuid.UUID
 ) -> tuple[MaterialSource, uuid.UUID] | None:
@@ -210,18 +231,7 @@ async def _claim_import(
     statement = (
         update(MaterialSource)
         .where(MaterialSource.id == source_id)
-        .where(
-            or_(
-                MaterialSource.status == SOURCE_PENDING,
-                and_(
-                    MaterialSource.status == SOURCE_PROCESSING,
-                    or_(
-                        MaterialSource.processing_heartbeat_at.is_(None),
-                        MaterialSource.processing_heartbeat_at <= stale_before,
-                    ),
-                ),
-            )
-        )
+        .where(_recoverable_import_filter(stale_before))
         .values(
             status=SOURCE_PROCESSING,
             processing_run_id=run_id,
@@ -312,12 +322,37 @@ async def _start_date(db, user_id: uuid.UUID) -> date:
 
 
 async def process_import(source_id: uuid.UUID) -> bool:
+    """Run one import inside the process-wide provider concurrency bound."""
+    async with _import_slots:
+        async with session_factory() as lookup_db:
+            lookup = (
+                await lookup_db.exec(
+                    select(MaterialSource.user_id, MaterialSource.status).where(
+                        MaterialSource.id == source_id
+                    )
+                )
+            ).first()
+            if lookup is None or lookup[1] not in {
+                SOURCE_PENDING,
+                SOURCE_PROCESSING,
+            }:
+                return False
+            user_id = lookup[0]
+        # Internal workers are already bounded to two, so they may wait for a
+        # shared provider slot instead of failing a durable import during a
+        # short burst of authenticated interactive work.
+        async with provider_slot(user_id, wait=True):
+            return await _process_import(source_id)
+
+
+async def _process_import(source_id: uuid.UUID) -> bool:
     """Run one atomically claimed import; return whether this worker claimed it."""
     async with session_factory() as db:
         claim = await _claim_import(db, source_id)
         if claim is None:
             return False
         source, run_id = claim
+        user_id = source.user_id
         heartbeat = asyncio.create_task(
             _heartbeat_import(source.id, run_id),
             name=f"material-heartbeat-{source.id}",
@@ -325,29 +360,46 @@ async def process_import(source_id: uuid.UUID) -> bool:
 
         try:
             try:
-                if source.import_path == "plan":
-                    source = await guide_import.run_while_heartbeat_live(
-                        _process_plan(db, source, run_id), heartbeat
-                    )
-                elif source.import_path == "lesson":
-                    source = await guide_import.run_while_heartbeat_live(
-                        _process_lesson(db, source, run_id), heartbeat
-                    )
-                else:
-                    source = await guide_import.run_while_heartbeat_live(
-                        _process_topics(db, source, run_id), heartbeat
-                    )
+                processor = {
+                    "plan": _process_plan,
+                    "lesson": _process_lesson,
+                }.get(source.import_path, _process_topics)
+                source = await guide_import.run_while_heartbeat_live(
+                    processor(db, source, run_id), heartbeat
+                )
             except (HTTPException, llm.LLMError, study_plan_import.ImportError_) as exc:
                 source = await _lock_result_claim(
                     db,
-                    user_id=source.user_id,
-                    source_id=source.id,
+                    user_id=user_id,
+                    source_id=source_id,
                     run_id=run_id,
                 )
                 source.status = SOURCE_FAILED
-                source.error = (
-                    str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+                if isinstance(exc, HTTPException):
+                    source.error = str(exc.detail)
+                elif isinstance(exc, llm.LLMError):
+                    source.error = "AI import unavailable. Retry to continue."
+                else:
+                    source.error = str(exc)
+            except Exception as exc:
+                # Parser/programming failures used to escape the background task
+                # and leave a durable `processing` row until the next restart.
+                # Roll back any failed transaction, reacquire the live claim, and
+                # expose only a retryable generic message to the account.
+                logger.error(
+                    "material import failed unexpectedly source_id=%s type=%s",
+                    source_id,
+                    type(exc).__name__,
                 )
+                await db.rollback()
+                source = await _lock_result_claim(
+                    db,
+                    user_id=user_id,
+                    source_id=source_id,
+                    run_id=run_id,
+                )
+                source.status = SOURCE_FAILED
+                source.error = "Import failed unexpectedly. Retry to continue."
             source.processing_run_id = None
             source.processing_heartbeat_at = None
             completed_at = _now()
@@ -423,6 +475,9 @@ async def _process_plan(
         await db.get(StudyPlanGuideDraft, source.plan_draft_id) if source.plan_draft_id else None
     )
     if draft is None:
+        await storage.reserve_study_guide_draft(
+            db, user_id=source.user_id, characters=len(source.source_text)
+        )
         draft = StudyPlanGuideDraft(
             user_id=source.user_id,
             guide_text=source.source_text,
@@ -1131,40 +1186,41 @@ async def _store_topic_proposals(
     return clean, attention, await _proposal_comparison(db, source, current)
 
 
-async def resume_imports() -> list[uuid.UUID]:
+async def recoverable_imports() -> list[uuid.UUID]:
+    """Return work claimable now, without accumulating waiters for live leases."""
+    stale_before = _now() - guide_import.GUIDE_IMPORT_STALE_AFTER
     async with session_factory() as db:
         ids = (
             await db.exec(
                 select(MaterialSource.id).where(
-                    col(MaterialSource.status).in_((SOURCE_PENDING, SOURCE_PROCESSING))
+                    _recoverable_import_filter(stale_before)
                 )
             )
         ).all()
     return list(ids)
 
 
-async def resume_import(source_id: uuid.UUID) -> None:
-    """Recover startup work once any live worker's heartbeat actually expires."""
+async def run_import_sweeper(*, interval_seconds: float = IMPORT_SWEEP_SECONDS) -> None:
+    """Continuously recover durable work with a fixed number of worker tasks."""
     while True:
-        if await process_import(source_id):
-            return
-        async with session_factory() as db:
-            source = await db.get(MaterialSource, source_id)
-            if source is None or source.status not in {
-                SOURCE_PENDING,
-                SOURCE_PROCESSING,
-            }:
-                return
-            if source.status == SOURCE_PENDING or source.processing_heartbeat_at is None:
-                delay = 1.0
-            else:
-                heartbeat = source.processing_heartbeat_at
-                if heartbeat.tzinfo is None:
-                    heartbeat = heartbeat.replace(tzinfo=UTC)
-                delay = max(
-                    1.0,
-                    (
-                        heartbeat + guide_import.GUIDE_IMPORT_STALE_AFTER - _now()
-                    ).total_seconds(),
+        try:
+            source_ids = await recoverable_imports()
+            for offset in range(0, len(source_ids), IMPORT_CONCURRENCY):
+                batch = source_ids[offset : offset + IMPORT_CONCURRENCY]
+                outcomes = await asyncio.gather(
+                    *(process_import(source_id) for source_id in batch),
+                    return_exceptions=True,
                 )
-        await asyncio.sleep(delay)
+                for source_id, outcome in zip(batch, outcomes, strict=True):
+                    if isinstance(outcome, Exception):
+                        logger.error(
+                            "material import worker failed source_id=%s type=%s",
+                            source_id,
+                            type(outcome).__name__,
+                        )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # A transient discovery failure must not permanently kill recovery.
+            logger.error("material import sweep failed type=%s", type(exc).__name__)
+        await asyncio.sleep(interval_seconds)

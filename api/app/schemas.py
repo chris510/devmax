@@ -2,6 +2,7 @@ import uuid
 from datetime import date, datetime, time
 from typing import Any, Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     AliasChoices,
@@ -13,6 +14,13 @@ from pydantic import (
 )
 
 from app.services.scoring_contract import CoachingFocus, ScoreKind, ScoringContractVersion
+
+
+def _strip_nonblank(value: str, message: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(message)
+    return value
 
 
 class DueCard(BaseModel):
@@ -149,6 +157,11 @@ class CaptureCreate(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     context: str = Field(default="", max_length=1000)
 
+    @field_validator("topic")
+    @classmethod
+    def _nonblank_topic(cls, value: str) -> str:
+        return _strip_nonblank(value, "capture topic must not be blank")
+
 
 class GroundingUpdate(BaseModel):
     source_url: str | None = Field(default=None, max_length=4000)
@@ -162,6 +175,13 @@ class GroundingUpdate(BaseModel):
 class CaptureUpdate(GroundingUpdate):
     topic: str | None = Field(default=None, min_length=1, max_length=200)
     context: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("topic")
+    @classmethod
+    def _nonblank_topic(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _strip_nonblank(value, "capture topic must not be blank")
 
 
 class CaptureSummary(BaseModel):
@@ -226,10 +246,17 @@ class SessionStart(BaseModel):
     turn_index: int = Field(ge=0)
     draft_text: str
     resumed: bool
+    # Echo the server-frozen mode on both a new start and a resume. A caller that
+    # asked for the other mode receives a 409 instead of silently changing the
+    # scheduling semantics of the answer it is about to submit.
+    practice: bool
 
 
 class DraftUpdate(BaseModel):
-    draft_text: str = ""
+    # Three minutes of speech is normally far smaller than this. The generous
+    # ceiling protects the cheap, durable draft path from becoming an unbounded
+    # database write without clipping a legitimate transcript.
+    draft_text: str = Field(default="", max_length=20_000)
     # Same turn coordinate as `ScoredAnswerIn`. A stale upload is acknowledged
     # but ignored after the session advances, so it cannot resurrect turn N's
     # transcript under turn N+1.
@@ -237,7 +264,9 @@ class DraftUpdate(BaseModel):
 
 
 class AnswerIn(BaseModel):
-    text: str = ""
+    # Route-level checks preserve the established `answer text is empty` wire
+    # error while this field keeps retained transcripts bounded.
+    text: str = Field(default="", max_length=20_000)
 
 
 class ScoredAnswerIn(AnswerIn):
@@ -295,8 +324,15 @@ class CoachingOut(BaseModel):
 
 
 class DeviceTokenIn(BaseModel):
-    token: str = Field(min_length=1)
-    kind: str = "apns"
+    # APNs currently emits 64-character hexadecimal tokens. Leave headroom for
+    # representation changes while refusing multi-megabyte primary keys.
+    token: str = Field(min_length=1, max_length=256)
+    kind: Literal["apns", "apns-sandbox"] = "apns"
+
+    @field_validator("token")
+    @classmethod
+    def _nonblank_token(cls, value: str) -> str:
+        return _strip_nonblank(value, "device token must not be blank")
 
 
 class AuthNonceOut(BaseModel):
@@ -404,6 +440,24 @@ class NotificationWindowIn(NotificationWindow):
     it rejected instead of the request body as a whole.
     """
 
+    label: str = Field(min_length=1, max_length=64)
+    from_: str = Field(
+        alias="from",
+        min_length=5,
+        max_length=5,
+        pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$",
+    )
+    to: str = Field(
+        min_length=5,
+        max_length=5,
+        pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$",
+    )
+
+    @field_validator("label")
+    @classmethod
+    def _nonblank_label(cls, value: str) -> str:
+        return _strip_nonblank(value, "window label must not be blank")
+
     @model_validator(mode="after")
     def _usable(self) -> "NotificationWindowIn":
         try:
@@ -420,7 +474,18 @@ class NotificationWindowIn(NotificationWindow):
 
 
 class SettingsIn(SettingsBase):
-    windows: list[NotificationWindowIn]
+    timezone: str = Field(min_length=1, max_length=100)
+    windows: list[NotificationWindowIn] = Field(min_length=1, max_length=8)
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_timezone(cls, value: str) -> str:
+        value = value.strip()
+        try:
+            ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("timezone must be a known IANA timezone") from exc
+        return value
 
 
 class TriggerResult(BaseModel):
@@ -438,6 +503,7 @@ class TriggerResult(BaseModel):
             "daily_limit",
             "nothing_due",
             "no_devices",
+            "delivery_failed",
         ]
         | None
     ) = None
@@ -450,6 +516,8 @@ class TriggerBatchResult(BaseModel):
     reason: Literal["batch"] = "batch"
     processed_users: int
     sent_count: int
+    failed_count: int
+    reasons: dict[str, int]
 
 
 def window_to_dict(w: NotificationWindow) -> dict[str, Any]:
@@ -769,21 +837,73 @@ class GuidePreviewIn(BaseModel):
     weekly_capacity_minutes: int = Field(gt=0, le=10080)
     mode: PlanMode = "flexible"
     deadline: date | None = None
-    subject_hint: str = ""
-    title_hint: str = ""
+    subject_hint: str = Field(default="", max_length=200)
+    title_hint: str = Field(default="", max_length=200)
     start_date: date | None = None
 
 
 class PreviewEdit(BaseModel):
     """Edits and review decisions applied to a draft, re-validated in place."""
 
-    estimates_reviewed: list[str] | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    estimates_reviewed: list[str] | None = Field(default=None, max_length=500)
     omissions_acknowledged: bool | None = None
-    retrieval_approved: list[str] | None = None
-    retrieval_rejected: list[str] | None = None
-    dependencies_confirmed: list[str] | None = None
-    item_estimates: dict[str, int] = {}
-    overview_titles: dict[str, str] = {}
+    retrieval_approved: list[str] | None = Field(default=None, max_length=500)
+    retrieval_rejected: list[str] | None = Field(default=None, max_length=500)
+    dependencies_confirmed: list[str] | None = Field(default=None, max_length=500)
+    item_estimates: dict[str, int] = Field(default_factory=dict, max_length=500)
+    overview_titles: dict[str, str] = Field(default_factory=dict, max_length=500)
+
+    @field_validator(
+        "estimates_reviewed",
+        "retrieval_approved",
+        "retrieval_rejected",
+        "dependencies_confirmed",
+    )
+    @classmethod
+    def _bounded_unique_keys(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        normalized = [key.strip() for key in value]
+        if any(not key or len(key) > 200 for key in normalized):
+            raise ValueError("preview decision keys must contain 1-200 characters")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("preview decision keys must be unique")
+        return normalized
+
+    @field_validator("item_estimates")
+    @classmethod
+    def _bounded_item_estimates(cls, value: dict[str, int]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for key, minutes in value.items():
+            key = key.strip()
+            if not key or len(key) > 200:
+                raise ValueError("item estimate keys must contain 1-200 characters")
+            if minutes <= 0 or minutes > 10_080 or minutes % 30:
+                raise ValueError(
+                    "item estimates must be positive 30-minute increments up to one week"
+                )
+            if key in normalized:
+                raise ValueError("item estimate keys must be unique after trimming")
+            normalized[key] = minutes
+        return normalized
+
+    @field_validator("overview_titles")
+    @classmethod
+    def _bounded_overview_titles(cls, value: dict[str, str]) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for key, title in value.items():
+            key = key.strip()
+            title = title.strip()
+            if not key or len(key) > 200:
+                raise ValueError("overview title keys must contain 1-200 characters")
+            if not title or len(title) > 200:
+                raise ValueError("overview titles must contain 1-200 characters")
+            if key in normalized:
+                raise ValueError("overview title keys must be unique after trimming")
+            normalized[key] = title
+        return normalized
 
 
 class CheckRow(BaseModel):
@@ -907,10 +1027,55 @@ class CardProposalList(BaseModel):
 
 
 class CardAcceptIn(BaseModel):
-    selected_proposal_ids: list[uuid.UUID] = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+    selected_proposal_ids: list[uuid.UUID] = Field(min_length=1, max_length=3)
     idempotency_key: str = Field(min_length=8, max_length=200)
     proposal_revision: int
-    edits: dict[str, dict[str, str]] = {}
+    edits: dict[str, dict[str, str]] = Field(default_factory=dict, max_length=3)
+
+    @field_validator("selected_proposal_ids")
+    @classmethod
+    def _unique_proposals(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("selected proposal ids must be unique")
+        return value
+
+    @field_validator("edits")
+    @classmethod
+    def _bounded_edits(
+        cls, value: dict[str, dict[str, str]]
+    ) -> dict[str, dict[str, str]]:
+        normalized: dict[str, dict[str, str]] = {}
+        allowed_fields = {"topic", "canonical_question"}
+        for raw_proposal_id, raw_edit in value.items():
+            try:
+                proposal_id = str(uuid.UUID(raw_proposal_id))
+            except ValueError as exc:
+                raise ValueError("edit keys must be proposal UUIDs") from exc
+            unexpected = set(raw_edit) - allowed_fields
+            if unexpected:
+                raise ValueError("card edits contain unsupported fields")
+            edit: dict[str, str] = {}
+            for field_name, text in raw_edit.items():
+                text = text.strip()
+                maximum = 200 if field_name == "topic" else 4000
+                if not text or len(text) > maximum:
+                    raise ValueError(
+                        f"{field_name} edits must contain 1-{maximum} characters"
+                    )
+                edit[field_name] = text
+            if proposal_id in normalized:
+                raise ValueError("card edits must identify each proposal once")
+            normalized[proposal_id] = edit
+        return normalized
+
+    @model_validator(mode="after")
+    def _edits_are_selected(self) -> "CardAcceptIn":
+        selected = {str(proposal_id) for proposal_id in self.selected_proposal_ids}
+        if not set(self.edits).issubset(selected):
+            raise ValueError("card edits may only target selected proposals")
+        return self
 
 
 class CardAcceptOut(BaseModel):
@@ -972,6 +1137,11 @@ class MaterialImportIn(BaseModel):
     mode: PlanMode = "flexible"
     deadline: date | None = None
     previous_version_id: uuid.UUID | None = None
+
+    @field_validator("title")
+    @classmethod
+    def title_is_not_blank(cls, value: str) -> str:
+        return _strip_nonblank(value, "title must not be blank")
 
     @field_validator("source_url")
     @classmethod
@@ -1339,10 +1509,20 @@ class ManualTopicIn(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     answer_anchor: str = Field(min_length=1, max_length=4000)
 
+    @field_validator("topic", "answer_anchor")
+    @classmethod
+    def fields_are_not_blank(cls, value: str) -> str:
+        return _strip_nonblank(value, "manual topic fields must not be blank")
+
 
 class ManualMaterialIn(BaseModel):
     title: str = Field(default="My topics", min_length=1, max_length=200)
     topics: list[ManualTopicIn] = Field(min_length=1, max_length=50)
+
+    @field_validator("title")
+    @classmethod
+    def title_is_not_blank(cls, value: str) -> str:
+        return _strip_nonblank(value, "manual material title must not be blank")
 
 
 class CollectionSummary(BaseModel):
@@ -1360,14 +1540,84 @@ class CollectionDetail(CollectionSummary):
     topics: list[ManualTopicIn]
 
 
+class AccountExportAppleIdentity(BaseModel):
+    """Sign in with Apple profile/audit fields, never its revocation credential."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    subject: str
+    email: str | None
+    display_name: str | None
+    authorization_revoked_at: datetime | None
+    last_apple_authorized_at: datetime | None
+    last_apple_event_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AccountExportAppleNotificationReceipt(BaseModel):
+    id: uuid.UUID
+    identity_id: uuid.UUID
+    jti: str
+    event_type: str
+    occurred_at: datetime
+    applied: bool
+    created_at: datetime
+
+
+class AccountExportAuthSession(BaseModel):
+    """Session lifecycle metadata with both credential hashes omitted."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    family_id: uuid.UUID
+    rotated_from_id: uuid.UUID | None
+    access_expires_at: datetime
+    refresh_expires_at: datetime
+    revoked_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AccountExportDevice(BaseModel):
+    """APNs registration metadata with no recoverable device token."""
+
+    user_id: uuid.UUID
+    kind: str
+    token_fingerprint: str
+    created_at: datetime
+
+
 class AccountExport(BaseModel):
+    # Additive export changes require a new literal. Consumers can reject an
+    # unfamiliar contract instead of silently treating a partial snapshot as
+    # complete.
+    schema_version: Literal[2] = 2
     exported_at: datetime
     account: dict[str, object]
     settings: dict[str, object]
+    apple_identity: AccountExportAppleIdentity | None
+    apple_notification_receipts: list[AccountExportAppleNotificationReceipt]
+    auth_sessions: list[AccountExportAuthSession]
+    devices: list[AccountExportDevice]
     sources: list[dict[str, object]]
+    material_topic_proposals: list[dict[str, object]]
     cards: list[dict[str, object]]
+    pending_captures: list[dict[str, object]]
     sessions: list[dict[str, object]]
+    session_probes: list[dict[str, object]]
     study_plans: list[dict[str, object]]
+    study_plan_phases: list[dict[str, object]]
+    study_plan_weeks: list[dict[str, object]]
+    study_plan_items: list[dict[str, object]]
+    study_plan_item_dependencies: list[dict[str, object]]
+    study_plan_revisions: list[dict[str, object]]
+    study_plan_guide_drafts: list[dict[str, object]]
+    study_plan_practice_debriefs: list[dict[str, object]]
+    study_plan_card_proposals: list[dict[str, object]]
+    study_plan_card_proposal_acceptances: list[dict[str, object]]
+    study_plan_card_links: list[dict[str, object]]
+    study_plan_duplications: list[dict[str, object]]
     ai_consent_events: list[dict[str, object]]
     llm_usage: list[dict[str, object]]
     # This is the private, user-requested account export. These records remain

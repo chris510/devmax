@@ -1,11 +1,9 @@
 """Explicit, versioned permission for third-party AI processing."""
 
-import hashlib
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import Settings
@@ -16,6 +14,7 @@ from app.consent_policy import (
     policy_for,
     satisfies,
 )
+from app.db import acquire_advisory_xact_lock
 from app.models import (
     AI_CONSENT_DECLINED,
     AI_CONSENT_GRANTED,
@@ -58,16 +57,6 @@ def prompt_required(user: User, required_policy_version: str = POLICY_VERSION) -
     )
 
 
-def _advisory_key(user_id: uuid.UUID) -> int:
-    """A stable signed bigint in a namespace reserved for AI boundaries."""
-    digest = hashlib.blake2b(
-        user_id.bytes,
-        digest_size=8,
-        person=b"devmax-ai",
-    ).digest()
-    return int.from_bytes(digest, byteorder="big", signed=True)
-
-
 async def lock_user_boundary(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     """Serialize provider authorization, consent mutation, and deletion.
 
@@ -80,12 +69,7 @@ async def lock_user_boundary(db: AsyncSession, user_id: uuid.UUID) -> User | Non
     SQLite has no advisory locks and is used only as the local/test fallback;
     retain the prior row-lock-shaped read there so the boundary remains explicit.
     """
-    bind = db.bind
-    if bind is not None and bind.dialect.name == "postgresql":
-        await db.exec(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            params={"key": _advisory_key(user_id)},
-        )
+    if await acquire_advisory_xact_lock(db, user_id, namespace=b"devmax-ai"):
         return await db.get(User, user_id, populate_existing=True)
     return await db.get(
         User,

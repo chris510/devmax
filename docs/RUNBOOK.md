@@ -87,7 +87,9 @@ re-enable it at the end of §3. CI itself will pass on merge.
 3. **New → Database → Add PostgreSQL** in the same project.
 
 `api/railway.json` already pins the rest: build from the Dockerfile, `alembic
-upgrade head` as the `preDeployCommand`, and `/health` as the healthcheck.
+upgrade head` as the `preDeployCommand`, and `/ready` as the healthcheck.
+The deployed code expects the single Alembic head to be exactly `0025`; readiness
+fails closed if the migration step did not reach it.
 
 ### Enable the trigger-review poll
 
@@ -176,9 +178,14 @@ LEGACY_API_KEY_AUTH_ENABLED = true
 ANTHROPIC_API_KEY  = <your key>
 # A code deploy may understand v2, but production still requires the installed client.
 AI_CONSENT_REQUIRED_POLICY_VERSION = anthropic-2026-08-12-v1
+AI_CONSENT_ENFORCEMENT_ENABLED = true
 APNS_USE_SANDBOX   = true
 LOG_LEVEL          = INFO
 ```
+
+`AI_CONSENT_ENFORCEMENT_ENABLED` is required rather than defaulted. Set it
+explicitly on every environment; production should remain `true` after the
+consent migration and client cutover have been verified.
 
 APNs secrets come later, in §6 — the app boots fine without them and logs a warning.
 
@@ -197,15 +204,22 @@ the two GitHub repo secrets: `API_BASE_URL` (that domain, with `https://`) and
 
 ```sh
 B=https://<your-app>.up.railway.app
-curl -sS $B/health                                                  # {"status":"ok"}
+curl -sS $B/live                                                    # {"status":"alive"}
+curl -sS $B/ready                 # {"status":"ready","schema_revision":"0025",...}
+curl -sS $B/health                # status plus consent-policy metadata
 curl -sS -o /dev/null -w '%{http_code}\n' $B/cards/due               # 401
 curl -sS -H "X-API-Key: $API_KEY" $B/cards/due                       # []
 curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" $B/internal/trigger-review
 ```
 
-`/health` passing proves asyncpg, greenlet, the private-network address, and the
-schema all work in one call. Deploy logs should show the `APNS_PRIVATE_KEY is unset`
-warning (expected at this stage) and no tracebacks.
+`/live` answers only whether the process can serve HTTP and deliberately never
+waits on a dependency. `/ready` proves asyncpg, the private-network database
+address, and the exact `0025` schema head work together; Railway should gate
+traffic on this endpoint. `/health` also checks the database, but its operational
+purpose is reporting the required/latest consent policy, minimum iOS build, and
+whether consent enforcement is enabled. Do not use `/health` as a migration-head
+check. Deploy logs should show the `APNS_PRIVATE_KEY is unset` warning (expected at
+this stage) and no tracebacks.
 
 ---
 
@@ -601,8 +615,120 @@ In order.
 `POST /sessions/{id}/answers` scores before it writes anything, and the complete
 path is one transaction, so an LLM failure leaves the session and card untouched
 rather than half-written. A session stuck in `open` or `awaiting_follow_up` is
-resumable by design — starting a session on that card returns the existing one.
-There is no `abandoned` transition; nothing sets it.
+resumable by design — starting a session on that card in the same scheduled or
+practice mode returns the existing one. An opposite-mode start returns
+`409 session_mode_conflict`; explicitly `POST /sessions/{id}/abandon` first if
+the saved draft should be retained but the answer should not be scored. Abandon
+is idempotent, preserves the draft, and never changes the card's schedule.
+
+## Production signals, limits, and recovery
+
+The application emits the signals below, but the repository cannot prove that a
+Railway log drain, paging destination, provider billing limit, backup policy, or
+restore job is configured. Treat each external control as incomplete until its
+current setting and one test notification or restore are recorded in the deploy
+checklist.
+
+### Minimum alert set
+
+| Signal | Alert threshold | First response |
+|---|---|---|
+| Readiness | Any `/ready` 503 for two consecutive checks, or a deploy that never becomes ready | Check the returned `reason`. `database_unavailable` points at connectivity/pool pressure; `schema_mismatch` means traffic must stay off until the single Alembic head is `0025`. Compare `/live`: live-but-not-ready is a dependency or migration fault, not a dead process. |
+| Review poll | Any batch response with `failed_count > 0`; two consecutive in-window `delivery_failed` or unexpected `no_devices` results | Search for `trigger-review batch had failures` and the per-account fingerprint. Manually call the cron endpoint once after fixing it; never stamp a card as pushed by hand. |
+| Import leases | A `processing` material source or pending Study Plan draft whose heartbeat is more than two minutes old; warn when any source remains `pending` for 15 minutes | The worker heartbeat runs every 15 seconds, the stale lease is two minutes, the material sweeper runs every minute, and only two material imports run concurrently. Look for `material import worker failed`, `material import sweep failed`, or `study-plan preview heartbeat failed`; retry through the API rather than rewriting status rows. |
+| Database pool | Any connection checkout/queue timeout, or provider connection utilization above 80% for five minutes; warn if `/ready` latency rises above two seconds | Inspect Railway Postgres connections and app logs. Long model calls must not hold a connection; find the route that does before increasing pool size. If a pooler was introduced, re-check both prepared-statement cache settings in §3. |
+| APNs token health | Notify on every `apns rejected ... permanent=true`; page if the rejection removes the last usable token or produces two consecutive in-window `delivery_failed` results | Permanent `BadDeviceToken`, topic mismatch, and `Unregistered` responses are removed automatically. Logs contain only a token fingerprint. Confirm `APNS_USE_SANDBOX` matches the installed build before asking the device to register again. |
+| Paid-model budget | Warn at 75% and urgent at 90% of both `LLM_CALLS_PER_DAY`/`GUIDE_IMPORTS_PER_DAY` and the provider billing limit; page on an unexpected budget 429 | The application counters are safeguards, not a billing ceiling. Identify the operation from `llm_usage`; do not raise a limit until retries, shadow calls, and import volume are understood. |
+
+The import lease query below is safe to use for triage on Postgres. A stale row
+should normally be reclaimed by the next sweep; repeated appearance is the alert,
+not permission to edit it manually.
+
+```sql
+SELECT id, status, updated_at, processing_heartbeat_at
+FROM material_sources
+WHERE (status = 'pending' AND updated_at < now() - interval '15 minutes')
+   OR (status = 'processing'
+       AND (processing_heartbeat_at IS NULL
+            OR processing_heartbeat_at < now() - interval '2 minutes'));
+
+SELECT id, status, updated_at, processing_run_id, processing_heartbeat_at
+FROM study_plan_guide_drafts
+WHERE status = 'pending'
+  AND ((processing_run_id IS NULL
+        AND updated_at < now() - interval '2 minutes')
+       OR (processing_run_id IS NOT NULL
+           AND (processing_heartbeat_at IS NULL
+                OR processing_heartbeat_at < now() - interval '2 minutes')));
+```
+
+### Provider-enforced spend ceilings
+
+`LLM_CALLS_PER_DAY` and `GUIDE_IMPORTS_PER_DAY` are account-level, best-effort
+application checks. Concurrent requests can cross a count boundary, and the
+in-process provider-admission limit only bounds concurrency in one API replica.
+Neither is a hard financial control.
+
+In the Anthropic console—and in the OpenAI project before any V2 provider stage—
+configure the smallest provider-enforced monthly spending limit and rate limits
+that support the rollout. Add billing notifications at 75% and 90%. If a provider
+offers an alert-only budget rather than a hard stop, document that distinction and
+use a restricted/prepaid project or another provider-enforced ceiling. Test the
+warning path with a deliberately low temporary threshold, then restore the
+recorded production value. These settings are **unverified production state**
+until that evidence exists.
+
+### Backup/PITR status and restore drill
+
+As of this audit, the repository contains no evidence that Railway backups or
+point-in-time recovery are enabled, what their retention is, or that a restore has
+ever completed. Do not infer recoverability from a successful migration or test
+suite. Until the controls below are verified, the actual RPO and RTO are unknown.
+Use **RPO ≤ 24 hours** and **RTO ≤ 4 hours** as provisional operating targets, not
+as guarantees.
+
+Verify the provider setting and run this drill before calling the targets met,
+then repeat the restore at least monthly and after a database-provider change:
+
+1. In Railway, record the Postgres backup/PITR feature, retention window, latest
+   recoverable timestamp, region, and who can initiate a restore. Enable a daily
+   backup or PITR policy capable of the provisional RPO if it is absent.
+2. Choose a recovery point several hours old and use Railway's documented restore
+   operation to create a **new isolated Postgres service**. Never restore over the
+   production database and never attach the production API service to the clone.
+3. Give a local verification process temporary access to the clone. Keep
+   `REVIEW_POLLER_ENABLED=false`; omit APNs and model-provider credentials so a
+   smoke test cannot send a push or make a paid call.
+4. Before running any migration, execute `DATABASE_URL=<restore-url> uv run
+   alembic current`. For this release the single revision must be `0025`. Run
+   `uv run alembic heads` locally and confirm it also reports only `0025`; an
+   older restore point is acceptable only when its age explains the revision.
+5. Record row counts for `users`, `cards`, `sessions`, `study_plans`,
+   `material_sources`, and `llm_usage`. Run orphan checks for owned rows against
+   `users`, inspect several recent timestamps, and verify one known account can
+   be exported from the isolated app without exposing credentials in the drill
+   record.
+6. Start the restored app locally with the safeguards from step 3 and confirm
+   `/live`, `/ready`, `/health`, and an authenticated read. If the chosen restore
+   predates `0025`, make a second clone or snapshot, run `alembic upgrade head`
+   there, and repeat the checks; do not mutate the untouched restore evidence.
+7. Record the recovery point, start/end time, measured data loss, measured restore
+   time, schema revision, counts, operator, and result. Delete the disposable
+   service and revoke its temporary credential when the evidence is complete.
+
+### Production-only validation still open
+
+- APNs sandbox delivery has reached a physical device. A TestFlight build uses a
+  production APNs token, and the coordinated switch to
+  `APNS_USE_SANDBOX=false` plus `WC_APS_ENVIRONMENT=production` has not yet been
+  exercised end to end.
+- The generic Study Plan importer fixes are unit-tested, but the post-fix live
+  Anthropic rerun was blocked by account credit. Repeat the reviewed guide import
+  once the provider budget is funded, retaining latency, token, validation, and
+  retry evidence without copying guide or model text into logs.
+- Confirm production has deployed through migration `0025`, `/ready` returns that
+  exact revision, the backup/PITR drill passes, and provider-enforced spending
+  ceilings and their alert destinations are recorded.
 
 ## Scoring Contract V2 activation and rollback
 
@@ -734,7 +860,11 @@ Two changes closed the gap instead. `check-missed` now records which push it
 counted on `missed_counted_at` (migration 0004) rather than erasing
 `last_pushed_at`, so the evidence survives. And `trigger-review` never offers a card
 it already pushed today, so every push in a day lands on a distinct card — which
-makes the card count *equal* the push count, and the cap exact.
+makes the card count *equal* the push count, and the cap exact. Migration 0025 adds
+`push_resolved_at`: when a session starts or trusted learning is opened after a
+particular push, `check-missed` stamps that push as engaged and stops rediscovering
+it on every later run. A newer push moves `last_pushed_at` past both resolution
+stamps and becomes independently eligible for bookkeeping.
 
 Reintroduce a `push_log` only if a card ever needs to be pushed twice in one day.
 

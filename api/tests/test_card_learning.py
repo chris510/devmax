@@ -30,6 +30,7 @@ from app.routers import sessions as sessions_router
 from app.schemas import DraftUpdate, ScoredAnswerIn
 from app.services import llm, usage
 from app.services.llm import ScoreResult
+from app.services.push import PushDelivery
 from tests.conftest import (
     API_HEADERS,
     CRON_HEADERS,
@@ -506,7 +507,7 @@ async def test_trigger_review_excludes_learning_gated_cards(
 
     async def capture_push(**kwargs):
         sent.append(kwargs)
-        return 1
+        return PushDelivery(sent=1, attempted=1)
 
     monkeypatch.setattr(internal, "send_push", capture_push)
     db.add(
@@ -530,7 +531,7 @@ async def test_trigger_review_skips_a_live_card_and_offers_the_next_due_card(
 
     async def capture_push(**kwargs):
         sent.append(kwargs)
-        return 1
+        return PushDelivery(sent=1, attempted=1)
 
     monkeypatch.setattr(internal, "send_push", capture_push)
     live_card = grounded_card(
@@ -919,7 +920,7 @@ async def test_push_holds_candidate_lock_until_stamp_before_learning_exposure(
     async def paused_push(**_kwargs):
         push_started.set()
         await release_push.wait()
-        return 1
+        return PushDelivery(sent=1, attempted=1)
 
     monkeypatch.setattr(internal, "send_push", paused_push)
 
@@ -994,6 +995,7 @@ async def test_check_missed_reloads_after_concurrent_learning_engagement(
         stored = await verify_db.get(type(card), card.id)
         assert stored.missed_count == 0
         assert stored.missed_counted_at is None
+        assert stored.push_resolved_at == stored.last_pushed_at
 
 
 async def test_learning_after_a_push_counts_as_engagement_not_a_miss(client, db):
@@ -1009,3 +1011,4 @@ async def test_learning_after_a_push_counts_as_engagement_not_a_miss(client, db)
     await db.refresh(card)
     assert card.missed_count == 0
     assert card.missed_counted_at is None
+    assert card.push_resolved_at == card.last_pushed_at

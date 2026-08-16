@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -7,9 +8,20 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import current_user_id
 from app.db import get_session
-from app.models import Settings
+from app.models import Card, Settings
 
 SessionDep = Depends(get_session)
+
+
+async def owned_card(
+    db: AsyncSession, card_id: uuid.UUID, *, for_update: bool = False
+) -> Card | None:
+    statement = select(Card).where(
+        Card.id == card_id, Card.user_id == current_user_id()
+    )
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    return (await db.exec(statement)).first()
 
 
 async def get_settings_row(db: AsyncSession, user_id=None) -> Settings:
@@ -18,7 +30,11 @@ async def get_settings_row(db: AsyncSession, user_id=None) -> Settings:
     if row is None:
         row = Settings(user_id=owner)
         db.add(row)
-        await db.commit()
+        # The caller owns its transaction. Committing a lazy default here can
+        # split a scored-answer transaction after the transcript/card mutations
+        # have been staged but before SM-2 is applied. Flush makes the row usable
+        # without making unrelated dirty ORM state durable.
+        await db.flush()
     return row
 
 

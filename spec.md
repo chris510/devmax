@@ -582,8 +582,10 @@ Behavior:
 - Reject a card whose learning exposure gate has not expired, for scheduled and
   practice sessions alike.
 - If an existing session for this card has status `'open'` or
-  `'awaiting_follow_up'`, return that session instead of creating a new
-  one (this is what makes resume work).
+  `'awaiting_follow_up'` **in the requested scheduled/practice mode**, return that
+  session instead of creating a new one (this is what makes resume work). Reject
+  an opposite-mode request with `409 session_mode_conflict`; silently crossing
+  that boundary would change whether submission moves SM-2.
 - Otherwise generate a question via `llm.generate_question`, create a
   session with `status: 'open'`, return it.
 - Supply the card's trusted answer basis and rubric to question generation.
@@ -599,7 +601,8 @@ Behavior:
   "is_follow_up": false,
   "turn_index": 0,
   "draft_text": "",
-  "resumed": false
+  "resumed": false,
+  "practice": false
 }
 ```
 
@@ -636,6 +639,15 @@ path. Re-attempt and qualitative-coaching turns happen after the session is
 complete and have no server reopen path, so a draft PATCH in those states is
 intentionally a 204 no-op; the client keeps only its contextual local
 crash-recovery copy.
+
+### `POST /sessions/{id}/abandon`
+
+Explicitly changes a live `open` or `awaiting_follow_up` session to `abandoned`
+and records `ended_at`. It preserves the draft and every previously submitted
+turn for recovery, writes no score, and changes no card or SM-2 field. The
+transition is idempotent for an already-abandoned session and rejects a completed
+session. It takes the same card lock as answer submission, so an abandon/submit
+race has one winner rather than scoring an abandoned answer. Returns 204.
 
 ### `POST /sessions/{id}/answers`
 

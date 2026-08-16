@@ -1,9 +1,12 @@
+import hashlib
 import ssl
+import uuid
 from collections.abc import AsyncIterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_settings
@@ -130,6 +133,37 @@ if _url.startswith("sqlite"):
 
 
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def acquire_advisory_xact_lock(
+    db: AsyncSession, resource_id: uuid.UUID, *, namespace: bytes
+) -> bool:
+    """Acquire one namespaced PostgreSQL transaction lock when supported."""
+    bind = db.bind
+    if bind is None or bind.dialect.name != "postgresql":
+        return False
+    digest = hashlib.blake2b(
+        resource_id.bytes,
+        digest_size=8,
+        person=namespace,
+    ).digest()
+    await db.exec(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        params={"key": int.from_bytes(digest, byteorder="big", signed=True)},
+    )
+    return True
+
+
+def sibling_session_factory(
+    db: AsyncSession, *, max_concurrency: int
+) -> tuple[async_sessionmaker[AsyncSession], int]:
+    """Create isolated sessions without over-subscribing a single connection."""
+    bind = db.bind
+    if not isinstance(bind, AsyncEngine):  # pragma: no cover - application sessions bind one
+        raise RuntimeError("parallel database work requires an async engine")
+    factory = async_sessionmaker(bind, class_=AsyncSession, expire_on_commit=False)
+    concurrency = 1 if isinstance(bind.sync_engine.pool, StaticPool) else max_concurrency
+    return factory, concurrency
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, tzinfo
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -20,7 +21,13 @@ from app.models import (
     Session,
     SessionProbe,
 )
-from app.routers.deps import get_settings_row, local_calendar, local_today, now_in
+from app.routers.deps import (
+    get_settings_row,
+    local_calendar,
+    local_today,
+    now_in,
+    owned_card,
+)
 from app.schemas import (
     CardDetail,
     CardGroundingUpdate,
@@ -59,17 +66,6 @@ from app.services.cards import (
 from app.services.scoring_contract import project_card_score, project_session_score
 
 router = APIRouter(tags=["cards"])
-
-
-async def _owned_card(
-    db: AsyncSession, card_id: uuid.UUID, *, for_update: bool = False
-) -> Card | None:
-    statement = select(Card).where(
-        Card.id == card_id, Card.user_id == current_user_id()
-    )
-    if for_update:
-        statement = statement.with_for_update().execution_options(populate_existing=True)
-    return (await db.exec(statement)).first()
 
 
 def _invalid_lineage() -> HTTPException:
@@ -161,7 +157,7 @@ async def _owned_lineage_for_update(
     if card_id not in links:
         return None
     root_id = _lineage_root_id(card_id, links)
-    root = await _owned_card(db, root_id, for_update=True)
+    root = await owned_card(db, root_id, for_update=True)
     if root is None:
         raise _invalid_lineage()
 
@@ -174,7 +170,7 @@ async def _owned_lineage_for_update(
 
     locked = {root_id: root}
     for member_id in sorted(component_ids - {root_id}, key=lambda value: value.bytes):
-        member = await _owned_card(db, member_id, for_update=True)
+        member = await owned_card(db, member_id, for_update=True)
         if member is None:
             raise _invalid_lineage()
         locked[member_id] = member
@@ -451,7 +447,7 @@ async def list_cards(
 
 @router.get("/cards/{card_id}", response_model=CardDetail)
 async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> CardDetail:
-    card = await _owned_card(db, card_id)
+    card = await owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -506,12 +502,11 @@ async def open_learning(
     not. Every successful response counts as a fresh exposure and can only extend
     the existing hold; retrying a lost response is safe in that direction.
     """
-    # Resolve/create the account's settings before taking the card lock. The
-    # settings helper may commit when repairing a missing singleton row, and a
-    # commit after SELECT FOR UPDATE would release the very lock this endpoint
-    # relies on before the exposure is recorded.
+    # Resolve/create the account's settings before taking the card lock. This
+    # keeps singleton repair outside the card's short critical section while the
+    # caller still owns the surrounding transaction.
     settings = await get_settings_row(db)
-    card = await _owned_card(db, card_id, for_update=True)
+    card = await owned_card(db, card_id, for_update=True)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     if card.lifecycle_status != CARD_ACTIVE:
@@ -637,7 +632,7 @@ async def _require_no_live_session(db: AsyncSession, card: Card) -> None:
 async def get_maintenance(
     card_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> CardMaintenance:
-    card = await _owned_card(db, card_id)
+    card = await owned_card(db, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     return _maintenance(card)
@@ -653,7 +648,7 @@ async def update_card_grounding(
     # The same lock closes the session-start race for every maintenance write,
     # not only archive/replace. Authority and the canonical question are scoring
     # inputs and must never change underneath an answer already in progress.
-    card = await _owned_card(db, card_id, for_update=True)
+    card = await owned_card(db, card_id, for_update=True)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
     await _require_no_live_session(db, card)
@@ -744,9 +739,9 @@ async def replace_card(
     body: ReplaceCard,
     db: AsyncSession = Depends(get_session),
 ) -> CardSummary:
-    # Resolve the settings row before taking the card lock. The compatibility
-    # path in `get_settings_row` may create and commit a missing row; doing that
-    # under `FOR UPDATE` would silently release the maintenance/session lock.
+    # Resolve the local calendar before taking the lineage lock. A missing
+    # settings singleton may be created here, outside the lifecycle critical
+    # section, while remaining in this caller-owned transaction.
     today, tz = await local_calendar(db)
     # See `archive_card`: the lineage lock excludes restores/replacements of
     # related cards, and its target-card lock excludes session creation.
@@ -818,7 +813,22 @@ async def replace_card(
         ) from exc
 
     db.add(replacement)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # SQLite cannot honor the row lock above. The one-to-one lineage index
+        # still picks a winner; report that winner as a normal conflict.
+        await db.rollback()
+        current = await owned_card(db, card_id)
+        if current is None or current.replaced_by_card_id is None:
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "newer_replacement_exists",
+                "card_id": str(current.replaced_by_card_id),
+            },
+        ) from None
     archive(card)
     card.replaced_by_card_id = replacement.id
     db.add(card)

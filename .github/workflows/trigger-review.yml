@@ -25,9 +25,16 @@ jobs:
           # no_devices means the phone or APNs is misconfigured and no push will
           # arrive until someone looks. A non-2xx still fails the job through
           # --fail-with-body, which is the real breakage signal now.
-          if [ "$(printf '%s' "$body" | jq -r '.reason // empty')" = "no_devices" ]; then
-            echo "::warning::Nothing delivered — no registered device token, or the \
-          APNs credentials are not configured on the app."
+          reason=$(printf '%s' "$body" | jq -r '.reason // empty')
+          failed_count=$(printf '%s' "$body" | jq -r '.failed_count // 0')
+          no_devices_count=$(printf '%s' "$body" | jq -r '.reasons.no_devices // 0')
+          delivery_failed_count=$(printf '%s' "$body" | jq -r '.reasons.delivery_failed // 0')
+          if [ "$reason" = "no_devices" ] || [ "$reason" = "delivery_failed" ]; then
+            echo "::warning::Nothing delivered — inspect device registration and APNs."
+          elif [ "$no_devices_count" -gt 0 ] || [ "$delivery_failed_count" -gt 0 ]; then
+            echo "::warning::$no_devices_count accounts had no devices and $delivery_failed_count had delivery failures."
+          elif [ "$failed_count" -gt 0 ]; then
+            echo "::warning::$failed_count account review evaluations failed."
           fi
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}

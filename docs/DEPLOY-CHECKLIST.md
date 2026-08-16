@@ -4,7 +4,7 @@
 detailed procedure; this is the running status, the ordering, and the traps that
 cost time. When both disagree, the RUNBOOK is the procedure and this is the state.
 
-Last updated: **2026-08-13**. Live at
+Last updated: **2026-08-16**. Live at
 `https://devmax-production.up.railway.app` (Railway project `devmax`,
 services `devmax` + `Postgres`).
 
@@ -32,6 +32,11 @@ services `devmax` + `Postgres`).
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
 | ✅ | **First push delivered, tapped, and a session opened** | done |
+| ☐ | Deploy the integrated adaptive-study-pilot + backend-hardening release and confirm `/ready` reports the single Alembic head `0025` | local code state only; production and participant launch unverified |
+| ☐ | Verify Railway backup/PITR retention and complete the isolated restore drill in RUNBOOK §Production signals, limits, and recovery | no production evidence recorded |
+| ☐ | Record provider-enforced Anthropic/OpenAI spending ceilings and test their 75%/90% alerts | external controls unverified |
+| ☐ | Deliver an APNs **production** push to a TestFlight build | sandbox path is verified; production token path is not |
+| ☐ | Re-run the generic Study Plan importer live after the post-fix changes | unit-tested; prior rerun was blocked by Anthropic credit |
 | ☐ | `reattempt_effort` sweep | independent — can happen any time |
 
 ---
@@ -72,7 +77,7 @@ registration are ready. Keep the GitHub trigger workflow as a manual fallback.
 
 **2. Railway: project, Postgres, variables, deploy, domain.** (RUNBOOK §3.)
 Root directory is `api`. `preDeployCommand` is `alembic upgrade head`; healthcheck is
-`/health`. `DATABASE_URL` must be the **private** `${{Postgres.DATABASE_URL}}`
+`/ready`. `DATABASE_URL` must be the **private** `${{Postgres.DATABASE_URL}}`
 reference, rewritten to start `postgresql+asyncpg://`.
 
 **3. Two GitHub repo secrets**, once the domain exists: `API_BASE_URL` (with
@@ -200,15 +205,19 @@ not the suite. Full reproduction recipe in RUNBOOK §3.
 
 ```sh
 B=https://<your-app>.up.railway.app
-curl -sS $B/health                                        # {"status":"ok"}
+curl -sS $B/live                                          # {"status":"alive"}
+curl -sS $B/ready                    # ready, schema_revision=0025
+curl -sS $B/health                   # status plus consent-policy metadata
 curl -sS -o /dev/null -w '%{http_code}\n' $B/cards/due     # 401
 curl -sS -H "X-API-Key: $API_KEY" $B/cards/due             # [] before seeding
 curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" $B/internal/trigger-review
 ```
 
-`/health` passing proves asyncpg, greenlet, the private-network address, and the
-schema all work in one call. Before APNs variables exist, the deploy log should show
-an `APNS_PRIVATE_KEY is unset` warning and no tracebacks.
+`/live` is process-only. `/ready` proves database connectivity and refuses traffic
+unless the single Alembic revision is exactly `0025`; this is the deployment gate.
+`/health` checks the database and reports consent-policy/enforcement state, but it
+does not verify the schema head. Before APNs variables exist, the deploy log should
+show an `APNS_PRIVATE_KEY is unset` warning and no tracebacks.
 
 ---
 

@@ -554,8 +554,8 @@ async def test_retire_removes_the_sessions_that_belonged_to_the_card(db, manifes
     db.add(doomed)
     db.add(kept)
     await db.commit()
-    db.add(Session(card_id=doomed.id, question_asked="q1"))
-    db.add(Session(card_id=doomed.id, question_asked="q2"))
+    db.add(Session(card_id=doomed.id, question_asked="q1", status="complete"))
+    db.add(Session(card_id=doomed.id, question_asked="q2", status="complete"))
     db.add(Session(card_id=kept.id, question_asked="q3"))
     await db.commit()
 

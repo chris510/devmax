@@ -65,6 +65,7 @@ CARD_COLUMNS = (
     "last_learning_exposure_at",
     "recall_not_before_at",
     "missed_counted_at",
+    "push_resolved_at",
     "created_at",
     "updated_at",
 )

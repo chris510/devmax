@@ -390,6 +390,13 @@ re-opened a window that had already been satisfied. Migration 0004 adds
 `missed_counted_at < last_pushed_at` reads exactly as "this push is still
 uncounted".
 
+Migration 0025 adds the parallel `push_resolved_at` watermark for pushes that
+were engaged rather than missed. Opening a session or trusted learning after a
+push stamps that push's `last_pushed_at`; `check-missed` excludes it on every
+later run without clearing delivery evidence or pretending it was counted
+missed. Both watermarks name the push they resolve, not the time the resolution
+job ran, so a later push naturally becomes eligible again.
+
 **One bug found while doing it.** SQLite's `DATETIME` bind processor keeps a
 tz-aware value's wall-clock fields and drops the offset, so the pre-existing
 `last_pushed_at >= day_start` comparison bound a Pacific midnight against

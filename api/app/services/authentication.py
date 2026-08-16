@@ -17,6 +17,7 @@ import httpx
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
 from jwt import PyJWKClient
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -37,6 +38,8 @@ APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
 APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke"
 NONCE_TTL = timedelta(minutes=10)
+USED_NONCE_RETENTION = timedelta(minutes=5)
+AUTH_CLEANUP_BATCH_SIZE = 100
 APPLE_JWK_CLIENT = PyJWKClient(
     APPLE_JWKS_URL,
     cache_jwk_set=True,
@@ -67,6 +70,7 @@ class AppleCodeExchange:
 
 @dataclass(frozen=True)
 class AppleAccountEvent:
+    jti: str
     event_type: str
     subject: str
     occurred_at: datetime
@@ -110,6 +114,7 @@ def _configured(config: AppConfig) -> bool:
 
 
 async def issue_nonce(db: AsyncSession) -> str:
+    await cleanup_auth_rows(db)
     nonce = secrets.token_urlsafe(32)
     db.add(AuthNonce(nonce_hash=token_hash(nonce), expires_at=_now() + NONCE_TTL))
     await db.commit()
@@ -186,13 +191,16 @@ async def verify_apple_server_notification(
     except (jwt.PyJWTError, OSError) as exc:
         raise AuthenticationError from exc
     events = claims.get("events")
+    jti = claims.get("jti")
     if not isinstance(events, dict):
         raise AuthenticationError
     event_type = events.get("type")
     subject = events.get("sub")
     event_time = events.get("event_time")
     if (
-        not isinstance(event_type, str)
+        not isinstance(jti, str)
+        or not jti
+        or not isinstance(event_type, str)
         or not isinstance(subject, str)
         or not subject
         or not isinstance(event_time, int)
@@ -210,7 +218,10 @@ async def verify_apple_server_notification(
     except (OverflowError, OSError, ValueError) as exc:
         raise AuthenticationError from exc
     return AppleAccountEvent(
-        event_type=event_type, subject=subject, occurred_at=occurred_at
+        jti=jti,
+        event_type=event_type,
+        subject=subject,
+        occurred_at=occurred_at,
     )
 
 
@@ -310,6 +321,27 @@ def decrypt_apple_token(token: str, config: AppConfig) -> str:
         raise AuthenticationUnavailable from exc
 
 
+def _apply_apple_authorization(
+    identity: AppleIdentity,
+    *,
+    claims: AppleClaims,
+    display_name: str | None,
+    exchange: AppleCodeExchange,
+    config: AppConfig,
+) -> None:
+    if claims.email:
+        identity.email = claims.email
+    if display_name and display_name.strip():
+        identity.display_name = display_name.strip()[:200]
+    if exchange.refresh_token:
+        identity.apple_refresh_token = _encrypt_apple_token(
+            exchange.refresh_token, config
+        )
+    identity.authorization_revoked_at = None
+    identity.last_apple_authorized_at = _now().replace(microsecond=0)
+    identity.updated_at = _now()
+
+
 async def issue_session(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -318,6 +350,7 @@ async def issue_session(
     family_id: uuid.UUID | None = None,
     rotated_from_id: uuid.UUID | None = None,
 ) -> TokenPair:
+    await cleanup_auth_rows(db)
     access = secrets.token_urlsafe(32)
     refresh = secrets.token_urlsafe(48)
     now = _now()
@@ -379,16 +412,13 @@ async def sign_in_with_apple(
             if user is None or user.status != USER_ACTIVE:
                 raise AuthenticationError
 
-        if claims.email:
-            identity.email = claims.email
-        if display_name and display_name.strip():
-            identity.display_name = display_name.strip()[:200]
-        if exchange.refresh_token:
-            identity.apple_refresh_token = _encrypt_apple_token(exchange.refresh_token, config)
-        authorized_at = _now()
-        identity.authorization_revoked_at = None
-        identity.last_apple_event_at = authorized_at
-        identity.updated_at = authorized_at
+        _apply_apple_authorization(
+            identity,
+            claims=claims,
+            display_name=display_name,
+            exchange=exchange,
+            config=config,
+        )
         db.add(identity)
 
         pair = await issue_session(db, user.id, config)
@@ -465,16 +495,13 @@ async def claim_founder_with_apple(
         raise AuthenticationError
     if founder_identity is None and exchange.refresh_token is None:
         raise AuthenticationError
-    if claims.email:
-        identity.email = claims.email
-    if display_name and display_name.strip():
-        identity.display_name = display_name.strip()[:200]
-    if exchange.refresh_token:
-        identity.apple_refresh_token = _encrypt_apple_token(exchange.refresh_token, config)
-    authorized_at = _now()
-    identity.authorization_revoked_at = None
-    identity.last_apple_event_at = authorized_at
-    identity.updated_at = authorized_at
+    _apply_apple_authorization(
+        identity,
+        claims=claims,
+        display_name=display_name,
+        exchange=exchange,
+        config=config,
+    )
     db.add(identity)
 
     try:
@@ -565,3 +592,59 @@ async def revoke_access_token(db: AsyncSession, access_token: str) -> None:
         row.updated_at = _now()
         db.add(row)
         await db.commit()
+
+
+async def cleanup_auth_rows(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    batch_size: int = AUTH_CLEANUP_BATCH_SIZE,
+) -> tuple[int, int]:
+    """Delete bounded, no-longer-security-relevant authentication rows.
+
+    Used nonces remain briefly for operational inspection; expired nonces can
+    go immediately. A revoked/rotated session is retained until *both* of its
+    credentials have expired so refresh-token replay can still revoke a live
+    replacement family during the original token's validity window.
+
+    Cleanup is opportunistic on nonce and session issuance. Each table has an
+    independent cap so a nonce flood cannot starve expired-session retention.
+    """
+
+    if batch_size < 1:
+        return 0, 0
+    cutoff = now or _now()
+    used_cutoff = cutoff - USED_NONCE_RETENTION
+    nonces = (
+        await db.exec(
+            select(AuthNonce)
+            .where(
+                or_(
+                    AuthNonce.expires_at <= cutoff,
+                    col(AuthNonce.used_at) <= used_cutoff,
+                )
+            )
+            .order_by(AuthNonce.expires_at, AuthNonce.id)
+            .limit(batch_size)
+        )
+    ).all()
+    for nonce in nonces:
+        await db.delete(nonce)
+
+    sessions = (
+        await db.exec(
+            select(AuthSession)
+            .where(
+                and_(
+                    AuthSession.access_expires_at <= cutoff,
+                    AuthSession.refresh_expires_at <= cutoff,
+                )
+            )
+            .order_by(AuthSession.refresh_expires_at, AuthSession.id)
+            .limit(batch_size)
+        )
+    ).all()
+    for session in sessions:
+        await db.delete(session)
+    await db.flush()
+    return len(nonces), len(sessions)

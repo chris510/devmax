@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import exists, func, update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -13,6 +14,7 @@ from app.db import get_session
 from app.models import (
     CARD_ACTIVE,
     LIVE_STATUSES,
+    STATUS_ABANDONED,
     STATUS_AWAITING_FOLLOW_UP,
     STATUS_COMPLETE,
     STATUS_OPEN,
@@ -20,7 +22,7 @@ from app.models import (
     Session,
     SessionProbe,
 )
-from app.routers.deps import as_utc, local_today
+from app.routers.deps import as_utc, local_today, owned_card
 from app.schemas import (
     AnswerIn,
     CoachingOut,
@@ -384,7 +386,30 @@ async def _resumed(db: AsyncSession, existing: Session) -> SessionStart:
         turn_index=turn_index,
         draft_text=existing.draft_text,
         resumed=True,
+        practice=existing.practice,
     )
+
+
+async def _resume_or_conflict(
+    db: AsyncSession, existing: Session, requested_practice: bool
+) -> SessionStart:
+    """Resume only when the caller asked for the session's frozen mode.
+
+    Practice and scheduled reviews write the same mastery signal but have
+    opposite scheduling semantics. Silently returning a scheduled session to a
+    practice caller (or vice versa) makes the later answer do something the
+    caller did not request.
+    """
+    if existing.practice != requested_practice:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "session_mode_conflict",
+                "session_id": str(existing.id),
+                "practice": existing.practice,
+            },
+        )
+    return await _resumed(db, existing)
 
 
 async def _live_session(db: AsyncSession, card_id: uuid.UUID) -> Session | None:
@@ -427,15 +452,6 @@ def _question_generation_snapshot(
         card.answer_basis,
         tuple(sorted(card.answer_rubric.items())),
     )
-
-
-async def _owned_card(
-    db: AsyncSession, card_id: uuid.UUID, *, for_update: bool = False
-) -> Card | None:
-    statement = select(Card).where(Card.id == card_id, Card.user_id == current_user_id())
-    if for_update:
-        statement = statement.with_for_update().execution_options(populate_existing=True)
-    return (await db.exec(statement)).first()
 
 
 async def _owned_session(
@@ -518,7 +534,7 @@ async def start_session(
     """
     stale_generations = 0
     while True:
-        card = await _owned_card(db, card_id)
+        card = await owned_card(db, card_id)
         if card is None:
             raise HTTPException(status_code=404, detail="card not found")
         if card.lifecycle_status != CARD_ACTIVE:
@@ -529,7 +545,7 @@ async def start_session(
         if existing is not None:
             # Returning the live session instead of creating a new one is what
             # makes resume work.
-            return await _resumed(db, existing)
+            return await _resume_or_conflict(db, existing, practice)
 
         question = card.canonical_question
         generated_question: str | None = None
@@ -547,7 +563,7 @@ async def start_session(
             _require_recall_available(card)
             existing = await _live_session(db, card_id)
             if existing is not None:
-                resumed = await _resumed(db, existing)
+                resumed = await _resume_or_conflict(db, existing, practice)
                 await db.rollback()
                 return resumed
 
@@ -573,7 +589,7 @@ async def start_session(
         # Serialize the final eligibility check with Learn and maintenance.
         # Provider work stays outside the card lock; if any generation input
         # changed meanwhile, its result is accounted for but discarded.
-        card = await _owned_card(db, card_id, for_update=True)
+        card = await owned_card(db, card_id, for_update=True)
         if card is None:  # pragma: no cover - the initial owned read found it
             raise HTTPException(status_code=404, detail="card not found")
         if card.lifecycle_status != CARD_ACTIVE:
@@ -584,7 +600,7 @@ async def start_session(
         # question. Resume its session rather than creating a second one.
         existing = await _live_session(db, card_id)
         if existing is not None:
-            return await _resumed(db, existing)
+            return await _resume_or_conflict(db, existing, practice)
 
         if (
             not card.canonical_question
@@ -631,7 +647,17 @@ async def start_session(
         scoring_route=frozen_scoring_route.as_json(),
     )
     db.add(session)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # SQLite has no row-level FOR UPDATE. The partial unique index still
+        # chooses one live session; turn a lost insert race into the same
+        # resume/mode-conflict contract instead of leaking a 500.
+        await db.rollback()
+        winner = await _live_session(db, card_id)
+        if winner is None:
+            raise
+        return await _resume_or_conflict(db, winner, practice)
     await db.refresh(session)
 
     return SessionStart(
@@ -641,6 +667,7 @@ async def start_session(
         turn_index=0,
         draft_text="",
         resumed=False,
+        practice=session.practice,
     )
 
 
@@ -685,6 +712,40 @@ async def save_draft(
     return Response(status_code=204)
 
 
+@router.post("/sessions/{session_id}/abandon", status_code=204)
+async def abandon_session(
+    session_id: uuid.UUID, db: AsyncSession = Depends(get_session)
+) -> Response:
+    """Explicitly end a live answer without scoring or moving its card.
+
+    The draft remains durable as evidence for recovery/support. Abandonment is
+    idempotent, but a completed session cannot be retroactively relabeled. The
+    card lock serializes this transition with answer submission and maintenance.
+    """
+    session = await _owned_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status == STATUS_ABANDONED:
+        return Response(status_code=204)
+
+    card = await owned_card(db, session.card_id, for_update=True)
+    if card is None:  # pragma: no cover — FK guarantees this
+        raise HTTPException(status_code=404, detail="card not found")
+    await db.refresh(session)
+    if session.status == STATUS_ABANDONED:
+        return Response(status_code=204)
+    if session.status == STATUS_COMPLETE:
+        raise HTTPException(status_code=409, detail="completed sessions cannot be abandoned")
+    if session.status not in LIVE_STATUSES:  # pragma: no cover — constrained in storage
+        raise HTTPException(status_code=409, detail="session is not live")
+
+    session.status = STATUS_ABANDONED
+    session.ended_at = datetime.now(UTC)
+    db.add(session)
+    await db.commit()
+    return Response(status_code=204)
+
+
 @router.post("/sessions/{session_id}/answers", response_model=FollowUpOut | CompleteOut)
 async def submit_answer(
     session_id: uuid.UUID, body: ScoredAnswerIn, db: AsyncSession = Depends(get_session)
@@ -712,7 +773,7 @@ async def submit_answer(
         # Reconstruct only while this is still the card's latest review. A later
         # review changes the schedule fields carried by `CompleteOut`, so replaying
         # the old turn after that point could not return the committed response.
-        card = await _owned_card(db, session.card_id, for_update=True)
+        card = await owned_card(db, session.card_id, for_update=True)
         if card is None:  # pragma: no cover — FK guarantees this
             raise HTTPException(status_code=404, detail="card not found")
         await db.refresh(session)
@@ -727,6 +788,8 @@ async def submit_answer(
             return _complete_response(session, card)
     if session.status == STATUS_COMPLETE:
         raise HTTPException(status_code=409, detail="session already complete")
+    if session.status not in LIVE_STATUSES:
+        raise HTTPException(status_code=409, detail="session is abandoned")
     user_id = current_user_id()
     settings = get_settings()
     # Provider work and account deletion share an account -> card lock order.
@@ -735,7 +798,7 @@ async def submit_answer(
     await ai_consent.require_ai_processing(db, user_id, settings)
     observed_status = session.status
 
-    card = await _owned_card(db, session.card_id, for_update=True)
+    card = await owned_card(db, session.card_id, for_update=True)
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     # The card lock serializes reviews without blocking PATCH /draft, which only
@@ -760,8 +823,13 @@ async def submit_answer(
         return replay
     if session.status != observed_status:
         raise HTTPException(status_code=409, detail="session advanced during submission")
-    if session.status == STATUS_COMPLETE:
-        raise HTTPException(status_code=409, detail="session already complete")
+    if session.status not in LIVE_STATUSES:
+        detail = (
+            "session already complete"
+            if session.status == STATUS_COMPLETE
+            else "session is abandoned"
+        )
+        raise HTTPException(status_code=409, detail=detail)
 
     pending = _pending_probe(session, probes)
     if session.status == STATUS_AWAITING_FOLLOW_UP and pending is None:  # pragma: no cover
@@ -1077,7 +1145,7 @@ async def submit_reattempt(
     ):
         # A committed turn needs no provider or consent check. Lock the card only
         # to prove its mastery summary has not since been replaced by a new review.
-        card = await _owned_card(db, session.card_id, for_update=True)
+        card = await owned_card(db, session.card_id, for_update=True)
         if card is None:  # pragma: no cover — FK guarantees this
             raise HTTPException(status_code=404, detail="card not found")
         await db.refresh(session)
@@ -1094,7 +1162,7 @@ async def submit_reattempt(
     user_id = current_user_id()
     settings = get_settings()
     await ai_consent.require_ai_processing(db, user_id, settings)
-    card = await _owned_card(db, session.card_id, for_update=True)
+    card = await owned_card(db, session.card_id, for_update=True)
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     await db.refresh(session)
@@ -1185,7 +1253,7 @@ async def submit_coaching(
     # the same card, so two simultaneous submissions cannot select the same
     # alternation focus. It deliberately does not lock the session row: draft
     # persistence must stay cheap while the model is running.
-    card = await _owned_card(db, session.card_id, for_update=True)
+    card = await owned_card(db, session.card_id, for_update=True)
     if card is None:  # pragma: no cover — FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     await db.refresh(session)

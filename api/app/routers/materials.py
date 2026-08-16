@@ -81,11 +81,12 @@ from app.schemas import (
     MaterialTopicOut,
     MaterialTopicPreviewOut,
 )
-from app.services import llm, materials, second_brain, study_plan, usage
+from app.services import llm, materials, second_brain, storage, study_plan, usage
 from app.services.card_lifecycle import (
     Grounding,
     GroundingError,
     build_grounded_card,
+    lock_topic_creation,
 )
 from app.services.cards import learning_exposure_boundary
 from app.services.scoring_contract import project_card_score
@@ -1091,16 +1092,20 @@ async def start_import(
     db: AsyncSession = Depends(get_session),
 ) -> MaterialImportOut:
     enrollment = await _require_pilot_compatible_build(request, db)
+    user_id = current_user_id()
     previous = None
     if body.previous_version_id:
         previous = await _owned_source(db, body.previous_version_id)
+    await storage.reserve_material_source(
+        db, user_id=user_id, characters=len(body.source_text)
+    )
     source = MaterialSource(
-        user_id=current_user_id(),
+        user_id=user_id,
         lineage_id=previous.lineage_id if previous else uuid.uuid4(),
         previous_version_id=previous.id if previous else None,
         version=previous.version + 1 if previous else 1,
         kind=body.kind,
-        title=body.title.strip(),
+        title=body.title,
         source_text=body.source_text,
         source_url=body.source_url,
         content_provenance=body.content_provenance,
@@ -2047,7 +2052,9 @@ async def confirm_topics(
                     ],
                 },
             )
-    existing = await study_plan.normalized_card_index(db, current_user_id())
+    user_id = current_user_id()
+    await lock_topic_creation(db, user_id)
+    existing = await study_plan.normalized_card_index(db, user_id)
     normalized = [study_plan.normalize_topic(row.topic) for row in rows]
     if len(set(normalized)) != len(normalized) or any(key in existing for key in normalized):
         raise HTTPException(status_code=409, detail="duplicate topic")
@@ -2387,17 +2394,25 @@ async def lesson_artifacts(
 async def _create_manual(
     db: AsyncSession, title: str, topics: list[ManualTopicIn], kind: str
 ) -> MaterialConfirmOut:
+    user_id = current_user_id()
+    source_text = "\n\n".join(
+        f"{item.topic}\n{item.answer_anchor}" for item in topics
+    )
+    await storage.reserve_material_source(
+        db, user_id=user_id, characters=len(source_text)
+    )
     source = MaterialSource(
-        user_id=current_user_id(),
+        user_id=user_id,
         kind=kind,
         title=title,
-        source_text="\n\n".join(f"{item.topic}\n{item.answer_anchor}" for item in topics),
+        source_text=source_text,
         status=SOURCE_CONFIRMED,
     )
     db.add(source)
     await db.flush()
     today = await local_today(db)
-    existing = await study_plan.normalized_card_index(db, current_user_id())
+    await lock_topic_creation(db, user_id)
+    existing = await study_plan.normalized_card_index(db, user_id)
     keys = [study_plan.normalize_topic(item.topic) for item in topics]
     if len(keys) != len(set(keys)) or any(key in existing for key in keys):
         raise HTTPException(status_code=409, detail="duplicate topic")
@@ -2406,12 +2421,12 @@ async def _create_manual(
         proposal = MaterialTopicProposal(
             source_id=source.id,
             position=position,
-            topic=item.topic.strip(),
-            answer_anchor=item.answer_anchor.strip(),
+            topic=item.topic,
+            answer_anchor=item.answer_anchor,
             status=PROPOSAL_CONFIRMED,
         )
         card = Card(
-            user_id=current_user_id(),
+            user_id=user_id,
             topic=proposal.topic,
             category="Devmax collection" if kind == "collection" else "Manual topic",
             delivery_mode=DELIVERY_CONVERSATIONAL,
@@ -2464,10 +2479,3 @@ async def delete_import(source_id: uuid.UUID, db: AsyncSession = Depends(get_ses
     ):
         raise HTTPException(status_code=404, detail="material not found")
     return Response(status_code=204)
-
-
-async def schedule_pending_imports() -> list[asyncio.Task[None]]:
-    return [
-        asyncio.create_task(materials.resume_import(source_id), name=f"material-{source_id}")
-        for source_id in await materials.resume_imports()
-    ]

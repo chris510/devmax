@@ -592,6 +592,13 @@ async def _upgrade_existing_plan(
             "a curriculum upgrade may not add or remove phases or weeks in place"
         )
 
+    base_revision = await sp.claim_plan_revision(db, plan)
+    if base_revision is None:
+        raise PlanSeedError(
+            "the plan changed while the curriculum upgrade was being prepared; "
+            "reload and try again; nothing was updated"
+        )
+
     for entry in preview["phases"]:
         phase = phases[int(entry["index"])]
         phase.full_title = str(entry["full_title"])
@@ -719,7 +726,6 @@ async def _upgrade_existing_plan(
             )
         )
 
-    base_revision = plan.revision
     previous_start_date = plan.start_date
     plan.title = str(preview["title"])
     plan.subject = str(preview["subject"])
@@ -729,7 +735,6 @@ async def _upgrade_existing_plan(
     if legacy_upgrade:
         plan.start_date = start_date
     plan.forecast_end_plan_week = max(target_week_indexes)
-    plan.revision += 1
     plan.updated_at = now
     db.add(plan)
     db.add(

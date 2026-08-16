@@ -15,6 +15,7 @@ import asyncio
 import logging
 import uuid
 from contextlib import suppress
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -47,6 +48,7 @@ from app.models import (
     ITEM_REMOVED,
     ITEM_RETRIEVE,
     MODE_FIXED,
+    ORIGIN_GENERATED,
     PLAN_ACTIVE,
     PLAN_ARCHIVED,
     PLAN_COMPLETED,
@@ -109,7 +111,7 @@ from app.schemas import (
     WeekPlacementOut,
     WeekSection,
 )
-from app.services import guide_import, llm, materials, usage
+from app.services import guide_import, llm, materials, storage, usage
 from app.services import study_plan as sp
 from app.services import study_plan_import as spi
 from app.services import study_plan_scheduler as sched
@@ -119,6 +121,7 @@ from app.services.card_lifecycle import (
     active_card_filter,
     build_grounded_card,
     clean_rubric,
+    lock_topic_creation,
     storage_rubric,
 )
 from app.services.cards import recall_is_available
@@ -199,6 +202,29 @@ def _require_current(plan: StudyPlan, base_plan_revision: int) -> None:
     """
     if plan.revision != base_plan_revision:
         raise HTTPException(status_code=409, detail="plan has changed since this proposal")
+
+
+async def _claim_plan_mutation(
+    db: AsyncSession,
+    plan: StudyPlan,
+    *,
+    expected_revision: int | None = None,
+    conflict_detail: str = "plan has changed since this proposal",
+) -> int:
+    """Claim one revision before staging a material plan write.
+
+    The plan-row lock used by callers is the production serialization boundary;
+    the conditional revision update is the SQLite/cross-database backstop.
+    """
+    base_revision = await sp.claim_plan_revision(
+        db,
+        plan,
+        expected_revision=expected_revision,
+    )
+    if base_revision is None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=conflict_detail)
+    return base_revision
 
 
 async def _fresh_completion_keys_for_plan(
@@ -682,15 +708,23 @@ async def _run_import(
         await db.refresh(draft)
         return draft
     except Exception as exc:
-        detail = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        logging.getLogger(__name__).error(
+            "study-plan preview failed draft_id=%s type=%s",
+            draft_id,
+            type(exc).__name__,
+        )
         await _store_preview_failure(
             db,
             draft_id=draft_id,
             user_id=user_id,
             run_id=run_id,
-            error=detail or "preview import failed",
+            error="Preview import failed. Retry to continue.",
         )
-        raise
+        if isinstance(exc, HTTPException):
+            raise
+        if isinstance(exc, llm.LLMError):
+            raise
+        raise HTTPException(status_code=503, detail="preview_import_failed") from exc
     finally:
         if not heartbeat.done():
             heartbeat.cancel()
@@ -719,6 +753,9 @@ async def preview_guide(
     if errors:
         raise HTTPException(status_code=422, detail="; ".join(errors))
 
+    await storage.reserve_study_guide_draft(
+        db, user_id=current_user_id(), characters=len(body.guide_text)
+    )
     draft = StudyPlanGuideDraft(
         user_id=current_user_id(),
         guide_text=body.guide_text,
@@ -835,8 +872,44 @@ async def edit_preview(
         raise HTTPException(status_code=409, detail="draft has no import to edit")
 
     raw = dict(draft.raw_response)
+    raw_items = [item for item in raw.get("items", []) if isinstance(item, dict)]
+    item_keys = {
+        str(item.get("key", "")).strip()
+        for item in raw_items
+        if str(item.get("key", "")).strip()
+    }
+    generated_retrieval_keys = {
+        str(item.get("key", "")).strip()
+        for item in raw_items
+        if item.get("type") == ITEM_RETRIEVE
+        and item.get("origin") == ORIGIN_GENERATED
+        and str(item.get("key", "")).strip()
+    }
+    dependency_keys = {
+        f"{dependency.get('prerequisite_key')}->{dependency.get('dependent_key')}"
+        for dependency in raw.get("dependencies", [])
+        if isinstance(dependency, dict)
+        and dependency.get("prerequisite_key")
+        and dependency.get("dependent_key")
+    }
+    overview_keys = {
+        f"{collection[:-1]}-{row.get('index')}"
+        for collection in ("phases", "weeks")
+        for row in raw.get(collection, [])
+        if isinstance(row, dict) and row.get("index") is not None
+    }
+
+    def require_known_keys(values, allowed: set[str], *, field: str) -> None:
+        if set(values) - allowed:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_preview_edit", "field": field},
+            )
+
+    require_known_keys(body.item_estimates, item_keys, field="item_estimates")
+    require_known_keys(body.overview_titles, overview_keys, field="overview_titles")
     if body.item_estimates:
-        items = [dict(i) for i in raw.get("items", [])]
+        items = [dict(item) for item in raw_items]
         for item in items:
             new_estimate = body.item_estimates.get(item.get("key", ""))
             if new_estimate:
@@ -856,16 +929,29 @@ async def edit_preview(
 
     preview = dict(draft.preview or {})
     resolutions = dict(preview.get("resolutions", {}))
-    for field_name in (
-        "estimates_reviewed",
-        "retrieval_approved",
-        "retrieval_rejected",
-        "dependencies_confirmed",
-    ):
+    resolution_domains = {
+        "estimates_reviewed": item_keys,
+        "retrieval_approved": generated_retrieval_keys,
+        "retrieval_rejected": generated_retrieval_keys,
+        "dependencies_confirmed": dependency_keys,
+    }
+    for field_name, allowed in resolution_domains.items():
         value = getattr(body, field_name)
+        require_known_keys(value or (), allowed, field=field_name)
+        # Older rows may predate these domain checks. Revalidation keeps only
+        # decisions tied to the immutable import graph, so arbitrary stale keys
+        # cannot remain as a cumulative JSON-storage side channel.
+        existing = set(resolutions.get(field_name, [])) & allowed
         if value is not None:
-            existing = set(resolutions.get(field_name, []))
-            resolutions[field_name] = sorted(existing | set(value))
+            existing.update(value)
+        resolutions[field_name] = sorted(existing)
+    if set(resolutions["retrieval_approved"]) & set(
+        resolutions["retrieval_rejected"]
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_preview_edit", "field": "retrieval_decision"},
+        )
     if body.omissions_acknowledged is not None:
         resolutions["omissions_acknowledged"] = body.omissions_acknowledged
     preview["resolutions"] = resolutions
@@ -886,6 +972,10 @@ async def create_plan(body: PlanCreate, db: AsyncSession = Depends(get_session))
         raise HTTPException(status_code=409, detail="draft is not ready")
     if not all(c.get("status") == "ok" for c in (draft.checks or [])):
         raise HTTPException(status_code=409, detail="draft has unresolved checks")
+
+    await storage.reserve_study_plan(
+        db, user_id=current_user_id(), characters=len(draft.guide_text)
+    )
 
     rows = spi.build_plan_rows(draft.preview, start_date=draft.start_date)
     plan: StudyPlan = rows["plan"]
@@ -1475,7 +1565,7 @@ async def preview_replan(
 async def apply_replan(
     plan_id: uuid.UUID, body: ApplyReplan, db: AsyncSession = Depends(get_session)
 ) -> ProposalOut:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     _require_current(graph.plan, body.base_plan_revision)
     kwargs = _replan_kwargs(body)
     proposal = sp.build_proposal_for(graph, **kwargs)
@@ -1483,6 +1573,11 @@ async def apply_replan(
         raise HTTPException(status_code=409, detail="proposal does not validate")
 
     headline, text = _replan_copy(proposal)
+    base_revision = await _claim_plan_mutation(
+        db,
+        graph.plan,
+        expected_revision=body.base_plan_revision,
+    )
     for item_id in body.deferred_item_ids:
         item = graph.item_by_id.get(item_id)
         if item is not None and item.status == ITEM_REMOVED:
@@ -1496,6 +1591,7 @@ async def apply_replan(
         db,
         graph,
         proposal,
+        base_plan_revision=base_revision,
         kind=REVISION_REPLAN,
         summary=headline,
         capacity_overrides=kwargs["capacity_overrides"],
@@ -1525,7 +1621,7 @@ async def update_capacity(
     validity and writes nothing — the user confirms it through the replan path,
     which is the same code with an explicit confirmation in front of it.
     """
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     _require_current(graph.plan, body.base_plan_revision)
     if index not in graph.week_by_index:
         raise HTTPException(status_code=404, detail="week not found")
@@ -1536,10 +1632,16 @@ async def update_capacity(
 
     if proposal.valid and not proposal.moves:
         effective = body.override_capacity_minutes or graph.plan.default_weekly_capacity_minutes
+        base_revision = await _claim_plan_mutation(
+            db,
+            graph.plan,
+            expected_revision=body.base_plan_revision,
+        )
         sp.apply_proposal(
             db,
             graph,
             proposal,
+            base_plan_revision=base_revision,
             kind=REVISION_CAPACITY,
             summary=f"Week {index} capacity set to {sched.format_hours(effective)}",
             capacity_overrides=overrides,
@@ -1659,21 +1761,46 @@ async def save_practice_debrief_draft(
     if not _debrief_eligible(plan.subject_slug, item):
         raise HTTPException(status_code=409, detail="practice debrief is not available")
 
-    row = await _debrief_for(db, item_id)
-    if row is None:
+    for _attempt in range(3):
+        now = _now()
+        saved = await db.exec(
+            update(StudyPlanPracticeDebrief)
+            .where(
+                StudyPlanPracticeDebrief.plan_id == plan_id,
+                StudyPlanPracticeDebrief.plan_item_id == item_id,
+                StudyPlanPracticeDebrief.submitted_at.is_(None),
+            )
+            .values(draft_text=body.text, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if saved.rowcount == 1:
+            await db.commit()
+            row = await _debrief_for(db, item_id)
+            if row is None:  # pragma: no cover - protected by the item unique index
+                raise RuntimeError("practice debrief draft disappeared")
+            return _debrief_response(row)
+
+        row = await _debrief_for(db, item_id)
+        if row is not None and row.submitted_at is not None:
+            raise HTTPException(status_code=409, detail="practice debrief is already submitted")
+        if row is not None:
+            await db.rollback()
+            continue
+
         row = StudyPlanPracticeDebrief(
             plan_id=plan_id,
             plan_item_id=item_id,
             draft_text=body.text,
         )
-    elif row.submitted_at is not None:
-        raise HTTPException(status_code=409, detail="practice debrief is already submitted")
-    else:
-        row.draft_text = body.text
-        row.updated_at = _now()
-    db.add(row)
-    await db.commit()
-    return _debrief_response(row)
+        db.add(row)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            continue
+        return _debrief_response(row)
+
+    raise HTTPException(status_code=409, detail="practice debrief changed; try again")
 
 
 @router.post(
@@ -1686,36 +1813,89 @@ async def submit_practice_debrief(
     body: PracticeDebriefSubmitIn,
     db: AsyncSession = Depends(get_session),
 ) -> PracticeDebriefOut:
-    """Commit one unscored debrief. It never touches plan or review state."""
+    """Commit one unscored debrief. It never touches plan or review state.
+
+    The conditional update is the immutability boundary for an existing draft:
+    once one writer sets ``submitted_at``, every later writer observes rowcount
+    zero and can only replay the exact text. The unique item index is the insert
+    boundary when two first submissions race; the loser reloads the winner and
+    applies the same replay rule.
+    """
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="debrief text is empty")
     plan, item = await _debrief_context(db, plan_id, item_id)
     if not _debrief_eligible(plan.subject_slug, item):
         raise HTTPException(status_code=409, detail="practice debrief is not available")
 
-    row = await _debrief_for(db, item_id)
-    if row is not None and row.submitted_at is not None:
-        if row.text != body.text:
-            raise HTTPException(status_code=409, detail="practice debrief is already submitted")
-        return await _debrief_out(db, row)
-
-    now = _now()
-    if row is None:
-        row = StudyPlanPracticeDebrief(
-            plan_id=plan_id,
-            plan_item_id=item_id,
-            draft_text=body.text,
-            text=body.text,
-            submitted_at=now,
+    for _attempt in range(3):
+        now = _now()
+        claimed = await db.exec(
+            update(StudyPlanPracticeDebrief)
+            .where(
+                StudyPlanPracticeDebrief.plan_id == plan_id,
+                StudyPlanPracticeDebrief.plan_item_id == item_id,
+                StudyPlanPracticeDebrief.submitted_at.is_(None),
+            )
+            .values(
+                draft_text=body.text,
+                text=body.text,
+                submitted_at=now,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
         )
-    else:
-        row.draft_text = body.text
-        row.text = body.text
-        row.submitted_at = now
-        row.updated_at = now
-    db.add(row)
-    await db.commit()
-    return _debrief_response(row)
+        if claimed.rowcount == 1:
+            await db.commit()
+            submitted = await _debrief_for(db, item_id)
+            if submitted is None:  # pragma: no cover - protected by the item unique index
+                raise RuntimeError("submitted practice debrief disappeared")
+            return await _debrief_out(db, submitted)
+
+        row = await _debrief_for(db, item_id)
+        if row is not None and row.submitted_at is not None:
+            if row.text != body.text:
+                raise HTTPException(
+                    status_code=409,
+                    detail="practice debrief is already submitted",
+                )
+            return await _debrief_out(db, row)
+
+        if row is not None:
+            # A concurrent draft insert became visible after our conditional
+            # update. Retry so that submission still goes through the guarded
+            # update instead of an unconditional ORM write.
+            await db.rollback()
+            continue
+
+        db.add(
+            StudyPlanPracticeDebrief(
+                plan_id=plan_id,
+                plan_item_id=item_id,
+                draft_text=body.text,
+                text=body.text,
+                submitted_at=now,
+            )
+        )
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two first submissions can both observe no row. The item-unique
+            # index elects the winner; after rollback the loser may only replay
+            # identical text, or retry if the conflicting row was just a draft.
+            await db.rollback()
+            continue
+
+        submitted = await _debrief_for(db, item_id)
+        if submitted is None:  # pragma: no cover - commit made the row durable
+            raise RuntimeError("submitted practice debrief disappeared")
+        return await _debrief_out(db, submitted)
+
+    winner = await _debrief_for(db, item_id)
+    if winner is not None and winner.submitted_at is not None:
+        if winner.text == body.text:
+            return await _debrief_out(db, winner)
+        raise HTTPException(status_code=409, detail="practice debrief is already submitted")
+    raise HTTPException(status_code=409, detail="practice debrief changed; try again")
 
 
 @router.post("/study-plans/{plan_id}/items/{item_id}/reopen/preview", response_model=ProposalOut)
@@ -1735,7 +1915,7 @@ async def preview_reopen(
 
     plan, weeks, items, deps = graph.sched_inputs()
     items = [
-        sched.SchedItem(**{**i.__dict__, "status": ITEM_PENDING}) if i.id == str(item_id) else i
+        replace(i, status=ITEM_PENDING) if i.id == str(item_id) else i
         for i in items
     ]
     proposal = sched.build_proposal(plan, weeks, items, deps)
@@ -1762,28 +1942,36 @@ async def reopen_item(
     base_plan_revision: int = Query(...),
     db: AsyncSession = Depends(get_session),
 ) -> ItemDetail:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     _require_current(graph.plan, base_plan_revision)
     item = _available_item(graph, item_id)
     if item.status != ITEM_COMPLETE:
         raise HTTPException(status_code=409, detail="item is not complete")
 
     before = sp.plan_snapshot(graph)
-    item.status = ITEM_PENDING
-    item.reopened_at = _now()
-    item.completed_at = None
-    item.updated_at = item.reopened_at
-    db.add(item)
-
-    proposal = sp.build_proposal_for(graph)
+    plan_input, weeks, items, dependencies = graph.sched_inputs()
+    items = [
+        replace(candidate, status=ITEM_PENDING)
+        if candidate.id == str(item_id)
+        else candidate
+        for candidate in items
+    ]
+    proposal = sched.build_proposal(plan_input, weeks, items, dependencies)
     if not proposal.valid:
         raise HTTPException(
             status_code=409, detail="reopening needs a replan; preview and apply it first"
         )
 
-    graph.plan.revision += 1
-    graph.plan.updated_at = _now()
-    db.add(graph.plan)
+    await _claim_plan_mutation(
+        db,
+        graph.plan,
+        expected_revision=base_plan_revision,
+    )
+    item.status = ITEM_PENDING
+    item.reopened_at = _now()
+    item.completed_at = None
+    item.updated_at = item.reopened_at
+    db.add(item)
     sp.record_revision(
         db,
         graph,
@@ -1803,13 +1991,22 @@ async def edit_item(
     body: ItemEdit,
     db: AsyncSession = Depends(get_session),
 ) -> ItemDetail:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     item = _available_item(graph, item_id)
 
     before = sp.plan_snapshot(graph)
     changed_estimate = (
         body.estimate_minutes is not None and body.estimate_minutes != item.estimate_minutes
     )
+    base_revision: int | None = None
+    if changed_estimate:
+        base_revision = await _claim_plan_mutation(
+            db,
+            graph.plan,
+            conflict_detail=(
+                "plan changed while this item edit was being saved; reload and try again"
+            ),
+        )
     for field_name in (
         "full_title",
         "why_it_matters",
@@ -1834,9 +2031,8 @@ async def edit_item(
         # An estimate edit can displace work, so it is a material change and gets
         # a revision. The proposal is not applied here — if it no longer fits, the
         # week reads as over capacity and the app offers the replan.
+        assert base_revision is not None
         proposal = sp.build_proposal_for(graph)
-        graph.plan.revision += 1
-        db.add(graph.plan)
         sp.record_revision(
             db,
             graph,
@@ -1855,7 +2051,7 @@ async def edit_item(
 
 @router.post("/study-plans/{plan_id}/pause", response_model=PlanOverview)
 async def pause_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     if graph.plan.status != PLAN_ACTIVE:
         raise HTTPException(status_code=409, detail="plan is not active")
     sp.pause(db, graph)
@@ -1906,7 +2102,7 @@ async def apply_resume(
     base_plan_revision: int = Query(...),
     db: AsyncSession = Depends(get_session),
 ) -> PlanOverview:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     _require_current(graph.plan, base_plan_revision)
     if graph.plan.status == PLAN_ACTIVE:
         raise HTTPException(status_code=409, detail="plan is already active")
@@ -1917,7 +2113,18 @@ async def apply_resume(
             status_code=409, detail="resuming needs a replan; preview and apply it first"
         )
 
-    await sp.make_active(db, graph, kind=REVISION_RESUME, summary="Plan resumed")
+    base_revision = await _claim_plan_mutation(
+        db,
+        graph.plan,
+        expected_revision=base_plan_revision,
+    )
+    await sp.make_active(
+        db,
+        graph,
+        base_plan_revision=base_revision,
+        kind=REVISION_RESUME,
+        summary="Plan resumed",
+    )
     await _commit_activation(db)
     return await _overview(db, plan_id)
 
@@ -1928,9 +2135,20 @@ async def activate_plan(
     base_plan_revision: int = Query(...),
     db: AsyncSession = Depends(get_session),
 ) -> PlanOverview:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     _require_current(graph.plan, base_plan_revision)
-    await sp.make_active(db, graph, kind=REVISION_ACTIVATE, summary="Made this the active plan")
+    claimed_revision = await _claim_plan_mutation(
+        db,
+        graph.plan,
+        expected_revision=base_plan_revision,
+    )
+    await sp.make_active(
+        db,
+        graph,
+        base_plan_revision=claimed_revision,
+        kind=REVISION_ACTIVATE,
+        summary="Made this the active plan",
+    )
     await _commit_activation(db)
     return await _overview(db, plan_id)
 
@@ -1939,7 +2157,7 @@ async def activate_plan(
 async def complete_plan(
     plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)
 ) -> PlanOverview:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     sp.complete(db, graph)
     await db.commit()
     return await _overview(db, plan_id)
@@ -1947,7 +2165,7 @@ async def complete_plan(
 
 @router.post("/study-plans/{plan_id}/archive", response_model=PlanOverview)
 async def archive_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
-    graph = await _get_graph(db, plan_id)
+    graph = await _get_graph(db, plan_id, for_update=True)
     sp.archive(db, graph)
     await db.commit()
     return await _overview(db, plan_id)
@@ -1956,7 +2174,23 @@ async def archive_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(get_sessio
 @router.post("/study-plans/{plan_id}/duplicate", response_model=PlanOverview, status_code=201)
 async def duplicate(plan_id: uuid.UUID, db: AsyncSession = Depends(get_session)) -> PlanOverview:
     """Copy the plan's structure and reset its progress. Creates it paused."""
-    graph = await _get_graph(db, plan_id)
+    guide_characters = (
+        await db.exec(
+            select(func.length(StudyPlan.guide_text)).where(
+                StudyPlan.id == plan_id,
+                StudyPlan.user_id == current_user_id(),
+            )
+        )
+    ).first()
+    if guide_characters is None:
+        raise HTTPException(status_code=404, detail="plan not found")
+    await storage.reserve_study_plan(
+        db, user_id=current_user_id(), characters=guide_characters
+    )
+    # Reload under the plan lock after taking the account boundary. Account
+    # deletion and plan edits now have a single lock order and the copy cannot
+    # mix rows from two revisions.
+    graph = await _get_graph(db, plan_id, for_update=True)
     rows = sp.duplicate_plan(
         graph.plan, graph, start_date=spi.default_start_date(await local_today(db))
     )
@@ -2248,24 +2482,25 @@ async def accept_card_proposals(
     appeared, the batch aborts and that candidate refreshes as EXISTING rather
     than the rest being created while claiming atomic success.
     """
+    user_id = current_user_id()
     graph = await _get_graph(db, plan_id)
     plan = graph.plan
     today = await local_today(db)
 
-    prior = (
-        await db.exec(
-            select(StudyPlanCardProposalAcceptance)
-            .where(col(StudyPlanCardProposalAcceptance.idempotency_key) == body.idempotency_key)
-            .join(
-                StudyPlanCardProposal,
-                StudyPlanCardProposal.id == StudyPlanCardProposalAcceptance.proposal_id,
-            )
-            .where(StudyPlanCardProposal.plan_id == plan_id)
-        )
-    ).first()
     computed_hash = sp.request_hash(body.selected_proposal_ids, body.edits)
 
-    if prior is not None:
+    async def replay_or_clear_prior() -> CardAcceptOut | None:
+        prior = (
+            await db.exec(
+                select(StudyPlanCardProposalAcceptance).where(
+                    col(StudyPlanCardProposalAcceptance.plan_id) == plan_id,
+                    col(StudyPlanCardProposalAcceptance.idempotency_key)
+                    == body.idempotency_key,
+                )
+            )
+        ).first()
+        if prior is None:
+            return None
         if prior.request_hash != computed_hash:
             # Same key, different intent. This is a client bug, not a replay, and
             # silently honouring either request would create the wrong cards.
@@ -2292,14 +2527,23 @@ async def accept_card_proposals(
         # run again under the same key.
         await db.delete(prior)
         await db.flush()
+        return None
 
+    replay = await replay_or_clear_prior()
+    if replay is not None:
+        return replay
+
+    proposal_rows = (
+        await db.exec(
+            select(StudyPlanCardProposal).where(
+                col(StudyPlanCardProposal.id).in_(body.selected_proposal_ids)
+            )
+        )
+    ).all()
+    proposals_by_id = {row.id: row for row in proposal_rows}
     proposals = []
     for proposal_id in body.selected_proposal_ids:
-        row = (
-            await db.exec(
-                select(StudyPlanCardProposal).where(col(StudyPlanCardProposal.id) == proposal_id)
-            )
-        ).first()
+        row = proposals_by_id.get(proposal_id)
         if row is None:
             raise HTTPException(status_code=404, detail="proposal not found")
         if row.plan_id != plan_id:
@@ -2317,13 +2561,30 @@ async def accept_card_proposals(
     # needed to report which candidate clashed. Checking first means the abort
     # path never has anything to undo.
     prepared: list[tuple[StudyPlanCardProposal, Card]] = []
-    existing_cards = await sp.normalized_card_index(db, current_user_id())
+    await lock_topic_creation(db, user_id)
+    # A concurrent retry may have committed while this request waited for the
+    # per-account topic-creation lock. Re-read under that lock so same-key
+    # requests replay the committed batch instead of misreporting its new card
+    # as an unrelated duplicate.
+    replay = await replay_or_clear_prior()
+    if replay is not None:
+        return replay
+    existing_cards = await sp.normalized_card_index(db, user_id)
+    prepared_topics: set[str] = set()
     for row in proposals:
         edit = body.edits.get(str(row.id), {})
         topic = (edit.get("topic") or row.topic).strip()
         question = (edit.get("canonical_question") or row.canonical_question).strip()
 
-        clash = existing_cards.get(sp.normalize_topic(topic))
+        normalized_topic = sp.normalize_topic(topic)
+        if not normalized_topic or normalized_topic in prepared_topics:
+            raise HTTPException(
+                status_code=409,
+                detail="selected proposals must resolve to distinct non-empty topics",
+            )
+        prepared_topics.add(normalized_topic)
+
+        clash = existing_cards.get(normalized_topic)
         if clash is not None:
             row.duplicate_check_result = DUPLICATE_EXACT
             row.duplicate_card_id = clash.id
@@ -2337,7 +2598,7 @@ async def accept_card_proposals(
             )
         try:
             card = build_grounded_card(
-                user_id=current_user_id(),
+                user_id=user_id,
                 topic=topic,
                 category=row.category,
                 grounding=Grounding(
@@ -2357,6 +2618,7 @@ async def accept_card_proposals(
         prepared.append((row, card))
 
     acceptance = StudyPlanCardProposalAcceptance(
+        plan_id=plan.id,
         proposal_id=proposals[0].id,
         idempotency_key=body.idempotency_key,
         request_hash=computed_hash,
