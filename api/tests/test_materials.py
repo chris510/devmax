@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -149,6 +150,29 @@ def lesson_findings(
     return findings
 
 
+def lesson_span_id_findings(
+    concepts: list[dict],
+    *,
+    verdicts: dict[tuple[int, str], str] | None = None,
+    repairs: dict[tuple[int, str], str] | None = None,
+) -> list[dict]:
+    findings = lesson_findings(
+        concepts, verdicts=verdicts, repairs=repairs
+    )
+    issued = {
+        entry["concept_index"]: [
+            span["span_id"] for span in entry["spans"]
+        ]
+        for entry in llm.lesson_evidence_catalog(concepts)
+    }
+    for finding in findings:
+        literal = finding.pop("evidence_spans")
+        finding["evidence_span_ids"] = (
+            issued[finding["concept_index"]][:1] if literal else []
+        )
+    return findings
+
+
 def stub_lesson_verifier(monkeypatch, responses=None) -> list[dict]:
     calls: list[dict] = []
     queued = list(responses or [])
@@ -157,8 +181,36 @@ def stub_lesson_verifier(monkeypatch, responses=None) -> list[dict]:
         calls.append(kwargs)
         if queued:
             response = queued.pop(0)
-            return response(kwargs["concepts"]) if callable(response) else response
-        return lesson_findings(kwargs["concepts"])
+            findings = (
+                response(kwargs["concepts"]) if callable(response) else response
+            )
+        else:
+            findings = lesson_findings(kwargs["concepts"])
+        if (
+            kwargs.get("evidence_transport_version")
+            != llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+        ):
+            return findings
+
+        # Existing behavioral fixtures describe semantic verdicts with the
+        # frozen pilot transport. Adapt only their evidence envelope so the
+        # ordinary lesson path exercises the server-ID contract.
+        issued = {
+            entry["concept_index"]: [
+                span["span_id"] for span in entry["spans"]
+            ]
+            for entry in llm.lesson_evidence_catalog(kwargs["concepts"])
+        }
+        adapted = []
+        for finding in findings:
+            item = deepcopy(finding)
+            if "evidence_span_ids" not in item:
+                literal = item.pop("evidence_spans", [])
+                item["evidence_span_ids"] = (
+                    issued[item["concept_index"]][:1] if literal else []
+                )
+            adapted.append(item)
+        return adapted
 
     monkeypatch.setattr(llm, "verify_lesson_grounding", verify)
     return calls
@@ -1497,6 +1549,12 @@ async def test_lesson_extraction_stores_one_complete_concept_pack(
     assert processed.result_summary["grounding_gate_version"] == (
         materials.LESSON_GROUNDING_GATE_VERSION
     )
+    assert processed.result_summary["grounding_evidence_transport_version"] == (
+        llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+    )
+    assert verifier_calls[0]["evidence_transport_version"] == (
+        llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+    )
     assert len(verifier_calls) == 1
     assert proposal.canonical_question.startswith("How would you trace")
     assert proposal.answer_rubric == LESSON_RUBRIC
@@ -1643,6 +1701,162 @@ def test_networking_grounding_rejects_source_text_outside_the_concept_excerpt():
 
     with pytest.raises(llm.LLMError, match="non-literal span"):
         materials._validated_lesson_grounding(source, concepts, findings)
+
+
+def test_server_span_ids_bind_exactly_to_the_concept_and_fail_closed():
+    expanded_source = f"{NETWORKING_101_SOURCE} {NETWORKING_101_SOURCE}"
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=expanded_source,
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source,
+        [
+            networking_concept(source_excerpt=expanded_source),
+            networking_concept(
+                topic="Persistent connection capacity",
+                section_title="Networking connection capacity",
+            ),
+        ],
+    )
+    findings = lesson_span_id_findings(concepts)
+    catalog = llm.lesson_evidence_catalog(concepts)
+    first_ids = [span["span_id"] for span in catalog[0]["spans"]]
+    second_id = catalog[1]["spans"][0]["span_id"]
+    transport = llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+
+    cross_concept = deepcopy(findings)
+    cross_concept[0]["evidence_span_ids"] = [second_id]
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
+        materials._validated_lesson_grounding(
+            source,
+            concepts,
+            cross_concept,
+            evidence_transport_version=transport,
+        )
+
+    duplicate = deepcopy(findings)
+    duplicate[0]["evidence_span_ids"] = [first_ids[0], first_ids[0]]
+    with pytest.raises(llm.LLMError, match="invalid evidence"):
+        materials._validated_lesson_grounding(
+            source, concepts, duplicate, evidence_transport_version=transport
+        )
+
+    non_string = deepcopy(findings)
+    non_string[0]["evidence_span_ids"] = [[first_ids[0]]]
+    with pytest.raises(llm.LLMError, match="invalid evidence"):
+        materials._validated_lesson_grounding(
+            source, concepts, non_string, evidence_transport_version=transport
+        )
+
+    too_many = deepcopy(findings)
+    assert len(first_ids) >= 5
+    too_many[0]["evidence_span_ids"] = first_ids[:5]
+    with pytest.raises(llm.LLMError, match="invalid evidence"):
+        materials._validated_lesson_grounding(
+            source, concepts, too_many, evidence_transport_version=transport
+        )
+
+    unknown = deepcopy(findings)
+    unknown[0]["evidence_span_ids"] = ["c1-s999-not-issued"]
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
+        materials._validated_lesson_grounding(
+            source, concepts, unknown, evidence_transport_version=transport
+        )
+
+    reversed_ids = deepcopy(findings)
+    reversed_ids[0]["evidence_span_ids"] = [first_ids[1], first_ids[0]]
+    review = materials._validated_lesson_grounding(
+        source,
+        concepts,
+        reversed_ids,
+        evidence_transport_version=transport,
+    )
+    assert review[(1, llm.LESSON_GROUNDING_FIELDS[0])][
+        "evidence_span_ids"
+    ] == first_ids[:2]
+
+
+def test_networking_finding_16_uses_ids_without_copy_normalization_failures():
+    punctuation_trap = (
+        "TCP’s acknowledgement path preserves   exact spacing and an em—dash "
+        "across the server-issued excerpt."
+    )
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=f"{NETWORKING_101_SOURCE}\n{punctuation_trap}",
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source,
+        [
+            networking_concept(),
+            networking_concept(
+                topic="Acknowledgement path notation",
+                section_title="Networking punctuation boundary",
+                source_excerpt=punctuation_trap,
+            ),
+        ],
+    )
+    findings = lesson_span_id_findings(concepts)
+    finding_16 = findings[15]
+
+    assert finding_16["concept_index"] == 2
+    assert finding_16["field"] == llm.LESSON_GROUNDING_FIELDS[1]
+    assert "TCP's acknowledgement path preserves exact spacing" not in punctuation_trap
+    issued_id = finding_16["evidence_span_ids"][0]
+    issued_text = llm.lesson_evidence_catalog(concepts)[1]["spans"][0]["text"]
+    assert "TCP’s" in issued_text
+    assert "preserves   exact" in issued_text
+    assert "em—dash" in issued_text
+
+    for _ in range(2):
+        review = materials._validated_lesson_grounding(
+            source,
+            concepts,
+            deepcopy(findings),
+            evidence_transport_version=(
+                llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+            ),
+        )
+        assert review[(2, llm.LESSON_GROUNDING_FIELDS[1])][
+            "evidence_span_ids"
+        ] == [issued_id]
+
+
+def test_server_span_catalog_cannot_cite_source_outside_the_concept_excerpt():
+    excerpt = "TCP provides a reliable ordered byte stream."
+    outside = "QUIC adds a fact that is outside this concept excerpt."
+    source = MaterialSource(
+        user_id=FOUNDER_USER_ID,
+        title="Networking 101",
+        source_text=f"{excerpt} {outside}",
+        kind="article",
+        import_path="lesson",
+    )
+    concepts = materials._validated_lesson_concepts(
+        source, [networking_concept(source_excerpt=excerpt)]
+    )
+    findings = lesson_span_id_findings(concepts)
+    outside_id = llm.lesson_evidence_catalog(
+        [{"source_excerpt": outside}]
+    )[0]["spans"][0]["span_id"]
+    findings[0]["evidence_span_ids"] = [outside_id]
+
+    with pytest.raises(llm.LLMError, match="unissued evidence span ID"):
+        materials._validated_lesson_grounding(
+            source,
+            concepts,
+            findings,
+            evidence_transport_version=(
+                llm.LESSON_GROUNDING_EVIDENCE_TRANSPORT_VERSION
+            ),
+        )
 
 
 async def test_networking_unsupported_additions_are_review_only(
@@ -1865,7 +2079,7 @@ async def test_assigned_pilot_audit_preserves_the_untouched_pack_before_repair(
 
     monkeypatch.setattr(llm, "extract_lesson", extract)
     monkeypatch.setattr(materials, "_guide_authorizer", authorizer)
-    stub_lesson_verifier(monkeypatch, [repairable])
+    verifier_calls = stub_lesson_verifier(monkeypatch, [repairable])
     processed = await materials._process_lesson(
         db, source, await _claim(db, source)
     )
@@ -1875,7 +2089,20 @@ async def test_assigned_pilot_audit_preserves_the_untouched_pack_before_repair(
     proposal = (await db.exec(select(MaterialTopicProposal))).one()
     audit = (await db.exec(select(LessonProposalAudit))).one()
     assert authorizer_operations[0] == materials.PILOT_LESSON_IMPORT_OPERATION
+    assert all(
+        call["evidence_transport_version"]
+        == llm.LESSON_LITERAL_EVIDENCE_TRANSPORT_VERSION
+        for call in verifier_calls
+    )
+    assert processed.result_summary["grounding_evidence_transport_version"] == (
+        llm.LESSON_LITERAL_EVIDENCE_TRANSPORT_VERSION
+    )
     assert audit.proposal_id == proposal.id
+    assert audit.extraction_route == {
+        "provider": "anthropic",
+        "model": llm.get_settings().card_proposal_model,
+        "effort": llm.get_settings().card_proposal_effort,
+    }
     assert audit.original_proposal_pack == original
     assert audit.original_grounding_findings == first_findings
     assert "video call" in audit.original_proposal_pack["recall_questions"][3]["question"]
