@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Unprompted backend: conversational spaced-repetition study coach"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.3",
     "sqlmodel>=0.0.22",
     "asyncpg>=0.30",
-    "alembic>=1.14",
-    "pydantic-settings>=2.6",
-    "anthropic>=0.40",
+    "alembic>=1.19.1",
+    "pydantic-settings>=2.15.0",
+    "anthropic>=0.122.0",
     "aioapns>=3.2",
     "httpx>=0.28",
     "pyjwt[crypto]>=2.13",
@@ -24,8 +24,8 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "aiosqlite>=0.20",
-    "ruff>=0.8",
-    "greenlet>=3.5.4",
+    "ruff>=0.16.3",
+    "greenlet>=3.5.5",
     "pip-audit>=2.9",
 ]
 
