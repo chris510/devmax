@@ -42,7 +42,7 @@ struct PlanBuildScreen: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { state.path.removeLast() } label: {
-                Text("← Today")
+                Text("← Back")
                     .font(TypeRole.secondaryAction)
                     .foregroundStyle(Theme.metaAlt)
             }

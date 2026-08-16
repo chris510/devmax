@@ -56,7 +56,7 @@ struct SessionRecapScreen: View {
 
             HStack(alignment: .lastTextBaseline, spacing: 10) {
                 Text(averageLabel)
-                    .font(TypeRole.bigScoreNumeral)
+                    .font(state.runAverage == nil ? WCFont.mono(12) : TypeRole.bigScoreNumeral)
                     .monospacedDigit()
                     .foregroundStyle(averageColor)
                 MetaText(text: state.usesRecallContract ? "/ 5 AVG RECALL" : "/ 5 AVERAGE", font: WCFont.mono(13),
@@ -76,7 +76,7 @@ struct SessionRecapScreen: View {
     }
 
     private var averageLabel: String {
-        guard let average = state.runAverage else { return "—" }
+        guard let average = state.runAverage else { return "UNRATED" }
         return String(format: "%.1f", average)
     }
 

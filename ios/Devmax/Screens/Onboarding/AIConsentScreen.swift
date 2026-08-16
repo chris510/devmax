@@ -45,7 +45,7 @@ struct AIConsentScreen: View {
                         "Your Apple sign-in credential and voice recording are not sent to "
                             + "either AI provider. iOS provides a text transcript; Unprompted "
                             + "sends text. OpenAI also receives a stable pseudonymous safety "
-                            + "identifier derived with a private app secret—not your Apple "
+                            + "identifier derived with a private app secret, not your Apple "
                             + "credential, name, or email."
                     )
 

@@ -318,7 +318,7 @@ enum StudyPlanFixtures {
                 + "WAL, and replication.",
             sourceLabel: sourceLabel ?? "Hello Interview · PostgreSQL",
             recallSupported: resolvedRecallSupport,
-            notes: notes ?? "Write out the WAL path once — that's the part I lose under pressure.",
+            notes: notes ?? "Write out the WAL path once. That's the part I lose under pressure.",
             studyBlockLabel: "Tue 19:00", studyBlockWeekday: 2,
             studyBlockMinuteOfDay: 1140, studyBlockReminderOn: true,
             completedAt: complete ? Date(timeIntervalSince1970: 1_755_388_800) : nil,
@@ -516,7 +516,7 @@ enum StudyPlanFixtures {
         ],
         unresolved: [], unresolvedMinutes: 0, displacedMinutes: 240,
         forecastEndPlanWeek: 12,
-        forecastLabel: "Est. completion · week of 19 Oct — unchanged",
+        forecastLabel: "Est. completion · week of 19 Oct · unchanged",
         forecastChanged: false, canApply: true, reasons: [],
         unchanged: [
             "Your cards, scores, session history, mastery summaries, and review "

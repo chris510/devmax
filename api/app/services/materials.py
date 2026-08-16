@@ -90,7 +90,7 @@ def render_lesson_markdown(
         source_line = f"[{source.title}](<{source.source_url}>)"
 
     note_lines = [f"# {source.title}", "", f"Source: {source_line}"]
-    recall_lines = [f"# {source.title} — Recall questions"]
+    recall_lines = [f"# {source.title}: Recall questions"]
     for concept in concepts:
         note_lines.extend(
             [

@@ -2,17 +2,17 @@
 
 Two sources:
 
-* ``cards.json`` — the 54-card system-design recall spine
+* ``cards.json``: the 54-card system-design recall spine
   (spec.md §Seeding, docs/CURRICULUM.md). Nine teaching weeks followed by three
   weeks of mocks and gap-driven additions. Activate one week only after its
   source lessons are complete.
-* ``library/*.json`` — reference material that is never part of the automatic
+* ``library/*.json``: reference material that is never part of the automatic
   push curriculum. Coding lives here because implementation practice happens in
   an editor; seed a card only when external practice proves the recall prompt is
   useful.
-* ``modules/*.json`` — company-shaped card sets in the same schema, seeded on
+* ``modules/*.json``: company-shaped card sets in the same schema, seeded on
   demand when a loop is scheduled rather than as part of the daily rotation.
-* ``--fixtures`` — the three cards from the design prototype, with their invented
+* ``--fixtures``: the three cards from the design prototype, with their invented
   session history. Every screenshot in the design handoff depicts these, so this
   is what makes the designs reproducible against a real server during dev. Never
   load them into a real study queue; the guard in main() refuses by default.
@@ -23,11 +23,11 @@ Two sources:
 
 ``--activate-week`` selects exactly one curriculum week and schedules it from the
 given start date, regardless of its original week number. This makes lesson
-completion—not the calendar—the gate. The older ``--weeks-through`` bulk path
+completion, not the calendar, is the gate. The older ``--weeks-through`` bulk path
 remains useful for local verification and clean-room imports.
 
 ``--retire-file`` is the only path that deletes. Loading is additive and dedupes
-by topic, so swapping a curriculum needs an explicit retirement of the old one —
+by topic, so swapping a curriculum needs an explicit retirement of the old one.
 naming the manifest to delete rather than diffing against the current deck, so
 ``library/``, ``modules/`` and gap-driven cards stay out of reach.
 """
@@ -133,7 +133,7 @@ def _schedule(entries: list[dict], start: date, per_day: int) -> list[date]:
     the opposite of what spec.md §Seeding is asking for.
 
     Cards are grouped by (target_week, delivery_mode) and dealt out ``per_day`` at a
-    time — matching the push budget for conversational cards, one a day for desk
+    time, matching the push budget for conversational cards, one a day for desk
     cards, which never enter the push loop at all. The day index is clamped so a
     large week spills onto its own last day rather than into the following week.
     Returns one due date per entry, in the order given.
@@ -244,7 +244,7 @@ async def retire_from_file(
     cards.json". The same database also holds `library/` reference cards,
     `modules/` company overlays, and gap-driven cards added through POST /cards.
     None of those appear in the base manifest, and a curriculum swap has no
-    business touching them — so the caller names exactly what is being retired.
+    business touching them. The caller names exactly what is being retired.
 
     Sessions are deleted explicitly even though `sessions.card_id` is already
     ON DELETE CASCADE. The default test database is SQLite, which does not enforce
@@ -319,7 +319,7 @@ def _fixtures() -> list[dict]:
                     "answer": "With mod-N, if you add a server the modulus changes and almost "
                     "every key maps somewhere new, so the whole cache is cold. Consistent "
                     "hashing keeps most keys where they are.",
-                    "follow_up": "One more — what are virtual nodes for?",
+                    "follow_up": "One more: what are virtual nodes for?",
                     "follow_up_answer": "I think they… split a node into several ring "
                     "positions? I'm not sure what that actually buys you.",
                 },
@@ -375,7 +375,7 @@ def _fixtures() -> list[dict]:
                     "reached only when prompted.",
                     "question": "Who can a follower vote for in a given term?",
                     "answer": "One candidate per term, first come first served I think.",
-                    "follow_up": "One more — is that the only condition?",
+                    "follow_up": "One more: is that the only condition?",
                     "follow_up_answer": "Probably also something about the log being up to date.",
                 },
             ],
@@ -395,7 +395,7 @@ def _fixtures() -> list[dict]:
                     "score": 3,
                     "feedback": "Correct boundary. Follow-up on bloat went unanswered.",
                     "question": "When is a B-tree index the wrong choice?",
-                    "answer": "When you're not querying by an ordered scalar — full-text, "
+                    "answer": "When you're not querying by an ordered scalar, such as full-text, "
                     "array containment, jsonb keys. B-tree needs a single comparable value.",
                 },
             ],
@@ -463,7 +463,7 @@ async def load_fixtures(db: AsyncSession | None = None) -> int:
                     ended_at=started,
                 )
                 db.add(session)
-                # A probe is a row, not a column pair — the same shape a real
+                # A probe is a row, not a column pair: the same shape a real
                 # session writes, so fixture history renders through exactly the
                 # path production history does.
                 if s.get("follow_up"):

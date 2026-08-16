@@ -32,6 +32,22 @@ struct Hairline: View {
     }
 }
 
+/// A low-contrast container for related controls. The panel is selective: it
+/// groups a section, while review queues and conversation turns stay flat.
+struct QuietPanel<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .padding(.horizontal, 15)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Theme.bubbleBorder, lineWidth: 1)
+            )
+    }
+}
+
 /// Accent fill, `#06232A` text, 17px vertical padding, 14px radius.
 struct PrimaryButton: View {
     let title: String

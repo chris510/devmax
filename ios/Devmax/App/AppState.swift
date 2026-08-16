@@ -23,6 +23,10 @@ final class AppState: ObservableObject {
         case planLifecycle(UUID, PlanLifecycleAction, PlanLifecycleOrigin)
         case planRecap(UUID)
         case planAudit(String)
+        case library
+        case libraryCards
+        case libraryCaptures
+        case reviewReminders
         case materialSetup
         case fullSettings
         case privacy
@@ -274,23 +278,6 @@ final class AppState: ObservableObject {
 
     func closeCaptureFlow() {
         captureRoute = nil
-    }
-
-    func saveSettings(_ new: AppSettings) {
-        let previous = settings
-        settings = new
-        Task {
-            // The server is the authority on whether a window is usable: it rejects
-            // one shorter than the cron's poll interval, and TimeChip advances
-            // `from` and `to` independently, so `from == to` is two taps away.
-            // Discarding the response left the sheet showing a window as saved
-            // that was never stored. Adopting it means a rejected edit snaps back.
-            guard let saved = try? await api.updateSettings(new) else {
-                settings = previous
-                return
-            }
-            settings = saved
-        }
     }
 
     // MARK: - Review Sprint
@@ -596,8 +583,11 @@ final class AppState: ObservableObject {
     /// on top of an item. Keep the label honest without changing pop behavior.
     var historyBackLabel: String {
         guard path.count > 1 else { return "← Today" }
-        if case .planItem = path[path.count - 2] { return "← Plan item" }
-        return "← Today"
+        return switch path[path.count - 2] {
+        case .planItem: "← Plan item"
+        case .libraryCards: "← Review cards"
+        default: "← Today"
+        }
     }
 
     func recallNotBefore(cardID: UUID, fallback: String?) -> String? {
@@ -1294,7 +1284,11 @@ final class AppState: ObservableObject {
     }
 
     private func completeConversationExit() {
-        if let completion = firstReviewCompletion {
+        // Onboarding advances only after a committed score is on screen. Closing
+        // before answering, while scoring, or after a question-load failure must
+        // not fabricate a "first score" step. Keep the callback installed so the
+        // learner's next completed review can still finish onboarding.
+        if result != nil, let completion = firstReviewCompletion {
             firstReviewCompletion = nil
             completion()
             return
@@ -1570,7 +1564,7 @@ final class AppState: ObservableObject {
     private func waitForLibrary() async { await waitUntil { libraryLoad != .loading } }
 
     private func advance(to route: String) async {
-        let answer = "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move — everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
+        let answer = "So the key space is a ring of hashes, and each node owns the arc that ends at its own position. When you add a node, it takes over part of one neighbour's arc, so only the keys in that slice move. Everything else stays put. That's the whole point versus mod-N hashing, where changing N reshuffles nearly everything."
 
         switch route {
         case "question", "question-failure":
@@ -1608,7 +1602,7 @@ final class AppState: ObservableObject {
             guard route.hasPrefix("reattempt") else { return }
             beginReattempt()
             if route == "reattempt" { return }
-            await submit("Right — so it's the arc, not the node name. Each node owns the stretch of hash space that ends at its own position.")
+            await submit("Right. It's the arc, not the node name. Each node owns the stretch of hash space that ends at its own position.")
         default:
             return
         }

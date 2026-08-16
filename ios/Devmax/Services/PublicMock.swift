@@ -80,7 +80,7 @@ extension MockAPI {
             || route.hasPrefix("lesson-pilot-")
         return MaterialImport(
             id: id,
-            title: isLesson ? "Networking 101" : "Contracts — formation",
+            title: isLesson ? "Networking 101" : "Contracts: formation",
             kind: isLesson ? "article" : "guide", version: 1,
             status: status, importPath: isLesson ? "lesson" : "topics",
             intent: "already_studied",
@@ -462,7 +462,7 @@ extension MockAPI {
 
     func lessonProgress(_ id: UUID) async throws -> LessonProgress {
         LessonProgress(
-            sourceId: id, title: "Contracts — formation", conceptCount: 2,
+            sourceId: id, title: "Contracts: formation", conceptCount: 2,
             reviewedCount: 2, weakCount: 1, complete: true, nextCardId: nil,
             concepts: [
                 LessonConceptProgress(
@@ -494,10 +494,10 @@ extension MockAPI {
             try await Task.sleep(for: lessonArtifactDelay)
         }
         return MaterialArtifacts(
-            sourceId: id, title: "Contracts — formation",
+            sourceId: id, title: "Contracts: formation",
             sourceUrl: "https://example.com/lesson",
             contentProvenance: "exact_source_excerpt", distilledAt: Date(),
-            canonicalNoteMarkdown: "# Contracts — formation\n\nA concise canonical note.",
+            canonicalNoteMarkdown: "# Contracts: formation\n\nA concise canonical note.",
             recallExportMarkdown: "# Recall questions\n\n- Explain the mechanism.",
             concepts: [],
             writebackBundle: Self.lessonWritebackBundle(sourceID: id)
@@ -513,7 +513,7 @@ extension MockAPI {
             source: LearningWritebackSource(
                 id: "devmax:source:\(sourceID)",
                 lineageId: "devmax:source-lineage:00000000-0000-0000-0000-000000000901",
-                version: 1, title: "Contracts — formation",
+                version: 1, title: "Contracts: formation",
                 url: "https://example.com/lesson", distilledAt: "2026-08-14T22:45:00Z"
             ),
             concepts: [

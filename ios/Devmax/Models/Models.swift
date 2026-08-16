@@ -297,8 +297,8 @@ struct AppSettings: Codable, Equatable {
 /// One turn in the Conversation thread. Render order is the source of truth.
 struct ThreadEntry: Identifiable, Equatable {
     /// `reattemptQuestion` is the coached re-attempt after the correction,
-    /// prefaced `In your words — ` the way the probes are prefaced
-    /// `One more — ` and `Last one — `.
+    /// prefaced `In your words: ` the way the probes are prefaced
+    /// `One more: ` and `Last one: `.
     enum Role: Equatable {
         case question, answer, followUpQuestion, reattemptQuestion
         case coachingQuestion, coachingFeedback
@@ -444,6 +444,12 @@ struct SessionResult: Equatable {
     var coachingOffered: Bool
     let coachingFocus: String?
     let coachingQuestion: String?
+
+    /// Production still emits V1 composites. Only the activated V2 contract may
+    /// call the displayed numeral Recall; unknown versions stay neutral.
+    var scoreLabel: String {
+        scoringContractVersion == 2 ? "RECALL" : "SCORE"
+    }
 }
 
 struct CoachingOutcome: Codable, Equatable {

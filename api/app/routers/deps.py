@@ -46,7 +46,7 @@ def as_utc(value: datetime) -> datetime:
     """Normalize a timestamp read back from the database before comparing it.
 
     Every timestamp is written tz-aware, but SQLite silently drops `tzinfo` on read
-    while Postgres keeps it — the same divergence `models.TZ_DATETIME` documents. A
+    while Postgres keeps it, the same divergence `models.TZ_DATETIME` documents. A
     bare `<` between the two raises TypeError, so comparisons normalize first.
     """
     return value if value.tzinfo else value.replace(tzinfo=UTC)
@@ -63,7 +63,7 @@ async def local_calendar(db: AsyncSession) -> tuple[date, ZoneInfo]:
 
     Every timestamp in the database is UTC, so taking `.date()` off one and
     comparing it to `local_today()` is wrong for the hours where the two
-    calendars disagree — west of UTC that's most of the evening, and it reports
+    calendars disagree. West of UTC that's most of the evening, and it reports
     a card reviewed minutes ago as `-1` days since review.
     """
     tz = ZoneInfo((await get_settings_row(db)).timezone)

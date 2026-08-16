@@ -98,14 +98,14 @@ final class DebugFlags: ObservableObject {
 
         loadState = LoadState(rawValue: env["WC_LOAD"] ?? "") ?? .auto
         railStyle = RailStyle(rawValue: env["WC_RAIL_STYLE"] ?? "") ?? .dots
-        failSubmit = flag("WC_FAIL_SUBMIT")
+        let route = env["WC_ROUTE"] ?? ""
+        failSubmit = flag("WC_FAIL_SUBMIT") || route == "submit-failure"
 
         // A few routes are unreachable without a forced failure, so they set their
         // own flag rather than making the caller remember a second env var. Derived
         // here, where `route` is already being read and nothing has run yet, so the
         // "set it before whatever consumes it" ordering that each route would
         // otherwise have to get right stops being a consideration at all.
-        let route = env["WC_ROUTE"] ?? ""
         failQuestion = flag("WC_FAIL_QUESTION") || route == "question-failure"
         failedMechanism = flag("WC_FAILED_MECHANISM") || route.hasPrefix("reattempt")
         secondProbe = flag("WC_SECOND_PROBE") || route == "followup-second"
@@ -380,9 +380,9 @@ actor MockAPI: DevmaxAPI {
                     turns: [
                         Turn(role: .question, text: "What problem does consistent hashing solve that modulo hashing doesn't?"),
                         Turn(role: .answer, text: "With mod-N, if you add a server the modulus changes and almost every key maps somewhere new, so the whole cache is cold. Consistent hashing keeps most keys where they are."),
-                        Turn(role: .followUp, text: "One more — what are virtual nodes for?"),
+                        Turn(role: .followUp, text: "One more: what are virtual nodes for?"),
                         Turn(role: .answer, text: "I think they… split a node into several ring positions? I'm not sure what that actually buys you."),
-                        Turn(role: .score, text: "2 — Right on the core motivation. Virtual nodes were guessed at, not explained."),
+                        Turn(role: .score, text: "2 · Right on the core motivation. Virtual nodes were guessed at, not explained."),
                     ]
                 ),
                 // The session that took both probes — the transcript shape a
@@ -397,11 +397,11 @@ actor MockAPI: DevmaxAPI {
                     turns: [
                         Turn(role: .question, text: "How does a client find which node owns a key?"),
                         Turn(role: .answer, text: "Hash the key, walk clockwise on the ring to the first node position you hit, that node owns it."),
-                        Turn(role: .followUp, text: "One more — what happens to that lookup while a node is joining the ring?"),
+                        Turn(role: .followUp, text: "One more: what happens to that lookup while a node is joining the ring?"),
                         Turn(role: .answer, text: "The ring changes, so some of those keys point at the new node instead. I suppose the lookup just resolves to whoever owns the position at the time."),
-                        Turn(role: .followUp, text: "Last one — during that handoff, does the old owner or the new one serve the key?"),
+                        Turn(role: .followUp, text: "Last one: during that handoff, does the old owner or the new one serve the key?"),
                         Turn(role: .answer, text: "Whichever one has the data, I'd assume. I don't know how they agree on the moment it switches over."),
-                        Turn(role: .score, text: "3 — Correct lookup path. No mention of how replicas are chosen from the successors."),
+                        Turn(role: .score, text: "3 · Correct lookup path. No mention of how replicas are chosen from the successors."),
                     ]
                 ),
                 SessionHistory(
@@ -411,7 +411,7 @@ actor MockAPI: DevmaxAPI {
                     turns: [
                         Turn(role: .question, text: "Describe consistent hashing in two sentences."),
                         Turn(role: .answer, text: "Nodes and keys are both hashed into the same circular space, and each key is owned by the next node clockwise. Adding or removing a node only affects the keys in the adjacent arc."),
-                        Turn(role: .score, text: "4 — Concise and accurate framing."),
+                        Turn(role: .score, text: "4 · Concise and accurate framing."),
                     ]
                 ),
             ],
@@ -639,7 +639,7 @@ actor MockAPI: DevmaxAPI {
         let topic = Self.library.first { $0.id == cardID }?.topic ?? "this topic"
         return SessionStart(
             sessionId: sessionID,
-            question: "Reconstruct \(topic.lowercased()) from memory — what is the mechanism, and where does it break?",
+            question: "Reconstruct \(topic.lowercased()) from memory. What is the mechanism, and where does it break?",
             isFollowUp: false, draftText: "", resumed: false
         )
     }
@@ -647,13 +647,13 @@ actor MockAPI: DevmaxAPI {
     func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws {}
 
     /// The two probes, in the voice and about the card the Conversation
-    /// screenshots were taken against. Only the second is prefaced `Last one — `,
+    /// screenshots were taken against. Only the second is prefaced `Last one: `,
     /// which is the one thing that tells the user the session cannot keep being
     /// extended.
     private static let firstProbe =
-        "One more — how do virtual nodes change the amount of data that moves?"
+        "One more: how do virtual nodes change the amount of data that moves?"
     private static let secondProbe =
-        "Last one — while the new node takes over its slice, which node serves those keys?"
+        "Last one: while the new node takes over its slice, which node serves those keys?"
 
     func submitAnswer(
         sessionID: UUID, text: String, turnIndex: Int
@@ -686,7 +686,7 @@ actor MockAPI: DevmaxAPI {
             DebugFlags.shared.route.contains("boundary")
         }
         let feedback = score <= 2
-            ? "The ring isn't ordered by node identity — each node owns the arc of hash space ending at its own position, so adding one only moves the slice that arc takes over."
+            ? "The ring isn't ordered by node identity. Each node owns the arc of hash space ending at its own position, so adding one only moves the slice that arc takes over."
             : (scoringV2
                 ? "The essential ring-ownership account was recalled. The successor-node handoff remained the one bounded omission."
                 : "Good on ring mechanics and why mod-N is worse. The virtual-node answer covered load spreading but not the successor-node handoff during transfer, and replication factor never came up.")
@@ -703,15 +703,15 @@ actor MockAPI: DevmaxAPI {
             // when it fails), so the mock can key off the score it already has.
             reattemptOffered: score <= 2,
             reattemptPrompt: score <= 2
-                ? "In your words — You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't."
+                ? "In your words: You're adding a node to a consistent-hashing ring. Walk me through exactly what data moves and what doesn't."
                 : nil,
             coachingOffered: scoringV2 && score >= 3,
             coachingFocus: scoringV2 && score >= 3
                 ? (boundaryCoaching ? "boundaries" : "depth") : nil,
             coachingQuestion: scoringV2 && score >= 3
                 ? (boundaryCoaching
-                    ? "One level deeper — what condition, exception, limitation, or failure case matters here?"
-                    : "One level deeper — what reasoning, causal link, application, or trade-off matters here?")
+                    ? "One level deeper: what condition, exception, limitation, or failure case matters here?"
+                    : "One level deeper: what reasoning, causal link, application, or trade-off matters here?")
                 : nil
         )
     }
@@ -730,8 +730,8 @@ actor MockAPI: DevmaxAPI {
         return CoachingOutcome(
             focus: boundary ? "boundaries" : "depth",
             question: boundary
-                ? "One level deeper — what condition, exception, limitation, or failure case matters here?"
-                : "One level deeper — what reasoning, causal link, application, or trade-off matters here?",
+                ? "One level deeper: what condition, exception, limitation, or failure case matters here?"
+                : "One level deeper: what reasoning, causal link, application, or trade-off matters here?",
             feedback: boundary
                 ? "The boundary is grounded: skewed vnode assignment can still concentrate ownership and transfer load."
                 : "The causal link is explicit, and the transfer consequence follows from it."

@@ -82,7 +82,13 @@ struct TodayScreen: View {
                     .foregroundStyle(Theme.accent)
             }
             .contentShape(Rectangle())
-            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.horizontal, 15)
+            .padding(.vertical, 12)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Metrics.inlineRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Metrics.inlineRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .frame(minHeight: Metrics.minTapTarget)
@@ -91,7 +97,8 @@ struct TodayScreen: View {
                 ? "Study plan unavailable. Opens the plan."
                 : (state.planSummary?.accessibleLine ?? "Add a study guide.")
         )
-        .padding(.bottom, 6)
+        .padding(.horizontal, Metrics.screenPadding)
+        .padding(.bottom, 8)
     }
 
     private var planText: String {
@@ -146,7 +153,7 @@ struct TodayScreen: View {
         }
         .padding(.horizontal, Metrics.screenPadding)
         .padding(.top, 14)
-        .padding(.bottom, 18)
+        .padding(.bottom, 16)
     }
 
     private var settingsPill: some View {
@@ -207,56 +214,46 @@ struct TodayScreen: View {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                // A lesson is source ingestion, not Quick Add: it stays outside
-                // pending captures and opens the durable material flow.
-                Button {
-                    flow.beginLesson()
-                    state.path.append(.materialSetup)
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("+").font(WCFont.sans(16))
-                        Text("Add lesson").font(TypeRole.rowSummary)
+                HStack(spacing: 10) {
+                    // Creation remains available without making a raised plus the
+                    // app's primary navigation. The menu keeps both add paths in
+                    // one quiet, 44pt target beside the optional sprint.
+                    Menu {
+                        Button("Add study material") {
+                            flow.step = .material
+                            state.path.append(.materialSetup)
+                        }
+                        Button("Capture a gap") {
+                            state.savedCapture = nil
+                            state.addError = false
+                            state.sheet = .add
+                        }
+                    } label: {
+                        Text("+  Add")
+                            .font(WCFont.sans(14))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(
+                                RoundedRectangle(cornerRadius: Metrics.secondaryRadius)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
+                            )
                     }
-                    .foregroundStyle(Theme.meta)
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: Metrics.minTapTarget)
+                    .accessibilityLabel("Add")
+                    .accessibilityHint("Choose study material or capture a gap.")
 
-                // Quick-add stays visible in every state, including empty and error.
-                Button {
-                    state.savedCapture = nil
-                    state.addError = false
-                    state.sheet = .add
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("+").font(WCFont.sans(16))
-                        Text("Capture a gap").font(TypeRole.rowSummary)
+                    // A sprint draws from the whole library, even when nothing is
+                    // due. It stays secondary to the scheduled review action.
+                    SecondaryButton(title: "Review sprint") {
+                        state.enterSprintSetup()
                     }
-                    .foregroundStyle(Theme.meta)
-                    .padding(.vertical, 4)
                 }
-                .buttonStyle(.plain)
-
-                // Always visible, including when the queue is empty or the fetch
-                // failed — a sprint draws from the whole library, not from what's due.
-                // Deliberately lower weight than Start, which stays the dominant
-                // daily action.
-                Button { state.enterSprintSetup() } label: {
-                    Text("Review sprint")
-                        .font(WCFont.sans(15))
-                        .foregroundStyle(Theme.textMuted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(Theme.border, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
 
                 // Start appears only when more than one card is due.
                 if state.visibleQueue.count > 1 {
-                    PrimaryButton(title: "Start — \(state.visibleQueue.count) cards") {
+                    PrimaryButton(title: "Start review · \(state.visibleQueue.count) cards") {
                         state.beginSession(cards: state.visibleQueue)
                     }
                 }
@@ -279,8 +276,8 @@ struct NoMaterialTodayContent: View {
             Text("Add something you want to understand.")
                 .font(TypeRole.emptyQueue).foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            PrimaryButton(title: "Add lesson") {
-                flow.beginLesson()
+            PrimaryButton(title: "Add study material") {
+                flow.step = .material
                 state.path.append(.materialSetup)
             }
             SecondaryButton(title: "Add a few topics") { open(.manual) }
@@ -475,22 +472,27 @@ struct EmptyQueue: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
-            Text("Nothing due until tomorrow, 7:10.")
-                .font(TypeRole.emptyQueue)
-                .foregroundStyle(Theme.textSecondary)
-                .lineSpacing(22 * 1.4 - 22 * 1.2)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("No reviews due")
+                    .font(TypeRole.emptyQueue)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(22 * 1.4 - 22 * 1.2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(nextDueLine)
+                    .font(WCFont.sans(13.5))
+                    .foregroundStyle(Theme.textMuted)
+            }
 
             if !state.library.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     MetaText(text: "COMING UP", font: WCFont.mono(10), tracking: 1.2, color: Theme.metaDimAlt)
-                    ForEach(state.library.prefix(3)) { card in
+                    ForEach(upcomingCards.prefix(3)) { card in
                         HStack(spacing: 12) {
                             Text(card.topic)
                                 .font(WCFont.sans(14))
                                 .foregroundStyle(Theme.metaAlt)
                             Spacer(minLength: 0)
-                            MetaText(text: upcomingTime(for: card), font: WCFont.mono(12),
+                            MetaText(text: upcomingDay(for: card), font: WCFont.mono(12),
                                      tracking: 0, color: Theme.metaDimAlt)
                         }
                     }
@@ -503,15 +505,68 @@ struct EmptyQueue: View {
         .wcFade()
     }
 
-    /// The backend has no "upcoming" endpoint, so the day comes from the card's
-    /// next review date and the time from the first enabled notification window.
-    private func upcomingTime(for card: CardSummary) -> String {
-        let parser = DateFormatter()
-        parser.dateFormat = "yyyy-MM-dd"
-        let day = DateFormatter()
-        day.dateFormat = "EEE"
-        let name = parser.date(from: card.nextReviewAt).map { day.string(from: $0) } ?? ""
-        let time = state.settings.windows.first(where: { $0.on })?.from ?? "07:10"
-        return "\(name.uppercased()) \(time)"
+    private var nextDueLine: String {
+        guard let next = state.library.compactMap({ card -> (CardSummary, Date)? in
+            guard let availableAt = ReviewAvailability.effectiveDate(
+                for: card, timeZone: accountTimeZone
+            ) else { return nil }
+            return (card, availableAt)
+        }).min(by: { $0.1 < $1.1 })?.0 else {
+            return "More reviews are scheduled."
+        }
+        return "Next due \(upcomingDay(for: next).capitalized)"
+    }
+
+    private var upcomingCards: [CardSummary] {
+        state.library.sorted {
+            let left = ReviewAvailability.effectiveDate(for: $0, timeZone: accountTimeZone)
+                ?? .distantFuture
+            let right = ReviewAvailability.effectiveDate(for: $1, timeZone: accountTimeZone)
+                ?? .distantFuture
+            return left < right
+        }
+    }
+
+    private var accountTimeZone: TimeZone {
+        TimeZone(identifier: state.settings.timezone) ?? .current
+    }
+
+    /// Cards are scheduled to a date, and learning can move honest recall later.
+    /// Show the effective day without borrowing a notification-window time.
+    private func upcomingDay(for card: CardSummary) -> String {
+        ReviewAvailability.weekday(for: card, timeZone: accountTimeZone) ?? "LATER"
+    }
+}
+
+/// The review date remains unchanged after learning, while `recallNotBeforeAt`
+/// temporarily closes retrieval. Empty Today must name the later boundary.
+enum ReviewAvailability {
+    static func effectiveDate(for card: CardSummary, timeZone: TimeZone) -> Date? {
+        guard let scheduled = scheduledDate(card.nextReviewAt, timeZone: timeZone) else {
+            return nil
+        }
+        guard let boundary = card.recallNotBeforeAt, !boundary.isEmpty else {
+            return scheduled
+        }
+        guard let recallNotBefore = WireDate.parse(boundary) else { return nil }
+        return max(scheduled, recallNotBefore)
+    }
+
+    static func weekday(for card: CardSummary, timeZone: TimeZone) -> String? {
+        guard let date = effectiveDate(for: card, timeZone: timeZone) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: date).uppercased()
+    }
+
+    private static func scheduledDate(_ value: String, timeZone: TimeZone) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)
     }
 }

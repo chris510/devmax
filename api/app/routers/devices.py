@@ -50,7 +50,7 @@ async def upsert_device_token(
         db.add(DeviceToken(token=body.token, user_id=user_id, kind=body.kind))
     else:
         # The client re-registers on every launch, so this is the common path.
-        # `created_at` is deliberately left alone — it records when the token was
+        # `created_at` is deliberately left alone. It records when the token was
         # first seen, and the sandbox/production split is carried by `kind`,
         # which must follow the build that just registered.
         existing.kind = body.kind

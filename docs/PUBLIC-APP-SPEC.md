@@ -194,10 +194,10 @@ Welcome
       → Add topics manually → Add answer anchors → Review topics
       → Devmax collection → Collection detail → Review topics
   → If already studied: Try one real review → Explain first score
-      → Choose daily review pace → Request notification permission → Today
+      → Choose reminder windows → Request notification permission → Today
   → If learning over time: Today / Week 1
       → Complete first study item → First legitimate review → Explain first score
-      → Choose daily review pace → Request notification permission
+      → Choose reminder windows → Request notification permission
 ```
 
 The user can inspect choices and prepare material before signing in. Identity is
@@ -240,14 +240,21 @@ No sample scores, fake queue, or empty Study Plan are created.
 
 ## Settings information architecture
 
-The existing Today settings sheet remains the fast path for reviews per day,
-notification windows, and read-aloud. It gains a **More settings** action.
+The Today settings sheet is the fast path for read-aloud and the current review
+reminder summary. Notification-window editing is a dedicated destination with an
+explicit save action. The sheet also has a **More settings** action.
+
+Each enabled window is eligible for at most one review push when a conversational
+card is due. Two enabled windows therefore means up to two reminders per day, one
+means up to one, and zero means reminders are off. This does not cap Today's queue
+or reschedule existing cards. The legacy `reviews_per_day` wire field remains during
+migration and is normalized to the enabled-window count, with a minimum stored value
+of one when all windows are off.
 
 The full Settings screen contains:
 
 1. **Study material** — collections, imported guides, topics, and Study Plans.
-2. **Reviews** — daily count, notification windows, read-aloud, and default
-   voice/text choice.
+2. **Reviews** — reminder windows, read-aloud, and the available voice/text modes.
 3. **Notifications** — current iOS permission state and a system-settings link.
 4. **Account** — Apple identity, sign out, and account deletion.
 5. **Data & privacy** — export, deletion, retention, and model-processing copy.

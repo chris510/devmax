@@ -1,7 +1,7 @@
 """The deterministic weekly scheduler. See docs/STUDY-PLAN-SPEC.md §Scheduler.
 
 Pure functions, independent of FastAPI request context and of the ORM, so they're
-directly unit-testable. Nothing here writes — `build_proposal` returns a proposal
+directly unit-testable. Nothing here writes. `build_proposal` returns a proposal
 and the service layer decides whether to persist it, which is what makes
 "never mutate the saved schedule until the user confirms" structural rather than
 a habit.
@@ -177,14 +177,14 @@ def week_start(start_date: date, index: int) -> date:
     deliberately coarse: everything downstream renders `week of <date>`. No
     completion *day* is ever derived from weekly capacity.
 
-    Takes a bare date rather than a plan so the preview screen — which has a
-    draft, not a plan — can use it too instead of reimplementing the arithmetic.
+    Takes a bare date rather than a plan so the preview screen, which has a
+    draft rather than a plan, can use it too instead of reimplementing the arithmetic.
     """
     return start_date + timedelta(days=DAYS_PER_WEEK * (index - 1))
 
 
 def week_of_label(start_date: date, index: int) -> str:
-    """`week of 19 Oct`. Plan-week precision — never a completion day."""
+    """`week of 19 Oct`. Plan-week precision, never a completion day."""
     start = week_start(start_date, index)
     return f"week of {start.day} {start.strftime('%b')}"
 
@@ -230,7 +230,7 @@ def _with_extra_weeks(
     than shifting items here keeps this function operating on weeks alone.
 
     A fresh week is **inserted into the phase that needs it**, not appended to the
-    end of the plan — appending would put phase-2 overflow in a phase-4 week,
+    end of the plan. Appending would put phase-2 overflow in a phase-4 week,
     which rule 3 forbids and which is why the option would never validate. Later
     weeks shift up by one, which is exactly what moves the forecast from Week 12
     to Week 13.
@@ -298,7 +298,7 @@ def build_proposal(
     week can no longer hold it. That is the difference between rule 7 ("carry work
     forward when the current week is full") and a global re-pack, and it is what
     keeps a resident item from being displaced by work carried in from an earlier
-    week — carried work fills slack, it never evicts.
+    week. Carried work fills slack; it never evicts.
 
     Two passes:
 
@@ -308,12 +308,12 @@ def build_proposal(
       B. Place. Each carried item goes to the earliest week at or after its floor
          with room for it. The floor is the latest of the current plan week, the
          item's phase's first week, its hard prerequisites' weeks, its source
-         item's week (rule 6), and its own original week — so carry is always
+         item's week (rule 6), and its own original week, so carry is always
          forward and never crosses an unmet dependency (rules 2, 3, 8).
 
     Rule 3 is a **ceiling as well as a floor**: work never drifts past the last
     week of its own phase. Without that, phase-2 overflow would quietly colonise
-    phase 4's weeks and the phase structure would mean nothing — and the plan
+    phase 4's weeks and the phase structure would mean nothing, and the plan
     would never report that it has run out of room, because there is always a
     later week somewhere.
 
@@ -427,13 +427,13 @@ def build_proposal(
         floor = max(floor, item.week_index)
         for prereq_id in prereqs.get(item.id, ()):  # rules 2 and 8
             if prereq_id not in by_id:
-                continue  # removed or deferred — no ordering left to preserve
+                continue  # removed or deferred; no ordering left to preserve
             placed = placements.get(prereq_id)
             if placed is None:
                 return None
             floor = max(floor, placed)
         # Rule 6: plan-local retrieval goes after the item it retrieves. Same week
-        # is "after" — R4-01 sits alongside L4-01 in the canonical fixture.
+        # is "after". R4-01 sits alongside L4-01 in the canonical fixture.
         if item.source_item_id and item.source_item_id in by_id:
             placed = placements.get(item.source_item_id)
             if placed is None:
@@ -472,7 +472,7 @@ def build_proposal(
             load[target] += item.estimate_minutes
         if not progressed:
             # Every remaining item is waiting on a prerequisite that will never be
-            # placed — a cycle, or a dependency on something unresolved above.
+            # placed: a cycle, or a dependency on something unresolved above.
             unresolved.extend(
                 Unresolved(i.id, i.estimate_minutes, UNRESOLVED_DEPENDENCY_CYCLE)
                 for i in sorted(deferred_pass, key=_sort_key)
@@ -608,7 +608,7 @@ def _validate(
     if unresolved:
         reasons.append(INVALID_UNRESOLVED)
 
-    # Stable order, no duplicates — the client renders one line per code.
+    # Stable order, no duplicates. The client renders one line per code.
     ordered = tuple(
         code
         for code in (

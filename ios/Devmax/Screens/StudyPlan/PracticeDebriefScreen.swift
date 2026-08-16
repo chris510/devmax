@@ -245,7 +245,7 @@ struct PracticeDebriefScreen: View {
 
             if stage == .saveFailed {
                 InlineNotice {
-                    Text("Couldn’t save — your debrief is safe on this phone.")
+                    Text("Couldn’t save. Your debrief is safe on this phone.")
                         .font(WCFont.sans(14))
                         .foregroundStyle(Theme.text)
                 }

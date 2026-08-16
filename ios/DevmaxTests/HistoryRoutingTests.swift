@@ -73,6 +73,15 @@ final class HistoryRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryBackLabelNamesReviewCardsWhenOpenedFromLibrary() {
+        let state = AppState(api: MockAPI.shared)
+        let cardID = UUID()
+        state.path = [.library, .libraryCards, .history(cardID)]
+
+        XCTAssertEqual(state.historyBackLabel, "← Review cards")
+    }
+
+    @MainActor
     func testLinkedFixtureOpensTheNamedRecallCard() async throws {
         let mapping = try XCTUnwrap(
             StudyPlanFixtures.linkedItemDetail().recallMappings.first

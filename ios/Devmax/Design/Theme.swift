@@ -70,7 +70,7 @@ enum Metrics {
     static let rowTopPadding: CGFloat = 15
     static let rowBottomPadding: CGFloat = 16
     static let scoreColumnGap: CGFloat = 14
-    static let scoreColumnWidth: CGFloat = 34
+    static let scoreColumnWidth: CGFloat = 44
 
     static let primaryRadius: CGFloat = 14
     static let secondaryRadius: CGFloat = 11

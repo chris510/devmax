@@ -189,7 +189,7 @@ async def _commit_activation(db: AsyncSession) -> None:
     """
     try:
         await db.commit()
-    except IntegrityError as exc:  # pragma: no cover — the partial index backstop
+    except IntegrityError as exc:  # pragma: no cover; the partial index backstop
         await db.rollback()
         raise HTTPException(status_code=409, detail="another plan is already active") from exc
 
@@ -864,7 +864,7 @@ async def edit_preview(
     """Apply edits and review decisions, then re-run the gate over them.
 
     Edits are applied to the stored raw response rather than the preview, so a
-    later re-validation sees them too — an edit that only lived on the preview
+    later re-validation sees them too. An edit that only lived on the preview
     would silently revert on the next check.
     """
     draft = await _get_draft(db, draft_id)
@@ -987,7 +987,7 @@ async def create_plan(body: PlanCreate, db: AsyncSession = Depends(get_session))
         if previous_active is not None:
             # Making another plan active pauses the current one. The client has
             # already confirmed this; the database's partial unique index is what
-            # guarantees the two never overlap — and it is evaluated per statement,
+            # guarantees the two never overlap. It is evaluated per statement,
             # so the pause has to reach the database before the activation does.
             previous_active.status = PLAN_PAUSED
             previous_active.paused_at = _now()
@@ -1618,7 +1618,7 @@ async def update_capacity(
     """Preview a capacity change. Applied only when nothing has to move.
 
     A change that displaces work returns the proposal with `can_apply` reflecting
-    validity and writes nothing — the user confirms it through the replan path,
+    validity and writes nothing. The user confirms it through the replan path,
     which is the same code with an explicit confirmation in front of it.
     """
     graph = await _get_graph(db, plan_id, for_update=True)
@@ -2029,7 +2029,7 @@ async def edit_item(
 
     if changed_estimate:
         # An estimate edit can displace work, so it is a material change and gets
-        # a revision. The proposal is not applied here — if it no longer fits, the
+        # a revision. The proposal is not applied here. If it no longer fits, the
         # week reads as over capacity and the app offers the replan.
         assert base_revision is not None
         proposal = sp.build_proposal_for(graph)
@@ -2253,10 +2253,14 @@ async def _card_proposal_list(
             ).first()
             if card is not None:
                 if active_contract == SCORING_CONTRACT_V2:
-                    score = card.last_accuracy if card.last_accuracy is not None else "—"
+                    score = (
+                        card.last_accuracy
+                        if card.last_accuracy is not None
+                        else "unrated"
+                    )
                     label = "recall"
                 else:
-                    score = card.last_score if card.last_score is not None else "—"
+                    score = card.last_score if card.last_score is not None else "unrated"
                     label = "score"
                 context = (
                     f"Existing · {label} {score} · due {card.next_review_at.isoformat()}"
@@ -2474,7 +2478,7 @@ async def accept_card_proposals(
     """Create the selected cards atomically and idempotently.
 
     The whole operation is one transaction. Either every selected card and the
-    acceptance record commit together, or nothing does — a half-created batch
+    acceptance record commit together, or nothing does. A half-created batch
     that reported success would leave the user unable to tell which cards exist.
 
     The exact normalized-topic check runs **again here**, inside the transaction,
@@ -2645,7 +2649,7 @@ async def accept_card_proposals(
         created.append(card.id)
 
     # The links reference both the cards and the acceptance, and the unit of work
-    # would otherwise emit them first — see `sp.insert_plan_rows` for why ordering
+    # would otherwise emit them first; see `sp.insert_plan_rows` for why ordering
     # is manual here. Still one transaction: a flush is not a commit.
     await db.flush()
     for link in links:

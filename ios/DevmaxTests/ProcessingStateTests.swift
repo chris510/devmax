@@ -137,7 +137,7 @@ final class ProcessingStateTests: XCTestCase {
     /// score block already shows it.
     @MainActor
     func testCoachingFeedbackIsNotSpeakable() {
-        let probe = entry(.coachingQuestion, "One level deeper — why does it hold?")
+        let probe = entry(.coachingQuestion, "One level deeper: why does it hold?")
         let thread = [
             entry(.question, "Walk me through what data moves."),
             entry(.answer, "an answer"),
@@ -152,7 +152,7 @@ final class ProcessingStateTests: XCTestCase {
     @MainActor
     func testANewProbeIsSpokenEvenThoughTheQuestionWasSpokenBefore() {
         let question = entry(.question, "Walk me through what data moves.")
-        let probe = entry(.followUpQuestion, "One more — how do virtual nodes change it?")
+        let probe = entry(.followUpQuestion, "One more: how do virtual nodes change it?")
         let thread = [question, entry(.answer, "a first answer"), probe]
 
         XCTAssertEqual(thread.latestSpokenPrompt?.id, probe.id)
@@ -160,11 +160,11 @@ final class ProcessingStateTests: XCTestCase {
 
     @MainActor
     func testTheNewestSpeakableEntryWins() {
-        let reattempt = entry(.reattemptQuestion, "In your words — what moves?")
+        let reattempt = entry(.reattemptQuestion, "In your words: what moves?")
         let thread = [
             entry(.question, "Walk me through what data moves."),
             entry(.answer, "a first answer"),
-            entry(.followUpQuestion, "One more — and virtual nodes?"),
+            entry(.followUpQuestion, "One more: and virtual nodes?"),
             entry(.answer, "a second answer"),
             reattempt,
         ]

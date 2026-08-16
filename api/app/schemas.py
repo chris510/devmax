@@ -298,7 +298,7 @@ class CompleteOut(BaseModel):
     reattempt_offered: bool = False
     # The exact prompt to show for turn 3, or null when it isn't offered. Sent by the
     # server for the same reason turns 1 and 2 are: it is the question the answer
-    # will be graded against, and the client cannot reliably reconstruct it — on a
+    # will be graded against, and the client cannot reliably reconstruct it. On a
     # resumed follow-up session the client's copy of "the question" is the probe.
     reattempt_prompt: str | None = None
     coaching_offered: bool = False
@@ -309,7 +309,7 @@ class CompleteOut(BaseModel):
 class ReattemptOut(BaseModel):
     """Deliberately carries no score.
 
-    Turn 3's `accuracy` is stored but never returned — the app shows one
+    Turn 3's `accuracy` is stored but never returned. The app shows one
     numeral per session and that numeral is turn 2's composite. Sending a second
     number to a client that has no place to put it invites putting it somewhere.
     """
@@ -417,7 +417,7 @@ class SettingsOut(SettingsBase):
 # A window shorter than the cron's poll interval can fall between two polls and
 # never fire, so this is the floor. Pinned against the actual schedule in
 # .github/workflows/trigger-review.yml by
-# `test_the_minimum_window_is_at_least_the_poll_interval` — a comment alone is
+# `test_the_minimum_window_is_at_least_the_poll_interval`. A comment alone is
 # the same hand-synced coupling this whole change set exists to remove.
 MIN_WINDOW_MINUTES = 30
 
@@ -431,7 +431,7 @@ class NotificationWindowIn(NotificationWindow):
 
     Deliberately a separate model from `NotificationWindow`: `read_settings`
     rebuilds that one from stored JSON, so a rule there would make
-    `GET /settings` fail on any row written before the rule existed — including
+    `GET /settings` fail on any row written before the rule existed, including
     the hand-widened windows docs/RUNBOOK.md describes for testing a push. Reads
     stay permissive; writes are constrained.
 
@@ -465,7 +465,7 @@ class NotificationWindowIn(NotificationWindow):
         except ValueError as exc:
             raise ValueError("times must be 24-hour HH:MM") from exc
         if span < MIN_WINDOW_MINUTES:
-            # A non-positive span covers `to` before `from`, and `to == from` —
+            # A non-positive span covers `to` before `from`, and `to == from`:
             # both two taps away in the app, which advances each end separately.
             raise ValueError(
                 f"a window must run at least {MIN_WINDOW_MINUTES} minutes; this one is {span}"
@@ -490,7 +490,7 @@ class SettingsIn(SettingsBase):
 
 class TriggerResult(BaseModel):
     sent: bool
-    # Constrained because this is what the cron consumer branches on — a typo'd
+    # Constrained because this is what the cron consumer branches on. A typo'd
     # reason should fail here, not read as an unrecognised-but-valid state.
     reason: (
         Literal[
@@ -525,7 +525,7 @@ def window_to_dict(w: NotificationWindow) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Study Plan — see docs/STUDY-PLAN-SPEC.md §API
+# Study Plan; see docs/STUDY-PLAN-SPEC.md §API
 #
 # These are screen-shaped, not table-shaped. Each one answers the question its
 # level of the hierarchy exists to answer, and none of them carries an internal
@@ -543,7 +543,7 @@ class ActivePlanSummary(BaseModel):
     """Today's one line. Kept deliberately thin.
 
     Today asks "what should I do now?", so this carries position and the next
-    study block and nothing else — no capacity, no progress paragraph, no
+    study block and nothing else: no capacity, no progress paragraph, no
     description. It is also the endpoint that must never slow the due-card
     fetch, so it resolves from the plan row and one week lookup.
     """
@@ -555,7 +555,7 @@ class ActivePlanSummary(BaseModel):
     week_index: int | None = None
     week_total: int | None = None
     # The current phase's concise title. Uppercased by the client's mono style,
-    # not here — casing is a display decision.
+    # not here. Casing is a display decision.
     phase_title: str = ""
     # e.g. "Next Tue 19:00", or null when no study block is set.
     next_block_label: str | None = None
@@ -590,7 +590,7 @@ class PlanOverview(BaseModel):
     status: PlanStatus
     week_index: int
     week_total: int
-    # "Est. completion · week of 19 Oct". Plan-week precision only — there is
+    # "Est. completion · week of 19 Oct". Plan-week precision only; there is
     # deliberately no field here from which a completion day could be derived.
     forecast_label: str
     forecast_end_plan_week: int
@@ -632,7 +632,7 @@ class WeekDetail(BaseModel):
     planned_minutes: int
     capacity_minutes: int
     # The two facts under the title, rendered server-side. `due_label` set this
-    # rule — "computed server-side so the client never reimplements date math" —
+    # rule, "computed server-side so the client never reimplements date math",
     # and the hours rounding is the same kind of thing.
     core_line: str
     capacity_line: str
@@ -819,7 +819,7 @@ class ApplyReplan(ReplanRequest):
     """Apply carries the same shape as Preview so the two cannot diverge.
 
     A proposal is only ever applied by recomputing it from these inputs against
-    the current revision — the client never sends a placement, so there is no
+    the current revision. The client never sends a placement, so there is no
     way for a stale client-side plan to be written.
     """
 
@@ -972,7 +972,7 @@ class RevisionOut(BaseModel):
 class PlanRecap(BaseModel):
     """The completed-plan screen. Plan work only.
 
-    Estimated, not measured — Study Plan does not track actual study time — and
+    Estimated, not measured. Study Plan does not track actual study time, and
     global reviews are deliberately absent, because they were never part of this
     plan's capacity.
     """
@@ -1082,7 +1082,7 @@ class CardAcceptOut(BaseModel):
     status: Literal["committed"]
     created_card_ids: list[uuid.UUID]
     # True when this response replayed an earlier commit rather than creating
-    # anything. The UI shows ADDED either way — both mean the cards exist.
+    # anything. The UI shows ADDED either way; both mean the cards exist.
     replayed: bool = False
 
 

@@ -194,11 +194,13 @@ async def test_lesson_check_records_one_successful_physical_call(monkeypatch):
     client = FakeClient(
         [
             make_response(
-            {
-                "qualitative_outcome": "missing_mechanism",
-                "feedback": "Name how the load balancer routes the request.",
-            }
-            )
+                {
+                    "qualitative_outcome": "missing_mechanism",
+                    "feedback": (
+                        "Name the routing sequence — then explain the load balancer."
+                    ),
+                }
+            ),
         ]
     )
     monkeypatch.setattr(llm, "_no_retry_client", lambda: client)
@@ -220,6 +222,7 @@ async def test_lesson_check_records_one_successful_physical_call(monkeypatch):
     )
 
     assert result.qualitative_outcome == "missing_mechanism"
+    assert result.feedback == "Name the routing sequence: then explain the load balancer."
     assert authorized == [1]
     assert len(client.calls) == 1
     assert len(result.trace.calls) == 1
@@ -566,7 +569,7 @@ async def test_follow_up_result_carries_the_probe_and_no_score(
     result = await llm.score_answer(**SCORE_ARGS, probes=NO_PROBES)
 
     assert result.status == "follow_up"
-    assert result.follow_up_question == "One more —"
+    assert result.follow_up_question == "One more:"
     # A provisional score must not leak out as a real one: the card is not
     # rescheduled until the session completes.
     assert result.score is None
@@ -580,7 +583,7 @@ async def test_a_second_probe_result_also_carries_no_score(
     result = await llm.score_answer(**SCORE_ARGS, probes=ONE_PROBE)
 
     assert result.status == "follow_up"
-    assert result.follow_up_question == "Last one —"
+    assert result.follow_up_question == "Last one:"
     assert result.score is None
 
 
@@ -915,6 +918,98 @@ async def test_qualitative_coaching_is_unscored_and_no_retry(
     assert set(calls[0]["schema"]["properties"]) == {"coaching_feedback"}
     assert calls[0]["retry"] is False
     assert "score" not in json.dumps(calls[0]["schema"])
+
+
+def test_generated_copy_prompts_do_not_request_em_dashes() -> None:
+    rubrics = (
+        llm.SCORING_RUBRIC,
+        llm.SCORING_V2_RUBRIC,
+        llm.COACHING_RUBRIC,
+        llm.QUESTION_RUBRIC,
+        llm.REATTEMPT_RUBRIC,
+        llm.IMPORT_RUBRIC,
+        llm.CARD_PROPOSAL_RUBRIC,
+        llm.LESSON_EXTRACTION_RUBRIC,
+        llm.LESSON_GROUNDING_RUBRIC,
+        llm.LESSON_CHECK_RUBRIC,
+    )
+
+    assert all("—" not in rubric for rubric in rubrics)
+    assert 'Preface it "One more: "' in llm.SCORING_RUBRIC
+    assert '"Last one: "' in llm.SCORING_V2_RUBRIC
+
+
+async def test_generated_copy_is_cleaned_but_evidence_stays_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_excerpt = "Only one arc moves — the quoted source uses this punctuation."
+    stub_completion(
+        monkeypatch,
+        {
+            "concepts": [
+                {
+                    "topic": "Ring movement — bounded ownership",
+                    "source_excerpt": source_excerpt,
+                }
+            ]
+        },
+    )
+
+    async def authorize(_attempt: int) -> None:
+        return None
+
+    concepts = await llm.extract_lesson(
+        title="Hashing",
+        source_text=source_excerpt,
+        source_url="https://example.com/hash",
+        source_type="article",
+        before_provider_call=authorize,
+    )
+
+    assert concepts[0]["topic"] == "Ring movement: bounded ownership"
+    assert concepts[0]["source_excerpt"] == source_excerpt
+
+
+def test_scoring_request_preserves_learner_and_source_punctuation() -> None:
+    answer = "I thought every key moved — no, only one arc moves."
+    source_excerpt = "When a node joins — only its acquired range moves."
+
+    completion = llm.build_score_answer_completion(
+        model="test",
+        effort=None,
+        **{**SCORE_ARGS, "answer_text": answer},
+        probes=NO_PROBES,
+        source_excerpt=source_excerpt,
+    )
+
+    assert answer in completion["user_content"]
+    assert source_excerpt in completion["user_content"]
+
+
+async def test_question_and_completion_fields_cannot_introduce_an_em_dash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_completion(monkeypatch, {"question": "What moves — and why?"})
+    question = await llm.generate_question(
+        topic="Consistent hashing",
+        category="Systems",
+        pattern=None,
+        source_company=None,
+        mastery_summary="",
+        last_score=None,
+        recent_questions=[],
+    )
+    assert question == "What moves: and why?"
+
+    payload = scored(4, probe=None)
+    payload["feedback"] = "Correct mechanism — the failure boundary was missing."
+    payload["mastery_summary"] = "solid mechanism — shaky boundaries"
+    stub_completion(monkeypatch, payload)
+    result = await llm.score_answer(**SCORE_ARGS, probes=AT_CAP)
+
+    assert result.feedback == "Correct mechanism: the failure boundary was missing."
+    assert result.mastery_summary == "solid mechanism: shaky boundaries"
+    assert "—" not in result.feedback + result.mastery_summary
 
 
 # --- request construction ---------------------------------------------------

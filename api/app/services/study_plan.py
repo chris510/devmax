@@ -53,13 +53,13 @@ from app.models import (
 from app.services import study_plan_scheduler as sched
 
 # Subjects the existing three-axis technical rubric can actually grade. Law,
-# anatomy, and language plans use plan-local retrieval and create no cards — the
+# anatomy, and language plans use plan-local retrieval and create no cards. The
 # rubric scores mechanism accuracy, trade-off awareness, and failure-mode
 # awareness, none of which mean anything for a vocabulary list or a case holding.
 #
 # Matching is by token rather than by exact slug. A live import of
 # `docs/CURRICULUM.md` returned `senior-backend-interview-prep`, which an exact
-# allowlist rejected — the flagship use case, refused on a slug variant. The
+# allowlist rejected the flagship use case on a slug variant. The
 # model has no way to know which strings are on a list it cannot see, so the
 # list is of *words* and the slug is checked against them.
 TECHNICAL_SUBJECT_TOKENS = frozenset(
@@ -97,7 +97,7 @@ TECHNICAL_SUBJECT_TOKENS = frozenset(
 
 # The deny list wins outright. A guide whose subject names one of these is not a
 # software-engineering plan however many technical words it also contains, and
-# "anatomy of distributed systems" is not worth being clever about — the cost of
+# "anatomy of distributed systems" is not worth being clever about. The cost of
 # a false positive is recall cards the scoring rubric cannot grade.
 NON_TECHNICAL_SUBJECT_TOKENS = frozenset(
     {
@@ -133,7 +133,7 @@ NON_TECHNICAL_SUBJECT_TOKENS = frozenset(
 _SLUG_SPLIT = re.compile(r"[^a-z0-9]+")
 
 # The curriculum-honesty gate (V3.4 §6). All five, in order. Failing any one
-# makes a candidate not selectable and not counted — there is no bypass and no
+# makes a candidate not selectable and not counted. There is no bypass and no
 # "add back", because a gate with an override is a suggestion.
 GATE_QUESTIONS = (
     "What source lesson or observed failure justifies the card?",
@@ -159,7 +159,7 @@ def _now() -> datetime:
 # names ("read-your-writes", "CI/CD"), so they are normalised to a single space
 # rather than deleted, and everything else in this set is packaging.
 _STRIP_PUNCTUATION = str.maketrans({ch: None for ch in "\"'`.,;:!?()[]{}«»‘’“”"})
-_SEPARATORS = re.compile(r"[-–—_/\\|]+")
+_SEPARATORS = re.compile(r"[-\N{EN DASH}\N{EM DASH}_/\\|]+")
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -171,7 +171,7 @@ def normalize_topic(topic: str) -> str:
     apostrophe and a straight one cannot produce two "different" cards.
 
     This is the authoritative check. Any semantic-overlap signal is a warning
-    shown to the user, never a decision — see `classify_duplicate`.
+    shown to the user, never a decision; see `classify_duplicate`.
     """
     text = unicodedata.normalize("NFKC", topic).strip().casefold()
     text = _SEPARATORS.sub(" ", text)
@@ -185,7 +185,7 @@ async def normalized_card_index(
     """Every card keyed by its normalized topic, read once.
 
     Normalization is not expressible in portable SQL, so the comparison happens
-    in Python — but it only needs the card list once per request, not once per
+    in Python, but it only needs the card list once per request, not once per
     candidate. Later collisions lose to the earlier card, which is the one that
     already exists.
     """
@@ -226,7 +226,7 @@ def slug_supports_cards(subject_slug: str) -> bool:
 
 
 def subject_supports_cards(subject_slug: str, importer_says_supported: bool) -> bool:
-    """Two keys, and a veto — the rule applied once, at import.
+    """Two keys and a veto: the rule applied once, at import.
 
     Only the importer calls this, because it is the only caller that has the
     model's answer. Everything after creation reads the slug through
@@ -644,7 +644,7 @@ async def make_active(
 
     The partial unique index only *detects* two active plans; the flush below is
     what avoids them. The index is evaluated per statement, so the incumbent's
-    pause has to reach the database before this plan's activation does — and
+    pause has to reach the database before this plan's activation does, and
     that ordering was previously hand-rolled at three call sites, which is two
     more than an invariant should have.
     """
@@ -695,7 +695,7 @@ def pause(db: AsyncSession, graph: PlanGraph) -> StudyPlanRevision:
 
 
 def complete(db: AsyncSession, graph: PlanGraph) -> StudyPlanRevision:
-    """Completed is not archived — the recap is kept and listed separately."""
+    """Completed is not archived. The recap is kept and listed separately."""
     before = plan_snapshot(graph)
     plan = graph.plan
     plan.status = PLAN_COMPLETED
@@ -734,7 +734,7 @@ def duplicate_plan(source: StudyPlan, graph: PlanGraph, *, start_date: date) -> 
     Copies guide provenance, phase and week structure, items, dependencies,
     estimates, and user edits. Resets item completion, retrieval completion,
     dates, and reminder settings. Copies **no** cards, scores, sessions, SM-2
-    state, mastery, or plan history — the duplicate starts with an empty
+    state, mastery, or plan history. The duplicate starts with an empty
     revision log and no card links, which is why those tables are simply not
     read here.
 

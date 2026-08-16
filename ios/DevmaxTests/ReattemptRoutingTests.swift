@@ -59,7 +59,7 @@ final class ReattemptRoutingTests: XCTestCase {
             return .complete(
                 score: 1, recallScore: 1, scoringContractVersion: 1,
                 feedback: "", nextReviewAt: "2026-07-30", intervalDays: 1,
-                practice: false, reattemptOffered: true, reattemptPrompt: "In your words — why?",
+                practice: false, reattemptOffered: true, reattemptPrompt: "In your words: why?",
                 coachingOffered: false, coachingFocus: nil, coachingQuestion: nil
             )
         }

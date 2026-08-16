@@ -59,14 +59,14 @@ RECENT_QUESTION_LIMIT = 3
 
 # The accuracy band where the rubric states the correct answer outright, and so the
 # only band where there is anything to re-attempt. Same threshold the scheduler fails
-# on (`scheduler.ACCURACY_PASS`), but they are independent decisions — one is "was
+# on (`scheduler.ACCURACY_PASS`), but they are independent decisions. One is "was
 # this a retention failure", the other is "is coaching available". Do not collapse.
 REATTEMPT_MAX_ACCURACY = 2
 
 # Turn 3 re-asks the card's own question rather than generating a new one: the
 # re-attempt is the same retrieval, now informed. Composed server-side and sent to
 # the client, so what is displayed is what the answer is graded against.
-REATTEMPT_PREFACE = "In your words — "
+REATTEMPT_PREFACE = "In your words: "
 
 
 def _scoring_event_details(
@@ -213,7 +213,7 @@ def _reattempt_eligible(session: Session) -> bool:
 
     One predicate, two callers: `submit_answer` decides whether to offer the link
     and `submit_reattempt` decides whether to honour it. Written once so an offer
-    the endpoint would 409 is unrepresentable — DEVIATIONS §15 shows this band does
+    the endpoint would 409 is unrepresentable. DEVIATIONS §15 shows this band does
     move, and it must move in both places at once.
     """
     return session.accuracy is not None and session.accuracy <= REATTEMPT_MAX_ACCURACY
@@ -369,7 +369,7 @@ async def _resumed(db: AsyncSession, existing: Session) -> SessionStart:
     """Re-enter a live session at the turn it is actually waiting on.
 
     On a probe turn the displayed question is the pending probe's, not the card's
-    — the same shared read both resume paths in `start_session` use, so a second
+    This is the same shared read both resume paths in `start_session` use, so a second
     probe cannot show the first one's text on one path and not the other.
     """
     is_follow_up = existing.status == STATUS_AWAITING_FOLLOW_UP
@@ -525,11 +525,11 @@ async def start_session(
     practice: bool = Query(False),
     db: AsyncSession = Depends(get_session),
 ) -> SessionStart:
-    """Called when the user taps into a card — not when the push fires.
+    """Called when the user taps into a card, not when the push fires.
 
     Question generation happens here, on actual engagement: generating one for a
     push that may never be opened wastes tokens and latency. It also happens at
-    most once per card — after the first session the question is reused verbatim,
+    most once per card. After the first session the question is reused verbatim,
     so each review is the same retrieval rather than a fresh one.
     """
     stale_generations = 0
@@ -799,7 +799,7 @@ async def submit_answer(
     observed_status = session.status
 
     card = await owned_card(db, session.card_id, for_update=True)
-    if card is None:  # pragma: no cover — FK guarantees this
+    if card is None:  # pragma: no cover; FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     # The card lock serializes reviews without blocking PATCH /draft, which only
     # touches the session row. Refresh after any wait. An exact replay of the last
@@ -1011,7 +1011,7 @@ async def submit_answer(
         raise llm.LLMError("scorer returned the wrong contract version")
     if result.status == "follow_up" and len(pairs) >= llm.MAX_SCORED_FOLLOW_UPS:
         # Defense in depth, at the write site. Both parsers already refuse to
-        # return a probe here, so reaching this line means a parser bug — and the
+        # return a probe here, so reaching this line means a parser bug. The
         # cap has to hold anyway: a prompt alone can never extend a session.
         raise llm.LLMError("scorer asked for a follow-up past the structural cap")
 
@@ -1063,7 +1063,7 @@ async def submit_answer(
     session.status = STATUS_COMPLETE
     session.ended_at = now
 
-    # Mastery signal, written for practice runs too — the score is real and the
+    # Mastery signal, written for practice runs too. The score is real and the
     # card's history shows it. Only the schedule is held back below.
     card.last_score = result.score
     card.last_accuracy = result.accuracy
@@ -1113,8 +1113,8 @@ async def submit_answer(
 
     db.add(session)
     db.add(card)
-    # Session and card land in a single transaction. A partial write here — answer
-    # saved, SM-2 not applied — would leave the card permanently stuck.
+    # Session and card land in a single transaction. A partial write here, with the
+    # answer saved but SM-2 not applied, would leave the card permanently stuck.
     await db.commit()
     return _complete_response(session, card)
 
@@ -1127,7 +1127,7 @@ async def submit_reattempt(
 
     This endpoint must never touch `ease_factor`, `interval_days`, `repetitions`, or
     `next_review_at`, and never touch `session.score` or the three axis columns. It
-    runs *after* the session is complete and SM-2 is already applied — a turn that
+    runs *after* the session is complete and SM-2 is already applied. A turn that
     happens once the model has stated the correct mechanism measures coached
     performance, and feeding that to the scheduler would inflate the interval by the
     ease factor on exactly the cards just gotten wrong.
@@ -1163,7 +1163,7 @@ async def submit_reattempt(
     settings = get_settings()
     await ai_consent.require_ai_processing(db, user_id, settings)
     card = await owned_card(db, session.card_id, for_update=True)
-    if card is None:  # pragma: no cover — FK guarantees this
+    if card is None:  # pragma: no cover; FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     await db.refresh(session)
     # A re-attempt only exists after a scored, completed session. Any other status
@@ -1185,14 +1185,14 @@ async def submit_reattempt(
         raise HTTPException(status_code=422, detail="re-attempt text is empty")
 
     # The offer expires when the card is reviewed again. Turn 3 rewrites
-    # `mastery_summary`, which is live context for the *next* `score_answer` — so a
+    # `mastery_summary`, which is live context for the *next* `score_answer`. A
     # re-attempt against a stale session would let an old, already-superseded
     # session's coaching overwrite a newer review's assessment, and that is the one
     # indirect route by which turn 3 could reach a future scheduling decision.
     if _card_was_reviewed_since(card, session):
         raise HTTPException(status_code=409, detail="card has been reviewed since")
 
-    # Scored before anything is written, matching `submit_answer` — a failed call
+    # Scored before anything is written, matching `submit_answer`. A failed call
     # leaves the row untouched and the client can retry. Unlike `submit_answer`,
     # nothing is at risk either way: the score is already banked and the schedule
     # already applied.
@@ -1254,7 +1254,7 @@ async def submit_coaching(
     # alternation focus. It deliberately does not lock the session row: draft
     # persistence must stay cheap while the model is running.
     card = await owned_card(db, session.card_id, for_update=True)
-    if card is None:  # pragma: no cover — FK guarantees this
+    if card is None:  # pragma: no cover; FK guarantees this
         raise HTTPException(status_code=404, detail="card not found")
     await db.refresh(session)
     replay = _replayed_coaching(session, body.text)

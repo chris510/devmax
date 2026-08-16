@@ -47,7 +47,7 @@ final class FollowUpBudgetTests: XCTestCase {
             return XCTFail("a daily review's first answer draws a probe, got \(first)")
         }
         XCTAssertTrue(
-            probe.hasPrefix("One more — "), "the first probe keeps its own preface: \(probe)"
+            probe.hasPrefix("One more: "), "the first probe keeps its own preface: \(probe)"
         )
 
         let second = try await api.submitAnswer(
@@ -95,7 +95,7 @@ final class FollowUpBudgetTests: XCTestCase {
         guard case .followUp(let firstProbe, _) = first else {
             return XCTFail("expected the band-rule probe, got \(first)")
         }
-        XCTAssertTrue(firstProbe.hasPrefix("One more — "))
+        XCTAssertTrue(firstProbe.hasPrefix("One more: "))
 
         let second = try await api.submitAnswer(
             sessionID: session, text: "the first probe answer", turnIndex: 1
@@ -106,7 +106,7 @@ final class FollowUpBudgetTests: XCTestCase {
         // The preface is the only thing telling the user the session cannot keep
         // being extended, so it is copy, not decoration.
         XCTAssertTrue(
-            secondProbe.hasPrefix("Last one — "),
+            secondProbe.hasPrefix("Last one: "),
             "the second probe announces itself as the last: \(secondProbe)"
         )
         XCTAssertNotEqual(secondProbe, firstProbe)

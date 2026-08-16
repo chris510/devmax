@@ -56,7 +56,7 @@ struct PlanOverviewScreen: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { state.path.removeLast() } label: {
-                Text("← Today")
+                Text("← Back")
                     .font(TypeRole.secondaryAction)
                     .foregroundStyle(Theme.metaAlt)
             }
@@ -93,10 +93,12 @@ struct PlanOverviewScreen: View {
 
     private func timeline(_ overview: PlanOverview) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(overview.phases) { phase in
+            ForEach(Array(overview.phases.enumerated()), id: \.element.id) { offset, phase in
                 PhaseRow(
                     phase: phase,
                     isOpen: plan.openPhase == phase.index,
+                    isFirst: offset == overview.phases.startIndex,
+                    isLast: offset == overview.phases.count - 1,
                     onToggle: {
                         withAnimation(Motion.fadeFast) { plan.togglePhase(phase.index) }
                     },
@@ -108,9 +110,16 @@ struct PlanOverviewScreen: View {
 
             if let change = overview.latestChange {
                 Button { state.path.append(.planUpdates(planID)) } label: {
-                    MetaText(text: change.uppercased(), font: WCFont.mono(10),
-                             tracking: 0.6, color: Theme.metaFaint)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 8) {
+                        MetaText(text: change.uppercased(), font: WCFont.mono(10),
+                                 tracking: 0.6, color: Theme.metaFaint)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.metaFaint)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
                 .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
@@ -123,11 +132,22 @@ struct PlanOverviewScreen: View {
     private var bottomBlock: some View {
         VStack(spacing: 10) {
             Hairline()
-            HStack(spacing: 10) {
-                SecondaryButton(title: "Plans") { state.sheet = .plans }
-                SecondaryButton(title: "Updates") { state.path.append(.planUpdates(planID)) }
+            if let overview = plan.overview,
+               overview.id == planID,
+               overview.status == "active" {
+                HStack(spacing: 10) {
+                    PrimaryButton(title: "Continue Week \(overview.weekIndex)") {
+                        state.path.append(.planWeek(planID, overview.weekIndex))
+                    }
+                    SecondaryButton(title: "Plan options", fillsWidth: false) {
+                        state.sheet = .plans
+                    }
+                }
+                .padding(.horizontal, Metrics.screenPadding)
+            } else {
+                SecondaryButton(title: "Plan options") { state.sheet = .plans }
+                    .padding(.horizontal, Metrics.screenPadding)
             }
-            .padding(.horizontal, Metrics.screenPadding)
         }
         .padding(.bottom, Metrics.bottomSafeArea)
         .background(Theme.bg)
@@ -139,14 +159,30 @@ struct PlanOverviewScreen: View {
 private struct PhaseRow: View {
     let phase: PlanPhaseRow
     let isOpen: Bool
+    let isFirst: Bool
+    let isLast: Bool
     let onToggle: () -> Void
     let onWeek: (Int) -> Void
 
     private var isCurrent: Bool { phase.status == "Current" }
+    private var isContained: Bool { isCurrent && isOpen }
+
+    // The header geometry is fixed: 1pt rule, 11pt top inset, 6pt node inset,
+    // then half of the 7pt node. Local rail segments meet at each row boundary,
+    // making one uninterrupted line while still stopping at the first and last
+    // phase nodes.
+    private static let nodeCenterY: CGFloat = 21.5
+    private static let nodeCenterX: CGFloat = 3.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Hairline()
+            if isContained {
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 1)
+            } else {
+                Hairline()
+            }
             Button(action: onToggle) {
                 HStack(alignment: .top, spacing: 12) {
                     // The rail is decoration; the row carries the meaning.
@@ -161,31 +197,35 @@ private struct PhaseRow: View {
                             Text(phase.numberedTitle)
                                 .font(WCFont.sans(16.5, weight: 500))
                                 .foregroundStyle(Theme.text)
+                                .fixedSize(horizontal: false, vertical: true)
                             // Status is a word first. The colour only reinforces it.
                             Text(phase.status)
                                 .font(WCFont.sans(13))
                                 .foregroundStyle(
                                     isCurrent ? Theme.accentChipNote : Theme.textMuted
                                 )
+                                .fixedSize()
                         }
                         MetaText(text: phase.rangeLine, font: WCFont.mono(10.5),
                                  tracking: 0.6, color: Theme.metaDim)
                     }
                     Spacer(minLength: 0)
-                    Text(isOpen ? "▲" : "▼")
-                        .font(WCFont.mono(9))
+                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.metaFaint)
                         .accessibilityHidden(true)
                 }
                 .padding(.vertical, 11)
+                .padding(.trailing, isContained ? 14 : 0)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .frame(minHeight: Metrics.minTapTarget)
             // The visual title is compressed; the accessible name is not.
             .accessibilityLabel(phase.accessibleLabel)
+            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
             .accessibilityHint(isOpen ? "Collapses this phase." : "Expands this phase.")
-            .accessibilityAddTraits(isOpen ? [.isHeader, .isSelected] : .isHeader)
+            .accessibilityAddTraits(.isHeader)
 
             if isOpen {
                 VStack(alignment: .leading, spacing: 0) {
@@ -194,8 +234,37 @@ private struct PhaseRow: View {
                     }
                 }
                 .padding(.leading, 19)
-                .padding(.bottom, 6)
+                .padding(.trailing, isContained ? 14 : 0)
+                .padding(.bottom, isContained ? 12 : 6)
                 .wcFade(Motion.fadeFast)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .topLeading) {
+            ZStack(alignment: .topLeading) {
+                if isContained {
+                    RoundedRectangle(cornerRadius: Metrics.inlineRadius)
+                        .fill(Theme.surface.opacity(0.55))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Metrics.inlineRadius)
+                                .strokeBorder(Theme.hairline, lineWidth: 1)
+                        )
+                        // Leave the timeline itself outside the panel. The
+                        // panel contains the current phase's task detail only.
+                        .padding(.leading, 7)
+                        .padding(.vertical, 6)
+                }
+
+                GeometryReader { proxy in
+                    Path { path in
+                        let startY = isFirst ? Self.nodeCenterY : 0
+                        let endY = isLast ? Self.nodeCenterY : proxy.size.height
+                        path.move(to: CGPoint(x: Self.nodeCenterX, y: startY))
+                        path.addLine(to: CGPoint(x: Self.nodeCenterX, y: endY))
+                    }
+                    .stroke(Theme.hairline, lineWidth: 1)
+                }
+                .accessibilityHidden(true)
             }
         }
     }
@@ -217,10 +286,12 @@ private struct WeekRow: View {
                 Text(week.displayTitle)
                     .font(WCFont.sans(14.5))
                     .foregroundStyle(week.isCurrent ? Theme.text : Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Text(week.status)
                     .font(WCFont.sans(12.5))
                     .foregroundStyle(Theme.textDim)
+                    .fixedSize()
             }
             .padding(.vertical, 9)
             .contentShape(Rectangle())
