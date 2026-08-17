@@ -12,6 +12,7 @@ final class PublicOnboardingState: ObservableObject {
         case returning
         case studyMaterial
         case lessonCheck
+        case lessonResults
     }
     enum LessonArtifactState: Equatable {
         case idle, preparing, ready, failed
@@ -101,10 +102,7 @@ final class PublicOnboardingState: ObservableObject {
     }
 
     var isLessonDraft: Bool {
-        if let job,
-           [.importing, .importFailed, .importReady, .topics].contains(step) {
-            return job.importPath == "lesson"
-        }
+        if let job { return job.importPath == "lesson" }
         return draft.importPath == "lesson"
     }
 
@@ -536,8 +534,12 @@ final class PublicOnboardingState: ObservableObject {
                 generation: generation, sourceID: sourceID
             ) else { return }
             lessonPilotPreview = nil
-            if let status = job?.status, ["confirmed", "superseded"].contains(status) {
-                step = .empty
+            if Self.hasPersistedLessonResults(job) {
+                await loadLessonProgress()
+                guard importContextIsCurrent(
+                    generation: generation, sourceID: sourceID
+                ) else { return }
+                step = .lessonResults
             } else {
                 step = .topics
             }
@@ -1150,14 +1152,19 @@ final class PublicOnboardingState: ObservableObject {
         if ["pending", "processing"].contains(source.status) {
             importStartedAt = source.updatedAt
         }
-        if source.importPath == "lesson",
-           ["confirmed", "superseded"].contains(source.status) {
+        if Self.hasPersistedLessonResults(source) {
             lessonCheckStage = .loading
             step = .lessonCheck
             Task { await openLessonPilotPreview(sourceID: source.id) }
             return
         }
         routeImportResult()
+    }
+
+    private static func hasPersistedLessonResults(_ source: MaterialImport?) -> Bool {
+        guard let source else { return false }
+        return source.importPath == "lesson"
+            && ["confirmed", "superseded"].contains(source.status)
     }
 
     func beginGuideUpdate(_ source: MaterialImport) {
