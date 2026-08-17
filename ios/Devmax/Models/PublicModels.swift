@@ -322,6 +322,10 @@ struct LessonConceptProgress: Codable, Identifiable, Equatable {
     let lastReviewedAt: Date?
     let nextReviewAt: String
     let intervalDays: Int
+
+    var displayScore: Int? {
+        scoringContractVersion == 2 ? recallScore : lastScore
+    }
 }
 
 struct LessonProgress: Codable, Equatable {

@@ -23,6 +23,8 @@ private struct APIErrorEnvelope: Decodable {
     let detail: Detail?
 }
 
+private struct APIPlainErrorEnvelope: Decodable { let detail: String }
+
 extension Error {
     /// The mono note under a failure that had nothing to retry — which half broke.
     ///
@@ -386,7 +388,7 @@ struct LiveAPI: DevmaxAPI {
 
     private func request(
         _ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil,
-        mayRefresh: Bool = true
+        mayRefresh: Bool = true, additivePilotRouteMayBeAbsent: Bool = false
     ) async throws -> Data {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
@@ -420,8 +422,15 @@ struct LiveAPI: DevmaxAPI {
                 minimumBuild: envelope?.detail?.minimumClientBuild
             )
         }
-        if code == 404, envelope?.detail?.code == "pilot_source_not_assigned" {
-            throw APIError.pilotSourceNotAssigned
+        if code == 404 {
+            if let errorCode = envelope?.detail?.code,
+               ["pilot_not_enrolled", "pilot_source_not_assigned"].contains(errorCode) {
+                throw APIError.pilotSourceNotAssigned
+            }
+            let plain = try? Self.decoder.decode(APIPlainErrorEnvelope.self, from: data)
+            if additivePilotRouteMayBeAbsent, plain?.detail == "Not Found" {
+                throw APIError.pilotSourceNotAssigned
+            }
         }
         switch code {
         case 200..<300: return data
@@ -433,7 +442,8 @@ struct LiveAPI: DevmaxAPI {
                     ).refresh(refreshToken)
                 }
                 return try await request(
-                    method, path, query: query, body: body, mayRefresh: false
+                    method, path, query: query, body: body, mayRefresh: false,
+                    additivePilotRouteMayBeAbsent: additivePilotRouteMayBeAbsent
                 )
             } catch {
                 await tokenStore.clear()
@@ -663,9 +673,11 @@ struct LiveAPI: DevmaxAPI {
     }
 
     func markLessonReviewOpened(_ id: UUID) async throws -> MaterialLessonPreview {
-        try await post(
-            "materials/imports/\(id)/review-opened", MaterialLessonPreview.self
+        let data = try await request(
+            "POST", "materials/imports/\(id)/review-opened",
+            additivePilotRouteMayBeAbsent: true
         )
+        return try Self.decoder.decode(MaterialLessonPreview.self, from: data)
     }
 
     func excludePilotLessonProposal(_ id: UUID) async throws -> MaterialTopicPreview {
