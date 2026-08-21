@@ -34,7 +34,7 @@ struct PlanOverviewScreen: View {
                 .padding(.bottom, 8)
             }
 
-            bottomBlock
+            planNavigation
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
@@ -49,9 +49,8 @@ struct PlanOverviewScreen: View {
 
     // MARK: - Header
     //
-    // Four lines and no more: what this is, which plan, where you are, and when
-    // it ends. That is the complete answer set for the five questions the
-    // overview exists to answer.
+    // One label, one title, one position line. Flexible plans are ongoing, so a
+    // forecast does not earn permanent space in the everyday header.
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -64,22 +63,17 @@ struct PlanOverviewScreen: View {
             .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("Study plan")
-                    .font(TypeRole.screenTitle)
-                    .tracking(-0.6)
-                    .foregroundStyle(Theme.text)
-                    .accessibilityAddTraits(.isHeader)
+                MetaText(text: "STUDY PLAN", font: WCFont.mono(10),
+                         tracking: 1.2, color: Theme.meta)
 
                 if let overview = plan.overview {
                     Text(overview.subject)
-                        .font(WCFont.sans(15))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(TypeRole.screenTitle)
+                        .tracking(-0.6)
+                        .foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
                     MetaText(text: overview.positionLine, font: WCFont.mono(11.5),
                              tracking: 0.35, color: Theme.metaAlt)
-                    // The single forecast. Plan-week precision, never a day.
-                    Text(overview.forecastLabel)
-                        .font(WCFont.sans(13.5))
-                        .foregroundStyle(Theme.textMuted)
                 }
             }
             .padding(.top, 4)
@@ -108,46 +102,23 @@ struct PlanOverviewScreen: View {
                 )
             }
 
-            if let change = overview.latestChange {
-                Button { state.path.append(.planUpdates(planID)) } label: {
-                    HStack(spacing: 8) {
-                        MetaText(text: change.uppercased(), font: WCFont.mono(10),
-                                 tracking: 0.6, color: Theme.metaFaint)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.metaFaint)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
-                .padding(.top, 10)
-                .accessibilityLabel("Latest change: \(change). Opens plan updates.")
-            }
         }
     }
 
-    private var bottomBlock: some View {
-        VStack(spacing: 10) {
+    private var planNavigation: some View {
+        VStack(spacing: 0) {
             Hairline()
-            if let overview = plan.overview,
-               overview.id == planID,
-               overview.status == "active" {
-                HStack(spacing: 10) {
-                    PrimaryButton(title: "Continue Week \(overview.weekIndex)") {
-                        state.path.append(.planWeek(planID, overview.weekIndex))
-                    }
-                    SecondaryButton(title: "Plan options", fillsWidth: false) {
-                        state.sheet = .plans
-                    }
-                }
-                .padding(.horizontal, Metrics.screenPadding)
-            } else {
-                SecondaryButton(title: "Plan options") { state.sheet = .plans }
-                    .padding(.horizontal, Metrics.screenPadding)
-            }
+            let currentWeek = plan.overview?.weekIndex ?? 1
+            PlanNavigationPill(
+                selection: .timeline,
+                weekLabel: "Week \(currentWeek)",
+                onWeek: { state.path.append(.planWeek(planID, currentWeek)) },
+                onTimeline: {},
+                onPlans: { state.sheet = .plans },
+                onUpdates: { state.path.append(.planUpdates(planID)) }
+            )
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.top, 10)
         }
         .padding(.bottom, Metrics.bottomSafeArea)
         .background(Theme.bg)
