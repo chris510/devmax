@@ -8,6 +8,12 @@ __pycache__/
 ios/build/
 ios/Devmax.xcodeproj/
 DerivedData/
+android/.gradle/
+android/.idea/
+android/.kotlin/
+android/local.properties
+android/**/build/
+android/captures/
 # Local build settings. FounderMigrationSecrets.xcconfig holds a short-lived,
 # single-purpose claim token and must be deleted after the controlled migration.
 ios/Config/Secrets.xcconfig

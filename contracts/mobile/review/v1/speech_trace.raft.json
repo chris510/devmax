@@ -1,0 +1,11 @@
+{
+  "interval_ms": 180,
+  "partials": [
+    "Okay",
+    "Okay so each server has a term number",
+    "Okay so each server has a term number, and when a follower stops hearing heartbeats",
+    "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate",
+    "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate, then it asks"
+  ],
+  "final_text": "Okay so each server has a term number, and when a follower stops hearing heartbeats it bumps its term and becomes a candidate, then it asks"
+}
