@@ -1,0 +1,7 @@
+{
+  "source": "private Railway bucket",
+  "key": "postgres/daily/20260909T171336Z-0eb9b7b6efb4425c88a8ac11c47e5465.dump",
+  "sha256": "2f634e13922a07da967ffe8f61ae848e25de3b75ff1a59b595e16f60e97a2730",
+  "download_and_restore_seconds": 1.14,
+  "restore_completed_at": "2026-09-09T17:14:50Z"
+}

@@ -1,0 +1,238 @@
+{
+  "verified_at": "2026-09-09T17:13:24.739725+00:00",
+  "backup_kind": "fresh logical pg_dump; not historical PITR",
+  "postgres_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+  "original_revision": "0019",
+  "migrated_revision": "0025",
+  "tables": {
+    "ai_consent_events": {
+      "rows_before": 3,
+      "rows_after": 3,
+      "all_original_columns_unchanged": true
+    },
+    "apple_identities": {
+      "rows_before": 1,
+      "rows_after": 1,
+      "all_original_columns_unchanged": true
+    },
+    "auth_nonces": {
+      "rows_before": 17,
+      "rows_after": 17,
+      "all_original_columns_unchanged": true
+    },
+    "auth_sessions": {
+      "rows_before": 36,
+      "rows_after": 36,
+      "all_original_columns_unchanged": true
+    },
+    "cards": {
+      "rows_before": 9,
+      "rows_after": 9,
+      "all_original_columns_unchanged": true
+    },
+    "device_tokens": {
+      "rows_before": 2,
+      "rows_after": 2,
+      "all_original_columns_unchanged": true
+    },
+    "llm_usage": {
+      "rows_before": 40,
+      "rows_after": 40,
+      "all_original_columns_unchanged": true
+    },
+    "material_sources": {
+      "rows_before": 2,
+      "rows_after": 2,
+      "all_original_columns_unchanged": true
+    },
+    "material_topic_proposals": {
+      "rows_before": 2,
+      "rows_after": 2,
+      "all_original_columns_unchanged": true
+    },
+    "pending_captures": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "session_probes": {
+      "rows_before": 9,
+      "rows_after": 9,
+      "all_original_columns_unchanged": true
+    },
+    "sessions": {
+      "rows_before": 14,
+      "rows_after": 14,
+      "all_original_columns_unchanged": true
+    },
+    "settings": {
+      "rows_before": 1,
+      "rows_after": 1,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_card_links": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_card_proposal_acceptances": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_card_proposals": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_duplications": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_guide_drafts": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_item_dependencies": {
+      "rows_before": 31,
+      "rows_after": 31,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_items": {
+      "rows_before": 260,
+      "rows_after": 260,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_phases": {
+      "rows_before": 8,
+      "rows_after": 8,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_practice_debriefs": {
+      "rows_before": 0,
+      "rows_after": 0,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_revisions": {
+      "rows_before": 12,
+      "rows_after": 12,
+      "all_original_columns_unchanged": true
+    },
+    "study_plan_weeks": {
+      "rows_before": 24,
+      "rows_after": 24,
+      "all_original_columns_unchanged": true
+    },
+    "study_plans": {
+      "rows_before": 2,
+      "rows_after": 2,
+      "all_original_columns_unchanged": true
+    },
+    "users": {
+      "rows_before": 1,
+      "rows_after": 1,
+      "all_original_columns_unchanged": true
+    }
+  },
+  "owner_orphans": {
+    "ai_consent_events": 0,
+    "apple_identities": 0,
+    "auth_sessions": 0,
+    "cards": 0,
+    "device_tokens": 0,
+    "lesson_checks": 0,
+    "llm_usage": 0,
+    "material_sources": 0,
+    "pending_captures": 0,
+    "settings": 0,
+    "study_pilot_enrollments": 0,
+    "study_plan_guide_drafts": 0,
+    "study_plans": 0
+  },
+  "unvalidated_constraints": 0,
+  "duplicate_live_sessions": 0,
+  "latest_completed_review_at": "2026-08-17 00:14:00.190848+00",
+  "http": {
+    "/live": {
+      "status": 200,
+      "body": {
+        "status": "alive"
+      }
+    },
+    "/ready": {
+      "status": 200,
+      "body": {
+        "status": "ready",
+        "schema_revision": "0025",
+        "ai_consent_enforcement_enabled": true
+      }
+    },
+    "/health": {
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "ai_consent_required_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_latest_supported_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_minimum_ios_build": 8,
+        "ai_consent_enforcement_enabled": true
+      }
+    },
+    "/cards/due": {
+      "status": 200
+    },
+    "/settings": {
+      "status": 200
+    },
+    "/auth/me": {
+      "status": 200
+    },
+    "/auth/export": {
+      "status": 200
+    }
+  },
+  "account_export_sections": [
+    "account",
+    "ai_consent_events",
+    "apple_identity",
+    "apple_notification_receipts",
+    "auth_sessions",
+    "cards",
+    "devices",
+    "exported_at",
+    "lesson_checks",
+    "lesson_proposal_audits",
+    "llm_usage",
+    "material_topic_proposals",
+    "pending_captures",
+    "schema_version",
+    "session_probes",
+    "sessions",
+    "settings",
+    "sources",
+    "study_pilot_assignments",
+    "study_pilot_enrollments",
+    "study_plan_card_links",
+    "study_plan_card_proposal_acceptances",
+    "study_plan_card_proposals",
+    "study_plan_duplications",
+    "study_plan_guide_drafts",
+    "study_plan_item_dependencies",
+    "study_plan_items",
+    "study_plan_phases",
+    "study_plan_practice_debriefs",
+    "study_plan_revisions",
+    "study_plan_weeks",
+    "study_plans"
+  ],
+  "unauthenticated_cards_status": 401,
+  "verification_seconds": 0.32,
+  "pass": true,
+  "limitations": [
+    "Fresh logical snapshot; no historical PITR was available.",
+    "Local isolated restore uses a disposable API key; physical-device Apple authentication is verified separately."
+  ],
+  "backup_bytes": 155933,
+  "dump_seconds": 10.31
+}

@@ -13,7 +13,8 @@ This audit started at `837cafd` with a clean working tree. It includes local fix
 source inspection, both database suites, simulator tests, visual inspection, and
 read-only public production probes. It does not certify zero bugs. No production
 data, scoring policy, curriculum approval, deployment, or provider setting was
-changed.
+changed during that initial pass. The follow-up implementation and production
+recovery work is recorded in [the rollout record](PRODUCTION-RECOVERY-2026-09-09.md).
 
 ## Verified results
 
