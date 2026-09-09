@@ -101,7 +101,6 @@ final class AppState: ObservableObject {
     @Published var inputMode: InputMode = .voice
     @Published var submitError = false
     @Published var resumeAvailable = false
-    @Published var storedPartial = ""
     @Published var result: SessionResult?
     @Published var sessionCards: [DueCard] = []
     @Published var cursor = 0
@@ -836,7 +835,6 @@ final class AppState: ObservableObject {
         draftResetPending = false
         result = nil
         resumeAvailable = false
-        storedPartial = ""
         inputMode = DebugFlags.shared.textFirst ? .text : .voice
     }
 
@@ -936,7 +934,10 @@ final class AppState: ObservableObject {
                 for: card.id, sessionID: start.sessionId, turnIndex: start.turnIndex
             ) ?? adoptedLegacy ?? start.draftText
             if !partial.isEmpty {
-                storedPartial = partial
+                // Recovery is already the current answer, even before the user
+                // dismisses its banner. Keeping it in a separate preview value
+                // let lifecycle saves overwrite it with an empty editor draft.
+                draft = partial
                 resumeAvailable = true
             }
         } catch {
@@ -962,7 +963,6 @@ final class AppState: ObservableObject {
     }
 
     func resumeAnswer() {
-        draft = storedPartial
         resumeAvailable = false
     }
 
@@ -977,7 +977,6 @@ final class AppState: ObservableObject {
         draftSync = nil
         pendingUpload?.cancel()
         draft = ""
-        storedPartial = ""
         resumeAvailable = false
         DraftStore.discard(
             for: identity.cardID, sessionID: identity.sessionID, turnIndex: identity.turnIndex
@@ -1005,6 +1004,7 @@ final class AppState: ObservableObject {
     /// persistence.
     func updateDraft(_ text: String) {
         draft = text
+        resumeAvailable = false
         scheduleDraftSync()
     }
 

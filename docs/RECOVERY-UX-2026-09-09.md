@@ -56,8 +56,8 @@ that the lesson check was unscored, without exposing implementation terminology.
 
 - SQLite: 1,293 passed, 44 PostgreSQL-only skips.
 - PostgreSQL 18: 1,337 passed, no skips.
-- iOS: 221 passed (211 unit, ten UI), no skips after the device-discovered sheet
-  dismissal fix. The earlier final layout-only
+- iOS: 225 passed (212 unit, thirteen UI), no skips after the device-discovered sheet
+  dismissal and recovery-preview fixes. The earlier final layout-only
   corrections also passed a separate eight-UI-test run.
 - The iOS Release configuration builds for a generic physical device.
 - Configuration validation errors omit secret-bearing input values; 96 focused
@@ -75,6 +75,9 @@ that the lesson check was unscored, without exposing implementation terminology.
   global sheet binding. The shared header now dismisses its actual presentation;
   UI tests cover both local maintenance and app-owned capture sheets. See the
   [device check](DEVICE-CHECK-2026-09-09.md).
+- Recovered text is the active draft before Resume is tapped. Tests cover
+  preview exit with local/server recovery, unscored ending, and continuing through
+  typing or recording. The three `recovery-preview*.png` states were inspected.
 
 Screenshots are in `docs/audits/2026-09-09/`: `unfinished-review.png`,
 `end-review-failure.png`, `ended-review.png`, `learn-after-ended-review.png`,

@@ -56,8 +56,39 @@ passed with the fix. A companion test confirms that the global capture sheet
 still closes. The full iOS suite passed **221 tests: 211 unit and 10 UI**.
 The 390×844 [open sheet](audits/2026-09-09/maintenance-close-before.png) and
 [dismissed sheet](audits/2026-09-09/maintenance-close-after.png) were visually
-inspected. A signed build 14 archive contains the fix; distribution and device
-verification are recorded below when completed.
+inspected. Build 14 was uploaded, assigned to the same Founder Internal group,
+and installed through TestFlight. `devicectl` independently confirmed build 14.
+Card maintenance's Close button then dismissed correctly on the physical phone.
+
+## Device-discovered recovery preview draft loss
+
+On build 14, entered a clearly labeled, unscored QA draft on API identity
+boundary, which had no unfinished attempt. The existing estimation-card attempt
+was left untouched. A read-only database query confirmed the exact QA text had
+been saved. Closed the review, terminated only Unprompted through the app
+switcher, and reopened it; process inspection confirmed a new app process. The
+recovery banner and exact partial returned correctly.
+
+Opening Options **without first choosing Resume answer**, then ending without a
+score, exposed a separate defect: the saved partial was overwritten with empty
+text. The preview used `storedPartial`, while persistence and input controls
+used the still-empty `draft`. The QA attempt was abandoned with no score; its
+test text was lost. At 19:22 UTC, all nine cards' scheduling/mastery fields and
+all twelve completed scored sessions still matched the pre-test snapshot.
+
+Recovered text now populates the active draft immediately. The resume banner
+tracks presentation only, and starting to type or record dismisses it without
+replacing the answer. This removes the second in-memory answer value and keeps
+the existing contextual disk/server persistence and Start over tombstones.
+
+Before the fix, the regression reproduced empty disk/server writes for both a
+newer local draft and a server-only draft. UI tests also reproduced the lost
+saved-partial section after ending and the empty Type instead editor. New
+coverage additionally checks that recording continues from the recovered text
+without submitting it. The full iOS suite passed **225 tests: 212 unit and
+13 UI**, with no failures. The recovery preview, continued text editor, and
+ended-history screenshots were inspected at 390×844. A signed build 15 archive
+contains the fix; its installation and device checks are recorded when completed.
 
 ## Mirroring limits
 

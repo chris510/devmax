@@ -249,8 +249,6 @@ struct ConversationScreen: View {
                         liveTranscript(speech.transcript)
                     } else if !state.draft.isEmpty, state.inputMode == .voice {
                         liveTranscript(state.draft)
-                    } else if state.resumeAvailable, !state.storedPartial.isEmpty {
-                        liveTranscript(state.storedPartial)
                     }
 
                     if state.stage == .processing { scoringIndicator }
@@ -658,6 +656,7 @@ struct ConversationScreen: View {
                 await state.submit(text)
             }
         } else {
+            state.resumeAnswer()
             recordingGeneration += 1
             state.submitError = false
             state.stage = state.stage.recordingTwin
@@ -713,6 +712,7 @@ struct ConversationScreen: View {
         guard canAnswer, !finalizing, !answerMutationBlocked,
               let context = recordingContext()
         else { return }
+        state.resumeAnswer()
         finalizing = true
         Task {
             let result = await speech.finishResult()

@@ -392,6 +392,45 @@ final class ReattemptRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testLeavingRecoveryPreviewPreservesLocalAndServerDraftsBeforeResuming() async {
+        for local in [false, true] {
+            let api = SpyAPI()
+            let state = AppState(api: api)
+            let card = Self.card("Recovery preview")
+            let sessionID = UUID()
+            let expected = local ? "newer local partial" : "server-only partial"
+            state.sessionCards = [card]
+            api.startStubs[card.id] = [.init(delay: .zero, result: .success(
+                SessionStart(
+                    sessionId: sessionID, question: "probe", isFollowUp: true,
+                    draftText: "server-only partial", resumed: true, turnIndex: 1
+                )
+            ))]
+            if local {
+                DraftStore.save(expected, for: card.id, sessionID: sessionID, turnIndex: 1)
+            }
+            defer { DraftStore.clear(for: card.id) }
+
+            await state.openCard(card)
+            XCTAssertTrue(state.resumeAvailable)
+            // Closing, opening Options, or backgrounding must be safe without
+            // first tapping Resume answer. Exercise the actual load/flush seam.
+            state.flushDraft()
+            await waitUntil { !api.saveDraftCalls.isEmpty }
+
+            XCTAssertEqual(DraftStore.read(
+                for: card.id, sessionID: sessionID, turnIndex: 1
+            ), expected)
+            XCTAssertEqual(api.saveDraftCalls, [expected])
+            XCTAssertEqual(api.saveDraftTurnIndexes, [1])
+            XCTAssertTrue(state.resumeAvailable)
+            XCTAssertTrue(api.answerCalls.isEmpty)
+            state.resumeAnswer()
+            XCTAssertEqual(state.draft, expected)
+        }
+    }
+
+    @MainActor
     func testPriorTurnDiskDraftDoesNotHydrateAnAdvancedProbe() async {
         let api = SpyAPI()
         let state = AppState(api: api)
@@ -418,7 +457,7 @@ final class ReattemptRoutingTests: XCTestCase {
 
         XCTAssertEqual(state.answerTurnIndex, 1)
         XCTAssertFalse(state.resumeAvailable)
-        XCTAssertTrue(state.storedPartial.isEmpty)
+        XCTAssertTrue(state.draft.isEmpty)
     }
 
     @MainActor
@@ -452,7 +491,7 @@ final class ReattemptRoutingTests: XCTestCase {
         let sessionID = UUID()
         state.sessionCards = [card]
         state.sessionID = sessionID
-        state.storedPartial = "discard me"
+        state.draft = "discard me"
         state.resumeAvailable = true
         DraftStore.save("discard me", for: card.id, sessionID: sessionID, turnIndex: 0)
         defer { DraftStore.clear(for: card.id) }
@@ -475,7 +514,7 @@ final class ReattemptRoutingTests: XCTestCase {
         let sessionID = UUID()
         state.sessionCards = [card]
         state.sessionID = sessionID
-        state.storedPartial = "never resurrect this"
+        state.draft = "never resurrect this"
         state.resumeAvailable = true
         defer { DraftStore.clear(for: card.id) }
 
