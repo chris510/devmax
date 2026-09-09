@@ -1,7 +1,26 @@
 # Production recovery and release — September 9, 2026
 
-This is the first implementation step following the project audit. The API
-deployment is pending completion of the final release checks below.
+This is the first implementation step following the project audit. The API is
+deployed and recoverable; physical-device and provider-control checks remain open.
+
+## Deployed result
+
+At 17:27 UTC, Railway deployed commit `51d3c2197b8e88cecf3a3dcadd933c98fb55f551`
+as deployment `1f192ff0-69e6-4672-acb6-8302ce203ca2`. The predeploy migration
+advanced `0019` to `0025`; `/live`, `/ready`, and `/health` returned 200, with
+`/ready` reporting `0025`. Unauthenticated card access still returned 401.
+The single-replica review poller restarted normally and returned `already_pushed`.
+
+The postdeployment comparison matched every original column in all 26 existing
+application tables against the untouched predeployment restore. No curriculum
+activation, pilot enrollment, learner session, score, or schedule was changed.
+A new archive of the upgraded database was uploaded and verified at 17:29 UTC
+(182,895 bytes). See [production verification](audits/2026-09-09/production-after-deploy.json)
+and [postmigration backup](audits/2026-09-09/backup-after-migration.json).
+
+Both hosted CI runs passed all six jobs, including iOS and backup validation:
+[branch CI](https://github.com/chris510/devmax/actions/runs/34382412742) and
+[PR CI](https://github.com/chris510/devmax/actions/runs/34382432488).
 
 ## Verified starting state
 
@@ -34,6 +53,15 @@ the supported minor version. CI now retains startup logs when a container exits.
   vulnerabilities with available fixes. It still reports 54 OS findings without
   available fixes; this is not a claim of a vulnerability-free image.
 - Ruff, Actionlint, whitespace checks, and three backup-retention tests passed.
+
+The live V1 canary made two synthetic, reviewed-fixture calls at the configured
+shipping model/effort for $0.0205. Both retention pass/fail classifications were
+correct, but the numeric review gate failed: a noisy yet adequate explanation
+received depth 3 instead of 1 and composite 4 instead of 3. This is unresolved
+calibration evidence, not a fully passing live-scoring qualification. No learner
+session or scheduling state was written. Keep this case in the later learning-
+quality work; do not change scoring policy or claim score precision from two calls.
+See [the canary record](audits/2026-09-09/v1-live-canary.json).
 
 The first Postgres-18 suite invocation targeted an empty database before its
 migrations had been applied. Its fixture setup errors were corrected by following
@@ -78,11 +106,12 @@ Evidence: [migration and data comparison](audits/2026-09-09/production-recovery.
 [backup operations](../ops/backups/README.md). Raw database archives and credentials
 remain outside the repository in a private local directory.
 
-## Gates still being completed
+## Remaining checks
 
-- First hosted CI run including the new iOS and backup jobs.
-- Updated API deployment, predeploy migration, and public `/ready` verification.
-- Physical-device push/review and interrupted-network recovery.
+- Physical-device push/review and interrupted-network recovery. iPhone Mirroring
+  requires the owner's Mac authentication before the device walkthrough can proceed.
+- Observe the first scheduled backup on September 10; successful manual/deployment
+  runs and the configured cron establish setup, not future execution.
 - Provider billing ceilings and the post-fix live generic importer run.
 - Railway IaC migration before its December 1, 2026 legacy-config cutoff;
   preserve migrations, `/ready`, one API replica, and the daily backup schedule.

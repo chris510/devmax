@@ -1,0 +1,61 @@
+{
+  "model": "claude-sonnet-5",
+  "contract_version": 1,
+  "effort": "low",
+  "cost_usd": 0.0205,
+  "reviewed_numeric_gate_passed": false,
+  "retention_false_passes": 0,
+  "retention_false_failures": 0,
+  "cases": [
+    {
+      "case": "delivery sequence \u2014 noisy transcript",
+      "created_at": "2026-09-09T17:22:34.170336+00:00",
+      "fingerprint": "3314277b25fcfcf49c60f9a10e20823c91d188f44d5836966fc7e3c26af17821",
+      "usage": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "input_tokens": 2178,
+        "output_tokens": 209
+      },
+      "result": {
+        "axes": [
+          4,
+          3,
+          2
+        ],
+        "expected_axes": [
+          5,
+          1,
+          1
+        ],
+        "expected_score": 3,
+        "score": 4
+      }
+    },
+    {
+      "case": "delivery sequence \u2014 fluent architecture jargon",
+      "created_at": "2026-09-09T17:22:39.767935+00:00",
+      "fingerprint": "044763bf6ab6c5b1afac0b7dacc2d36607eaa2d702ab8b4258a1c33b6c940a0a",
+      "usage": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "input_tokens": 2201,
+        "output_tokens": 279
+      },
+      "result": {
+        "axes": [
+          1,
+          1,
+          0
+        ],
+        "expected_axes": [
+          1,
+          1,
+          0
+        ],
+        "expected_score": 1,
+        "score": 1
+      }
+    }
+  ]
+}

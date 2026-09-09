@@ -4,9 +4,11 @@
 detailed procedure; this is the running status, the ordering, and the traps that
 cost time. When both disagree, the RUNBOOK is the procedure and this is the state.
 
-Last updated: **2026-08-16**. Live at
+Last updated: **2026-09-09**. Live at
 `https://devmax-production.up.railway.app` (Railway project `devmax`,
-services `devmax` + `Postgres`).
+services `devmax`, `Postgres`, and `database-backup`; private bucket
+`production-recovery`). September release evidence is in
+[PRODUCTION-RECOVERY-2026-09-09.md](PRODUCTION-RECOVERY-2026-09-09.md).
 
 ---
 
@@ -32,19 +34,22 @@ services `devmax` + `Postgres`).
 | ✅ | APNs variables — four set, key parses in-container, warning gone | done |
 | ✅ | iOS Release build installed on the iPhone; token registered | done |
 | ✅ | **First push delivered, tapped, and a session opened** | done |
-| ☐ | Deploy the integrated adaptive-study-pilot + backend-hardening release and confirm `/ready` reports the single Alembic head `0025` | local code state only; production and participant launch unverified |
-| ☐ | Verify Railway backup/PITR retention and complete the isolated restore drill in RUNBOOK §Production signals, limits, and recovery | no production evidence recorded |
+| ✅ | Deploy the integrated release and confirm `/ready` reports `0025` | September 9: commit `51d3c21`, deployment `1f192ff0-69e6-4672-acb6-8302ce203ca2`; V1 retained, zero pilot enrollments |
+| ✅ | Configure daily database backups and complete an isolated restore | Hobby: private logical dumps at 10:00 UTC, 31-day retention and at least 3 copies; bucket download/restore verified; native backups/PITR require Pro |
+| ✅ | Verify current PostgreSQL 18 and iOS release checks | 1,331 backend tests; 207 iOS tests; all six hosted CI jobs green |
+| ☐ | Observe the first scheduled backup run | September 10 at 10:00 UTC; initial manual/deployment runs succeeded |
 | ☐ | Record provider-enforced Anthropic/OpenAI spending ceilings and test their 75%/90% alerts | external controls unverified |
 | ☐ | Deliver an APNs **production** push to a TestFlight build | sandbox path is verified; production token path is not |
 | ☐ | Re-run the generic Study Plan importer live after the post-fix changes | unit-tested; prior rerun was blocked by Anthropic credit |
 | ☐ | `reattempt_effort` sweep | independent — can happen any time |
+| ☐ | Resolve the noisy-transcript numeric scoring canary | retention classification passed, but depth/composite exceeded the reviewed fixture; see September release record |
 
 ---
 
 ## Order, and why it is this order
 
-**The deploy is complete — steps 1 through 7 are all done.** They are kept below as the
-record of what was done and why, and as the procedure for doing it again.
+**The original July deployment completed steps 1 through 7.** They remain below
+as historical context; the current open release checks are in the table above.
 
 Verified end to end on 2026-07-29: a Release build signed with the team provisioning
 profile is installed on the iPhone, `aps-environment=development` matches
