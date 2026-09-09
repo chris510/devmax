@@ -107,14 +107,16 @@ partial. Opened Options without tapping Resume answer. A read-only query then
 confirmed the exact draft remained on the open session, fixing the observed
 build 14 failure at its write boundary.
 
-The final End without scoring tap is pending: Mirroring began returning
-`noWindowsAvailable` for coordinate actions. Reconnecting handles, bringing the
-window forward, and resetting the control session did not resolve it. Restarted
-Mirroring; macOS now requires the owner's Mac login. The QA attempt remains open
-and recoverable, with no score. No production database row was edited by an
-operator workaround.
+Mirroring subsequently lost coordinate control and required a restart and Mac
+unlock. After it reconnected, tapped End without scoring on the phone and
+expanded the newest history row. History displayed both “Ended without a score”
+and the exact QA text under “SAVED PARTIAL · UNSCORED”. A read-only database query
+confirmed the attempt was abandoned with the exact 63-character partial and a
+null score. The full restart → recovered preview → Options → unscored end path
+therefore passes on the installed build 15. Both labeled QA attempts are now
+ended; the existing learner attempt was left untouched.
 
-At 19:48:52 UTC, all nine cards' scheduling/mastery fields and all twelve completed
+At 19:53:22 UTC, all nine cards' scheduling/mastery fields and all twelve completed
 scored sessions still matched the pre-test snapshot. Build 15's local 225 tests
 and all six hosted branch CI jobs passed. The PR checks for the same source also
 passed. [Release evidence](audits/2026-09-09/ios-build15.json).
@@ -126,7 +128,7 @@ capture cannot be certified through Mirroring: Apple's current documentation
 states that microphone access is unavailable through this surface.
 [Apple's iPhone Mirroring documentation](https://support.apple.com/en-us/120421).
 
-The remaining device checks are the final unscored end/history observation,
-interrupted-network recovery, visible production-push delivery/tap routing, and
-direct-phone microphone/VoiceOver use. Process restart and recovery-preview exit
-have passed on build 15.
+The remaining device checks are interrupted-network recovery, visible
+production-push delivery/tap routing, and direct-phone microphone/VoiceOver use.
+Process restart, recovery-preview exit, and unscored ending with preserved
+history have passed on build 15.

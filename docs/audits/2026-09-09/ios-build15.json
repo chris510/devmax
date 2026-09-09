@@ -25,11 +25,12 @@
   "installed_build_verified": "15",
   "process_restart_draft_recovered": true,
   "recovery_preview_exit_draft_preserved": true,
-  "final_unscored_end_verified": false,
-  "final_device_check_blocker": "Mirroring restarted after noWindowsAvailable; Mac login required",
+  "final_unscored_end_verified": true,
+  "final_device_check_blocker": null,
   "card_schedule_and_mastery_unchanged": true,
   "scored_history_unchanged": true,
-  "state_compared_at": "2026-09-09T19:48:52Z",
+  "state_compared_at": "2026-09-09T19:53:22Z",
   "branch_ci_run": 34395978376,
-  "branch_ci_status": "success"
+  "branch_ci_status": "success",
+  "ended_history_partial_visible": true
 }

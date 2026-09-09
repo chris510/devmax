@@ -63,8 +63,9 @@ one checked. [Build evidence](audits/2026-09-09/ios-build13.json).
 Build 15 now supersedes build 13 with the two device-discovered sheet dismissal
 and recovery-preview fixes. Its 225 local iOS tests and all six hosted branch
 checks passed on `18c2d9b`. The physical restart recovered the exact unscored QA
-draft, and leaving the resume preview preserved it in the server. Final unscored
-ending awaits Mirroring's Mac unlock after a window-control failure. See the
+draft, leaving the resume preview preserved it in the server, and ending without
+a score retained the exact partial in History. A final production comparison
+confirmed existing schedules, mastery, and scored history were unchanged. See the
 [device record](DEVICE-CHECK-2026-09-09.md) and
 [build 15 artifact](audits/2026-09-09/ios-build15.json).
 
