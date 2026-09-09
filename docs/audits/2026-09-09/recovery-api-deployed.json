@@ -1,0 +1,36 @@
+{
+  "verified_at": "2026-09-09T18:35:56.359383+00:00",
+  "deployment_id": "707fc772-62f9-4f88-b857-467c541ab998",
+  "source_commit": "da76d46232954b653b8b174cc763b7553f7c54db",
+  "read_only": true,
+  "provider_calls": 0,
+  "http": {
+    "/live": {
+      "status": 200,
+      "body": {
+        "status": "alive"
+      }
+    },
+    "/ready": {
+      "status": 200,
+      "body": {
+        "status": "ready",
+        "schema_revision": "0025",
+        "ai_consent_enforcement_enabled": true
+      }
+    },
+    "/health": {
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "ai_consent_required_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_latest_supported_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_minimum_ios_build": 8,
+        "ai_consent_enforcement_enabled": true
+      }
+    }
+  },
+  "unauthenticated_cards_status": 401,
+  "legacy_key_access_rejected": true,
+  "protected_recovery_http": "pending device bearer session; verified separately on isolated restore"
+}

@@ -774,10 +774,13 @@ then repeat the restore at least monthly and after a database-provider change:
   production APNs token, and the coordinated switch to
   `APNS_USE_SANDBOX=false` plus `WC_APS_ENVIRONMENT=production` has not yet been
   exercised end to end.
-- The generic Study Plan importer fixes are unit-tested, but the post-fix live
-  Anthropic rerun was blocked by account credit. Repeat the reviewed guide import
-  once the provider budget is funded, retaining latency, token, validation, and
-  retry evidence without copying guide or model text into logs.
+- The September 9 generic-import rerun completed in 872.6 seconds, returning 73
+  items with all source offsets resolved. The validator withheld creation for
+  capacity, estimates, inferred dependencies/retrieval, and possible omissions.
+  The current guide specifies 20 hours/week; the smoke requested 15. This is a
+  passing provider/schema/offset smoke, not an approved saved plan. See
+  `docs/audits/2026-09-09/live-generic-import.json`. Billed output-token/cost
+  accounting was not emitted by the existing operator CLI.
 - Migration `0025`, public readiness, and logical-backup restoration were verified
   September 9. Observe the first scheduled backup and record provider-enforced
   spending ceilings and their alert destinations.

@@ -22,6 +22,55 @@ Both hosted CI runs passed all six jobs, including iOS and backup validation:
 [branch CI](https://github.com/chris510/devmax/actions/runs/34382412742) and
 [PR CI](https://github.com/chris510/devmax/actions/runs/34382432488).
 
+### Recovery API and internal TestFlight build
+
+The second rollout deployed `da76d46232954b653b8b174cc763b7553f7c54db` as
+`707fc772-62f9-4f88-b857-467c541ab998`. Schema remains `0025`, and all three health
+probes return 200. Both unauthenticated requests and the disabled legacy shared
+key return 401. Protected recovery responses were verified against the isolated
+production restore; a production bearer-session walkthrough remains device work.
+See [deployed probes](audits/2026-09-09/recovery-api-deployed.json) and
+[container reads](audits/2026-09-09/recovery-api-container.json).
+
+The initial upload `befa0f9c-1cba-4339-9b82-9881bf679118` failed before Docker
+started because `--path-as-root api` removed the `/api` directory expected by
+the service. The existing deployment stayed healthy. Uploading the repository
+root preserved `/api/railway.json`, the Dockerfile, migration command, readiness
+check, and one API replica; that rollout succeeded.
+
+All six hosted CI jobs passed on the deployed source in both the
+[branch run](https://github.com/chris510/devmax/actions/runs/34388739780) and
+[PR run](https://github.com/chris510/devmax/actions/runs/34388934929), including
+219 iOS tests. Final local results are
+1,337 PostgreSQL 18 tests and 1,293 SQLite tests with 44 PostgreSQL-only skips.
+The last configuration fix removes secret-bearing input dictionaries from
+startup validation messages while retaining their field/error explanations.
+
+Release build **13** was archived and exported for **internal TestFlight only**,
+then uploaded successfully at 18:34:46 UTC. This build overrides the repository's
+build 10 with `CURRENT_PROJECT_VERSION=13`, above the installed developer build
+12. The exported IPA has production APNs, `get-task-allow=false`, mocks off, the
+Railway URL, and empty API/claim bootstrap secrets. Xcode reports that the
+uploaded package is processing; this does not prove TestFlight readiness,
+installation, or delivery to a production APNs token. The archive's development
+signature is expected before export; the distributed IPA's signature is the
+one checked. [Build evidence](audits/2026-09-09/ios-build13.json).
+
+### Generic importer rerun
+
+The existing operator CLI completed one live import of the current 19.7k-character
+curriculum in **872.6 seconds**, returning four phases, twelve weeks, and 73
+items. Every source excerpt resolves against the guide. No database was written.
+
+The guide declares 20 hours/week; the smoke requested 15. The gate correctly
+withheld creation for over-capacity weeks and also flagged 16 inferred estimates,
+eight possible omissions, five proposed retrieval items, and fourteen inferred
+dependencies. This closes the missing post-fix provider/schema/offset run; it
+does not approve the generated plan. The deterministic first-party manifest
+remains the appropriate path for the built-in curriculum. Billed output tokens
+and total cost were not reported by the existing CLI.
+[Sanitized evidence](audits/2026-09-09/live-generic-import.json).
+
 ## Verified starting state
 
 - Railway project `devmax`, production environment, API deployment
@@ -108,11 +157,13 @@ remain outside the repository in a private local directory.
 
 ## Remaining checks
 
-- Physical-device push/review and interrupted-network recovery. iPhone Mirroring
-  requires the owner's Mac authentication before the device walkthrough can proceed.
+- Finish Apple processing, install internal TestFlight build 13, and verify a
+  physical-device push, review, and interrupted-network recovery. iPhone Mirroring
+  most recently reported that the phone was in use; earlier it required the
+  owner's Mac authentication. No learner answer was simulated.
 - Observe the first scheduled backup on September 10; successful manual/deployment
   runs and the configured cron establish setup, not future execution.
-- Provider billing ceilings and the post-fix live generic importer run.
+- Provider billing ceilings and billed token/cost accounting for the live import.
 - Railway IaC migration before its December 1, 2026 legacy-config cutoff;
   preserve migrations, `/ready`, one API replica, and the daily backup schedule.
 

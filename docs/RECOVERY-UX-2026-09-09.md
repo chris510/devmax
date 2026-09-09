@@ -54,10 +54,13 @@ that the lesson check was unscored, without exposing implementation terminology.
 
 ## Verification
 
-- SQLite: 1,291 passed, 44 PostgreSQL-only skips.
-- PostgreSQL 18: 1,335 passed, no skips.
+- SQLite: 1,293 passed, 44 PostgreSQL-only skips.
+- PostgreSQL 18: 1,337 passed, no skips.
 - iOS: 219 passed (211 unit, eight UI), no skips. The final layout-only
-  corrections also receive a separate eight-UI-test run.
+  corrections also passed a separate eight-UI-test run.
+- The iOS Release configuration builds for a generic physical device.
+- Configuration validation errors omit secret-bearing input values; 96 focused
+  configuration tests and the final full backend suites pass.
 - New API tests cover ownership, explicit archive filtering, current follow-up
   identity, idempotent abandonment, partial preservation, and unchanged card fields.
 - New client tests cover draft-before-abandon ordering, failed-upload retry, stale

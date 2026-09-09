@@ -22,18 +22,20 @@ The findings below preserve the initial audit evidence. Subsequent work:
 
 | Work | Current result |
 |---|---|
-| Production and recovery | Supported Python runtime deployed; schema `0025`; real bucket backup restored; daily job configured. Physical-device/APNs and first future cron execution still need observation. |
+| Production and recovery | Recovery API `da76d46` deployed; schema `0025`; real bucket backup restored; daily job configured. Build 13 uploaded for internal TestFlight. Apple processing, installation, physical-device/APNs, and first future cron execution still need verification. |
 | Week 2–3 content | Corrected six draft authorities/questions and prepared [Week 2](WEEK-2-CONTENT-REVIEW-2026-09-09.md) and [Week 3](WEEK-3-CONTENT-REVIEW-2026-09-09.md) review packets. Owner approval and actual lesson completion remain required. |
 | Unfinished attempts | Explicit Options → History → End without scoring → Learn, with draft preservation, failed-request retry, and spoken resume. |
 | Archived discovery | Library has an owned archived list and a tested restore path. |
 | Unknown discovery | Library checking/failure states are distinct from empty; unavailable plans open a cached destination or plan list. |
 | Readability | Dynamic Type scales; targeted maximum-size layouts and review controls checked. Pilot implementation jargon removed; README and runtime amendment index updated. VoiceOver device pass remains open. |
 | Learning quality | Two live V1 canary cases retained the correct binary retention outcome, but one over-scored secondary detail and failed the numeric gate. V2 and pilot remain inactive. |
+| Generic importer | One live post-fix run completed in 872.6 seconds with 73/73 source excerpts resolving. Capacity and content-review gates prevent automatic creation; no plan was saved. |
 
-[Recovery/UI implementation and evidence](RECOVERY-UX-2026-09-09.md): 1,291 SQLite
-tests passed with 44 PostgreSQL-only skips, all 1,335 passed on PostgreSQL 18, and
+[Recovery/UI implementation and evidence](RECOVERY-UX-2026-09-09.md): 1,293 SQLite
+tests passed with 44 PostgreSQL-only skips, all 1,337 passed on PostgreSQL 18, and
 219 iOS tests passed. These replace the earlier baseline counts for the follow-up
-code. Hosted release and backup evidence is in the separate rollout record.
+code. All six hosted CI jobs also passed for both the deployed branch and PR
+revision. Hosted release and backup evidence is in the separate rollout record.
 
 ## Verified results
 
@@ -287,9 +289,12 @@ older screenshot predates the current plan, capture, and footer additions; it is
 not a pixel-equivalent baseline. Dynamic dates and simulator safe areas also
 differ. The inspected screens showed no new clipping of primary actions.
 
-Not exercised here: real microphone recognition and audio interruptions, physical
+Not exercised in the initial pass: real microphone recognition and audio interruptions, physical
 device background termination, Sign in with Apple against Apple, paid model
 scoring or guide extraction, production pushes, production backup restoration,
 the current container/OS vulnerability inventory, and the new hosted iOS CI job.
-These remain explicit validation work; mocked provider tests cannot substitute
-for scoring calibration or prove that the app improves your learning.
+The follow-up status above and rollout record supersede this initial list:
+provider calls, the container scan, backup restoration, and hosted CI have since
+been exercised. Device checks and scoring qualification remain open; mocked
+provider tests cannot substitute for calibration or prove that the app improves
+your learning.

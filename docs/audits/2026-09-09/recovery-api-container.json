@@ -1,0 +1,10 @@
+{
+  "schema": "0025",
+  "active_cards": 8,
+  "archived_cards": 1,
+  "live_sessions_found": 1,
+  "all_new_fields_present": true,
+  "database": "isolated production restore",
+  "mutations": 0,
+  "provider_calls": 0
+}
