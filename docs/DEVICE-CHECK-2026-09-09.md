@@ -39,6 +39,26 @@ separately; APNs acceptance alone does not establish either.
 At 18:57 UTC, a read-only database comparison confirmed that all nine cards'
 schedule/mastery fields and all twelve completed sessions were unchanged.
 
+## Device-discovered maintenance dismissal defect
+
+On build 13, Card maintenance's Close button did not dismiss the sheet. Its
+shared `SheetChrome` header cleared `AppState.sheet`, but History presents
+maintenance from its own local binding. The button therefore changed unrelated
+state and left the local presentation open.
+
+The header now uses SwiftUI's presentation-scoped `dismiss` action. All callers
+use native sheets, so the same header closes both local maintenance and the
+app-owned capture, settings, capacity, and plan sheets. The change preserves the
+existing layout and copy.
+
+The new maintenance UI regression failed on build 13's implementation, then
+passed with the fix. A companion test confirms that the global capture sheet
+still closes. The full iOS suite passed **221 tests: 211 unit and 10 UI**.
+The 390×844 [open sheet](audits/2026-09-09/maintenance-close-before.png) and
+[dismissed sheet](audits/2026-09-09/maintenance-close-after.png) were visually
+inspected. A signed build 14 archive contains the fix; distribution and device
+verification are recorded below when completed.
+
 ## Mirroring limits
 
 Mirroring paused when the phone was unlocked during the check. Real microphone

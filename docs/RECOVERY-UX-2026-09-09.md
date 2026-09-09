@@ -56,7 +56,8 @@ that the lesson check was unscored, without exposing implementation terminology.
 
 - SQLite: 1,293 passed, 44 PostgreSQL-only skips.
 - PostgreSQL 18: 1,337 passed, no skips.
-- iOS: 219 passed (211 unit, eight UI), no skips. The final layout-only
+- iOS: 221 passed (211 unit, ten UI), no skips after the device-discovered sheet
+  dismissal fix. The earlier final layout-only
   corrections also passed a separate eight-UI-test run.
 - The iOS Release configuration builds for a generic physical device.
 - Configuration validation errors omit secret-bearing input values; 96 focused
@@ -70,6 +71,10 @@ that the lesson check was unscored, without exposing implementation terminology.
 - All four font variants grow at accessibility size 3. At the largest setting,
   UI tests verify review and Plan Item actions remain reachable; assertions on
   button height establish that the requested text size actually took effect.
+- Physical testing found that maintenance's Close header targeted the unrelated
+  global sheet binding. The shared header now dismisses its actual presentation;
+  UI tests cover both local maintenance and app-owned capture sheets. See the
+  [device check](DEVICE-CHECK-2026-09-09.md).
 
 Screenshots are in `docs/audits/2026-09-09/`: `unfinished-review.png`,
 `end-review-failure.png`, `ended-review.png`, `learn-after-ended-review.png`,

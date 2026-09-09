@@ -1,6 +1,34 @@
 import XCTest
 
 final class ReviewRecoveryUITests: XCTestCase {
+    func testMaintenanceCloseDismissesItsLocalSheetWithoutChangingTheCard() {
+        let app = XCUIApplication()
+        app.launchEnvironment = ["WC_ROUTE": "history", "WC_TTS": "0"]
+        app.launch()
+        let maintain = app.buttons["MAINTAIN CARD"]
+        XCTAssertTrue(maintain.waitForExistence(timeout: 10))
+        maintain.tap()
+        let archive = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Archive card")).firstMatch
+        XCTAssertTrue(archive.waitForExistence(timeout: 5))
+        capture(app, "maintenance-close-before")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(archive.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(maintain.isHittable)
+        XCTAssertFalse(app.staticTexts["Archived · Your history and review schedule are saved."].exists)
+        capture(app, "maintenance-close-after")
+    }
+
+    func testCaptureCloseStillDismissesTheAppSheet() {
+        let app = XCUIApplication()
+        app.launchEnvironment = ["WC_ROUTE": "add", "WC_TTS": "0"]
+        app.launch()
+        let close = app.buttons["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["SETTINGS"].isHittable)
+    }
+
     func testTypedAttemptCanRetryEndingThenStudyWithoutAScore() {
         let app = XCUIApplication()
         app.launchEnvironment = ["WC_ROUTE": "review-end-failure", "WC_TEXT_FIRST": "1", "WC_TTS": "0"]

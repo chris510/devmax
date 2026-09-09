@@ -314,7 +314,7 @@ struct SheetChrome<Content: View>: View {
     /// row pushed the title and Close out through the top of the sheet.
     var height: CGFloat? = nil
     @ViewBuilder let content: Content
-    @EnvironmentObject private var state: AppState
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 22) {
@@ -323,7 +323,9 @@ struct SheetChrome<Content: View>: View {
                     .font(serifTitle ? TypeRole.sheetTitleSerif : TypeRole.sheetTitle)
                     .foregroundStyle(serifTitle ? Theme.textSerif : Theme.text)
                 Spacer()
-                Button { state.sheet = nil } label: {
+                // Dismiss the presentation containing this header. Some callers
+                // own a local sheet binding rather than AppState.sheet.
+                Button { dismiss() } label: {
                     Text("Close")
                         .font(TypeRole.secondaryAction)
                         .foregroundStyle(Theme.meta)
