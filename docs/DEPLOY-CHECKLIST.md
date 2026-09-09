@@ -38,12 +38,12 @@ services `devmax`, `Postgres`, and `database-backup`; private bucket
 | ✅ | Configure daily database backups and complete an isolated restore | Hobby: private logical dumps at 10:00 UTC, 31-day retention and at least 3 copies; bucket download/restore verified; native backups/PITR require Pro |
 | ✅ | Verify current PostgreSQL 18 and iOS release checks | 1,337 PostgreSQL 18 tests; 1,293 SQLite tests; 225 iOS tests; all six hosted CI jobs green on iOS source `18c2d9b` |
 | ✅ | Deploy recovery API and install the matching iOS build | Backend `da76d46`, deployment `707fc772-62f9-4f88-b857-467c541ab998`; TestFlight build 15 installed; authenticated Library and recovered draft preservation verified |
-| ☐ | Observe the first scheduled backup run | September 10 at 10:00 UTC; initial manual/deployment runs succeeded |
+| ☐ | Observe the first scheduled backup run | September 10 at 10:00 UTC; 10:15 UTC task follow-up scheduled. Post-merge archive restore passed; retry-policy ordering fixed and live readback verified |
 | ☐ | Record provider-enforced Anthropic/OpenAI spending ceilings and test their 75%/90% alerts | external controls unverified |
 | ☐ | Deliver an APNs **production** push to a TestFlight build | September 9: production APNs accepted the build-13 device check; visible delivery and tap routing remain unverified |
 | ✅ | Re-run the generic Study Plan importer live after the post-fix changes | 872.6 seconds; 73/73 offsets resolve; review gates correctly prevent saving the over-capacity/inferred output |
 | ☐ | `reattempt_effort` sweep | independent — can happen any time |
-| ☐ | Resolve the noisy-transcript numeric scoring canary | retention classification passed, but depth/composite exceeded the reviewed fixture; see September release record |
+| ☐ | Resolve the noisy-transcript numeric scoring canary | Investigation complete: existing V1 secondary-axis instability; keyless replay still fails the numeric gate. 248 focused checks pass; V2 live activation remains separately gated. See [post-merge verification](POST-MERGE-VERIFICATION-2026-09-09.md) |
 
 ---
 

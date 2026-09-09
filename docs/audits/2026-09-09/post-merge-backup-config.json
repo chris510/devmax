@@ -1,0 +1,23 @@
+{
+  "verified_at": "2026-09-09T20:35:48.140010+00:00",
+  "service_id": "2a5c0a4b-fa4c-46ea-9604-5eb56ff3fcac",
+  "combined_mutation_before": {
+    "cronSchedule": "0 10 * * *",
+    "restartPolicyType": "NEVER",
+    "restartPolicyMaxRetries": 2
+  },
+  "ordered_mutations_after": {
+    "cronSchedule": "0 10 * * *",
+    "latestDeployment": {
+      "id": "3acb05e1-1c2f-4253-9f78-be5e6d175d31",
+      "status": "SUCCESS"
+    },
+    "nextCronRunAt": "2026-09-10T10:00:00.000Z",
+    "restartPolicyMaxRetries": 2,
+    "restartPolicyType": "ON_FAILURE"
+  },
+  "automatic_run_verified": false,
+  "fault_injection_retry_tested": false,
+  "followup_automation_id": "verify-devmax-scheduled-backup",
+  "followup_local_time": "2026-09-10 03:15 America/Los_Angeles"
+}
