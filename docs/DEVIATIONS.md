@@ -679,3 +679,30 @@ way.
 carries the two-stage truth table and the "at most two additional scoring calls"
 budget, and the V2 parser enforces them fail-closed. `scoring_contract_version`
 stays 1.
+
+## 31. Study Plan uses a compact Week / Timeline navigation pill
+
+The V3.5 overview predates the first-party plan becoming an ongoing study
+surface. It gives the generic `Study plan` label the largest type, keeps a
+completion forecast permanently visible, and ends with separate Continue and
+Plan-options buttons. Week detail then relies on the navigation stack alone.
+In regular use this reads as repeated explanation plus a row of unrelated
+actions rather than two views of the same plan.
+
+The iOS client now treats **Week** and **Timeline** as the two everyday Study
+Plan destinations. A shared bottom pill keeps those destinations in the same
+place on both screens; `Plans` and `Updates` move behind one clearly labelled
+`More` menu. This follows the compact segmented-navigation pattern reviewed in
+Mobbin's Quizlet and Apple Photos references without importing either product's
+visual language. The selected segment uses neutral Devmax surfaces rather than
+the accent, preserving the accent-use invariant.
+
+The overview header is compressed to `STUDY PLAN` / subject / position. The
+forecast remains on the wire for planning and decision surfaces but is no
+longer permanent overview copy: a flexible, no-deadline plan continues into
+review reinforcement, so an ambient completion date makes the ongoing plan
+sound terminal. Week detail similarly compresses its two progress sentences to
+`3/5 Core · 11h/12h`; VoiceOver retains the full server-rendered wording.
+
+No scheduler, lifecycle, card, score, session, or SM-2 behavior changes. Phase
+and week rows keep their existing semantics and 44-point targets.

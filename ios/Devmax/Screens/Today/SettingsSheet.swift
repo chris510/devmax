@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Reachable only from Today, not a destination.
+/// Retained as the compact settings-sheet fixture for design verification.
 struct SettingsSheet: View {
     @EnvironmentObject private var state: AppState
     @State private var draft: AppSettings = .placeholder

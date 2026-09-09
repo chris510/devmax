@@ -157,7 +157,7 @@ struct TodayScreen: View {
     }
 
     private var settingsPill: some View {
-        Button { state.sheet = .settings } label: {
+        Button { state.path.append(.fullSettings) } label: {
             MetaText(text: "SETTINGS", font: WCFont.mono(10.5), tracking: 1.26, color: Theme.meta)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)

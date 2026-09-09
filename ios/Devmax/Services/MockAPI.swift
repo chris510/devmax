@@ -136,6 +136,7 @@ actor MockAPI: DevmaxAPI {
     static let shared = MockAPI()
     let materialImportDelay: Duration
     let confirmMaterialDelay: Duration
+    let lessonProgressDelay: Duration
     let lessonArtifactDelay: Duration
     let materialImportFixture: MaterialImport?
     let retryMaterialImportFixture: MaterialImport?
@@ -149,6 +150,7 @@ actor MockAPI: DevmaxAPI {
     init(
         materialImportDelay: Duration = .zero,
         confirmMaterialDelay: Duration = .zero,
+        lessonProgressDelay: Duration = .zero,
         lessonArtifactDelay: Duration = .zero,
         materialImportFixture: MaterialImport? = nil,
         retryMaterialImportFixture: MaterialImport? = nil,
@@ -161,6 +163,7 @@ actor MockAPI: DevmaxAPI {
     ) {
         self.materialImportDelay = materialImportDelay
         self.confirmMaterialDelay = confirmMaterialDelay
+        self.lessonProgressDelay = lessonProgressDelay
         self.lessonArtifactDelay = lessonArtifactDelay
         self.materialImportFixture = materialImportFixture
         self.retryMaterialImportFixture = retryMaterialImportFixture

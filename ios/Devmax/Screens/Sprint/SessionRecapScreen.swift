@@ -100,7 +100,7 @@ struct SessionRecapScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if state.runWasLesson { lessonExportBlock }
+            if state.runWasLesson { LessonExportControls() }
 
             PrimaryButton(title: "Done") { state.finish() }
 
@@ -121,8 +121,16 @@ struct SessionRecapScreen: View {
         .background(Theme.bg)
     }
 
-    @ViewBuilder
-    private var lessonExportBlock: some View {
+    private func progressSummary(_ progress: LessonProgress) -> String {
+        "\(progress.reviewedCount) OF \(progress.conceptCount) CONCEPTS REVIEWED · "
+            + "\(progress.weakCount) NEED REVIEW"
+    }
+}
+
+struct LessonExportControls: View {
+    @EnvironmentObject private var flow: PublicOnboardingState
+
+    var body: some View {
         switch flow.lessonArtifactState {
         case .idle:
             SecondaryButton(title: "Prepare learning notes") {
@@ -168,11 +176,6 @@ struct SessionRecapScreen: View {
                 }
             }
         }
-    }
-
-    private func progressSummary(_ progress: LessonProgress) -> String {
-        "\(progress.reviewedCount) OF \(progress.conceptCount) CONCEPTS REVIEWED · "
-            + "\(progress.weakCount) NEED REVIEW"
     }
 }
 

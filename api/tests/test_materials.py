@@ -653,6 +653,11 @@ async def test_pilot_build_gate_and_safe_poll_never_return_answer_authority(
     )
     assert fallback.status_code == 404
     assert fallback.json()["detail"]["code"] == "pilot_source_not_assigned"
+    review_fallback = await client.post(
+        f"/materials/imports/{ordinary.id}/review-opened", headers=PILOT_HEADERS
+    )
+    assert review_fallback.status_code == 404
+    assert review_fallback.json()["detail"]["code"] == "pilot_source_not_assigned"
 
 
 async def test_pilot_runtime_rejects_frozen_minimum_build_contract_drift(client, db):

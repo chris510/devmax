@@ -347,7 +347,7 @@ final class LessonWorkflowTests: XCTestCase {
     }
 
     @MainActor
-    func testConfirmedAndSupersededUnassignedLessonsRemainLegacyEmpty() async {
+    func testConfirmedAndSupersededUnassignedLessonsOpenPersistedResults() async {
         for status in ["confirmed", "superseded"] {
             let api = MockAPI(pilotSourceNotAssigned: true)
             let source = Self.lessonImport(
@@ -358,9 +358,50 @@ final class LessonWorkflowTests: XCTestCase {
             flow.openSavedImport(source)
             await waitForTerminalLessonRouting(flow)
 
-            XCTAssertEqual(flow.step, .empty, "status: \(status)")
+            XCTAssertEqual(flow.step, .lessonResults, "status: \(status)")
             XCTAssertNil(flow.lessonPilotPreview, "status: \(status)")
+            XCTAssertEqual(flow.lessonProgress?.sourceId, source.id, "status: \(status)")
+            XCTAssertEqual(flow.lessonProgress?.reviewedCount, 2, "status: \(status)")
+            XCTAssertTrue(flow.lessonProgress?.complete == true, "status: \(status)")
         }
+    }
+
+    @MainActor
+    func testStalePersistedResultsCannotReplaceANewerLessonDraft() async throws {
+        let api = MockAPI(
+            lessonProgressDelay: .milliseconds(100), pilotSourceNotAssigned: true
+        )
+        let source = Self.lessonImport(
+            topics: [Self.topic("TCP reliability", position: 1)], status: "confirmed"
+        )
+        let flow = PublicOnboardingState(api: api, route: "welcome")
+
+        flow.openSavedImport(source)
+        try await Task.sleep(for: .milliseconds(10))
+        flow.beginLesson(forceNew: true)
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(flow.step, .lesson)
+        XCTAssertNil(flow.job)
+        XCTAssertNil(flow.lessonProgress)
+    }
+
+    func testLessonProgressDisplayScoreHonorsItsScoringContractVersion() {
+        let v1 = LessonConceptProgress(
+            proposalId: UUID(), cardId: UUID(), concept: "V1",
+            masterySummary: "", lastScore: 5, recallScore: 3,
+            scoreKind: "composite", scoringContractVersion: 1,
+            lastReviewedAt: nil, nextReviewAt: "2026-08-17", intervalDays: 1
+        )
+        let v2 = LessonConceptProgress(
+            proposalId: UUID(), cardId: UUID(), concept: "V2",
+            masterySummary: "", lastScore: 5, recallScore: 3,
+            scoreKind: "recall", scoringContractVersion: 2,
+            lastReviewedAt: nil, nextReviewAt: "2026-08-17", intervalDays: 1
+        )
+
+        XCTAssertEqual(v1.displayScore, 5)
+        XCTAssertEqual(v2.displayScore, 3)
     }
 
     func testLessonCheckDraftStoreCanClearEveryDraft() {

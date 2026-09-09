@@ -64,6 +64,7 @@ struct PublicOnboardingView: View {
             case .returning: existingOwner
             case .studyMaterial: studyMaterial
             case .lessonCheck: LessonCheckScreen()
+            case .lessonResults: lessonResults
             }
         }
         .background(Theme.bg)
@@ -958,6 +959,50 @@ struct PublicOnboardingView: View {
         .task { await flow.loadStudyMaterial() }
     }
 
+    private var lessonResults: some View {
+        PublicPage(
+            back: { flow.step = .studyMaterial },
+            kicker: "LESSON RESULTS",
+            title: flow.lessonProgress?.title ?? flow.job?.title ?? "Lesson results"
+        ) {
+            if let progress = flow.lessonProgress {
+                PublicMaterialCard(
+                    title: "\(progress.reviewedCount) of \(progress.conceptCount) concepts reviewed",
+                    meta: "\(progress.weakCount) NEED REVIEW"
+                )
+                ForEach(progress.concepts) { concept in
+                    VStack(alignment: .leading, spacing: 8) {
+                        PublicMaterialCard(
+                            title: concept.concept,
+                            meta: lessonConceptMeta(concept)
+                        )
+                        if !concept.masterySummary.isEmpty {
+                            Text(concept.masterySummary).publicBody()
+                        }
+                    }
+                }
+            } else {
+                PublicNote("The lesson is safe, but its mastery results couldn't load.")
+                SecondaryButton(title: "Try again") {
+                    Task { await flow.loadLessonProgress() }
+                }
+            }
+            if !flow.error.isEmpty, flow.lessonArtifactState != .failed {
+                PublicError(flow.error)
+            }
+        } footer: {
+            if flow.lessonProgress?.complete == true {
+                LessonExportControls()
+            }
+            PrimaryButton(title: "Done") { flow.step = .studyMaterial }
+        }
+    }
+
+    private func lessonConceptMeta(_ concept: LessonConceptProgress) -> String {
+        let scoreLabel = concept.displayScore.map { "\($0) / 5" } ?? "UNRATED"
+        return "\(scoreLabel) · INTERVAL \(concept.intervalDays)D"
+    }
+
     private func publicStepper(
         label: String, value: String, min: Int, max: Int, binding: Binding<Int>
     ) -> some View {
@@ -979,7 +1024,8 @@ struct PublicOnboardingView: View {
         case "pending", "processing": "View progress"
         case "ready", "needs_attention":
             source.importPath == "lesson" ? "Review concepts" : "Review proposals"
-        case "confirmed" where source.importPath == "lesson": "Open lesson"
+        case "confirmed", "superseded":
+            source.importPath == "lesson" ? "Open lesson" : nil
         case "failed": "Review and retry"
         default: nil
         }

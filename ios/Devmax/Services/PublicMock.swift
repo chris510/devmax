@@ -461,7 +461,10 @@ extension MockAPI {
     }
 
     func lessonProgress(_ id: UUID) async throws -> LessonProgress {
-        LessonProgress(
+        if lessonProgressDelay != .zero {
+            try await Task.sleep(for: lessonProgressDelay)
+        }
+        return LessonProgress(
             sourceId: id, title: "Contracts: formation", conceptCount: 2,
             reviewedCount: 2, weakCount: 1, complete: true, nextCardId: nil,
             concepts: [

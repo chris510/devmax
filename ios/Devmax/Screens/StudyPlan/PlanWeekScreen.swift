@@ -35,6 +35,8 @@ struct PlanWeekScreen: View {
                 .padding(.horizontal, Metrics.screenPadding)
                 .padding(.bottom, 20)
             }
+
+            planNavigation
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
@@ -50,7 +52,7 @@ struct PlanWeekScreen: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { state.path.removeLast() } label: {
-                Text("← Study plan")
+                Text("← Back")
                     .font(TypeRole.secondaryAction)
                     .foregroundStyle(Theme.metaAlt)
             }
@@ -58,6 +60,8 @@ struct PlanWeekScreen: View {
             .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
+                MetaText(text: "STUDY PLAN", font: WCFont.mono(10),
+                         tracking: 1.2, color: Theme.meta)
                 Text("Week \(index)")
                     .font(TypeRole.screenTitle)
                     .tracking(-0.6)
@@ -70,14 +74,13 @@ struct PlanWeekScreen: View {
                         .foregroundStyle(Theme.textSecondary)
                         .accessibilityLabel(week.fullTitle)
 
-                    // Two facts. Not four.
-                    Text(week.coreLine)
-                        .font(WCFont.sans(13.5))
-                        .foregroundStyle(Theme.textMuted)
-
                     Button { state.sheet = .planCapacity } label: {
                         HStack(spacing: 6) {
-                            Text(week.capacityLine)
+                            Text(
+                                "\(week.coreComplete)/\(week.coreTotal) Core · "
+                                + "\(PlanFormat.hours(week.plannedMinutes))/"
+                                + "\(PlanFormat.hours(week.capacityMinutes))"
+                            )
                                 .font(WCFont.sans(13.5))
                                 .foregroundStyle(Theme.textMuted)
                             Text("→")
@@ -87,11 +90,11 @@ struct PlanWeekScreen: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    // The negative margin keeps the line optically aligned with
-                    // the two above it while still clearing 44px.
                     .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
-                    .padding(.vertical, -12)
-                    .accessibilityLabel("\(week.capacityLine). Opens the capacity editor.")
+                    .padding(.vertical, -8)
+                    .accessibilityLabel(
+                        "\(week.coreLine). \(week.capacityLine). Opens the capacity editor."
+                    )
                 }
             }
             .padding(.top, 4)
@@ -99,6 +102,30 @@ struct PlanWeekScreen: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Metrics.screenPadding)
+    }
+
+    private var planNavigation: some View {
+        VStack(spacing: 0) {
+            Hairline()
+            let currentWeek = plan.overview?.weekIndex ?? index
+            PlanNavigationPill(
+                selection: index == currentWeek ? .week : .timeline,
+                weekLabel: "Week \(currentWeek)",
+                onWeek: {
+                    if index != currentWeek {
+                        state.path.removeLast()
+                        state.path.append(.planWeek(planID, currentWeek))
+                    }
+                },
+                onTimeline: { state.path.removeLast() },
+                onPlans: { state.sheet = .plans },
+                onUpdates: { state.path.append(.planUpdates(planID)) }
+            )
+            .padding(.horizontal, Metrics.screenPadding)
+            .padding(.top, 10)
+        }
+        .padding(.bottom, Metrics.bottomSafeArea)
+        .background(Theme.bg)
     }
 
     private func sectionView(_ section: WeekSection) -> some View {

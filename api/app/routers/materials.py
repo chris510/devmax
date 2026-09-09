@@ -1233,9 +1233,13 @@ async def mark_import_review_opened(
     # Resolve assignment before recording the funnel transition. An unbound
     # source is not yet participant-visible review work.
     assignment = await _pilot_assignment(db, enrollment, source)
+    if assignment is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "pilot_source_not_assigned"},
+        )
     if (
-        assignment is None
-        or assignment.source_id != source.id
+        assignment.source_id != source.id
         or assignment.target_proposal_id is None
         or assignment.bound_at is None
     ):

@@ -131,6 +131,62 @@ final class PilotAPIClientTests: XCTestCase {
         }
     }
 
+    func testNonEnrolledPilotEnvelopeUsesLegacyFallbackError() async {
+        PilotURLProtocolStub.handler = { [self] request in
+            response(
+                for: request, status: 404,
+                json: #"{"detail":{"code":"pilot_not_enrolled"}}"#
+            )
+        }
+
+        do {
+            _ = try await api().markLessonReviewOpened(UUID())
+            XCTFail("a non-enrolled account must retain the legacy lesson flow")
+        } catch APIError.pilotSourceNotAssigned {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testMissingAdditivePilotRouteUsesLegacyFallbackError() async {
+        PilotURLProtocolStub.handler = { [self] request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertTrue(request.url?.path.hasSuffix("/review-opened") == true)
+            return response(
+                for: request, status: 404,
+                json: #"{"detail":"Not Found"}"#
+            )
+        }
+
+        do {
+            _ = try await api().markLessonReviewOpened(UUID())
+            XCTFail("a server without additive pilot routes must use the legacy flow")
+        } catch APIError.pilotSourceNotAssigned {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testMaterialLevelNotFoundDoesNotMasqueradeAsMissingPilotRoute() async {
+        PilotURLProtocolStub.handler = { [self] request in
+            response(
+                for: request, status: 404,
+                json: #"{"detail":"material not found"}"#
+            )
+        }
+
+        do {
+            _ = try await api().markLessonReviewOpened(UUID())
+            XCTFail("a missing material source must remain a load failure")
+        } catch APIError.status(404) {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testPilotExclusionUsesThePreviewResponseShape() async throws {
         PilotURLProtocolStub.handler = { [self] request in
             XCTAssertEqual(request.httpMethod, "PATCH")
