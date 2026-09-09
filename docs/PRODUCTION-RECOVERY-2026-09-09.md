@@ -60,6 +60,14 @@ The archive's development
 signature is expected before export; the distributed IPA's signature is the
 one checked. [Build evidence](audits/2026-09-09/ios-build13.json).
 
+Build 15 now supersedes build 13 with the two device-discovered sheet dismissal
+and recovery-preview fixes. Its 225 local iOS tests and all six hosted branch
+checks passed on `18c2d9b`. The physical restart recovered the exact unscored QA
+draft, and leaving the resume preview preserved it in the server. Final unscored
+ending awaits Mirroring's Mac unlock after a window-control failure. See the
+[device record](DEVICE-CHECK-2026-09-09.md) and
+[build 15 artifact](audits/2026-09-09/ios-build15.json).
+
 ### Generic importer rerun
 
 The existing operator CLI completed one live import of the current 19.7k-character
@@ -162,7 +170,7 @@ remain outside the repository in a private local directory.
 ## Remaining checks
 
 - Finish physical-device notification presentation/tap routing, review recovery,
-  and interrupted-network recovery. Build 13 is installed and loads authenticated
+  and interrupted-network recovery. Build 15 is installed and loads authenticated
   production data. Mirroring has required owner reconnection/authentication;
   real microphone access is unavailable through Mirroring. No learner answer was
   simulated. See the device-check record for the latest evidence.

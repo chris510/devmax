@@ -92,3 +92,10 @@ Reproduce the failure flow with `WC_ROUTE=review-end-failure`,
 `WC_TEXT_FIRST=1`, and `WC_TTS=0`. Type an answer, select Options, end it, retry,
 then select Study source again. Existing `question` and `history` routes exercise
 spoken resume and archive recovery respectively.
+
+For recovery-preview regressions, launch `WC_ROUTE=resume` with `WC_TTS=0`.
+Without choosing Resume answer, open Options, end the attempt without a score,
+and expand the ended row: the exact saved partial must remain. In a fresh
+fixture launch, Type instead must carry that same text into the editor.
+`WC_SIM_SPEECH=1` also exercises continuing capture from the recovered partial;
+use Type instead to finish capture without scoring it.

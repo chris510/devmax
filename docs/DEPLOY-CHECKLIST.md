@@ -36,8 +36,8 @@ services `devmax`, `Postgres`, and `database-backup`; private bucket
 | ✅ | **First push delivered, tapped, and a session opened** | done |
 | ✅ | Deploy the integrated release and confirm `/ready` reports `0025` | September 9: commit `51d3c21`, deployment `1f192ff0-69e6-4672-acb6-8302ce203ca2`; V1 retained, zero pilot enrollments |
 | ✅ | Configure daily database backups and complete an isolated restore | Hobby: private logical dumps at 10:00 UTC, 31-day retention and at least 3 copies; bucket download/restore verified; native backups/PITR require Pro |
-| ✅ | Verify current PostgreSQL 18 and iOS release checks | 1,337 PostgreSQL 18 tests; 1,293 SQLite tests; 219 iOS tests; all six hosted CI jobs green on `da76d46` |
-| ✅ | Deploy recovery API and install the matching iOS build | Backend `da76d46`, deployment `707fc772-62f9-4f88-b857-467c541ab998`; TestFlight build 13 installed and authenticated production Library verified |
+| ✅ | Verify current PostgreSQL 18 and iOS release checks | 1,337 PostgreSQL 18 tests; 1,293 SQLite tests; 225 iOS tests; all six hosted CI jobs green on iOS source `18c2d9b` |
+| ✅ | Deploy recovery API and install the matching iOS build | Backend `da76d46`, deployment `707fc772-62f9-4f88-b857-467c541ab998`; TestFlight build 15 installed; authenticated Library and recovered draft preservation verified |
 | ☐ | Observe the first scheduled backup run | September 10 at 10:00 UTC; initial manual/deployment runs succeeded |
 | ☐ | Record provider-enforced Anthropic/OpenAI spending ceilings and test their 75%/90% alerts | external controls unverified |
 | ☐ | Deliver an APNs **production** push to a TestFlight build | September 9: production APNs accepted the build-13 device check; visible delivery and tap routing remain unverified |

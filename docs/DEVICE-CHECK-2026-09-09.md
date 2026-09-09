@@ -90,6 +90,35 @@ without submitting it. The full iOS suite passed **225 tests: 212 unit and
 ended-history screenshots were inspected at 390×844. A signed build 15 archive
 contains the fix; its installation and device checks are recorded when completed.
 
+## Build 15 installation and recovery verification
+
+Build 15 (source `18c2d9bdce549169ff491b6704e8af314e76ed4b`) was uploaded
+at 19:36:13 UTC, completed processing, and was assigned to the existing one-person
+Founder Internal group. TestFlight initially retained build 13 in its detail
+page; restarting TestFlight refreshed the list to 15. Installed the explicitly
+listed 15 and verified bundle build 15 independently with `devicectl`.
+
+On build 15, entered a second labeled QA draft on API identity boundary without
+submitting it. The server retained the exact 63-character text with no score.
+Closed the review, terminated Unprompted through the app switcher, verified its
+process was absent, and relaunched it. The process ID changed from 17726 to 17729.
+The queue marked the card resumable, and the recovery preview displayed the exact
+partial. Opened Options without tapping Resume answer. A read-only query then
+confirmed the exact draft remained on the open session, fixing the observed
+build 14 failure at its write boundary.
+
+The final End without scoring tap is pending: Mirroring began returning
+`noWindowsAvailable` for coordinate actions. Reconnecting handles, bringing the
+window forward, and resetting the control session did not resolve it. Restarted
+Mirroring; macOS now requires the owner's Mac login. The QA attempt remains open
+and recoverable, with no score. No production database row was edited by an
+operator workaround.
+
+At 19:48:52 UTC, all nine cards' scheduling/mastery fields and all twelve completed
+scored sessions still matched the pre-test snapshot. Build 15's local 225 tests
+and all six hosted branch CI jobs passed. The PR checks for the same source also
+passed. [Release evidence](audits/2026-09-09/ios-build15.json).
+
 ## Mirroring limits
 
 Mirroring paused when the phone was unlocked during the check. Real microphone
@@ -97,5 +126,7 @@ capture cannot be certified through Mirroring: Apple's current documentation
 states that microphone access is unavailable through this surface.
 [Apple's iPhone Mirroring documentation](https://support.apple.com/en-us/120421).
 
-The remaining device checks are unscored draft interruption/resume, visible
-production-push delivery/tap routing, and direct-phone microphone/VoiceOver use.
+The remaining device checks are the final unscored end/history observation,
+interrupted-network recovery, visible production-push delivery/tap routing, and
+direct-phone microphone/VoiceOver use. Process restart and recovery-preview exit
+have passed on build 15.

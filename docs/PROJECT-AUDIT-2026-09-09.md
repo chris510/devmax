@@ -22,9 +22,9 @@ The findings below preserve the initial audit evidence. Subsequent work:
 
 | Work | Current result |
 |---|---|
-| Production and recovery | Recovery API `da76d46` deployed; schema `0025`; real bucket backup restored; daily job configured. TestFlight build 13 installed and authenticated production Library verified. Production APNs accepted a test notification; visible delivery/tap routing and first future cron execution still need verification. |
+| Production and recovery | Recovery API `da76d46` deployed; schema `0025`; real bucket backup restored; daily job configured. TestFlight build 15 installed; authenticated Library, process-restart draft recovery, and recovery-preview exit verified. Production APNs accepted a test notification; visible delivery/tap routing and first future cron execution still need verification. |
 | Week 2–3 content | Corrected six draft authorities/questions and prepared [Week 2](WEEK-2-CONTENT-REVIEW-2026-09-09.md) and [Week 3](WEEK-3-CONTENT-REVIEW-2026-09-09.md) review packets. Owner approval and actual lesson completion remain required. |
-| Unfinished attempts | Explicit Options → History → End without scoring → Learn, with draft preservation, failed-request retry, and spoken resume. |
+| Unfinished attempts | Explicit Options → History → End without scoring → Learn, with draft preservation, failed-request retry, and spoken resume. Physical testing found and fixed recovery-preview draft loss and an inert maintenance Close button; see [device evidence](DEVICE-CHECK-2026-09-09.md). |
 | Archived discovery | Library has an owned archived list and a tested restore path. |
 | Unknown discovery | Library checking/failure states are distinct from empty; unavailable plans open a cached destination or plan list. |
 | Readability | Dynamic Type scales; targeted maximum-size layouts and review controls checked. Pilot implementation jargon removed; README and runtime amendment index updated. VoiceOver device pass remains open. |
@@ -33,7 +33,7 @@ The findings below preserve the initial audit evidence. Subsequent work:
 
 [Recovery/UI implementation and evidence](RECOVERY-UX-2026-09-09.md): 1,293 SQLite
 tests passed with 44 PostgreSQL-only skips, all 1,337 passed on PostgreSQL 18, and
-219 iOS tests passed. These replace the earlier baseline counts for the follow-up
+225 iOS tests passed (212 unit, 13 UI). These replace the earlier baseline counts for the follow-up
 code. All six hosted CI jobs also passed for both the deployed branch and PR
 revision. Hosted release and backup evidence is in the separate rollout record.
 
