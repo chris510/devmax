@@ -49,7 +49,7 @@ extension Error {
 /// `JSONDecoder.DateDecodingStrategy.iso8601` uses `.withInternetDateTime` alone,
 /// which rejects fractional seconds — and the backend emits them. `started_at` is a
 /// Postgres `timestamptz` that pydantic serializes as `2026-07-26T23:02:09.722946Z`,
-/// so every `GET /cards/{id}` threw. `CardHistoryScreen` swallows that with `try?`,
+/// so every `GET /cards/{id}` threw. Card History originally swallowed that error,
 /// which is why all three Card History states rendered blank against a real server
 /// while working fine on `MockAPI`.
 ///

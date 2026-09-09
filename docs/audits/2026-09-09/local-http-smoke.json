@@ -1,0 +1,116 @@
+{
+  "environment": "Disposable local Postgres 17 + uvicorn; synthetic data; no provider/APNs calls",
+  "readiness": {
+    "status": "ready",
+    "schema_revision": "0025",
+    "ai_consent_enforcement_enabled": false
+  },
+  "checks": [
+    {
+      "method": "GET",
+      "path": "/ready",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/study-plans/active/summary",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/captures",
+      "status": 201
+    },
+    {
+      "method": "PATCH",
+      "path": "/captures/f576ad07-2156-49da-aa51-cc19141a8483",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/captures/f576ad07-2156-49da-aa51-cc19141a8483/activate",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/cards/due",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/sessions",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "path": "/sessions/cc8a68dd-b9b3-4f0f-ab37-64a2003e2ba4/draft",
+      "status": 204
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/sessions",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/learning",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/sessions/cc8a68dd-b9b3-4f0f-ab37-64a2003e2ba4/abandon",
+      "status": 204
+    },
+    {
+      "method": "GET",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/learning",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/cards/due",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/sessions?practice=true",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/archive",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/cards",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cards/fdc04d0d-ad75-465d-800d-372c9215b55e/restore",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/settings",
+      "status": 200
+    },
+    {
+      "method": "PUT",
+      "path": "/settings",
+      "status": 200
+    }
+  ],
+  "assertions": "Resume preserves draft and session identity; learning holds due and practice with no score/history/SM-2 changes; archive/restore and reminder days persist."
+}

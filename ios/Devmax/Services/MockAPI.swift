@@ -190,6 +190,7 @@ actor MockAPI: DevmaxAPI {
     var pilotConfirmationAttempts = 0
     var confirmedMaterialSelections: [[UUID]] = []
     private var completions = 0
+    private var historyAttempts = 0
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.
     private var sessionIsPractice = false
@@ -333,6 +334,10 @@ actor MockAPI: DevmaxAPI {
 
     func card(_ id: UUID) async throws -> CardDetail {
         try await Task.sleep(nanoseconds: 200_000_000)
+        historyAttempts += 1
+        if flags.route == "history-failure", historyAttempts == 1 {
+            throw APIError.status(503)
+        }
         if id == StudyPlanFixtures.mappedCardID {
             return CardDetail(
                 id: id,

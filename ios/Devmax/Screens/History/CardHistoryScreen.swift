@@ -3,10 +3,12 @@ import SwiftUI
 struct CardHistoryScreen: View {
     let cardID: UUID
     @EnvironmentObject private var state: AppState
-    @State private var detail: CardDetail?
+    @StateObject private var history = CardHistoryState()
     /// One row open at a time.
     @State private var expanded: UUID?
     @State private var maintenance: CardMaintenance?
+    @State private var maintenancePending = false
+    @State private var maintenanceFailed = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +24,16 @@ struct CardHistoryScreen: View {
                     .buttonStyle(.plain)
                     .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
-                    if let detail {
+                    switch history.phase {
+                    case .loading:
+                        LoadingList(label: "LOADING HISTORY", inset: 0)
+                            .padding(.top, 8)
+                    case .failed:
+                        LoadFailureBody(title: "Couldn't load card history.") {
+                            Task { await history.load(cardID: cardID, api: state.api) }
+                        }
+                        .padding(.top, 28)
+                    case .ready(let detail):
                         heading(detail)
                         sessions(detail)
                     }
@@ -33,7 +44,7 @@ struct CardHistoryScreen: View {
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        .task { detail = try? await state.api.card(cardID) }
+        .task(id: cardID) { await history.load(cardID: cardID, api: state.api) }
         .sheet(item: $maintenance) { value in
             CardMaintenanceSheet(
                 value: value,
@@ -73,7 +84,14 @@ struct CardHistoryScreen: View {
 
             Button {
                 Task {
-                    maintenance = try? await state.api.cardMaintenance(cardID)
+                    maintenancePending = true
+                    maintenanceFailed = false
+                    defer { maintenancePending = false }
+                    do {
+                        maintenance = try await state.api.cardMaintenance(cardID)
+                    } catch {
+                        maintenanceFailed = true
+                    }
                 }
             } label: {
                 MetaText(
@@ -82,7 +100,15 @@ struct CardHistoryScreen: View {
                 )
             }
             .buttonStyle(.plain)
+            .disabled(maintenancePending)
             .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
+
+            if maintenanceFailed {
+                Text("Couldn't open card maintenance. Tap Maintain card to try again.")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.top, 6)
         .padding(.bottom, 26)

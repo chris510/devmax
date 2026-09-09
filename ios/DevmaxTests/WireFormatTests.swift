@@ -9,7 +9,7 @@ import XCTest
 ///
 /// This is the regression test for a bug that shipped: the decoder used
 /// `.dateDecodingStrategy = .iso8601`, which rejects fractional seconds, so every
-/// `CardDetail` decode threw. `CardHistoryScreen` swallows that with `try?`, so all
+/// `CardDetail` decode threw. Card History originally swallowed that error, so all
 /// three Card History states rendered blank against a real server while looking
 /// perfect on `MockAPI` fixtures.
 final class WireFormatTests: XCTestCase {

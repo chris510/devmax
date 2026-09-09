@@ -304,7 +304,7 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 
 `WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup`
 `followup-second` `score` `resume`
-`submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
+`submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `history-failure` `settings` `add`
 `learning` `ai-consent` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
 Adaptive-study pilot routes are `lesson-pilot-preview` `lesson-pilot-attempt`

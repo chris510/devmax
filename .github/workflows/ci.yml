@@ -129,6 +129,36 @@ jobs:
             sbom.cdx.json
           if-no-files-found: error
 
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install XcodeGen and generate the project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Test the study flow on the design-size iPhone
+        run: |
+          device_id=$(xcrun simctl create 'Devmax CI' com.apple.CoreSimulator.SimDeviceType.iPhone-16e)
+          xcodebuild -project Devmax.xcodeproj -scheme Devmax \
+            -destination "platform=iOS Simulator,id=$device_id" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath TestResults.xcresult test
+      - name: Retain simulator test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: devmax-ios-tests
+          path: ios/TestResults.xcresult
+          if-no-files-found: warn
+          retention-days: 7
+
   # An RGBA marketing icon fails only at App Store upload.
   icons:
     runs-on: ubuntu-latest

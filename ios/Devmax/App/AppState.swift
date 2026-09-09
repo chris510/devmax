@@ -174,6 +174,9 @@ final class AppState: ObservableObject {
     /// while the task handle lets normal UI navigation cancel work promptly.
     private var questionLoadTask: Task<Void, Never>?
     private var questionLoadID = UUID()
+    /// A foreground refresh and a post-review refresh can overlap. Only the
+    /// newest one may publish; cancellation alone cannot order their responses.
+    private var todayLoadID = UUID()
 
     let api: DevmaxAPI
 
@@ -221,6 +224,8 @@ final class AppState: ObservableObject {
     }
 
     func loadToday() async {
+        let loadID = UUID()
+        todayLoadID = loadID
         switch DebugFlags.shared.loadState {
         case .loading:
             load = .loading
@@ -229,27 +234,55 @@ final class AppState: ObservableObject {
             break
         }
         load = .loading
-        // Concurrent, not sequential. The plan summary is a second network call
-        // and it must not add its latency to the queue's — nor its failure. The
-        // `try?` is the whole safety property: an unreachable Study Plan degrades
-        // one line on Today and leaves the due cards untouched.
-        async let dueCards = api.due()
-        async let summary = try? await api.activePlan()
-        async let captured = try? await api.captures()
+        // Each child publishes its own result. Merely starting requests with
+        // async let still blocks the queue if .ready waits for optional results.
+        async let due: Void = loadTodayQueue(loadID)
+        async let summary: Void = loadTodayPlan(loadID)
+        async let captured: Void = loadTodayCaptures(loadID)
+        async let preferences: Void = loadTodaySettings(loadID)
+        _ = await (due, summary, captured, preferences)
+    }
+
+    private func ownsTodayLoad(_ loadID: UUID) -> Bool {
+        todayLoadID == loadID && !Task.isCancelled
+    }
+
+    private func loadTodayQueue(_ loadID: UUID) async {
         do {
-            queue = try await dueCards
-            planSummary = await summary
-            captures = await captured ?? captures
-            planSummaryFailed = planSummary == nil
+            let cards = try await api.due()
+            guard ownsTodayLoad(loadID) else { return }
+            queue = cards.filter { RecallGate.isOpen(learningRecallNotBefore[$0.id]) }
             DueCache.record(count: queue.count)
             load = .ready
             // Today's "COMING UP" list and Coverage read the same library, so
             // it is fetched once into one store rather than twice into two.
             if queue.isEmpty { await loadLibrary() }
-            settings = (try? await api.settings()) ?? settings
         } catch {
+            guard ownsTodayLoad(loadID) else { return }
             load = .error
         }
+    }
+
+    private func loadTodayPlan(_ loadID: UUID) async {
+        let summary = try? await api.activePlan()
+        guard ownsTodayLoad(loadID) else { return }
+        planSummary = summary
+        planSummaryFailed = summary == nil
+    }
+
+    private func loadTodayCaptures(_ loadID: UUID) async {
+        let captured = try? await api.captures()
+        guard ownsTodayLoad(loadID), let captured else { return }
+        captures = captured
+    }
+
+    private func loadTodaySettings(_ loadID: UUID) async {
+        // A settings save can finish while this read is in flight. Preserve a
+        // user's newer local choice instead of restoring the earlier snapshot.
+        let previous = settings
+        let preferences = try? await api.settings()
+        guard ownsTodayLoad(loadID), settings == previous, let preferences else { return }
+        settings = preferences
     }
 
     func saveCapture(topic: String, context: String) async {
@@ -1506,7 +1539,7 @@ final class AppState: ObservableObject {
                 captureRoute = .review(capture.id)
             }
         case "filter": filter = .shaky
-        case "history":
+        case "history", "history-failure":
             if let card = queue.first { path.append(.history(card.id)) }
         case "history-empty":
             if let capture = captures.first(where: { $0.status == "ready_to_review" }) {
