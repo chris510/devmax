@@ -1,14 +1,12 @@
-import CoreText
 import SwiftUI
 import UIKit
 
 /// The three type families from the handoff, with the exact size / leading /
 /// tracking pairs the designs call for.
 ///
-/// Newsreader and IBM Plex Sans ship as variable fonts, so weights are selected
-/// by setting the `wght` axis rather than by PostScript name — the named
-/// instances are inconsistently named upstream (`Newsreader16pt-Regular` next to
-/// `NewsreaderRoman-Medium`) and would be fragile to hard-code.
+/// Resolve the bundled variable-font families through UIKit instead of hardcoding
+/// their inconsistent PostScript instance names. SwiftUI owns Dynamic Type and
+/// the requested weight; the point sizes remain the default-size design tokens.
 enum Typeface {
     static let serif = "Newsreader"
     static let serifItalic = "Newsreader"
@@ -16,31 +14,17 @@ enum Typeface {
     static let mono = "IBM Plex Mono"
 }
 
-private enum Axis {
-    static let weight: UInt32 = 0x77676874  // 'wght'
-    static let opticalSize: UInt32 = 0x6F70737A  // 'opsz'
-}
-
 enum WCFont {
-    /// Serif — the "question voice". Optical size tracks the point size, which is
-    /// what a browser does automatically and what the prototype was rendered with.
+    /// Resolve the bundled face, then let SwiftUI scale it with the reader's
+    /// Dynamic Type setting. A fixed UIFont loses that environment behavior.
     static func serif(_ size: CGFloat, weight: CGFloat = 400, italic: Bool = false) -> Font {
-        let family = italic ? Typeface.serifItalic : Typeface.serif
-        return Font(
-            variableFont(
-                family: family,
-                size: size,
-                axes: [Axis.weight: weight, Axis.opticalSize: min(max(size, 6), 72)],
-                italic: italic
-            )
-        )
+        custom(Typeface.serif, size: size, weight: weight, italic: italic)
     }
 
     static func sans(_ size: CGFloat, weight: CGFloat = 400) -> Font {
-        Font(variableFont(family: Typeface.sans, size: size, axes: [Axis.weight: weight]))
+        custom(Typeface.sans, size: size, weight: weight)
     }
 
-    /// Mono is shipped as static instances, so it selects by PostScript name.
     static func mono(_ size: CGFloat, weight: CGFloat = 400) -> Font {
         let name: String
         switch weight {
@@ -48,26 +32,25 @@ enum WCFont {
         case ..<550: name = "IBMPlexMono-Medium"
         default: name = "IBMPlexMono-SemiBold"
         }
-        return Font(UIFont(name: name, size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular))
+        return .custom(name, size: size, relativeTo: .body)
     }
 
-    private static func variableFont(
-        family: String,
-        size: CGFloat,
-        axes: [UInt32: CGFloat],
-        italic: Bool = false
-    ) -> UIFont {
-        var attributes: [UIFontDescriptor.AttributeName: Any] = [
-            .family: family,
-            UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): axes,
-        ]
+    private static func custom(
+        _ family: String, size: CGFloat, weight: CGFloat, italic: Bool = false
+    ) -> Font {
+        var attributes: [UIFontDescriptor.AttributeName: Any] = [.family: family]
         if italic {
             attributes[.traits] = [
                 UIFontDescriptor.TraitKey.symbolic: UIFontDescriptor.SymbolicTraits.traitItalic.rawValue
             ]
         }
-        let descriptor = UIFontDescriptor(fontAttributes: attributes)
-        return UIFont(descriptor: descriptor, size: size)
+        let face = UIFont(descriptor: UIFontDescriptor(fontAttributes: attributes), size: size)
+        let font = Font.custom(face.fontName, size: size, relativeTo: .body)
+        switch weight {
+        case ..<450: return font.weight(.regular)
+        case ..<550: return font.weight(.medium)
+        default: return font.weight(.semibold)
+        }
     }
 }
 

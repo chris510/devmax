@@ -80,6 +80,8 @@ class SessionHistory(BaseModel):
     legacy_composite_score: int | None
     scoring_contract_version: ScoringContractVersion
     feedback: str
+    status: str
+    unscored_draft: str | None = None
     turns: list[Turn]
     coaching_focus: Literal["depth", "boundaries"] | None = None
     coaching_question: str | None = None
@@ -87,10 +89,17 @@ class SessionHistory(BaseModel):
     coaching_feedback: str | None = None
 
 
+class ActiveCardSession(BaseModel):
+    id: uuid.UUID
+    practice: bool
+    turn_index: int
+
+
 class CardDetail(CardSummary):
     learning_available: bool = False
     source_label: str = ""
     source_section: str = ""
+    active_session: ActiveCardSession | None = None
     sessions: list[SessionHistory]
 
 

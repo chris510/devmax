@@ -38,6 +38,11 @@ struct LibraryScreen: View {
                         )
                         panelDivider
                         LibraryDestinationRow(
+                            title: "Archived cards", value: "Restore a card",
+                            action: { state.path.append(.archivedCards) }
+                        )
+                        panelDivider
+                        LibraryDestinationRow(
                             title: "Collections", value: collectionsValue,
                             action: openCollections
                         )
@@ -139,6 +144,8 @@ struct LibraryScreen: View {
     }
 
     private var planValue: String {
+        if state.planSummaryFailed { return "Unavailable" }
+        if state.planSummary == nil { return "Checking" }
         guard let summary = state.planSummary, summary.active else { return "Not set" }
         guard let week = summary.weekIndex else { return "Active" }
         return "Week \(week)"
@@ -156,11 +163,7 @@ struct LibraryScreen: View {
     }
 
     private func openPlan() {
-        if let id = state.planSummary?.planId {
-            state.path.append(.planOverview(id))
-        } else {
-            state.path.append(.planBuild)
-        }
+        state.openStudyPlan()
     }
 
     private func openAdd() {
@@ -193,11 +196,20 @@ struct LibraryScreen: View {
         if let newCollections { flow.collections = newCollections }
 
         if let newSummary { state.planSummary = newSummary }
+        state.planSummaryFailed = newSummary == nil
     }
 }
 
 struct LibraryCardsScreen: View {
+    var archived = false
     @EnvironmentObject private var state: AppState
+
+    private var cards: [CardSummary] { archived ? state.archivedCards : state.library }
+    private var loadState: AppState.LoadState { archived ? state.archiveLoad : state.libraryLoad }
+
+    private func reload() async {
+        if archived { await state.loadArchivedCards() } else { await state.loadLibrary() }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -206,20 +218,20 @@ struct LibraryCardsScreen: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    switch state.libraryLoad {
+                    switch loadState {
                     case .loading:
                         LoadingList(label: "LOADING CARDS", inset: 0)
                     case .error:
-                        LoadFailure { Task { await state.loadLibrary() } }
+                        LoadFailure { Task { await reload() } }
                     case .ready:
-                        if state.library.isEmpty {
-                            Text("No review cards yet.")
+                        if cards.isEmpty {
+                            Text(archived ? "No archived cards." : "No review cards yet.")
                                 .font(TypeRole.emptyQueue)
                                 .foregroundStyle(Theme.textSecondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 24)
                         } else {
-                            ForEach(state.library) { card in
+                            ForEach(cards) { card in
                                 Hairline()
                                 Button { state.path.append(.history(card.id)) } label: {
                                     HStack(alignment: .top, spacing: Metrics.scoreColumnGap) {
@@ -237,7 +249,7 @@ struct LibraryCardsScreen: View {
                                                     uppercased: true
                                                 )
                                                 MetaText(
-                                                    text: card.dueLabel,
+                                                    text: archived ? "archived" : card.dueLabel,
                                                     font: TypeRole.metaRow,
                                                     tracking: 0.4,
                                                     color: Theme.metaFaint
@@ -258,12 +270,11 @@ struct LibraryCardsScreen: View {
                 .padding(.horizontal, Metrics.screenPadding)
                 .padding(.bottom, Metrics.bottomSafeArea)
             }
+            .refreshable { await reload() }
         }
         .background(Theme.bg)
         .navigationBarHidden(true)
-        .task {
-            if state.libraryLoad != .ready { await state.loadLibrary() }
-        }
+        .task { await reload() }
     }
 
     private var header: some View {
@@ -276,14 +287,14 @@ struct LibraryCardsScreen: View {
             .buttonStyle(.plain)
             .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
-            Text("Review cards")
+            Text(archived ? "Archived cards" : "Review cards")
                 .font(TypeRole.screenTitle)
                 .tracking(-0.6)
                 .foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
             MetaText(
-                text: state.libraryLoad.status {
-                    "\(state.library.count) ACTIVE CARD\(state.library.count == 1 ? "" : "S")"
+                text: loadState.status {
+                    "\(cards.count) \(archived ? "ARCHIVED" : "ACTIVE") CARD\(cards.count == 1 ? "" : "S")"
                 },
                 font: WCFont.mono(11), tracking: 0.5, color: Theme.metaAlt
             )

@@ -187,6 +187,8 @@ struct RootView: View {
                         LibraryScreen()
                     case .libraryCards:
                         LibraryCardsScreen()
+                    case .archivedCards:
+                        LibraryCardsScreen(archived: true)
                     case .libraryCaptures:
                         CaptureFlowScreen(
                             route: .inbox,

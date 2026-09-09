@@ -11,6 +11,11 @@ updates:
     directory: /api
     schedule:
       interval: weekly
+    # Interpreter upgrades also require pyproject.toml and runtime validation.
+    # Keep receiving patch releases and digest updates within Python 3.12.
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

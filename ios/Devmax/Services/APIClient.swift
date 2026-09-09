@@ -51,7 +51,7 @@ extension Error {
 /// `JSONDecoder.DateDecodingStrategy.iso8601` uses `.withInternetDateTime` alone,
 /// which rejects fractional seconds — and the backend emits them. `started_at` is a
 /// Postgres `timestamptz` that pydantic serializes as `2026-07-26T23:02:09.722946Z`,
-/// so every `GET /cards/{id}` threw. `CardHistoryScreen` swallows that with `try?`,
+/// so every `GET /cards/{id}` threw. Card History originally swallowed that error,
 /// which is why all three Card History states rendered blank against a real server
 /// while working fine on `MockAPI`.
 ///
@@ -104,6 +104,7 @@ enum APIClientBuild {
 protocol DevmaxAPI {
     func due() async throws -> [DueCard]
     func cards(sort: String, mode: String) async throws -> [CardSummary]
+    func archivedCards() async throws -> [CardSummary]
     func card(_ id: UUID) async throws -> CardDetail
     func learnCard(_ id: UUID) async throws -> LearningCard
     func captures() async throws -> [CaptureSummary]
@@ -121,6 +122,7 @@ protocol DevmaxAPI {
     /// history exactly like a normal session, with SM-2 left untouched.
     func startSession(cardID: UUID, practice: Bool) async throws -> SessionStart
     func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws
+    func abandonSession(_ id: UUID) async throws
     func submitAnswer(
         sessionID: UUID, text: String, turnIndex: Int
     ) async throws -> AnswerOutcome
@@ -228,6 +230,8 @@ protocol DevmaxAPI {
 /// methods default to a clear unsupported error so those doubles stay narrow;
 /// LiveAPI and MockAPI implement every method used by the app.
 extension DevmaxAPI {
+    func archivedCards() async throws -> [CardSummary] { throw APIError.status(501) }
+    func abandonSession(_ id: UUID) async throws { throw APIError.status(501) }
     func learnCard(_ id: UUID) async throws -> LearningCard { throw APIError.status(501) }
     func submitCoaching(sessionID: UUID, text: String) async throws -> CoachingOutcome {
         throw APIError.status(501)
@@ -472,6 +476,17 @@ struct LiveAPI: DevmaxAPI {
 
     func card(_ id: UUID) async throws -> CardDetail {
         try Self.decoder.decode(CardDetail.self, from: await request("GET", "cards/\(id)"))
+    }
+
+    func archivedCards() async throws -> [CardSummary] {
+        let data = try await request(
+            "GET", "cards", query: [URLQueryItem(name: "lifecycle", value: "archived")]
+        )
+        return try Self.decoder.decode([CardSummary].self, from: data)
+    }
+
+    func abandonSession(_ id: UUID) async throws {
+        _ = try await request("POST", "sessions/\(id)/abandon")
     }
 
     func learnCard(_ id: UUID) async throws -> LearningCard {

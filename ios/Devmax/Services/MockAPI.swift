@@ -193,6 +193,14 @@ actor MockAPI: DevmaxAPI {
     var pilotConfirmationAttempts = 0
     var confirmedMaterialSelections: [[UUID]] = []
     private var completions = 0
+    private var historyAttempts = 0
+    private var abandonAttempts = 0
+    private var archivedIDs: Set<UUID> = []
+    private var liveCardSessions: [UUID: ActiveCardSession] = [:]
+    private var sessionCardIDs: [UUID: UUID] = [:]
+    private var savedDrafts: [UUID: String] = [:]
+    private var sessionQuestions: [UUID: String] = [:]
+    private var endedSessions: [UUID: SessionHistory] = [:]
     /// Set by the most recent `startSession`, so `submitAnswer` echoes the flag
     /// back the way the server does.
     private var sessionIsPractice = false
@@ -249,9 +257,9 @@ actor MockAPI: DevmaxAPI {
         // mastery string edited in one place and not the other would make Today
         // and Coverage disagree about the same card with nothing to catch it.
         // The Raft card is the one carrying a stored partial answer.
-        return extraCards + Self.library.prefix(3).map {
+        return (extraCards + Self.library.prefix(3).map {
             $0.asQueueCard(resumable: $0.id == Self.raftID)
-        }
+        }).filter { !archivedIDs.contains($0.id) }
     }
 
     /// The whole library: the three due cards plus ten that exist only for Review
@@ -266,7 +274,11 @@ actor MockAPI: DevmaxAPI {
         if await MainActor.run(body: { DebugFlags.shared.loadState == .error }) {
             throw APIError.status(500)
         }
-        return Self.library
+        return Self.library.filter { !archivedIDs.contains($0.id) }
+    }
+
+    func archivedCards() async throws -> [CardSummary] {
+        Self.library.filter { archivedIDs.contains($0.id) }
     }
 
     private static let library: [CardSummary] = [
@@ -335,7 +347,23 @@ actor MockAPI: DevmaxAPI {
     }
 
     func card(_ id: UUID) async throws -> CardDetail {
+        var detail = try await baseCard(id)
+        detail.lifecycleStatus = archivedIDs.contains(id) ? "archived" : "active"
+        detail.activeSession = liveCardSessions[id]
+        detail.learningAvailable = detail.learningAvailable == true
+            && !archivedIDs.contains(id) && liveCardSessions[id] == nil
+        if let ended = endedSessions[id] {
+            detail.sessions.insert(ended, at: 0)
+        }
+        return detail
+    }
+
+    private func baseCard(_ id: UUID) async throws -> CardDetail {
         try await Task.sleep(nanoseconds: 200_000_000)
+        historyAttempts += 1
+        if flags.route == "history-failure", historyAttempts == 1 {
+            throw APIError.status(503)
+        }
         if id == StudyPlanFixtures.mappedCardID {
             return CardDetail(
                 id: id,
@@ -560,7 +588,7 @@ actor MockAPI: DevmaxAPI {
 
     func cardMaintenance(_ id: UUID) async throws -> CardMaintenance {
         CardMaintenance(
-            id: id, lifecycleStatus: "active",
+            id: id, lifecycleStatus: archivedIDs.contains(id) ? "archived" : "active",
             canonicalQuestion: "Explain this topic from the mechanism outward.",
             sourceUrl: "https://example.com/source", sourceSection: "", sourceLabel: "Source",
             answerBasis: "Trusted answer basis.", answerRubric: AnswerRubric(
@@ -572,6 +600,7 @@ actor MockAPI: DevmaxAPI {
     }
 
     func archiveCard(_ id: UUID) async throws -> CardMaintenance {
+        archivedIDs.insert(id)
         let value = try await cardMaintenance(id)
         return CardMaintenance(
             id: value.id, lifecycleStatus: "archived",
@@ -583,7 +612,8 @@ actor MockAPI: DevmaxAPI {
     }
 
     func restoreCard(_ id: UUID) async throws -> CardMaintenance {
-        try await cardMaintenance(id)
+        archivedIDs.remove(id)
+        return try await cardMaintenance(id)
     }
 
     func replaceCard(
@@ -597,6 +627,12 @@ actor MockAPI: DevmaxAPI {
     }
 
     func startSession(cardID: UUID, practice: Bool = false) async throws -> SessionStart {
+        let start = try await loadMockSession(cardID: cardID, practice: practice)
+        sessionQuestions[start.sessionId] = start.question
+        return start
+    }
+
+    private func loadMockSession(cardID: UUID, practice: Bool) async throws -> SessionStart {
         try await Task.sleep(nanoseconds: 500_000_000)
         // Alternates like the submit path does, so Retry recovers and the failure
         // walks end to end. 503 is what the server returns when Claude is down —
@@ -606,7 +642,17 @@ actor MockAPI: DevmaxAPI {
             throw APIError.scoringUnavailable
         }
         sessionIsPractice = practice
-        let sessionID = UUID()
+        let sessionID = liveCardSessions[cardID]?.id ?? UUID()
+        let turnIndex = liveCardSessions[cardID]?.turnIndex ?? 0
+        liveCardSessions[cardID] = ActiveCardSession(id: sessionID, practice: practice, turnIndex: turnIndex)
+        sessionCardIDs[sessionID] = cardID
+        if let question = sessionQuestions[sessionID] {
+            return SessionStart(
+                sessionId: sessionID, question: question,
+                isFollowUp: turnIndex > 0, draftText: savedDrafts[sessionID] ?? "",
+                resumed: true, turnIndex: turnIndex
+            )
+        }
         // Freeze the fixture budget for this session. A daily review may be
         // probed once — twice when `WC_SECOND_PROBE` stands in for the model
         // reporting, after probe 1, that it still lacks evidence. A Review Sprint
@@ -650,7 +696,22 @@ actor MockAPI: DevmaxAPI {
         )
     }
 
-    func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws {}
+    func saveDraft(sessionID: UUID, text: String, turnIndex: Int) async throws {
+        savedDrafts[sessionID] = text
+    }
+
+    func abandonSession(_ id: UUID) async throws {
+        abandonAttempts += 1
+        if flags.route == "review-end-failure", abandonAttempts == 1 {
+            throw APIError.status(503)
+        }
+        guard let cardID = sessionCardIDs[id] else { return }
+        liveCardSessions.removeValue(forKey: cardID)
+        endedSessions[cardID] = SessionHistory(
+            id: id, date: Date(), score: nil, feedback: "", turns: [],
+            status: "abandoned", unscoredDraft: savedDrafts[id]
+        )
+    }
 
     /// The two probes, in the voice and about the card the Conversation
     /// screenshots were taken against. Only the second is prefaced `Last one: `,
@@ -662,6 +723,25 @@ actor MockAPI: DevmaxAPI {
         "Last one: while the new node takes over its slice, which node serves those keys?"
 
     func submitAnswer(
+        sessionID: UUID, text: String, turnIndex: Int
+    ) async throws -> AnswerOutcome {
+        let outcome = try await baseSubmitAnswer(sessionID: sessionID, text: text, turnIndex: turnIndex)
+        if let cardID = sessionCardIDs[sessionID] {
+            savedDrafts.removeValue(forKey: sessionID)
+            switch outcome {
+            case .complete:
+                liveCardSessions.removeValue(forKey: cardID)
+            case .followUp(let question, let index):
+                sessionQuestions[sessionID] = question
+                liveCardSessions[cardID] = ActiveCardSession(
+                    id: sessionID, practice: sessionIsPractice, turnIndex: index ?? turnIndex + 1
+                )
+            }
+        }
+        return outcome
+    }
+
+    private func baseSubmitAnswer(
         sessionID: UUID, text: String, turnIndex: Int
     ) async throws -> AnswerOutcome {
         try await Task.sleep(nanoseconds: 1_200_000_000)

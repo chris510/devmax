@@ -85,7 +85,10 @@ jobs:
             --env DATABASE_URL=postgresql+asyncpg://audit:audit@127.0.0.1:9/audit \
             --env API_KEY --env CRON_SECRET --env AI_CONSENT_ENFORCEMENT_ENABLED \
             devmax-api:audit)
-          cleanup() { docker rm --force "$container_id" >/dev/null; }
+          cleanup() {
+            docker logs "$container_id"
+            docker rm --force "$container_id" >/dev/null
+          }
           trap cleanup EXIT
           test "$(docker exec "$container_id" id -u)" = "10001"
           curl --silent --show-error --fail \
@@ -128,6 +131,50 @@ jobs:
             trivy-high-critical.json
             sbom.cdx.json
           if-no-files-found: error
+
+  backups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check backup retention boundaries
+        run: python3 -m unittest discover -s ops/backups
+      - name: Build the backup job
+        run: docker build --tag devmax-backup:audit ops/backups
+      - name: Verify backup tools as the runtime user
+        run: |
+          docker run --rm --entrypoint pg_dump devmax-backup:audit --version
+          docker run --rm --entrypoint aws devmax-backup:audit --version
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install XcodeGen and generate the project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Test the study flow on the design-size iPhone
+        run: |
+          device_id=$(xcrun simctl create 'Devmax CI' com.apple.CoreSimulator.SimDeviceType.iPhone-16e)
+          xcodebuild -project Devmax.xcodeproj -scheme Devmax \
+            -destination "platform=iOS Simulator,id=$device_id" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath TestResults.xcresult test
+      - name: Retain simulator test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: devmax-ios-tests
+          path: ios/TestResults.xcresult
+          if-no-files-found: warn
+          retention-days: 7
 
   # An RGBA marketing icon fails only at App Store upload.
   icons:

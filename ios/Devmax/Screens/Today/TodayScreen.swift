@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Answers "what's due and how am I doing" in under two seconds.
 struct TodayScreen: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var plan: StudyPlanState
     @EnvironmentObject private var flow: PublicOnboardingState
@@ -9,18 +10,25 @@ struct TodayScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             StatusBar()
-            header
-            planLine
-            captureLine
+            if !dynamicTypeSize.isAccessibilitySize { introduction }
 
             ScrollView {
+                if dynamicTypeSize.isAccessibilitySize { introduction }
                 VStack(alignment: .leading, spacing: 0) {
                     switch state.load {
                     case .loading: LoadingList()
                     case .error: LoadFailure { Task { await state.loadToday() } }
                     case .ready:
                         if state.queue.isEmpty, state.library.isEmpty {
-                            NoMaterialTodayContent()
+                            switch state.libraryLoad {
+                            case .loading: LoadingList(label: "CHECKING YOUR LIBRARY", inset: 0)
+                            case .error:
+                                LoadFailureBody(title: "Couldn't check your library.") {
+                                    Task { await state.loadLibrary() }
+                                }
+                                .padding(.top, 28)
+                            case .ready: NoMaterialTodayContent()
+                            }
                         } else if state.queue.isEmpty {
                             EmptyQueue()
                         } else { rowList }
@@ -62,11 +70,7 @@ struct TodayScreen: View {
 
     private var planLine: some View {
         Button {
-            if let id = state.planSummary?.planId {
-                state.path.append(.planOverview(id))
-            } else {
-                state.path.append(.planBuild)
-            }
+            state.openStudyPlan()
         } label: {
             HStack(spacing: 8) {
                 MetaText(
@@ -94,8 +98,8 @@ struct TodayScreen: View {
         .frame(minHeight: Metrics.minTapTarget)
         .accessibilityLabel(
             state.planSummaryFailed
-                ? "Study plan unavailable. Opens the plan."
-                : (state.planSummary?.accessibleLine ?? "Add a study guide.")
+                ? "Study plan unavailable. Opens your saved plan or plan list."
+                : (state.planSummary?.accessibleLine ?? "Checking your study plan. Opens plan list.")
         )
         .padding(.horizontal, Metrics.screenPadding)
         .padding(.bottom, 8)
@@ -105,7 +109,7 @@ struct TodayScreen: View {
         // A Study Plan outage says so and stays tappable. It never blocks or
         // delays the due cards above it.
         if state.planSummaryFailed { return "PLAN · UNAVAILABLE" }
-        return (state.planSummary ?? .none).todayLine
+        return state.planSummary?.todayLine ?? "PLAN · CHECKING"
     }
 
     @ViewBuilder
@@ -133,27 +137,54 @@ struct TodayScreen: View {
 
     // MARK: - Header
 
+    private var introduction: some View {
+        VStack(spacing: 0) {
+            header
+            planLine
+            captureLine
+        }
+    }
+
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Today")
-                    .font(TypeRole.screenTitle)
-                    .tracking(-0.6)
-                    .foregroundStyle(Theme.text)
-
-                MetaText(
-                    text: "\(state.headerDate) · \(state.headerStatus)",
-                    font: WCFont.mono(11.5), tracking: 0.35, color: Theme.metaAlt
-                )
-
-                if state.load == .ready, !state.bands.isEmpty { masteryBands }
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    title
+                    settingsPill
+                    headerMetadata
+                }
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        title
+                        headerMetadata
+                    }
+                    Spacer(minLength: 0)
+                    settingsPill
+                }
             }
-            Spacer(minLength: 0)
-            settingsPill
         }
         .padding(.horizontal, Metrics.screenPadding)
         .padding(.top, 14)
         .padding(.bottom, 16)
+    }
+
+    private var title: some View {
+        Text("Today")
+            .font(TypeRole.screenTitle)
+            .tracking(-0.6)
+            .foregroundStyle(Theme.text)
+    }
+
+    private var headerMetadata: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            MetaText(
+                text: "\(state.headerDate) · \(state.headerStatus)",
+                font: WCFont.mono(11.5), tracking: 0.35, color: Theme.metaAlt
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            if state.load == .ready, !state.bands.isEmpty { masteryBands }
+        }
     }
 
     private var settingsPill: some View {
@@ -210,7 +241,7 @@ struct TodayScreen: View {
 
     @ViewBuilder
     private var bottomBlock: some View {
-        if state.load == .ready, state.queue.isEmpty, state.library.isEmpty {
+        if state.load == .ready, state.queue.isEmpty, state.hasConfirmedEmptyLibrary {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 12) {
@@ -253,9 +284,11 @@ struct TodayScreen: View {
 
                 // Start appears only when more than one card is due.
                 if state.visibleQueue.count > 1 {
-                    PrimaryButton(title: "Start review · \(state.visibleQueue.count) cards") {
+                    PrimaryButton(title: dynamicTypeSize.isAccessibilitySize
+                                  ? "Start review" : "Start review · \(state.visibleQueue.count) cards") {
                         state.beginSession(cards: state.visibleQueue)
                     }
+                    .accessibilityLabel("Start review · \(state.visibleQueue.count) cards")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

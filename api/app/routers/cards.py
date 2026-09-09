@@ -29,6 +29,7 @@ from app.routers.deps import (
     owned_card,
 )
 from app.schemas import (
+    ActiveCardSession,
     CardDetail,
     CardGroundingUpdate,
     CardLearningOut,
@@ -283,6 +284,8 @@ def _session_history(session: Session, probes: Sequence[SessionProbe]) -> Sessio
         legacy_composite_score=score.legacy_composite_score,
         scoring_contract_version=score.scoring_contract_version,
         feedback=session.feedback,
+        status=session.status,
+        unscored_draft=(session.draft_text or None) if session.status == "abandoned" else None,
         turns=build_turns(session, probes),
         coaching_focus=session.coaching_focus,
         coaching_question=session.coaching_question,
@@ -427,14 +430,19 @@ async def overview(
 async def list_cards(
     sort: Literal["next_review", "weakest"] = "next_review",
     mode: Literal["conversational", "desk", "all"] = "all",
+    lifecycle: Literal["active", "archived"] = "active",
     db: AsyncSession = Depends(get_session),
 ) -> list[CardSummary]:
-    """The whole library. Backs Review Sprint Setup and Coverage."""
+    """Active library by default; explicit archived discovery preserves ownership."""
     today, tz = await local_calendar(db)
     statement = (
         select(Card)
         .options(_summary_columns())
-        .where(Card.user_id == current_user_id(), active_card_filter())
+        .where(
+            Card.user_id == current_user_id(),
+            active_card_filter()
+            if lifecycle == "active" else Card.lifecycle_status == CARD_ARCHIVED,
+        )
     )
     if mode != "all":
         statement = statement.where(Card.delivery_mode == mode)
@@ -460,6 +468,9 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
         )
     ).all()
     probes = await _probes_by_session(db, [session.id for session in sessions])
+    active_session = next(
+        (session for session in sessions if session.status in LIVE_STATUSES), None
+    )
     source_title = ""
     has_linked_source = False
     if card.source_id is not None:
@@ -485,6 +496,16 @@ async def get_card(card_id: uuid.UUID, db: AsyncSession = Depends(get_session)) 
         ),
         source_label=card.source_label or source_title,
         source_section=card.source_section,
+        active_session=(
+            ActiveCardSession(
+                id=active_session.id,
+                practice=active_session.practice,
+                turn_index=max(
+                    (probe.idx for probe in probes.get(active_session.id, ())), default=0
+                ),
+            )
+            if active_session is not None else None
+        ),
         sessions=[
             _session_history(session, probes.get(session.id, ())) for session in sessions
         ],

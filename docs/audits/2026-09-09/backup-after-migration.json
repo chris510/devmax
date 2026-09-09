@@ -1,0 +1,11 @@
+{
+  "event": "database_backup_verified",
+  "key": "postgres/daily/20260909T172915Z-7710d639de5545c8a83c694edd12ac5c.dump",
+  "bytes": 182895,
+  "sha256": "259d1dfc8ec0a9965e11e2acb82b1f61339d3b9e8cac171eab86ed7f215ab344",
+  "expired_copies_removed": 0,
+  "schema_revision": "0025",
+  "execution": "local run of deployed backup image against production with the dedicated read-only role",
+  "backup_service": "database-backup",
+  "schedule_utc": "10:00 daily"
+}

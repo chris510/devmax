@@ -36,6 +36,21 @@ def test_a_full_config_boots() -> None:
     assert build().api_key == GOOD["api_key"]
 
 
+@pytest.mark.parametrize("field_error", [False, True])
+def test_startup_validation_errors_do_not_echo_secret_inputs(field_error: bool) -> None:
+    secret = "private-configuration-value-20260909"
+    overrides = (
+        {"review_poller_enabled": secret}
+        if field_error else {"api_key": secret, "cron_secret": secret}
+    )
+    with pytest.raises(ValidationError) as error:
+        build(**overrides)
+    message = str(error.value)
+    assert secret not in message
+    assert "input_value" not in message
+    assert ("review_poller_enabled" if field_error else "must be different") in message
+
+
 def test_scoring_v2_is_dark_by_default_and_only_known_versions_are_valid() -> None:
     assert build().scoring_contract_version == 1
     assert build(scoring_contract_version=2).scoring_contract_version == 2

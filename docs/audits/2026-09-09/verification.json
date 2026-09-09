@@ -1,0 +1,72 @@
+{
+  "date": "2026-09-09",
+  "base_commit": "837cafdc64f5598802a51a7b38f70ae38597c8d9",
+  "scope": "Local checkout with audit fixes; public production reads only",
+  "sqlite": {
+    "passed": 1287,
+    "skipped": 44,
+    "seconds": 34.8
+  },
+  "postgres": {
+    "passed": 1331,
+    "skipped": 0,
+    "seconds": 43.05,
+    "migration_head": "0025",
+    "version": "postgres (PostgreSQL) 17.10 (Homebrew)"
+  },
+  "ios": {
+    "unit_tests_passed": 199,
+    "ui_tests_passed": 3,
+    "toolchain": "Xcode 26.3 / 17C529",
+    "device": "iPhone 16e",
+    "runtime": "iOS 26.3",
+    "logical_frame": "390x844",
+    "result_bundle": "/tmp/devmax-audit-ios-fixed.xcresult"
+  },
+  "checks": {
+    "ruff": "passed",
+    "pip_audit": "No known vulnerabilities found",
+    "actionlint": "passed",
+    "git_diff_check": "passed"
+  },
+  "content": {
+    "system_design": {
+      "total": 54,
+      "grounding_status": {
+        "approved": 6,
+        "draft_review": 13,
+        "missing": 35
+      }
+    },
+    "ai_foundations": {
+      "total": 4,
+      "grounding_status": {
+        "draft_review": 4
+      }
+    }
+  },
+  "public_production": {
+    "host": "https://devmax-production.up.railway.app",
+    "ready": {
+      "http_status": 401,
+      "body": {}
+    },
+    "health": {
+      "http_status": 200,
+      "body": {
+        "status": "ok",
+        "ai_consent_required_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_latest_supported_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_minimum_ios_build": 8
+      }
+    }
+  },
+  "local_ios_api_smoke": "Canonical Week 1 question rendered via LiveAPI, uvicorn and disposable Postgres; copied Debug bundle with local test-only configuration; no provider call",
+  "limitations": [
+    "No production mutation or authenticated production smoke",
+    "No new paid model or guide-import run",
+    "No physical device speech or production APNs check",
+    "No hosted CI execution",
+    "No current container image/OS scan or backup restore"
+  ]
+}

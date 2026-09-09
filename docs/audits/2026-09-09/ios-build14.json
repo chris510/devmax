@@ -1,0 +1,26 @@
+{
+  "build": "14",
+  "version": "0.1.0",
+  "source_commit": "d70ea54e7f1a6f72238da75abf80286319502ded",
+  "sha256": "ba5ee85aa0edf637c11c4bbaf1b0d1e1a3a5ab032a0c5753d40e35d3dfa17b31",
+  "aps_environment": "production",
+  "debuggable": false,
+  "bootstrap_secrets_empty": true,
+  "base_url": "https://devmax-production.up.railway.app",
+  "mock_off": true,
+  "internal_testflight_only": true,
+  "uploaded": true,
+  "installed_on_device": true,
+  "ios_tests": {
+    "unit": 211,
+    "ui": 10,
+    "failed": 0
+  },
+  "uploaded_at": "2026-09-09T19:12:14Z",
+  "apple_processing_status": "complete",
+  "testflight_status": "Testing",
+  "test_group": "Founder Internal",
+  "test_group_size": 1,
+  "maintenance_close_verified_on_device": true,
+  "recovery_preview_draft_loss_observed": true
+}

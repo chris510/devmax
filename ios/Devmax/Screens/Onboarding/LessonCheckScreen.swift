@@ -410,15 +410,15 @@ struct LessonCheckScreen: View {
     private var held: some View {
         VStack(alignment: .leading, spacing: 16) {
             pilotNote("FORMATION COMPLETE · NO SCORE")
-            title("Recall is held.")
+            title("Let this lesson settle.")
             Text(
-                "The first scored question will appear through Today only after the server-owned hold opens."
+                "Your first scored review will appear in Today at the time below. Come back then and explain it from memory."
             )
             .lessonBody()
             if let date = flow.lessonRecallNotBeforeAt {
                 labelled("RECALL AVAILABLE", Self.holdFormatter.string(from: date))
             }
-            notice("Formation did not write review history, mastery, or SM-2 state.")
+            notice("This lesson check was unscored. Your review schedule is unchanged.")
         }
     }
 

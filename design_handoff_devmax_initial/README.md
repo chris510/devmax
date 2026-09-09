@@ -1,5 +1,9 @@
 # Handoff: Devmax — conversational spaced-repetition study coach
 
+The [September recovery amendment](../docs/RECOVERY-UX-2026-09-09.md) adds explicit
+unscored-attempt recovery, archived-card discovery, and honest loading states.
+Its screenshots inherit these tokens and document the added states.
+
 > **Approved scoring amendment:**
 > [`../docs/SCORING-CONTRACT-V2-SPEC.md`](../docs/SCORING-CONTRACT-V2-SPEC.md)
 > owns the target Recall-only score semantics, qualitative coaching states, and
@@ -343,6 +347,10 @@ No toast, no full-screen error, no data loss. Retrying re-posts the same payload
 
 ## Screen 3 — Card History (`screenshots/card-history.png`)
 
+- Loading uses the existing static list skeleton with `LOADING HISTORY`. A failed
+  read replaces it with `Couldn't load card history.` and the existing secondary
+  **Retry** button. Retry reloads this card in place; a decoding error follows the
+  same path. The `history-failure` fixture fails once and succeeds on retry.
 - Back link `← Today` (13px), then topic 24px/600, mono category tag, then the **mastery
   summary** in serif 19px/1.45 — the single most useful line, always above the fold.
 - Mono meta line: `3 SESSIONS · AVG 3.0 · 3 DAYS OVERDUE`.

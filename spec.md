@@ -1,5 +1,14 @@
 # Devmax — Backend Build Spec
 
+> **Current-runtime amendments (September 2026):** The original infrastructure
+> choices and early scheduling sketches below are historical. Production uses
+> Railway, PostgreSQL 18, Python 3.12, and one API replica with a 15-minute review
+> poller. V1's composite is display-only; Accuracy's two retention buckets drive
+> SM-2. Canonical card questions are generated once and reused. `AGENTS.md` records
+> these load-bearing invariants; `docs/RUNBOOK.md` owns current operations.
+> `docs/RECOVERY-UX-2026-09-09.md` adds archived discovery and explicit unscored
+> attempt recovery without changing review scoring or scheduling.
+
 > **Public-app extension:** `docs/PUBLIC-APP-SPEC.md` is authoritative for
 > accounts, authentication, per-user ownership, onboarding, and guide ingestion.
 > The single-user statements and related out-of-scope bullets below describe the

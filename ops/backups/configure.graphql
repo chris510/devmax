@@ -1,0 +1,14 @@
+# Configure only the dedicated backup service. Unlike legacy api/railway.json,
+# new services cannot opt into Railway's deprecated Config as Code format.
+mutation ConfigureBackup($serviceId: String!, $environmentId: String!) {
+  serviceInstanceUpdate(
+    serviceId: $serviceId
+    environmentId: $environmentId
+    input: {
+      cronSchedule: "0 10 * * *"
+      restartPolicyType: ON_FAILURE
+      restartPolicyMaxRetries: 2
+      numReplicas: 1
+    }
+  )
+}

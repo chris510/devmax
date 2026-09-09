@@ -20,11 +20,7 @@ struct FullSettingsScreen: View {
                 }
                 panelDivider
                 destination("Study plan", value: planValue) {
-                    if let id = state.planSummary?.planId {
-                        state.path.append(.planOverview(id))
-                    } else {
-                        state.path.append(.planBuild)
-                    }
+                    state.openStudyPlan()
                 }
             }
             settingsSection("REVIEWS") {

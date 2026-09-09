@@ -1,0 +1,94 @@
+{
+  "verified_at": "2026-09-09T17:29:16.199449+00:00",
+  "deployment_id": "1f192ff0-69e6-4672-acb6-8302ce203ca2",
+  "source_commit": "51d3c2197b8e88cecf3a3dcadd933c98fb55f551",
+  "schema_revision": "0025",
+  "all_original_columns_unchanged": {
+    "ai_consent_events": true,
+    "apple_identities": true,
+    "auth_nonces": true,
+    "auth_sessions": true,
+    "cards": true,
+    "device_tokens": true,
+    "llm_usage": true,
+    "material_sources": true,
+    "material_topic_proposals": true,
+    "pending_captures": true,
+    "session_probes": true,
+    "sessions": true,
+    "settings": true,
+    "study_plan_card_links": true,
+    "study_plan_card_proposal_acceptances": true,
+    "study_plan_card_proposals": true,
+    "study_plan_duplications": true,
+    "study_plan_guide_drafts": true,
+    "study_plan_item_dependencies": true,
+    "study_plan_items": true,
+    "study_plan_phases": true,
+    "study_plan_practice_debriefs": true,
+    "study_plan_revisions": true,
+    "study_plan_weeks": true,
+    "study_plans": true,
+    "users": true
+  },
+  "row_counts": {
+    "ai_consent_events": 3,
+    "apple_identities": 1,
+    "auth_nonces": 17,
+    "auth_sessions": 36,
+    "cards": 9,
+    "device_tokens": 2,
+    "llm_usage": 40,
+    "material_sources": 2,
+    "material_topic_proposals": 2,
+    "pending_captures": 0,
+    "session_probes": 9,
+    "sessions": 14,
+    "settings": 1,
+    "study_plan_card_links": 0,
+    "study_plan_card_proposal_acceptances": 0,
+    "study_plan_card_proposals": 0,
+    "study_plan_duplications": 0,
+    "study_plan_guide_drafts": 0,
+    "study_plan_item_dependencies": 31,
+    "study_plan_items": 260,
+    "study_plan_phases": 8,
+    "study_plan_practice_debriefs": 0,
+    "study_plan_revisions": 12,
+    "study_plan_weeks": 24,
+    "study_plans": 2,
+    "users": 1
+  },
+  "pilot_enrollments": 0,
+  "unvalidated_constraints": 0,
+  "http": {
+    "/live": {
+      "status": 200,
+      "body": {
+        "status": "alive"
+      }
+    },
+    "/ready": {
+      "status": 200,
+      "body": {
+        "status": "ready",
+        "schema_revision": "0025",
+        "ai_consent_enforcement_enabled": true
+      }
+    },
+    "/health": {
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "ai_consent_required_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_latest_supported_policy_version": "anthropic-openai-2026-08-13-v2",
+        "ai_consent_minimum_ios_build": 8,
+        "ai_consent_enforcement_enabled": true
+      }
+    },
+    "/cards/due": {
+      "status": 401
+    }
+  },
+  "data_preserved": true
+}

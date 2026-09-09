@@ -25,6 +25,7 @@ final class AppState: ObservableObject {
         case planAudit(String)
         case library
         case libraryCards
+        case archivedCards
         case libraryCaptures
         case reviewReminders
         case materialSetup
@@ -100,7 +101,6 @@ final class AppState: ObservableObject {
     @Published var inputMode: InputMode = .voice
     @Published var submitError = false
     @Published var resumeAvailable = false
-    @Published var storedPartial = ""
     @Published var result: SessionResult?
     @Published var sessionCards: [DueCard] = []
     @Published var cursor = 0
@@ -132,6 +132,11 @@ final class AppState: ObservableObject {
     // Review Sprint / Coverage
     @Published var library: [CardSummary] = []
     @Published var libraryLoad: LoadState = .loading
+    @Published var archivedCards: [CardSummary] = []
+    @Published var archiveLoad: LoadState = .loading
+    @Published private(set) var endingReview = false
+    private var libraryLoadID = UUID()
+    private var archiveLoadID = UUID()
     /// Empty means the whole library, not "nothing".
     @Published var setupCats: Set<String> = []
     @Published var setupSize = 6
@@ -174,6 +179,9 @@ final class AppState: ObservableObject {
     /// while the task handle lets normal UI navigation cancel work promptly.
     private var questionLoadTask: Task<Void, Never>?
     private var questionLoadID = UUID()
+    /// A foreground refresh and a post-review refresh can overlap. Only the
+    /// newest one may publish; cancellation alone cannot order their responses.
+    private var todayLoadID = UUID()
 
     let api: DevmaxAPI
 
@@ -221,6 +229,8 @@ final class AppState: ObservableObject {
     }
 
     func loadToday() async {
+        let loadID = UUID()
+        todayLoadID = loadID
         switch DebugFlags.shared.loadState {
         case .loading:
             load = .loading
@@ -229,27 +239,67 @@ final class AppState: ObservableObject {
             break
         }
         load = .loading
-        // Concurrent, not sequential. The plan summary is a second network call
-        // and it must not add its latency to the queue's — nor its failure. The
-        // `try?` is the whole safety property: an unreachable Study Plan degrades
-        // one line on Today and leaves the due cards untouched.
-        async let dueCards = api.due()
-        async let summary = try? await api.activePlan()
-        async let captured = try? await api.captures()
+        // Each child publishes its own result. Merely starting requests with
+        // async let still blocks the queue if .ready waits for optional results.
+        async let due: Void = loadTodayQueue(loadID)
+        async let summary: Void = loadTodayPlan(loadID)
+        async let captured: Void = loadTodayCaptures(loadID)
+        async let preferences: Void = loadTodaySettings(loadID)
+        _ = await (due, summary, captured, preferences)
+    }
+
+    private func ownsTodayLoad(_ loadID: UUID) -> Bool {
+        todayLoadID == loadID && !Task.isCancelled
+    }
+
+    private func loadTodayQueue(_ loadID: UUID) async {
         do {
-            queue = try await dueCards
-            planSummary = await summary
-            captures = await captured ?? captures
-            planSummaryFailed = planSummary == nil
+            let cards = try await api.due()
+            guard ownsTodayLoad(loadID) else { return }
+            queue = cards.filter { RecallGate.isOpen(learningRecallNotBefore[$0.id]) }
             DueCache.record(count: queue.count)
             load = .ready
             // Today's "COMING UP" list and Coverage read the same library, so
             // it is fetched once into one store rather than twice into two.
             if queue.isEmpty { await loadLibrary() }
-            settings = (try? await api.settings()) ?? settings
         } catch {
+            guard ownsTodayLoad(loadID) else { return }
             load = .error
         }
+    }
+
+    private func loadTodayPlan(_ loadID: UUID) async {
+        let summary = try? await api.activePlan()
+        guard ownsTodayLoad(loadID) else { return }
+        if let summary { planSummary = summary }
+        planSummaryFailed = summary == nil
+    }
+
+    var hasConfirmedEmptyLibrary: Bool { libraryLoad == .ready && library.isEmpty }
+
+    func openStudyPlan() {
+        if let id = planSummary?.planId {
+            path.append(.planOverview(id))
+        } else if planSummary != nil, !planSummaryFailed {
+            path.append(.planBuild)
+        } else {
+            sheet = .plans
+        }
+    }
+
+    private func loadTodayCaptures(_ loadID: UUID) async {
+        let captured = try? await api.captures()
+        guard ownsTodayLoad(loadID), let captured else { return }
+        captures = captured
+    }
+
+    private func loadTodaySettings(_ loadID: UUID) async {
+        // A settings save can finish while this read is in flight. Preserve a
+        // user's newer local choice instead of restoring the earlier snapshot.
+        let previous = settings
+        let preferences = try? await api.settings()
+        guard ownsTodayLoad(loadID), settings == previous, let preferences else { return }
+        settings = preferences
     }
 
     func saveCapture(topic: String, context: String) async {
@@ -300,16 +350,36 @@ final class AppState: ObservableObject {
     // MARK: - Review Sprint
 
     func loadLibrary() async {
+        let requestID = UUID()
+        libraryLoadID = requestID
         if DebugFlags.shared.loadState == .loading {
             libraryLoad = .loading
             return  // hold the skeleton so it can be compared to the screenshot
         }
         libraryLoad = .loading
         do {
-            library = try await api.cards(sort: "next_review", mode: "conversational")
+            let cards = try await api.cards(sort: "next_review", mode: "conversational")
+            guard libraryLoadID == requestID, !Task.isCancelled else { return }
+            library = cards
             libraryLoad = .ready
         } catch {
+            guard libraryLoadID == requestID, !Task.isCancelled else { return }
             libraryLoad = .error
+        }
+    }
+
+    func loadArchivedCards() async {
+        let requestID = UUID()
+        archiveLoadID = requestID
+        archiveLoad = .loading
+        do {
+            let cards = try await api.archivedCards()
+            guard archiveLoadID == requestID, !Task.isCancelled else { return }
+            archivedCards = cards
+            archiveLoad = .ready
+        } catch {
+            guard archiveLoadID == requestID, !Task.isCancelled else { return }
+            archiveLoad = .error
         }
     }
 
@@ -544,7 +614,7 @@ final class AppState: ObservableObject {
         // foreground push tap) can happen before the outgoing view's onDisappear
         // snapshots the recognizer tail. `finish` clears sessionID before leaving,
         // which is the explicit handoff point for a retained launcher.
-        !submissionPending && !(stage.acceptsAnswer && sessionID != nil)
+        !submissionPending && !endingReview && !(stage.acceptsAnswer && sessionID != nil)
     }
 
     @discardableResult
@@ -584,6 +654,38 @@ final class AppState: ObservableObject {
         path.append(.learning(cardID))
     }
 
+    @discardableResult
+    func resumeReviewFromHistory(_ detail: CardDetail) -> Bool {
+        guard let session = detail.activeSession, detail.lifecycleStatus != "archived" else {
+            return false
+        }
+        let card = DueCard(
+            id: detail.id, topic: detail.topic, category: detail.category,
+            masterySummary: detail.masterySummary, lastScore: detail.lastScore,
+            recallScore: detail.recallScore, scoreKind: detail.scoreKind,
+            scoringContractVersion: detail.scoringContractVersion,
+            dueLabel: "in progress", resumable: true, missedCount: detail.missedCount
+        )
+        return beginSession(cards: [card], practice: session.practice, replacingPath: true)
+    }
+
+    /// A deliberate end is distinct from Close. Upload the exact local turn
+    /// before abandoning; a failed upload leaves the attempt resumable.
+    func endReview(cardID: UUID, session: ActiveCardSession) async throws {
+        guard !submissionPending, !endingReview, sessionID == nil else {
+            throw APIError.status(409)
+        }
+        endingReview = true
+        defer { endingReview = false }
+        await draftSync?.value
+        if let text = DraftStore.read(
+            for: cardID, sessionID: session.id, turnIndex: session.turnIndex
+        ) {
+            try await api.saveDraft(sessionID: session.id, text: text, turnIndex: session.turnIndex)
+        }
+        try await api.abandonSession(session.id)
+    }
+
     /// A Study Plan mapping can name the recall card before the Card row has
     /// been created. Only a committed mapping gets a History destination; a
     /// pending mapping stays visible but inert on the item screen.
@@ -603,6 +705,7 @@ final class AppState: ObservableObject {
         return switch path[path.count - 2] {
         case .planItem: "← Plan item"
         case .libraryCards: "← Review cards"
+        case .archivedCards: "← Archived cards"
         default: "← Today"
         }
     }
@@ -732,7 +835,6 @@ final class AppState: ObservableObject {
         draftResetPending = false
         result = nil
         resumeAvailable = false
-        storedPartial = ""
         inputMode = DebugFlags.shared.textFirst ? .text : .voice
     }
 
@@ -832,7 +934,10 @@ final class AppState: ObservableObject {
                 for: card.id, sessionID: start.sessionId, turnIndex: start.turnIndex
             ) ?? adoptedLegacy ?? start.draftText
             if !partial.isEmpty {
-                storedPartial = partial
+                // Recovery is already the current answer, even before the user
+                // dismisses its banner. Keeping it in a separate preview value
+                // let lifecycle saves overwrite it with an empty editor draft.
+                draft = partial
                 resumeAvailable = true
             }
         } catch {
@@ -858,7 +963,6 @@ final class AppState: ObservableObject {
     }
 
     func resumeAnswer() {
-        draft = storedPartial
         resumeAvailable = false
     }
 
@@ -873,7 +977,6 @@ final class AppState: ObservableObject {
         draftSync = nil
         pendingUpload?.cancel()
         draft = ""
-        storedPartial = ""
         resumeAvailable = false
         DraftStore.discard(
             for: identity.cardID, sessionID: identity.sessionID, turnIndex: identity.turnIndex
@@ -901,6 +1004,7 @@ final class AppState: ObservableObject {
     /// persistence.
     func updateDraft(_ text: String) {
         draft = text
+        resumeAvailable = false
         scheduleDraftSync()
     }
 
@@ -1506,7 +1610,7 @@ final class AppState: ObservableObject {
                 captureRoute = .review(capture.id)
             }
         case "filter": filter = .shaky
-        case "history":
+        case "history", "history-failure":
             if let card = queue.first { path.append(.history(card.id)) }
         case "history-empty":
             if let capture = captures.first(where: { $0.status == "ready_to_review" }) {

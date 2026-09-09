@@ -7,6 +7,7 @@ import SwiftUI
 /// internal item id left the metadata line. Everything else — Why this matters,
 /// Done when, Source, Study block, Estimate, Retrieval support, Notes — stays.
 struct PlanItemScreen: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let planID: UUID
     let itemID: UUID
     @EnvironmentObject private var state: AppState
@@ -16,9 +17,10 @@ struct PlanItemScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             StatusBar()
-            header
+            if !dynamicTypeSize.isAccessibilitySize { header }
 
             ScrollView {
+                if dynamicTypeSize.isAccessibilitySize { header }
                 VStack(alignment: .leading, spacing: 0) {
                     switch plan.itemLoad {
                     case .loading, .idle:
@@ -67,6 +69,7 @@ struct PlanItemScreen: View {
                     // Phase, week, priority, state — and no internal id.
                     MetaText(text: item.metaLine, font: WCFont.mono(10.5),
                              tracking: 0.7, color: Theme.metaDim)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 4)
                 .padding(.bottom, 12)
@@ -507,6 +510,7 @@ struct PlanItemScreen: View {
                     text: "CHANGE PLAN PROGRESS FROM REOPEN",
                     font: WCFont.mono(10), tracking: 0.6, color: Theme.metaFaint
                 )
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, Metrics.screenPadding)
                 HStack(spacing: 10) {
                     SecondaryButton(title: "Edit") { editing = true }

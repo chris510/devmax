@@ -304,7 +304,7 @@ SIMCTL_CHILD_WC_ROUTE=submit-failure SIMCTL_CHILD_WC_FAIL_SUBMIT=1 \
 
 `WC_ROUTE`: `question` `question-failure` `recording` `processing` `text` `followup`
 `followup-second` `score` `resume`
-`submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `settings` `add`
+`submit-failure` `reattempt` `reattempt-answered` `history` `history-empty` `history-failure` `settings` `add`
 `learning` `ai-consent` `filter` `capture-inbox` `capture-source` `capture-question` `setup` (alias
 `sprint-setup`) `coverage` `coverage-expanded` `depth-repair` `recap` `recap-expanded`.
 Adaptive-study pilot routes are `lesson-pilot-preview` `lesson-pilot-attempt`
@@ -373,27 +373,27 @@ change faster than this file does — do not write Anthropic calls from memory.
 
 ## Known gaps
 
-- **The generic Study Plan importer is verified by one live run.**
-  `docs/CURRICULUM.md` was imported end to end against the real API — 12 weeks, 4
-  phases, 72 items, good concise titles, and a capacity check that correctly
-  reported the real curriculum needs ~15h/week rather than the 12 it was asked
-  for. That run is what surfaced three real bugs (offsets recomputed rather than
-  trusted, token-matched subject eligibility, `max_tokens` sized for thinking
-  *plus* output). **The post-fix re-run did not happen: the Anthropic account ran
-  out of credit.** The fixes are unit-tested; they are not live-tested.
+- **The generic importer has a September 9 post-fix live smoke.** The current
+  `docs/CURRICULUM.md` produced 73 items across 12 weeks and four phases, with
+  every source offset resolving. Its 20-hour curriculum exceeded the deliberately
+  requested 15-hour capacity; the gate also flagged inferred estimates,
+  dependencies, retrieval, and possible omissions. `can_create=false` is correct:
+  this proves provider/schema/offset execution, not an approved complete plan.
+  No database write occurred. See `docs/audits/2026-09-09/live-generic-import.json`.
   The deterministic first-party plan does not use that model path: its reviewed
   content-version-6 manifest has 116 stable items, exact resources,
   dependencies, and mapped topics, and its create/upgrade path makes no LLM
   call. Eight existing Learn rows integrate 11 hours of application-side AI
   systems without changing weekly capacity; `requires_fresh_completion`
   prevents a completed historical row from receiving retroactive credit.
-- **The import takes about 11 minutes** at `effort: high` on a 10k-character
-  guide. Fine for a once-a-quarter action, but the client needs to expect it, and
+- **The import is slow:** the September 9 run took 14.5 minutes at `effort: high`
+  on a 19.7k-character guide (the older 10k guide took about 11 minutes).
+  The client needs to expect it, and
   `studyplan_effort` is the lever if that is too slow — `medium` is untested here.
-- **Dynamic Type does not scale anywhere in the app.** `WCFont` builds fixed-size
-  `UIFont`s with no `UIFontMetrics`, so screenshots at `accessibility-medium` are
-  pixel-identical to default. Pre-existing and app-wide; see `docs/DEVIATIONS.md`
-  §28.
+- **Dynamic Type now scales the bundled fonts.** The September 9 audit uses
+  SwiftUI custom fonts relative to body size, with accessible Today/History
+  layouts. Verification and the remaining device screen-reader gap are recorded
+  in `docs/RECOVERY-UX-2026-09-09.md` and `docs/DEVIATIONS.md` §28.
 - **Study Plan has no VoiceOver rotor pass.** Accessible names, headings, hints,
   44px targets, native `disabled`, and status-in-text are all implemented and
   checked in code; nobody has driven it with the screen reader on.

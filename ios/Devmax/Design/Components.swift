@@ -14,7 +14,7 @@ struct StatusBar: View {
         .font(TypeRole.metaStatus)
         .tracking(0.44)
         .foregroundStyle(Theme.statusBar)
-        .frame(height: Metrics.statusBarHeight, alignment: .bottom)
+        .frame(minHeight: Metrics.statusBarHeight, alignment: .bottom)
         .padding(.horizontal, Metrics.screenPadding)
         .padding(.bottom, 6)
     }

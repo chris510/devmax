@@ -149,15 +149,15 @@
     "evidence": "official_documentation",
     "grounding_status": "draft_review",
     "source_label": "MongoDB Database Manual · Enforce Data Consistency with Transactions",
-    "answer_basis": "A seller read is optimized by duplicating product name and price inside the seller document while the product collection serves product reads. When prices must never disagree, update both copies in one transaction so either both changes commit or neither does. Transactions add contention and performance cost; if prices change frequently enough that this is unacceptable, remove the duplicate or reference one canonical copy.",
+    "answer_basis": "A seller read is optimized by duplicating product name and price inside the seller document while the product collection serves product reads. Update both copies in one transaction so either both changes commit or neither does. This is an atomic-write guarantee: two independent endpoint reads can still straddle a committed price change. A reader requiring a consistent multi-document view needs an appropriate snapshot. Transactions add contention and performance cost; if that is unacceptable, remove the duplicate or reference one canonical copy.",
     "answer_rubric": {
       "mechanism": "Names the duplicated seller read model and updates both the product and seller copies atomically in one transaction.",
       "acceptable_alternative": "Embedding the value in one atomic document or replacing the duplicate with a reference is valid when it still satisfies the required reads.",
       "trade_off": "Denormalization removes a read-time lookup but adds storage, coordinated writes, and transaction cost.",
       "failure_mode": "Two independent writes, or an asynchronous repair without an explicitly permitted stale window, can expose conflicting prices.",
-      "misconception": "Two writes issued by the same service are not automatically atomic, and denormalization does not make inconsistency unavoidable."
+      "misconception": "Two writes from the same service are not automatically atomic. Atomic updates also do not make independent reads at different times return the same price."
     },
-    "canonical_question": "A seller endpoint embeds current product prices so it can answer in one read, while product pages read the product collection; the two prices must never disagree. How would you preserve that read optimization without losing update correctness?"
+    "canonical_question": "A seller endpoint embeds product prices for one-read responses, while product pages read the product collection. A price update must commit both stored copies together. How would you preserve the read optimization without a partial update?"
   },
   {
     "topic": "B-tree lookup and range scans: how page locality shapes read cost",
@@ -184,15 +184,15 @@
     "category": "Core Concept",
     "target_week": 2,
     "source_url": "https://www.postgresql.org/docs/18/indexes.html",
-    "source_section": "§11.3 Multicolumn Indexes; §11.4 Indexes and ORDER BY; §11.9 Index-Only Scans and Covering Indexes",
+    "source_section": "§11.3 Multicolumn Indexes; §11.4 Indexes and ORDER BY; §11.9 Index-Only Scans and Covering Indexes; §11.8 Partial Indexes",
     "activation_prerequisite": "Complete V4-W2-L2 · Choose indexes from query shape",
     "evidence": "official_documentation",
     "grounding_status": "draft_review",
     "source_label": "PostgreSQL 18 · Indexes",
-    "answer_basis": "For SELECT created_at, total_cents FROM orders WHERE tenant_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 50, use (tenant_id, status, created_at DESC) INCLUDE (total_cents). The leading equality columns bound the relevant index region, created_at supplies the requested order and early LIMIT, and total_cents is payload for a possible index-only scan. An ascending created_at key scanned backward is equivalent here. A time-first index does not align the leading equality filters and can scan across many tenants.",
+    "answer_basis": "For SELECT created_at, total_cents FROM orders WHERE tenant_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 50, use (tenant_id, status, created_at DESC) INCLUDE (total_cents). The leading equality columns bound the relevant index region, created_at supplies the requested order and early LIMIT, and total_cents is payload for a possible index-only scan. An ascending created_at key scanned backward is equivalent here. A time-first index does not align the leading equality filters and can scan across many tenants. The two equality keys can also be reversed for this exact query. A partial index on (tenant_id, created_at DESC) INCLUDE (total_cents) WHERE status = 'open' is another option when the planner can prove that predicate; it trades generality for a smaller index.",
     "answer_rubric": {
-      "mechanism": "Places the equality filters first, the ordered range/output key next, and non-search payload in INCLUDE.",
-      "acceptable_alternative": "(tenant_id, status, created_at) scanned backward is equivalent for this query.",
+      "mechanism": "Uses the equality filters to bound the relevant rows and created_at to provide ordered early LIMIT. Explains INCLUDE as optional payload for an index-only scan, rather than a requirement for correct filtering or ordering.",
+      "acceptable_alternative": "An ascending created_at key scanned backward, either order of the two equality keys, or a partial (tenant_id, created_at DESC) index WHERE status = 'open' is valid for this exact query. INCLUDE is optional if heap fetches are acceptable; explain its separate covering benefit.",
       "trade_off": "The index can avoid sorting and heap reads, but wider indexes consume space, increase write cost, and only gain index-only behavior when visibility permits.",
       "failure_mode": "(created_at, tenant_id, status) may scan a much larger time region because tenant and status no longer form the leading equality prefix.",
       "misconception": "Composite-index permutations are not interchangeable, and choosing columns solely by global cardinality ignores the actual predicate and ordering."
@@ -209,13 +209,13 @@
     "evidence": "official_engineering_guidance",
     "grounding_status": "draft_review",
     "source_label": "Stripe Engineering · Online migrations at scale",
-    "answer_basis": "Create the new subscriptions representation, deploy dual writes for live changes, and backfill historical rows without stopping traffic. Compare old and new reads and repair mismatches before switching reads. Continue dual writing while reads move, then make the new store authoritative for writes. Keep the old data and path as the rollback boundary until parity and the cutover have remained healthy; remove them only in the final phase.",
+    "answer_basis": "Create the new subscriptions representation, synchronize live writes to both stores, and backfill historical rows without stopping traffic. Compare old and new reads and repair mismatches before switching reads. Keep both stores current through read cutover and the transition to new-first writes. A quick rollback is valid only while the old representation still reflects current writes; retaining an old table without synchronization is insufficient. Stop writes to the old store and retire it only after accepting that rollback boundary.",
     "answer_rubric": {
-      "mechanism": "Orders dual write, backfill, parity comparison, read cutover, write cutover, and final retirement while retaining the old path for rollback.",
+      "mechanism": "Orders live synchronization, backfill, parity comparison, read cutover, new-first writes with the old store still current, and final retirement.",
       "acceptable_alternative": "CDC, an outbox, checksums, or shadow reads are valid alternatives when they preserve incremental synchronization, observable parity, and a reversible cutover.",
       "trade_off": "The staged migration preserves uptime and rollback but temporarily doubles writes, adds database load, and requires repair and observability.",
-      "failure_mode": "A one-shot backfill followed immediately by cutover misses concurrent writes; deleting the old path before confidence removes rollback.",
-      "misconception": "Dual writing alone does not prove consistency. Historical backfill, comparison, discrepancy repair, and staged authority changes are still required."
+      "failure_mode": "A one-shot backfill misses concurrent writes. Stopping updates to the old store before rollback is retired makes a later read rollback serve stale data, even if the old table still exists.",
+      "misconception": "Dual writing alone does not prove consistency; backfill and partial failures still need comparison and repair. Keeping old data is not enough to preserve rollback if it stops receiving current writes."
     },
     "canonical_question": "You must move a live subscriptions representation into a new table without downtime. What sequence keeps old and new data consistent, proves the new reads before cutover, and preserves rollback until the migration is complete?"
   },
@@ -229,7 +229,7 @@
     "evidence": "official_documentation",
     "grounding_status": "draft_review",
     "source_label": "PostgreSQL 18 · Concurrency Control",
-    "answer_basis": "A Repeatable Read transaction keeps the snapshot established by its first statement, so after another transaction changes stock from 1 to 0 and commits, a second ordinary SELECT still sees 1. If the first transaction then tries to update that same row, PostgreSQL cannot let it write through the stale snapshot: it raises 'could not serialize access due to concurrent update.' The application must abort and retry the whole transaction against a fresh snapshot.",
+    "answer_basis": "A Repeatable Read transaction keeps the snapshot established by its first non-transaction-control statement, so after another transaction changes stock from 1 to 0 and commits, a second ordinary SELECT still sees 1. If the first transaction then tries to update that same row, PostgreSQL cannot let it write through the stale snapshot: it raises 'could not serialize access due to concurrent update.' The application must abort and retry the whole transaction against a fresh snapshot.",
     "answer_rubric": {
       "mechanism": "Explains stable row-version visibility, the concurrent writer's commit, the stale transaction's update conflict, and full-transaction retry.",
       "acceptable_alternative": "The answer may describe old and new row versions without saying MVCC, provided it predicts the same second-read and update outcome.",
@@ -249,15 +249,15 @@
     "evidence": "official_documentation",
     "grounding_status": "draft_review",
     "source_label": "Microsoft Azure Architecture Center · Cache-Aside Pattern",
-    "answer_basis": "On a read, check the cache; on a miss, read the authoritative store, cache that result with a suitable expiration, and return it. On an update, commit the authoritative store before deleting the cached entry so the next read repopulates from the new value. Deleting first opens a race in which another reader sees a miss, reads the still-old store value, and puts it back. Cache-aside is not an atomic transaction across both stores, so invalidation and TTLs bound rather than eliminate stale-data windows.",
+    "answer_basis": "On a read, check the cache; on a miss, read the authoritative store, populate the cache with a finite TTL, and return the result. On update, commit the database before invalidating the cache. Invalidating first allows a miss to load the old database value before the commit. Store-first ordering still permits an already-running miss to read the old value, pause, then populate it after commit and invalidation. TTL limits the lifetime of that stale entry from its insertion; ordering alone does not guarantee fresh reads.",
     "answer_rubric": {
-      "mechanism": "Traces cache hit or miss, authoritative-store fetch and population, then store-first/cache-invalidate update ordering.",
+      "mechanism": "Traces the miss/load/populate path and database-first invalidation, explains the delete-first race, and recognizes that an in-flight old read may still refill after invalidation.",
       "acceptable_alternative": "A read-through cache is equivalent if it still treats the durable store as authority and makes write invalidation and ordering explicit.",
       "trade_off": "Cache hits reduce read latency and source load, while application-managed population and invalidation add coordination and permit bounded staleness.",
-      "failure_mode": "Deleting the cache entry before the database commit lets a concurrent miss fetch and repopulate the old value.",
-      "misconception": "A TTL does not make the cache authoritative or guarantee fresh reads; it only bounds how long an uncorrected stale entry can survive."
+      "failure_mode": "A reader loads the old database version before a writer commits, then populates the cache after the writer commits and invalidates it. Database-first ordering alone cannot prevent that stale refill.",
+      "misconception": "Database-first invalidation is not an atomic freshness guarantee. TTL bounds a cached entry from insertion, not necessarily from the database update; delayed refills can extend that window."
     },
-    "canonical_question": "A cached profile is updated while another request misses. What exact cache-aside read and write order keeps that miss from repopulating the old profile?"
+    "canonical_question": "A profile uses cache-aside reads. On an update, should the database commit or cache invalidation happen first? Explain the stale-value race that ordering avoids and whether stale refills remain possible."
   },
   {
     "topic": "Cache stampede: expiration herds, request coalescing, and TTL jitter",
@@ -289,7 +289,7 @@
     "evidence": "primary_paper",
     "grounding_status": "draft_review",
     "source_label": "Ongaro and Ousterhout · In Search of an Understandable Consensus Algorithm",
-    "answer_basis": "The leader appends a command and acknowledges it only after replication to a majority, not merely after a local append or delivery to every follower. A slow minority can catch up later. Failover requires a majority election in a newer term and an up-to-date-log restriction, which ensures a candidate missing a committed entry cannot win. An isolated former leader cannot commit new work without a majority. Quorum intersection and term-based leadership preserve acknowledged entries and prevent two partitioned leaders from both committing conflicting histories.",
+    "answer_basis": "For a command appended in its current term, the Raft leader acknowledges commitment only after durable replication to a majority, not merely after a local append or delivery to every follower. A slow minority can catch up later. Failover requires a majority election in a newer term and an up-to-date-log restriction, which ensures a candidate missing a committed entry cannot win. An isolated former leader cannot commit new work without a majority. Quorum intersection and term-based leadership preserve acknowledged entries and prevent two partitioned leaders from both committing conflicting histories. In Raft, an older-term entry is not committed merely by counting its replicas; committing a current-term entry also commits the preceding log.",
     "answer_rubric": {
       "mechanism": "Requires majority replication before acknowledgment and a majority, log-fresh election before a replacement leader may commit.",
       "acceptable_alternative": "Another quorum-based leader protocol using epochs or terms, intersecting quorums, and fencing of stale leaders is equivalent.",

@@ -722,22 +722,32 @@ until that evidence exists.
 
 ### Backup/PITR status and restore drill
 
-As of this audit, the repository contains no evidence that Railway backups or
-point-in-time recovery are enabled, what their retention is, or that a restore has
-ever completed. Do not infer recoverability from a successful migration or test
-suite. Until the controls below are verified, the actual RPO and RTO are unknown.
-Use **RPO ≤ 24 hours** and **RTO ≤ 4 hours** as provisional operating targets, not
-as guarantees.
+Verified September 9: the Hobby project uses daily logical backups to its private
+`production-recovery` bucket through the SELECT-only `database-backup` service.
+The cron runs at 10:00 UTC, retains 31 days and at least three copies, and verifies
+each upload by downloading it and comparing SHA-256. A downloaded archive was
+restored to an empty PostgreSQL 18 database; the release was also migrated and
+checked on a separate restored copy before deployment. Native volume backups and
+PITR require Pro and are not enabled. See [backup operations](../ops/backups/README.md)
+and [dated evidence](PRODUCTION-RECOVERY-2026-09-09.md).
+
+Use **RPO ≤ 24 hours** and **RTO ≤ 4 hours** as provisional operating targets.
+The 1.14-second warm local restore is not incident response time; daily execution
+still needs observation. Same-project storage does not protect against deletion
+of the whole project/account.
 
 Verify the provider setting and run this drill before calling the targets met,
 then repeat the restore at least monthly and after a database-provider change:
 
-1. In Railway, record the Postgres backup/PITR feature, retention window, latest
-   recoverable timestamp, region, and who can initiate a restore. Enable a daily
-   backup or PITR policy capable of the provisional RPO if it is absent.
-2. Choose a recovery point several hours old and use Railway's documented restore
-   operation to create a **new isolated Postgres service**. Never restore over the
-   production database and never attach the production API service to the clone.
+1. In Railway, verify the backup service's effective cron, successful job logs,
+   bucket objects, retention, and latest verified timestamp. Record region and
+   restore access. The checked-in GraphQL configuration owns this new service;
+   new services do not read legacy `railway.json`.
+2. Download a recent archive from the private bucket, verify its SHA-256 against
+   object metadata, and use `pg_restore --no-owner --no-acl` into a **new isolated
+   Postgres database**. If native recovery is later enabled, its documented clone
+   operation is an alternative. Never restore over production or attach the
+   production API service to the clone.
 3. Give a local verification process temporary access to the clone. Keep
    `REVIEW_POLLER_ENABLED=false`; omit APNs and model-provider credentials so a
    smoke test cannot send a push or make a paid call.
@@ -764,13 +774,16 @@ then repeat the restore at least monthly and after a database-provider change:
   production APNs token, and the coordinated switch to
   `APNS_USE_SANDBOX=false` plus `WC_APS_ENVIRONMENT=production` has not yet been
   exercised end to end.
-- The generic Study Plan importer fixes are unit-tested, but the post-fix live
-  Anthropic rerun was blocked by account credit. Repeat the reviewed guide import
-  once the provider budget is funded, retaining latency, token, validation, and
-  retry evidence without copying guide or model text into logs.
-- Confirm production has deployed through migration `0025`, `/ready` returns that
-  exact revision, the backup/PITR drill passes, and provider-enforced spending
-  ceilings and their alert destinations are recorded.
+- The September 9 generic-import rerun completed in 872.6 seconds, returning 73
+  items with all source offsets resolved. The validator withheld creation for
+  capacity, estimates, inferred dependencies/retrieval, and possible omissions.
+  The current guide specifies 20 hours/week; the smoke requested 15. This is a
+  passing provider/schema/offset smoke, not an approved saved plan. See
+  `docs/audits/2026-09-09/live-generic-import.json`. Billed output-token/cost
+  accounting was not emitted by the existing operator CLI.
+- Migration `0025`, public readiness, and logical-backup restoration were verified
+  September 9. Observe the first scheduled backup and record provider-enforced
+  spending ceilings and their alert destinations.
 
 ## Scoring Contract V2 activation and rollback
 
