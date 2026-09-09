@@ -1,0 +1,26 @@
+{
+  "verified_at": "2026-09-09T20:35:10.848973+00:00",
+  "source_commit": "abaf2342d92f116b2c5c081a2b32d7bea6826398",
+  "method": "credential-free exact-fingerprint replay; not new model observations",
+  "new_provider_calls": 0,
+  "new_paid_cost_usd": 0,
+  "reviewed_gate_passed": false,
+  "expected_exit_code": 1,
+  "failure": "delivery sequence \u2014 noisy transcript: depth 3 is more than one from 1",
+  "retention_false_passes": 0,
+  "retention_false_failures": 0,
+  "case_fingerprints": [
+    {
+      "case": "delivery sequence \u2014 noisy transcript",
+      "fingerprint": "3314277b25fcfcf49c60f9a10e20823c91d188f44d5836966fc7e3c26af17821"
+    },
+    {
+      "case": "delivery sequence \u2014 fluent architecture jargon",
+      "fingerprint": "044763bf6ab6c5b1afac0b7dacc2d36607eaa2d702ab8b4258a1c33b6c940a0a"
+    }
+  ],
+  "offline_test_count": 248,
+  "offline_tests_passed": true,
+  "production_contract_changed": false,
+  "learner_writes": false
+}

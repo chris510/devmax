@@ -46,7 +46,11 @@ railway logs --service database-backup --lines 30
 New Railway services no longer read `railway.json`. Configure the daily schedule
 through the service settings or `configure.graphql`, passing the backup service's
 ID and production environment ID with `railway api --file ... --var ...`. Verify
-`serviceInstance.cronSchedule` and `nextCronRunAt` after applying; the first
+`serviceInstance.cronSchedule`, `nextCronRunAt`, `restartPolicyType` (ON_FAILURE),
+and `restartPolicyMaxRetries` (2) after applying. Railway resets the policy to
+NEVER when setting the cron schedule, even when the same update requests
+ON_FAILURE; the two ordered mutations in `configure.graphql` apply the retry
+policy last. Both mutations must succeed, and the readback must match. The first
 successful upload is not evidence that a schedule exists. The existing API is a
 legacy service and still reads `api/railway.json` until Railway's announced
 December 1, 2026 cutoff. Its eventual IaC migration must preserve the migration
