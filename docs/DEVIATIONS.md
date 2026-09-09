@@ -599,18 +599,21 @@ now by token, against a technical vocabulary and a non-technical deny list, with
 the deny list winning outright. Both keys still have to turn: the importer must
 report the subject as supported *and* the slug must pass.
 
-## 28. Dynamic Type does not scale, app-wide
+## 28. Dynamic Type — corrected September 9, 2026
 
-Not a Study Plan deviation but confirmed while verifying one. `WCFont` builds
+Historical finding, confirmed while verifying Study Plan: `WCFont` built
 `UIFont` directly at a fixed point size and wraps it in `Font(...)`; that path has
 no `UIFontMetrics` and no `relativeTo:`, so **no screen in the app responds to
 Dynamic Type**, including every screen that predates Study Plan. Screenshots at
 `accessibility-medium` are pixel-identical to default.
 
-Study Plan is consistent with the rest of the app, and the density budget it was
-designed against is a default-type budget. Making the app scale is a typography
-change affecting all 29 existing screenshot comparisons and is deliberately not
-bundled into this feature.
+The September 9 audit changes every bundled family to SwiftUI's custom font
+relative to the body text style. Default point-size tokens remain unchanged.
+Today moves its introduction into the scroll region at accessibility sizes;
+History stacks its heading and scales the score column. See
+[the verification amendment](RECOVERY-UX-2026-09-09.md) for tested sizes and flows.
+This resolves the fixed-font defect; it is not an exhaustive VoiceOver rotor or
+every-screen accessibility certification.
 
 ## 29. First-party resources, mapped cards, and Stretch are additive item metadata
 

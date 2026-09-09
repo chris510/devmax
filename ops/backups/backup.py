@@ -127,7 +127,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 — redact credentials at the process boundary
         # Subprocess errors may contain connection details. The operation fails
         # visibly without turning the provider log into a credential store.
         print(json.dumps({"event": "database_backup_failed", "error_type": type(error).__name__}))

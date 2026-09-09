@@ -115,10 +115,10 @@ primary actions, input state, and status indicators.
 ### `lesson-pilot-held`
 
 - Status: `RECALL HELD`.
-- Title: `Recall is held.`
+- Title: `Let this lesson settle.` (September 9 readability amendment.)
 - The server-owned availability date is visible.
 - Copy says the first scored question appears through Today after the hold.
-- It explicitly says formation did not write history, mastery, or SM-2 state.
+- It says `This lesson check was unscored. Your review schedule is unchanged.`
 - The only primary action is `Return to Today`; there is no review launcher.
 
 ### `lesson-pilot-recall-ready`

@@ -25,6 +25,7 @@ final class AppState: ObservableObject {
         case planAudit(String)
         case library
         case libraryCards
+        case archivedCards
         case libraryCaptures
         case reviewReminders
         case materialSetup
@@ -132,6 +133,11 @@ final class AppState: ObservableObject {
     // Review Sprint / Coverage
     @Published var library: [CardSummary] = []
     @Published var libraryLoad: LoadState = .loading
+    @Published var archivedCards: [CardSummary] = []
+    @Published var archiveLoad: LoadState = .loading
+    @Published private(set) var endingReview = false
+    private var libraryLoadID = UUID()
+    private var archiveLoadID = UUID()
     /// Empty means the whole library, not "nothing".
     @Published var setupCats: Set<String> = []
     @Published var setupSize = 6
@@ -266,8 +272,20 @@ final class AppState: ObservableObject {
     private func loadTodayPlan(_ loadID: UUID) async {
         let summary = try? await api.activePlan()
         guard ownsTodayLoad(loadID) else { return }
-        planSummary = summary
+        if let summary { planSummary = summary }
         planSummaryFailed = summary == nil
+    }
+
+    var hasConfirmedEmptyLibrary: Bool { libraryLoad == .ready && library.isEmpty }
+
+    func openStudyPlan() {
+        if let id = planSummary?.planId {
+            path.append(.planOverview(id))
+        } else if planSummary != nil, !planSummaryFailed {
+            path.append(.planBuild)
+        } else {
+            sheet = .plans
+        }
     }
 
     private func loadTodayCaptures(_ loadID: UUID) async {
@@ -333,16 +351,36 @@ final class AppState: ObservableObject {
     // MARK: - Review Sprint
 
     func loadLibrary() async {
+        let requestID = UUID()
+        libraryLoadID = requestID
         if DebugFlags.shared.loadState == .loading {
             libraryLoad = .loading
             return  // hold the skeleton so it can be compared to the screenshot
         }
         libraryLoad = .loading
         do {
-            library = try await api.cards(sort: "next_review", mode: "conversational")
+            let cards = try await api.cards(sort: "next_review", mode: "conversational")
+            guard libraryLoadID == requestID, !Task.isCancelled else { return }
+            library = cards
             libraryLoad = .ready
         } catch {
+            guard libraryLoadID == requestID, !Task.isCancelled else { return }
             libraryLoad = .error
+        }
+    }
+
+    func loadArchivedCards() async {
+        let requestID = UUID()
+        archiveLoadID = requestID
+        archiveLoad = .loading
+        do {
+            let cards = try await api.archivedCards()
+            guard archiveLoadID == requestID, !Task.isCancelled else { return }
+            archivedCards = cards
+            archiveLoad = .ready
+        } catch {
+            guard archiveLoadID == requestID, !Task.isCancelled else { return }
+            archiveLoad = .error
         }
     }
 
@@ -577,7 +615,7 @@ final class AppState: ObservableObject {
         // foreground push tap) can happen before the outgoing view's onDisappear
         // snapshots the recognizer tail. `finish` clears sessionID before leaving,
         // which is the explicit handoff point for a retained launcher.
-        !submissionPending && !(stage.acceptsAnswer && sessionID != nil)
+        !submissionPending && !endingReview && !(stage.acceptsAnswer && sessionID != nil)
     }
 
     @discardableResult
@@ -617,6 +655,38 @@ final class AppState: ObservableObject {
         path.append(.learning(cardID))
     }
 
+    @discardableResult
+    func resumeReviewFromHistory(_ detail: CardDetail) -> Bool {
+        guard let session = detail.activeSession, detail.lifecycleStatus != "archived" else {
+            return false
+        }
+        let card = DueCard(
+            id: detail.id, topic: detail.topic, category: detail.category,
+            masterySummary: detail.masterySummary, lastScore: detail.lastScore,
+            recallScore: detail.recallScore, scoreKind: detail.scoreKind,
+            scoringContractVersion: detail.scoringContractVersion,
+            dueLabel: "in progress", resumable: true, missedCount: detail.missedCount
+        )
+        return beginSession(cards: [card], practice: session.practice, replacingPath: true)
+    }
+
+    /// A deliberate end is distinct from Close. Upload the exact local turn
+    /// before abandoning; a failed upload leaves the attempt resumable.
+    func endReview(cardID: UUID, session: ActiveCardSession) async throws {
+        guard !submissionPending, !endingReview, sessionID == nil else {
+            throw APIError.status(409)
+        }
+        endingReview = true
+        defer { endingReview = false }
+        await draftSync?.value
+        if let text = DraftStore.read(
+            for: cardID, sessionID: session.id, turnIndex: session.turnIndex
+        ) {
+            try await api.saveDraft(sessionID: session.id, text: text, turnIndex: session.turnIndex)
+        }
+        try await api.abandonSession(session.id)
+    }
+
     /// A Study Plan mapping can name the recall card before the Card row has
     /// been created. Only a committed mapping gets a History destination; a
     /// pending mapping stays visible but inert on the item screen.
@@ -636,6 +706,7 @@ final class AppState: ObservableObject {
         return switch path[path.count - 2] {
         case .planItem: "← Plan item"
         case .libraryCards: "← Review cards"
+        case .archivedCards: "← Archived cards"
         default: "← Today"
         }
     }

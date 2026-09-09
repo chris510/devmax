@@ -16,6 +16,25 @@ data, scoring policy, curriculum approval, deployment, or provider setting was
 changed during that initial pass. The follow-up implementation and production
 recovery work is recorded in [the rollout record](PRODUCTION-RECOVERY-2026-09-09.md).
 
+## Follow-up implementation status
+
+The findings below preserve the initial audit evidence. Subsequent work:
+
+| Work | Current result |
+|---|---|
+| Production and recovery | Supported Python runtime deployed; schema `0025`; real bucket backup restored; daily job configured. Physical-device/APNs and first future cron execution still need observation. |
+| Week 2–3 content | Corrected six draft authorities/questions and prepared [Week 2](WEEK-2-CONTENT-REVIEW-2026-09-09.md) and [Week 3](WEEK-3-CONTENT-REVIEW-2026-09-09.md) review packets. Owner approval and actual lesson completion remain required. |
+| Unfinished attempts | Explicit Options → History → End without scoring → Learn, with draft preservation, failed-request retry, and spoken resume. |
+| Archived discovery | Library has an owned archived list and a tested restore path. |
+| Unknown discovery | Library checking/failure states are distinct from empty; unavailable plans open a cached destination or plan list. |
+| Readability | Dynamic Type scales; targeted maximum-size layouts and review controls checked. Pilot implementation jargon removed; README and runtime amendment index updated. VoiceOver device pass remains open. |
+| Learning quality | Two live V1 canary cases retained the correct binary retention outcome, but one over-scored secondary detail and failed the numeric gate. V2 and pilot remain inactive. |
+
+[Recovery/UI implementation and evidence](RECOVERY-UX-2026-09-09.md): 1,291 SQLite
+tests passed with 44 PostgreSQL-only skips, all 1,335 passed on PostgreSQL 18, and
+219 iOS tests passed. These replace the earlier baseline counts for the follow-up
+code. Hosted release and backup evidence is in the separate rollout record.
+
 ## Verified results
 
 | Check | Result | What it establishes |

@@ -390,10 +390,10 @@ change faster than this file does — do not write Anthropic calls from memory.
 - **The import takes about 11 minutes** at `effort: high` on a 10k-character
   guide. Fine for a once-a-quarter action, but the client needs to expect it, and
   `studyplan_effort` is the lever if that is too slow — `medium` is untested here.
-- **Dynamic Type does not scale anywhere in the app.** `WCFont` builds fixed-size
-  `UIFont`s with no `UIFontMetrics`, so screenshots at `accessibility-medium` are
-  pixel-identical to default. Pre-existing and app-wide; see `docs/DEVIATIONS.md`
-  §28.
+- **Dynamic Type now scales the bundled fonts.** The September 9 audit uses
+  SwiftUI custom fonts relative to body size, with accessible Today/History
+  layouts. Verification and the remaining device screen-reader gap are recorded
+  in `docs/RECOVERY-UX-2026-09-09.md` and `docs/DEVIATIONS.md` §28.
 - **Study Plan has no VoiceOver rotor pass.** Accessible names, headings, hints,
   44px targets, native `disabled`, and status-in-text are all implemented and
   checked in code; nobody has driven it with the screen reader on.

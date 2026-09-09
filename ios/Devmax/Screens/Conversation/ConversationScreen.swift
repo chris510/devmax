@@ -8,6 +8,7 @@ struct ConversationScreen: View {
         let fallbackDraft: String
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var flags: DebugFlags
     @StateObject private var speech = SpeechService()
@@ -94,22 +95,48 @@ struct ConversationScreen: View {
     // MARK: - Chrome
 
     private var chrome: some View {
-        HStack {
-            Button {
-                preserveAnswerAndStop()
-                state.finish()
-            } label: {
-                Text("✕")
-                    .font(.system(size: 19))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Button {
+                    preserveAnswerAndStop()
+                    state.finish()
+                } label: {
+                    Text("✕")
+                        .font(.system(size: 19))
+                        .foregroundStyle(Theme.metaAlt)
+                        .frame(width: Metrics.minTapTarget, height: Metrics.minTapTarget, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close review and save for later")
+                if state.stage.supportsServerDraft, state.sessionID != nil {
+                    Button("Options") {
+                        guard let cardID = state.currentCard?.id else { return }
+                        preserveAnswerAndStop()
+                        state.finish()
+                        state.path = [.history(cardID)]
+                    }
+                    .font(TypeRole.secondaryAction)
                     .foregroundStyle(Theme.metaAlt)
-                    .frame(width: Metrics.minTapTarget, height: Metrics.minTapTarget, alignment: .leading)
+                    .buttonStyle(.plain)
+                    .frame(minHeight: Metrics.minTapTarget)
+                    .accessibilityLabel("Review options")
+                    .accessibilityHint("Resume or end this attempt without a score.")
+                    .disabled(finalizing || state.submissionPending || state.draftResetPending)
+                }
+                Spacer()
+                if !dynamicTypeSize.isAccessibilitySize { chromeMetadata }
             }
-            .buttonStyle(.plain)
-            Spacer()
-            MetaText(text: state.conversationLabel, font: WCFont.mono(10.5), tracking: 1.05,
-                     color: Theme.metaDimAlt, uppercased: true)
+            if dynamicTypeSize.isAccessibilitySize { chromeMetadata }
         }
         .padding(.horizontal, Metrics.conversationPadding)
+    }
+
+    private var chromeMetadata: some View {
+        MetaText(text: state.conversationLabel, font: WCFont.mono(10.5), tracking: 1.05,
+                 color: Theme.metaDimAlt, uppercased: true)
+            .lineLimit(2)
+            .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+            .accessibilityLabel(state.conversationLabel)
     }
 
     // MARK: - Progress rail
@@ -559,6 +586,8 @@ struct ConversationScreen: View {
             .buttonStyle(.plain)
             .disabled(!micEnabled)
             .opacity(micEnabled ? 1 : 0.4)
+            .accessibilityLabel(isRecording ? "Stop and submit answer" : "Record answer")
+            .accessibilityHint(isRecording ? "Saves and submits this spoken answer." : "Starts recording your answer.")
 
             MetaText(text: micLabel, font: TypeRole.metaRow, tracking: 1.2, color: Theme.metaAlt)
 

@@ -106,10 +106,18 @@ struct SessionHistory: Codable, Identifiable, Equatable {
     var scoringContractVersion: Int? = nil
     let feedback: String
     let turns: [Turn]
+    var status: String? = nil
+    var unscoredDraft: String? = nil
     var coachingFocus: String? = nil
     var coachingQuestion: String? = nil
     var coachingAnswer: String? = nil
     var coachingFeedback: String? = nil
+}
+
+struct ActiveCardSession: Codable, Equatable {
+    let id: UUID
+    let practice: Bool
+    let turnIndex: Int
 }
 
 struct CardDetail: Codable, Equatable {
@@ -126,13 +134,15 @@ struct CardDetail: Codable, Equatable {
     let repetitions: Int
     let nextReviewAt: String
     let missedCount: Int
-    let sessions: [SessionHistory]
+    var sessions: [SessionHistory]
     /// Learning fields are additive so a compatible client can still read a
     /// server while it rolls forward. A malformed delay fails closed.
     var recallNotBeforeAt: String? = nil
     var learningAvailable: Bool? = nil
     var sourceLabel: String? = nil
     var sourceSection: String? = nil
+    var lifecycleStatus: String? = nil
+    var activeSession: ActiveCardSession? = nil
 
     func recallIsAvailable(at now: Date = Date()) -> Bool {
         RecallGate.isOpen(recallNotBeforeAt, at: now)

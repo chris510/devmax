@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CardHistoryScreen: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let cardID: UUID
     @EnvironmentObject private var state: AppState
     @StateObject private var history = CardHistoryState()
@@ -9,6 +10,7 @@ struct CardHistoryScreen: View {
     @State private var maintenance: CardMaintenance?
     @State private var maintenancePending = false
     @State private var maintenanceFailed = false
+    @State private var endError = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,7 +50,14 @@ struct CardHistoryScreen: View {
         .sheet(item: $maintenance) { value in
             CardMaintenanceSheet(
                 value: value,
-                updated: { maintenance = $0 },
+                updated: {
+                    maintenance = $0
+                    Task {
+                        await history.load(cardID: cardID, api: state.api)
+                        await state.loadLibrary()
+                        await state.loadArchivedCards()
+                    }
+                },
                 replaced: {
                     maintenance = nil
                     if state.path.last == .history(cardID) {
@@ -63,7 +72,10 @@ struct CardHistoryScreen: View {
 
     private func heading(_ detail: CardDetail) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+            layout {
                 Text(detail.topic)
                     .font(TypeRole.historyTitle)
                     .tracking(-0.4)
@@ -81,6 +93,12 @@ struct CardHistoryScreen: View {
 
             MetaText(text: metaLine(detail), font: TypeRole.metaBody, tracking: 1.0,
                      color: Theme.metaFaint, uppercased: true)
+
+            if detail.lifecycleStatus == "archived" {
+                Text("Archived · Your history and review schedule are saved.")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.textSecondary)
+            }
 
             Button {
                 Task {
@@ -100,7 +118,7 @@ struct CardHistoryScreen: View {
                 )
             }
             .buttonStyle(.plain)
-            .disabled(maintenancePending)
+            .disabled(maintenancePending || detail.activeSession != nil || state.endingReview)
             .frame(minHeight: Metrics.minTapTarget, alignment: .leading)
 
             if maintenanceFailed {
@@ -205,7 +223,29 @@ struct CardHistoryScreen: View {
             cardID: cardID, fallback: detail.recallNotBeforeAt
         )
         let due = recallOpen && state.queue.contains(where: { $0.id == cardID })
-        if detail.learningAvailable == true || due {
+        if let session = detail.activeSession {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("This attempt is unfinished. Resume it, or end it without a score before studying the source. Your saved answer stays in history.")
+                    .font(TypeRole.secondaryAction)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                PrimaryButton(title: session.practice ? "Resume practice" : "Resume review",
+                              enabled: !state.endingReview) {
+                    state.resumeReviewFromHistory(detail)
+                }
+                SecondaryButton(title: state.endingReview ? "Ending review…" : "End without scoring") {
+                    Task { await endReview(session) }
+                }
+                .disabled(state.endingReview)
+                if !endError.isEmpty {
+                    Text(endError)
+                        .font(TypeRole.secondaryAction)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 8)
+        } else if detail.lifecycleStatus != "archived", detail.learningAvailable == true || due {
             VStack(spacing: 10) {
                 if detail.sessions.isEmpty {
                     if detail.learningAvailable == true {
@@ -232,6 +272,22 @@ struct CardHistoryScreen: View {
                 }
             }
             .padding(.top, 8)
+        }
+    }
+
+    private func endReview(_ session: ActiveCardSession) async {
+        endError = ""
+        do {
+            try await state.endReview(cardID: cardID, session: session)
+            await history.load(cardID: cardID, api: state.api)
+            await state.loadToday()
+        } catch {
+            endError = "Couldn't confirm that this attempt ended. Your answer is saved. Try again."
+            // A scoring/abandon race can complete on another device. Reload the
+            // authoritative state; never expose Learn from an assumed success.
+            if case APIError.status(409) = error {
+                await history.load(cardID: cardID, api: state.api)
+            }
         }
     }
 }
@@ -358,6 +414,7 @@ private struct CardMaintenanceSheet: View {
 }
 
 private struct SessionRow: View {
+    @ScaledMetric(relativeTo: .body) private var scoreWidth = 16.0
     let session: SessionHistory
     let score: Int?
     let legacyOnly: Bool
@@ -368,11 +425,12 @@ private struct SessionRow: View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: toggle) {
                 HStack(alignment: .top, spacing: 14) {
-                    Text(ScoreStyle.label(for: score))
+                    Text(score.map(String.init) ?? "—")
                         .font(TypeRole.historyScoreNumeral)
                         .monospacedDigit()
                         .foregroundStyle(ScoreStyle.color(for: score))
-                        .frame(width: 16, alignment: .leading)
+                        .frame(width: scoreWidth, alignment: .leading)
+                        .accessibilityLabel(score.map { "Score \($0)" } ?? "Unscored")
 
                     VStack(alignment: .leading, spacing: 6) {
                         MetaText(text: Self.dateLabel(session.date), font: TypeRole.metaRow,
@@ -382,7 +440,7 @@ private struct SessionRow: View {
                                      font: TypeRole.metaLabel, tracking: 0.8,
                                      color: Theme.metaFaint)
                         }
-                        Text(session.feedback)
+                        Text(session.status == "abandoned" ? "Ended without a score." : session.feedback)
                             .font(TypeRole.historyNote)
                             .foregroundStyle(Theme.textMuted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -407,6 +465,16 @@ private struct SessionRow: View {
                             MetaText(text: label(for: turn), font: TypeRole.metaLabel,
                                      tracking: 1.2, color: Theme.metaFaintAlt)
                             transcriptText(turn)
+                        }
+                    }
+                    if let draft = session.unscoredDraft, !draft.isEmpty {
+                        VStack(alignment: .leading, spacing: 7) {
+                            MetaText(text: "SAVED PARTIAL · UNSCORED", font: TypeRole.metaLabel,
+                                     tracking: 1.2, color: Theme.metaFaintAlt)
+                            Text(draft)
+                                .font(TypeRole.historyNote)
+                                .foregroundStyle(Theme.textMuted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     if let question = session.coachingQuestion,

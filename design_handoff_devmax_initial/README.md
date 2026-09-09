@@ -1,5 +1,9 @@
 # Handoff: Devmax — conversational spaced-repetition study coach
 
+The [September recovery amendment](../docs/RECOVERY-UX-2026-09-09.md) adds explicit
+unscored-attempt recovery, archived-card discovery, and honest loading states.
+Its screenshots inherit these tokens and document the added states.
+
 > **Approved scoring amendment:**
 > [`../docs/SCORING-CONTRACT-V2-SPEC.md`](../docs/SCORING-CONTRACT-V2-SPEC.md)
 > owns the target Recall-only score semantics, qualitative coaching states, and

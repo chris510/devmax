@@ -107,6 +107,8 @@ Owner decision to record: which questions/authority are approved, any correction
 
 ## Week 3 preparation
 
+The next six decisions are assembled in the [Week 3 review packet](WEEK-3-CONTENT-REVIEW-2026-09-09.md).
+
 The six Week 3 sources were also checked. Cache-aside now explicitly includes the in-flight stale-refill race; the Raft-based replication answer limits direct majority counting to current-term entries. The ordered-tablet, consistent-hashing, expiration-herd, and per-operation CAP accounts remain drafts.
 
 The CAP DOI page did not expose its text; the [authorized Eric Brewer republication](https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/) supplies an accessible reading path. The article says it originally appeared in Computer and is republished with IEEE Computer Society.

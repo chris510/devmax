@@ -1,139 +1,122 @@
-# Devmax
+# Devmax / Unprompted
 
-A private, single-user conversational spaced-repetition coach for technical-interview prep.
-A push arrives, you answer a question by voice or text, the model probes once if the answer
-was partial, then scores recall 0–5 and reschedules the card with SM-2. Sessions are 1–3
-minutes.
+A conversational study coach for technical interviews and engineering learning.
+The iOS app is named **Unprompted**. This deployment is used personally; the code
+supports Sign in with Apple and per-user ownership.
 
-Three screens — **Today**, **Conversation**, **Card History**. No tab bar, no onboarding,
-no auth UI, no gamification.
+The useful loop is: learn from a trusted source, explain the mechanism later
+without help, attempt an unfamiliar design, and capture the specific gap.
+Reviews take 1–3 minutes by voice or text, with up to two pre-correction probes.
+There are no streaks, XP, badges, or celebration mechanics.
 
-## Layout
+## Current behavior
 
-```
-api/     FastAPI + SQLModel on Postgres, deployed to Railway — built to spec.md
-ios/     SwiftUI app — built to design_handoff_devmax_initial/
-assets/  App icon kit — svg/ is the re-export source of truth
-.github/ Cron workflows that drive the push loop
-```
+- Today shows due reviews independently of optional plan and library requests.
+- Conversation saves drafts locally and to the server. Close preserves resume;
+  Options → End without scoring explicitly ends an attempt before source study.
+- Card History preserves scored sessions and ended, unscored partial answers.
+  Library includes active cards, archived-card recovery, sources, and captured gaps.
+- Learn shows approved authority without a score and delays recall until the
+  later of eight hours after exposure and the next local day.
+- Study Plan schedules source lessons, Python coding, full designs, and mocks.
+  Plan completion does not change card scheduling or create missing cards.
+- Review Sprint writes practice history and mastery but leaves SM-2 unchanged.
 
-Source documents, both authoritative:
+Production still uses **V1 scoring**: three model axes produce a code-derived
+0–5 composite for display; only Accuracy's pass/fail bucket reaches SM-2.
+V2 Recall-only scoring remains gated. The adaptive-study pilot separates unscored
+formation from delayed Recall for explicitly enrolled sources; nonpilot lesson
+imports still use the legacy flow. Neither app scores nor same-sitting performance
+certify interview readiness.
 
-- `spec.md` — the backend build spec (schema, endpoints, SM-2, LLM rules, out-of-scope list).
-- `design_handoff_devmax_initial/` — the iOS design handoff: final tokens, type, copy,
-  motion, and 18 state screenshots, plus an HTML prototype used as a design reference.
+## Source documents
 
-Where the two disagree, `spec.md` wins; the deltas are resolved once in `ios/Devmax/Services/APIClient.swift`.
+Read [AGENTS.md](AGENTS.md) before changing the project. The backend starts with
+[spec.md](spec.md), with its current-runtime amendments and linked extensions.
+The [initial iOS handoff](design_handoff_devmax_initial/README.md) owns presentation;
+Study Plan and pilot handoffs amend their respective flows.
 
-## Backend
+[Curriculum](docs/CURRICULUM.md) owns lesson prerequisites and content release.
+Only the six Week 1 base cards are approved. The
+[Week 2 review](docs/WEEK-2-CONTENT-REVIEW-2026-09-09.md) is prepared; future drafts
+must not be activated merely because their calendar week arrived.
+
+[Runbook](docs/RUNBOOK.md) owns deployment and recovery procedures.
+[Deploy checklist](docs/DEPLOY-CHECKLIST.md) records verified production state.
+[September audit](docs/PROJECT-AUDIT-2026-09-09.md) and
+[release evidence](docs/PRODUCTION-RECOVERY-2026-09-09.md) distinguish tested work
+from outstanding device, content, and calibration gates.
+
+## Local development
+
+The backend uses Python 3.12, FastAPI, SQLModel, Alembic, and PostgreSQL. The API
+runs on Railway with one replica and an internal 15-minute review poller.
 
 ```sh
 cd api
-cp .env.example .env          # fill in DATABASE_URL, API_KEY, CRON_SECRET, ANTHROPIC_API_KEY
+cp .env.example .env
+# Fill the required local values described in .env.example.
 uv sync
 uv run alembic upgrade head
-uv run python -m app.seed --fixtures        # the three design-prototype cards + one desk card
 uv run uvicorn app.main:app --reload --port 8083
 ```
 
-`--fixtures` seeds exactly the cards every screenshot depicts, so the designs are
-reproducible against a real server. For a real queue, activate a curriculum week only
-after its source lessons are complete:
-
-```sh
-uv run python -m app.seed --file cards.json --activate-week 1 --start-date 2026-08-03
-uv run python -m app.seed_study_plan --activate --start-date 2026-08-03
-```
-
-These are intentionally separate. The first activates the Week 1 review-card
-cohort; the second creates the deterministic 12-week phase/week timeline
-without calling an LLM or touching card scheduling.
-
-The 12-week program is documented in `docs/CURRICULUM.md`. The base manifest has
-nine six-card teaching cohorts; weeks 10–12 are reserved for mocks and gap-driven
-cards.
-
-Never load `--fixtures` into a real database: they carry invented session history and a fake
-in-progress draft. The seeder refuses any non-local database without `--force`.
-
-The three access-gating settings have no defaults — the app will not start without
-`DATABASE_URL`, `API_KEY`, and `CRON_SECRET`, and refuses known placeholder values.
-
-```sh
-uv run pytest        # 107 tests; Anthropic and APNs are mocked, no live calls
-uv run ruff check .  # `.`, not `app tests` — the narrower form skips alembic/
-
-# The same suite against real Postgres, which is the only way to exercise JSONB,
-# native UUID, timestamptz, and the CHECK constraints that live in the migration.
-createdb devmax_test
-DATABASE_URL=postgresql+asyncpg://localhost/devmax_test uv run alembic upgrade head
-TEST_DATABASE_URL=postgresql+asyncpg://localhost/devmax_test uv run pytest
-```
-
-The two shared secrets are independent: client endpoints need `X-API-Key`, `/internal/*`
-needs `X-Cron-Secret`.
-
-## iOS
+For a disposable local screenshot database, `uv run python -m app.seed --fixtures`
+creates synthetic history. Never load fixtures into a real learner account.
+For real content, follow the reviewed cohort and prerequisite procedure in
+[Curriculum](docs/CURRICULUM.md); use an intentional current start date.
 
 ```sh
 cd ios
-cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig   # paste the server's API_KEY
+cp Config/Secrets.example.xcconfig Config/Secrets.xcconfig
 xcodegen generate
-open Devmax.xcodeproj
+xcodebuild -project Devmax.xcodeproj -scheme Devmax \
+  -destination 'platform=iOS Simulator,name=iPhone 16e' test
 ```
 
-Debug builds run against fixtures (`MockAPI`) so every screen works with no server; release
-builds always use the real API. Point a debug build at a live server with `WC_MOCK=0`.
+Debug uses MockAPI by default; Release uses the real API. Set `WC_MOCK=0` and
+`WC_BASE_URL` for a local API walkthrough. A phone requires the Mac's LAN address
+and uvicorn bound to `--host 0.0.0.0`. Follow the runbook for Apple sign-in and
+founder migration; the legacy shared API-key path is disabled by default.
+Internal operations use a separate `X-Cron-Secret`.
 
-The endpoint and API key come from `Config/*.xcconfig` — Debug at `localhost:8083`, Release
-at the Railway host — substituted into `Info.plist`. `Config/Secrets.xcconfig` is gitignored;
-without it the app builds and returns a clean 401 rather than falling back to a shared
-default. A device build also needs `DEVELOPMENT_TEAM` set in `project.yml`.
+## Verification
 
-### Walking the designed states
-
-The prototype's Tweaks are launch environment variables, so any state — including the
-failure paths — can be reached in one command:
+Run backend checks **from api/** so Alembic resolves its configuration:
 
 ```sh
-SIMCTL_CHILD_WC_ROUTE=score xcrun simctl launch <device> com.christrinh.devmax
+cd api
+uv run pytest -q
+uv run ruff check .
+
+# An isolated, already-migrated test database is mandatory: fixtures truncate it.
+DATABASE_URL=postgresql+asyncpg://localhost/devmax_test uv run alembic upgrade head
+TEST_DATABASE_URL=postgresql+asyncpg://localhost/devmax_test uv run pytest -q
 ```
 
-`simctl` passes an environment variable to the app only when it's prefixed `SIMCTL_CHILD_`;
-the `--setenv` flag it once accepted is gone, and today's `simctl` reads it as the device
-argument and fails with `Invalid device`.
+CI runs SQLite, PostgreSQL, iOS unit/UI tests, container readiness, backup-job
+validation, and icon validation. Live provider calls are separate, reviewed
+experiments and never run as part of the normal test suite.
 
-| Variable | Values |
-|---|---|
-| `WC_ROUTE` | `question` `recording` `processing` `text` `followup` `followup-second` `score` `resume` `submit-failure` `history` `history-empty` `settings` `add` `filter` `setup` (alias `sprint-setup`) `coverage` `coverage-expanded` `recap` `recap-expanded` |
-| `WC_LOAD` | `auto` `loading` `error` |
-| `WC_RAIL_STYLE` | `dots` (ships) `chips` (exists only for the side-by-side) |
-| `WC_EMPTY` `WC_FAIL_SUBMIT` `WC_FAIL_ADD` `WC_TEXT_FIRST` `WC_TTS` `WC_SIM_SPEECH` `WC_SECOND_PROBE` | `1` / `0` |
+Use an iPhone 16e at 390×844 logical points for design comparisons:
 
-`WC_MOCK=0` swaps `MockAPI` for the real API — everything above describes fixtures.
-`WC_BASE_URL` overrides where it points.
+```sh
+SIMCTL_CHILD_WC_ROUTE=history-failure SIMCTL_CHILD_WC_TTS=0 \
+  xcrun simctl launch <device> com.christrinh.devmax
+```
 
-Forced failures succeed on the retry, as in the prototype, so each failure path walks end to
-end. Use a 390×844 simulator (iPhone 16e / 14 / 15) to match the design frame.
+`AGENTS.md` lists fixture routes, including question/submit failures, Study Plan,
+pilot states, and recovery. `SIMCTL_CHILD_` is required; `simctl --setenv` is not
+supported. Compare screenshots with the applicable handoff before shipping UI.
 
-All of these are Debug-only: in a Release build every flag is pinned, so none of them can
-change how the app behaves on a real phone.
+## Backups and operational limits
 
-## Deploying
+The private `database-backup` Railway service runs at 10:00 UTC daily, uses a
+SELECT-only role, and verifies each private bucket upload by downloading it and
+checking SHA-256. Retention is 31 days with at least three copies. A bucket archive
+was restored and the production migration verified on September 9.
 
-`docs/RUNBOOK.md` is the ordered path from a clean repo to a push arriving on a phone —
-accounts, secrets, the first Railway deploy, seeding, the first real Claude call, the device
-build, and the triage steps for when a push doesn't show up.
-
-`docs/DEVIATIONS.md` records where the code intentionally differs from `spec.md`, and why.
-
-`docs/ADAPTIVE-STUDY-MVP.md` documents the source-grounded **Add lesson → Study → Lesson
-results** workflow and the safe, local-only second-brain export path.
-
-## Notes
-
-- The app hides the system status bar because the design draws its own 44px mono status row.
-- `missed_count` never touches the ease factor — missing a review is a compliance signal,
-  not a retention signal.
-- Only `conversational` cards enter the due queue and the push loop; `desk` cards are
-  tracked and scheduled but never pushed.
+See [backup operations](ops/backups/README.md) for recovery. This logical backup
+has no PITR window and shares the Railway project's failure boundary. The first
+future scheduled run, physical-device production push, provider spending controls,
+and live generic-importer rerun remain explicit release checks.
