@@ -12,6 +12,12 @@
   "internal_testflight_only": true,
   "uploaded": true,
   "uploaded_at": "2026-09-09T18:34:46Z",
-  "apple_processing_status": "processing at upload completion",
-  "installed_on_device": false
+  "apple_processing_status": "complete; Testing with existing Founder Internal group",
+  "installed_on_device": true,
+  "installed_build_verified": "13",
+  "test_group": "Founder Internal",
+  "testers_in_group": 1,
+  "authenticated_production_library_verified": true,
+  "production_apns_accepted": true,
+  "production_notification_observed": false
 }

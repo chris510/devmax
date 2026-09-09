@@ -51,8 +51,12 @@ then uploaded successfully at 18:34:46 UTC. This build overrides the repository'
 build 10 with `CURRENT_PROJECT_VERSION=13`, above the installed developer build
 12. The exported IPA has production APNs, `get-task-allow=false`, mocks off, the
 Railway URL, and empty API/claim bootstrap secrets. Xcode reports that the
-uploaded package is processing; this does not prove TestFlight readiness,
-installation, or delivery to a production APNs token. The archive's development
+uploaded package was processing at upload completion. The later
+[physical-device check](DEVICE-CHECK-2026-09-09.md) verified processing completion,
+assigned the existing one-person Founder Internal group, installed build 13,
+loaded authenticated production data, and obtained production APNs acceptance.
+Visible notification delivery and tap routing remain separate checks.
+The archive's development
 signature is expected before export; the distributed IPA's signature is the
 one checked. [Build evidence](audits/2026-09-09/ios-build13.json).
 
@@ -157,10 +161,11 @@ remain outside the repository in a private local directory.
 
 ## Remaining checks
 
-- Finish Apple processing, install internal TestFlight build 13, and verify a
-  physical-device push, review, and interrupted-network recovery. iPhone Mirroring
-  most recently reported that the phone was in use; earlier it required the
-  owner's Mac authentication. No learner answer was simulated.
+- Finish physical-device notification presentation/tap routing, review recovery,
+  and interrupted-network recovery. Build 13 is installed and loads authenticated
+  production data. Mirroring has required owner reconnection/authentication;
+  real microphone access is unavailable through Mirroring. No learner answer was
+  simulated. See the device-check record for the latest evidence.
 - Observe the first scheduled backup on September 10; successful manual/deployment
   runs and the configured cron establish setup, not future execution.
 - Provider billing ceilings and billed token/cost accounting for the live import.

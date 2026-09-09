@@ -22,7 +22,7 @@ The findings below preserve the initial audit evidence. Subsequent work:
 
 | Work | Current result |
 |---|---|
-| Production and recovery | Recovery API `da76d46` deployed; schema `0025`; real bucket backup restored; daily job configured. Build 13 uploaded for internal TestFlight. Apple processing, installation, physical-device/APNs, and first future cron execution still need verification. |
+| Production and recovery | Recovery API `da76d46` deployed; schema `0025`; real bucket backup restored; daily job configured. TestFlight build 13 installed and authenticated production Library verified. Production APNs accepted a test notification; visible delivery/tap routing and first future cron execution still need verification. |
 | Week 2–3 content | Corrected six draft authorities/questions and prepared [Week 2](WEEK-2-CONTENT-REVIEW-2026-09-09.md) and [Week 3](WEEK-3-CONTENT-REVIEW-2026-09-09.md) review packets. Owner approval and actual lesson completion remain required. |
 | Unfinished attempts | Explicit Options → History → End without scoring → Learn, with draft preservation, failed-request retry, and spoken resume. |
 | Archived discovery | Library has an owned archived list and a tested restore path. |
