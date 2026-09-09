@@ -63,7 +63,11 @@ def qualification_expiry_within_max_age(
 class Settings(BaseSettings):
     """Environment configuration. See spec.md §Environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Startup errors must name invalid fields without echoing the environment
+    # dictionary, which contains provider keys and database credentials.
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", hide_input_in_errors=True,
+    )
 
     # No defaults on settings that gate access or provider-data disclosure. A default
     # here means a deploy that forgets to set them boots healthy on a public
