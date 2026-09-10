@@ -451,6 +451,15 @@ verify it. Do it on its own, against a real database.
 
 ## Deviation from the design handoff, not `spec.md`
 
+**September 9 brand amendment.** The approved Balanced open-loop identity now
+ships from [`assets/brand/unprompted`](../assets/brand/unprompted/README.md).
+`assets/app_icon/` remains the historical Cache kit described below. The new
+catalog image is the opaque dark master, copied byte-for-byte by
+`scripts/sync_brand.py`; its `--check` mode also verifies the website's logos,
+favicons, and Apple touch icon in CI. The cyan detached square is the approved
+brand exception to screen accent usage. No in-app screen or motion changes.
+See the [integration verification](audits/2026-09-09/brand-integration/README.md).
+
 `design_handoff_devmax_initial/README.md` §Assets says: *"None. No images, no
 icons, no SVG."* Every screen still honors that — the launch screen is a bare
 `#0D0F11` and no Swift file loads an image. But an iOS app needs an icon and the

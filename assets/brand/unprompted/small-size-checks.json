@@ -1,0 +1,100 @@
+[
+  {
+    "file": "icon-dark-120.png",
+    "visible_components": [
+      277,
+      1892
+    ]
+  },
+  {
+    "file": "icon-dark-16.png",
+    "visible_components": [
+      6,
+      41
+    ]
+  },
+  {
+    "file": "icon-dark-24.png",
+    "visible_components": [
+      9,
+      84
+    ]
+  },
+  {
+    "file": "icon-dark-32.png",
+    "visible_components": [
+      23,
+      148
+    ]
+  },
+  {
+    "file": "icon-dark-40.png",
+    "visible_components": [
+      34,
+      221
+    ]
+  },
+  {
+    "file": "icon-dark-60.png",
+    "visible_components": [
+      70,
+      486
+    ]
+  },
+  {
+    "file": "icon-dark-80.png",
+    "visible_components": [
+      119,
+      842
+    ]
+  },
+  {
+    "file": "icon-paper-120.png",
+    "visible_components": [
+      275,
+      1892
+    ]
+  },
+  {
+    "file": "icon-paper-16.png",
+    "visible_components": [
+      6,
+      41
+    ]
+  },
+  {
+    "file": "icon-paper-24.png",
+    "visible_components": [
+      9,
+      84
+    ]
+  },
+  {
+    "file": "icon-paper-32.png",
+    "visible_components": [
+      23,
+      148
+    ]
+  },
+  {
+    "file": "icon-paper-40.png",
+    "visible_components": [
+      33,
+      221
+    ]
+  },
+  {
+    "file": "icon-paper-60.png",
+    "visible_components": [
+      70,
+      486
+    ]
+  },
+  {
+    "file": "icon-paper-80.png",
+    "visible_components": [
+      119,
+      842
+    ]
+  }
+]

@@ -1,0 +1,266 @@
+[
+  {
+    "file": "png/icon-dark-1024.png",
+    "size": [
+      1024,
+      1024
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-120.png",
+    "size": [
+      120,
+      120
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-16.png",
+    "size": [
+      16,
+      16
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-180.png",
+    "size": [
+      180,
+      180
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-24.png",
+    "size": [
+      24,
+      24
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-32.png",
+    "size": [
+      32,
+      32
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-40.png",
+    "size": [
+      40,
+      40
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-512.png",
+    "size": [
+      512,
+      512
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-60.png",
+    "size": [
+      60,
+      60
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-80.png",
+    "size": [
+      80,
+      80
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-dark-rounded-256.png",
+    "size": [
+      256,
+      256
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/icon-dark-rounded-64.png",
+    "size": [
+      64,
+      64
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/icon-paper-1024.png",
+    "size": [
+      1024,
+      1024
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-120.png",
+    "size": [
+      120,
+      120
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-16.png",
+    "size": [
+      16,
+      16
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-180.png",
+    "size": [
+      180,
+      180
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-24.png",
+    "size": [
+      24,
+      24
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-32.png",
+    "size": [
+      32,
+      32
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-40.png",
+    "size": [
+      40,
+      40
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-512.png",
+    "size": [
+      512,
+      512
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-60.png",
+    "size": [
+      60,
+      60
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-80.png",
+    "size": [
+      80,
+      80
+    ],
+    "mode": "RGB"
+  },
+  {
+    "file": "png/icon-paper-rounded-256.png",
+    "size": [
+      256,
+      256
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/icon-paper-rounded-64.png",
+    "size": [
+      64,
+      64
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/lockup-dark-1104.png",
+    "size": [
+      1104,
+      264
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/lockup-light-1104.png",
+    "size": [
+      1104,
+      264
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/lockup-monochrome-1104.png",
+    "size": [
+      1104,
+      264
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/mark-monochrome-100.png",
+    "size": [
+      100,
+      100
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/mark-monochrome-1024.png",
+    "size": [
+      1024,
+      1024
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/mark-monochrome-24.png",
+    "size": [
+      24,
+      24
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/mark-monochrome-40.png",
+    "size": [
+      40,
+      40
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/mark-monochrome-60.png",
+    "size": [
+      60,
+      60
+    ],
+    "mode": "RGBA"
+  },
+  {
+    "file": "png/proof-sheet-1200.png",
+    "size": [
+      1200,
+      960
+    ],
+    "mode": "RGB"
+  }
+]

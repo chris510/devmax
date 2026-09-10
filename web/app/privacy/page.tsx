@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
+import { Brand } from "../brand";
 
 export const metadata: Metadata = {
   title: "Privacy · Unprompted",
@@ -12,8 +12,7 @@ export default function Privacy() {
     <main className="policy-page">
       <header className="policy-header">
         <Link className="brand" href="/" aria-label="Unprompted home">
-          <Image src="/unprompted-icon.png" alt="" width={36} height={36} priority />
-          <span>Unprompted</span>
+          <Brand priority />
         </Link>
         <Link className="policy-back" href="/">← Product</Link>
       </header>

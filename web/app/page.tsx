@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { Brand } from "./brand";
 
 const cards = [
   {
@@ -110,8 +110,7 @@ export default function Home() {
       <div className="opening" id="top">
         <header className="site-header">
           <a className="brand" href="#top" aria-label="Unprompted home">
-            <Image src="/unprompted-icon.png" alt="" width={36} height={36} priority />
-            <span>Unprompted</span>
+            <Brand tone="light" compactOnMobile priority />
           </a>
           <nav aria-label="Primary navigation">
             <a href="#truth">Why recall</a>
@@ -245,7 +244,7 @@ export default function Home() {
       </section>
 
       <footer>
-        <div className="brand"><Image src="/unprompted-icon.png" alt="" width={30} height={30} /><span>Unprompted</span></div>
+        <div className="brand"><Brand /></div>
         <p>Private voice-first recall coach</p>
         <div><a href="/privacy">Privacy</a><a href="#private-beta">Contact</a></div>
       </footer>
