@@ -1,5 +1,10 @@
 # Dev Max — app icon (Cache stack)
 
+**Historical kit.** The user selected Balanced for Unprompted on September 9, 2026.
+The [current identity kit](../brand/unprompted/README.md) supplies the integrated
+iOS and web artwork. Keep these files as the original Cache stack design record;
+do not copy them back into application resources.
+
 Original mark from turn 1 of the icon board: three offset rounded bars, top layer warm.
 Art is optically centered (the board version leaned 3px right at 132px); geometry and
 colors are otherwise unchanged.

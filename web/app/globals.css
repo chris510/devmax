@@ -89,8 +89,9 @@ h1 em, h2 em, .principle-lines em { font-weight: 400; }
   gap: 34px;
   border-bottom: 1px solid var(--night-line);
 }
-.brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 600; letter-spacing: -.025em; }
-.brand img { border-radius: 9px; }
+.brand { display: inline-flex; align-items: center; flex-shrink: 0; }
+.brand-lockup { display: block; width: 200px; height: auto; }
+.brand-mark { display: none; width: 40px; height: 40px; }
 .site-header .brand { color: var(--night-text); }
 .site-header nav { display: flex; gap: 30px; margin-left: auto; }
 .site-header nav a { color: var(--night-muted); font-size: 13px; }
@@ -336,7 +337,8 @@ footer a:hover { color: var(--ink); }
 @media (max-width: 720px) {
   .section-shell, .site-header, footer { width: calc(100% - 40px); }
   .site-header { min-height: 72px; }
-  .site-header .brand span { display: none; }
+  .site-header .brand-lockup { display: none; }
+  .site-header .brand-mark { display: block; }
   .nav-cta { margin-left: auto; }
   .hero { min-height: 0; gap: 54px; padding-block: 72px 55px; }
   .hero h1 { font-size: clamp(66px, 20vw, 92px); line-height: .81; }

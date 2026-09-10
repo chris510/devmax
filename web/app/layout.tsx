@@ -31,7 +31,14 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: baseUrl,
     title: "Unprompted · Remember the hard parts",
     description: "A private voice-first coach for honest recall and spaced retrieval practice.",
-    icons: { icon: "/unprompted-icon.png", shortcut: "/unprompted-icon.png" },
+    icons: {
+      icon: [
+        { url: "/brand/favicon-16.png", type: "image/png", sizes: "16x16" },
+        { url: "/brand/favicon-32.png", type: "image/png", sizes: "32x32" },
+      ],
+      shortcut: "/brand/favicon-32.png",
+      apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    },
     openGraph: {
       title: "Unprompted · Remember the hard parts",
       description: "One honest question at a time. Voice-first retrieval practice in two minutes.",
